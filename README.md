@@ -2,6 +2,26 @@
 
 Unified development workflow plugin for Claude Code. Covers the full cycle: think → build → review → ship.
 
+## 安裝（Claude Code 2.1.275+）
+
+```
+/plugin install opsx-workflow --marketplace Mikaelaaaaa/opsx-workflow
+```
+
+或本機路徑：`claude plugin marketplace add ~/code/sandbox/opsx-workflow && claude plugin install opsx-workflow@opsx-workflow`。
+裝完跑一次 `bash <plugin root>/bin/opsx init --global`（裝 `~/.local/bin/opsx`、建 `~/.local/state/opsx/`、掛 herdr 看板 plugin），
+再到每個要用的 repo 根目錄跑 `opsx init`。
+
+## 看板
+
+資料全是投影（`opsx collect`：`openspec/changes/*/`、`~/.local/state/opsx/`、`herdr agent list`、`glab mr view`），看板自己不存狀態。
+
+- 網頁：herdr 裡叫 action `open-board`（`opsx init --global` 已 `herdr plugin link`），或 `bash herdr-board/scripts/open-board.sh`。
+  首頁四段 待處理 / 進行中 / 待指派 / 已完成；按鈕背後是 `opsx answer`（回 gate、三種授權答案）、`opsx dispatch`、`opsx merge`（寫一次性核准，叫 agent `/babysit merge`，閘門只放行那一次）、`opsx stop`。
+- 右側 pane：herdr pane `board`（`python3 herdr-board/tui.py`），同一份清單，↑↓ 選、Enter 跳 pane、q 關；不回 gate、不派工。
+- 對原型看畫面：`python3 herdr-board/server.py --collect herdr-board/tests/fixtures/collect-sample.json`，開 `http://127.0.0.1:8791/?token=$(cat ~/.local/state/opsx/board-token)`。
+- 收件匣 tab、同步腳本、紀錄 tab 在 `board-inbox`、`board-log` 兩張卡（`openspec/workplan.yaml`）。
+
 ## Skills
 
 | Skill | Description |
@@ -99,30 +119,7 @@ implement task → self-check (4 greps) → next task → ... → test → commi
 
 ## Install
 
-### From local checkout
-
-```bash
-VERSION=0.1.0
-mkdir -p ~/.claude/plugins/cache/opsx-workflow/opsx-workflow/$VERSION
-cp -R ~/code/sandbox/opsx-workflow/* ~/.claude/plugins/cache/opsx-workflow/opsx-workflow/$VERSION/
-```
-
-Then register in `~/.claude/settings.json`:
-```json
-{
-  "enabledPlugins": {
-    "opsx-workflow@opsx-workflow": true
-  }
-}
-```
-
-Restart Claude Code to activate.
-
-### After local changes
-
-```bash
-cp -R ~/code/sandbox/opsx-workflow/* ~/.claude/plugins/cache/opsx-workflow/opsx-workflow/$VERSION/
-```
+見上面「安裝」。改了 plugin 檔案後要重開 Claude Code 才載得到新的 skill / hook；`claude plugin update opsx-workflow` 同步 marketplace 來源。
 
 ## Structure
 
