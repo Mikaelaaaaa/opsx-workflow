@@ -22,6 +22,9 @@ opsx <command> [args]
   dispatch <slug> [--agent --model --mode --kind --repo]   派工：worktree + herdr tab + agent start + 第一句 + dispatch.json
   drive <slug> [--repo]                「開到可合併」迴圈（dispatch --mode drive 會自己跑）
   stop <slug> [--repo]                 停：kill drive、關 pane、dispatch.json 標 stopped
+  collect [--root ~/code] [--state …]  看板的資料：掃 repo 的卡 + 全域狀態 + herdr / glab，印一份 JSON（不寫檔）
+  answer <slug> --gate <id> [--grant this|card|repo] <text…>   回 gate：gates.md answered、授權落檔、decisions、herdr agent prompt
+  merge <slug> [--repo]                核准合併：重驗五條件、dispatch.json 寫一次性核准、叫 agent /babysit merge（不自己 glab mr merge）
 EOF
 }
 
