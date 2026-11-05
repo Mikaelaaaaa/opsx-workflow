@@ -1,0 +1,19 @@
+{
+  "id": "cli:tab:create",
+  "result": {
+    "root_pane": {
+      "agent_status": "unknown",
+      "cwd": "/Users/mikaela_lin/code/sandbox/opsx-workflow",
+      "focused": false,
+      "foreground_cwd": "/Users/mikaela_lin/code/sandbox/opsx-workflow",
+      "pane_id": "w1:pE",
+      "revision": 0,
+      "scroll": {"max_offset_from_bottom": 0, "offset_from_bottom": 0, "viewport_rows": 55},
+      "tab_id": "w1:tB",
+      "terminal_id": "term_65f843e32c6d610",
+      "workspace_id": "w1"
+    },
+    "tab": {"agent_status": "unknown", "focused": false, "label": "probe", "number": 11, "pane_count": 1, "tab_id": "w1:tB", "workspace_id": "w1"},
+    "type": "tab_created"
+  }
+}
