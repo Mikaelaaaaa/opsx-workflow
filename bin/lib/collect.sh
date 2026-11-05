@@ -99,15 +99,20 @@ scopes = [{"workspace": ws, "repos": rs} for ws, rs in by_ws.items() if ws is no
 if None in by_ws:
     scopes.append({"workspace": None, "repos": by_ws[None]})
 
-# herdr agents：真格式等 1.1 的樣本；現在接受 [{name, pane, agent_status}] 或 {"result": [...]}
+# herdr agents：真格式（tests/fakes/herdr-samples/agent-list.json，2026-11-06 實跑）
+#   {"id":"cli:agent:list","result":{"agents":[{"agent":"claude","agent_status":"idle","pane_id":"w1:p2","tab_id":"w1:t2",
+#    "workspace_id":"w1","terminal_title_stripped":"…","agent_session":{"value":"<uuid>"}}],"type":"agent_list"}}
+# 沒有 agent 名字；卡對 agent 只靠 pane_id == dispatch.json 的 pane。
 agents = []
 agents_path = os.path.join(work, "agents.json")
 if os.path.exists(agents_path) and not os.environ["OPSX_C_HERDR_ERR"]:
     try:
-        raw = json.loads(read(agents_path) or "[]")
-        agents = raw.get("result", raw.get("agents", [])) if isinstance(raw, dict) else raw
-    except json.JSONDecodeError as e:
-        errors.append({"source": "herdr", "message": "agent list 不是 JSON：%s" % e})
+        raw = json.loads(read(agents_path) or "{}")
+        agents = raw["result"]["agents"] if isinstance(raw, dict) and isinstance(raw.get("result"), dict) else []
+        if not agents and isinstance(raw, dict) and "result" not in raw:
+            raise ValueError("沒有 result.agents，herdr 的格式變了？")
+    except (json.JSONDecodeError, KeyError, TypeError, ValueError) as e:
+        errors.append({"source": "herdr", "message": "agent list 讀不懂：%s" % e})
 
 FIELD = re.compile(r"^(type|action|status|問題|建議|選項|證據|風險|預設|已確認|answer):\s*(.*)$")
 
@@ -172,9 +177,9 @@ for line in read(os.path.join(work, "cards.ndjson")).split("\n"):
     if disp and disp.get("mode") == "stopped": disp = None
     agent_status = None
     if disp and agents:
-        hit = [a for a in agents if str(a.get("pane")) == str(disp.get("pane")) or a.get("name") == disp.get("agent", c["slug"])]
+        hit = [a for a in agents if str(a.get("pane_id")) == str(disp.get("pane"))]
         agent_status = (hit[0].get("agent_status") or "unknown") if hit else "unknown"
-        if hit: matched_panes.add(str(hit[0].get("pane")))
+        if hit: matched_panes.add(str(hit[0].get("pane_id")))
     gates = parse_gates(read(os.path.join(d, "gates.md"))) if not c["archived"] else []
     waiting = None if c["archived"] else waiting_of(c, gates, agent_status)
     if c["archived"] or c["stage"] == "archive": section = "已完成"
@@ -192,8 +197,9 @@ for line in read(os.path.join(work, "cards.ndjson")).split("\n"):
 
 order = {"待處理": 0, "進行中": 1, "待指派": 2, "已完成": 3}
 cards.sort(key=lambda x: (order[x["section"]], x["repo"], x["slug"]))
-unmatched = [{"name": a.get("name"), "pane": a.get("pane"), "agent_status": a.get("agent_status")}
-             for a in agents if str(a.get("pane")) not in matched_panes]
+unmatched = [{"name": a.get("terminal_title_stripped") or a.get("agent") or "", "pane": a.get("pane_id"),
+              "agent_status": a.get("agent_status"), "cwd": a.get("cwd"), "workspace": a.get("workspace_id")}
+             for a in agents if str(a.get("pane_id")) not in matched_panes]
 print(json.dumps({"generated_at": now, "scopes": scopes, "cards": cards, "unmatched_agents": unmatched, "errors": errors}, ensure_ascii=False))
 PY
 }

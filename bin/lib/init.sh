@@ -184,7 +184,7 @@ register_workspace() { # <name>
   grep -q '^\[repos\]' "$f" || printf '\n[repos]\n' >> "$f"
   if grep -qE "^\"?$name\"? *=" "$f"; then say "init: workspaces.toml 已有 $name"; return; fi
   if interactive; then
-    printf 'repo %s 掛哪個 herdr workspace？（例 develop，直接 Enter 跳過）：' "$name"
+    printf 'repo %s 掛哪個 herdr workspace？（填 herdr 的 workspace label，`herdr workspace list` 看得到；直接 Enter 跳過）：' "$name"
     read -r ans
     if [ -n "$ans" ]; then
       printf '"%s" = "%s"\n' "$name" "$ans" >> "$f"
