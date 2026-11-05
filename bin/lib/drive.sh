@@ -5,6 +5,9 @@
 # MR 開了 → 查 glab 五條件；全綠就停（merge 永遠人）；沒綠就 /babysit 一次，然後 sleep 等 CI。
 # 要求檔 §3.6 自主程度表。
 
+# shellcheck source=/dev/null
+source "$OPSX_ROOT/bin/lib/mr.sh"   # mr_state：五條件，collect / merge / grant-gate 共用
+
 opsx_drive() {
   local slug="" top=""
   while [ $# -gt 0 ]; do
@@ -31,7 +34,7 @@ opsx_drive() {
       archive)
         say "drive: $slug 已 merged，結束"; return 0 ;;
       babysit)
-        local mr; mr="$(mr_state "$d")"
+        local mr; mr="$(OPSX_MR_CACHE_TTL=0 mr_state "$d")"   # 剛 /babysit 過，要看新值，不吃看板的 60 秒快取
         case "$mr" in
           ready) say "drive: $slug MR 五條件全綠，可以合併，停在這裡等人"; opsx_status_quiet "$top" "$slug" pr 5/5 "可以合併"; return 0 ;;
           none)  say "drive: $slug report.md 有 MR 但 glab 讀不到，等 $poll 秒再看"; sleep "$poll" ;;
@@ -52,44 +55,6 @@ dispatched() { # <repo> <slug>
 import json,os,sys
 d=json.load(open(sys.argv[1])); sys.exit(0 if os.environ["OPSX_KEY"] in d else 1)
 PY
-}
-
-# glab 五條件：report.md 有 MR URL ∧ opened 非 draft ∧ 無衝突 ∧ pipeline success ∧ 未解 threads 0
-# 印 ready | draft | conflicts | pipeline:<status> | threads:<n> | none
-mr_state() { # <card dir>
-  local url; url="$(st_mr_url "$1")"
-  [ -n "$url" ] || { printf none; return; }
-  local iid; iid="$(printf '%s' "$url" | grep -oE '[0-9]+$')"
-  local j
-  case "$url" in
-    *github.com*) j="$(gh pr view "$iid" --json state,isDraft,mergeable,statusCheckRollup,reviewThreads 2>/dev/null || true)"
-      [ -n "$j" ] || { printf none; return; }
-      printf '%s' "$j" | python3 -I -c '
-import json,sys
-d=json.load(sys.stdin)
-if d.get("state")!="OPEN": print("state:"+str(d.get("state"))); sys.exit()
-if d.get("isDraft"): print("draft"); sys.exit()
-if d.get("mergeable")=="CONFLICTING": print("conflicts"); sys.exit()
-bad=[c for c in d.get("statusCheckRollup") or [] if c.get("conclusion") not in (None,"SUCCESS","NEUTRAL","SKIPPED")]
-if bad: print("pipeline:failed"); sys.exit()
-open_t=[t for t in d.get("reviewThreads") or [] if not t.get("isResolved")]
-print("threads:%d"%len(open_t) if open_t else "ready")' ;;
-    *) j="$(glab mr view "$iid" -F json 2>/dev/null || true)"
-      [ -n "$j" ] || { printf none; return; }
-      printf '%s' "$j" | python3 -I -c '
-import json,sys
-d=json.load(sys.stdin)
-if d.get("state")!="opened": print("state:"+str(d.get("state"))); sys.exit()
-if d.get("draft") or d.get("work_in_progress"): print("draft"); sys.exit()
-if d.get("has_conflicts"): print("conflicts"); sys.exit()
-ps=(d.get("head_pipeline") or d.get("pipeline") or {}).get("status")
-if ps and ps!="success": print("pipeline:"+ps); sys.exit()
-n=d.get("unresolved_discussions_count")
-if n is None:
-    n=0 if d.get("blocking_discussions_resolved",True) else 1
-if n: print("threads:%d"%n); sys.exit()
-print("ready")' ;;
-  esac
 }
 
 opsx_status_quiet() { # <top> <slug> <phase> <n/t> <label>
