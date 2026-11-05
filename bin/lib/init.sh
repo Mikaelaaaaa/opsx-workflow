@@ -49,7 +49,14 @@ init_global() {
   else
     say "init --global: 非互動，obsidian / customer 來源略過（之後改 $state/sources.toml）"
   fi
-  say "init --global: launchd 每日同步與 herdr 看板在 sync / board 階段才裝，略過"
+  # herdr 看板：把這個 plugin 根目錄掛進 herdr（herdr-plugin.toml 在根目錄）。沒裝 herdr 就跳過。
+  if command -v herdr >/dev/null 2>&1; then
+    if herdr plugin link "$OPSX_ROOT" >/dev/null 2>&1; then say "init --global: herdr plugin link ${OPSX_ROOT}（看板 action open-board、pane board）"
+    else warn "herdr plugin link 失敗（已掛過會這樣；要重掛先 herdr plugin unlink opsx-board）"; fi
+  else
+    say "init --global: 沒有 herdr，看板 plugin 略過（裝了 herdr 再跑一次）"
+  fi
+  say "init --global: launchd 每日同步在 board-inbox 那張卡才裝，略過"
   say "init --global: 設定在 $state"
 }
 

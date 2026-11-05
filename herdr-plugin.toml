@@ -1,0 +1,22 @@
+# opsx 看板的 herdr plugin（herdr-board D4 / 5.1）。本機掛：`herdr plugin link <這個目錄>`，opsx init --global 會做。
+# 欄位照 ~/.config/herdr/plugins/*/herdr-plugin.toml 已裝的三個 plugin（herdr-board、herdr-portal、herdr-tsk）。
+id = "opsx-board"
+name = "opsx 看板"
+version = "0.2.0"
+description = "opsx 的看板：待處理 / 進行中 / 待指派 / 已完成，資料從 openspec/、dispatch.json、herdr、glab 投影；網頁回 gate、指派、核准合併，pane 只看。"
+min_herdr_version = "0.9.0"
+platforms = ["macos", "linux"]
+
+# 開網頁：起 server（已在跑就不重起）+ 開瀏覽器。綁一個鍵：config.toml 的 [[keys.command]]。
+[[actions]]
+id = "open-board"
+title = "Open opsx board"
+description = "開 opsx 看板網頁（server 已在跑就只開瀏覽器）。"
+command = ["bash", "herdr-board/scripts/open-board.sh"]
+
+# 右側 pane 的最小 TUI：一行一卡，↑↓ 選、Enter 跳 pane、r 重拉、q 關。不回 gate、不派工、不合併。
+[[panes]]
+id = "board"
+title = "opsx"
+placement = "overlay"
+command = ["python3", "herdr-board/tui.py"]
