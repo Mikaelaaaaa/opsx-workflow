@@ -6,6 +6,7 @@ case "$1 $2" in
   "workspace create") echo '{"result":{"workspace":"w9","tab":"t1","root_pane":"p1"}}' ;;
   "tab create") echo '{"result":{"tab":"t7","root_pane":"p42"}}' ;;
   "agent start") echo '{"result":{"ok":true}}' ;;
+  "agent list") if [ -n "${OPSX_TEST_HERDR_AGENTS:-}" ]; then cat "$OPSX_TEST_HERDR_AGENTS"; else echo '[]'; fi ;;   # 真格式等 1.1 的樣本
   "agent prompt") [ -n "${OPSX_TEST_ON_PROMPT:-}" ] && bash "$OPSX_TEST_ON_PROMPT" "$4"; echo '{"result":{"submitted":true}}' ;;
   "agent wait") [ -n "${OPSX_TEST_ON_WAIT:-}" ] && bash "$OPSX_TEST_ON_WAIT"; echo '{"result":{"status":"idle"}}' ;;
   "pane close") echo '{"result":{"closed":true}}' ;;
