@@ -1,0 +1,108 @@
+---
+name: apply
+description: |
+  Implement the tasks of an OpenSpec change, one task at a time, test first. Reads
+  `openspec/workplan.yaml` for branch and dependency order, loads the playbook for the change's
+  kind (dev / bug-fix / refactoring / perf / experiment / ops / chore), and for every task writes
+  the test named in tasks.md before the code, runs it red, implements to green, checks the task
+  off, commits one change as one commit, and writes status.json / decisions.tsv so the board can
+  see progress. Asks nothing in autopilot: anything that needs the user becomes a gate in gates.md.
+  Use when the user says "apply", "implement", "start working on", "do the tasks", "自動開發",
+  "做下去", names a change slug, or when the opsx router injects `apply · <slug>`.
+argument-hint: "[--auto] [pr-name | change-1 change-2 ...]"
+compatibility: Requires openspec CLI and the opsx CLI (bin/opsx) for status.
+---
+
+# /apply
+
+Implement tasks from an OpenSpec change. One change = one commit on its branch. Every task starts with its test.
+
+The flow around you: `/propose` wrote `tasks.md` where each task carries `驗收：` (the spec scenario it satisfies) and `測試：` (the test file to write first). After you, `/review` refuses to look at a change whose tasks lack tests or whose tests are not green, and the Stop hook refuses to let you stop with unchecked tasks. So the order below is not ceremony; it is what the next stage will check.
+
+## Setup (both modes)
+
+### 0. Workplan health check (silent)
+
+If `openspec/workplan.yaml` exists, reconcile it before anything else:
+
+1. For each PR with status ≠ `merged`: `glab mr list --source-branch <branch> -F json` (or `gh pr list --head <branch> --json state`). Merged on the forge but the workplan says otherwise → update to `merged`.
+2. For each change with status ≠ `done`: if `openspec/changes/<name>/` is gone (archived) → update to `done`.
+3. Report drift only when a decision is needed (branch deleted but MR not merged).
+
+### 1. Pick the target
+
+Parse `$ARGUMENTS`: `--auto` → autopilot; a PR name → every pending change in that PR; change names → those; nothing → show the workplan table and use **AskUserQuestion**. Without a workplan, `openspec list --json` and ask; work on the current branch.
+
+### 2. Dependencies, branch, context
+
+- A PR whose `depends-on` is not all `merged`: interactive asks whether to proceed; autopilot skips it and says why.
+- Switch to the PR's branch (`git checkout <branch>` or create it from main). Never work on `main` / `master`.
+- Per change: `openspec status --change <name> --json` and `openspec instructions apply --change <name> --json`; read every `contextFiles` entry. `blocked` → skip and report; `all_done` → mark `done` in the workplan and move on.
+- Read `kind` from `openspec/changes/<name>/.openspec.yaml` (set at dispatch, confirmed by propose). Missing → treat as `dev` and say so.
+
+### 3. Load the playbook for the kind
+
+`Read references/playbooks/<kind>.md` (dev, bug-fix, refactoring, perf, hillclimb or eval for experiment; ops and chore have no file, use the table below) and `Read ../tdd/SKILL.md`. Put the playbook's steps into TodoWrite verbatim, interleaved with the skeleton below; a step you will not do stays in the list as `skip: <reason>`. The board reads progress from `status.json`, not from the todo, so call `opsx status apply <n>/<total> "<label>"` as you move.
+
+| kind | playbook | what it adds on top of the skeleton | done when |
+|---|---|---|---|
+| dev | `playbooks/dev.md` | how (if explore skipped it) → architect → test first → implement → throughput checkpoint → verify → interrogate if contested | tasks all checked, every task's test file exists and the whole change is green |
+| bug-fix | `playbooks/bug-fix.md` | reproduce yourself for runtime evidence → bisect to the mechanism → failing test (repro + edges) committed first → fix → original repro passes | repro red → green, failing-test commit before the fix commit |
+| refactoring | `playbooks/refactoring.md` | characterization tests first → name the target shape → delete before moving → small steps, green after each → equivalence proof → reader load actually down or revert | pins green before and after, equivalence script output identical |
+| perf | `playbooks/perf.md` + `../benchmark-checklist/SKILL.md` | behavior-preserving tests first → baseline trace through the seven questions → the seven mantras in order → change → measure again → compare artifacts | behavior tests green, baseline number, after number, delta, artifact path |
+| experiment | `playbooks/hillclimb.md` or `playbooks/eval.md` | the harness is the test; freeze it after the seven questions; one hypothesis, one change, one measurement per loop | results table + verdict (do / don't / retry), decision.tsv |
+| ops | none | compose validate → sops → pre-up → up → healthcheck; a task that touches a script still gets a shell assertion first | healthcheck green; deploy is level three, always a gate |
+| chore | none | skeleton 3b (only when code is touched), 4, 10, 11, 12 | commit; touched code has a green test |
+
+## Per task: the skeleton
+
+Run this for every unchecked task, in order. Numbers match the requirement doc so the board and the reviewers can refer to them.
+
+| # | step | read |
+|---|---|---|
+| 1 | Before writing: list every place the change reaches (callers, tests, fixtures, config, exports). Climb the ladder: does it need to exist, does the codebase already have it, does the stdlib or platform, does an installed package, can it be one obvious line, only then the smallest working code | `~/.claude/CLAUDE.md` §2–§3 (already in your context) |
+| 2 | Name the data shape and where it lives (state machine, table, typed model) before touching code | `../../references/principles/model-the-domain.md` |
+| 3 | If the task crosses a function boundary, sketch the types and signatures first, then fill the bodies. One candidate, no arena | `../architect/SKILL.md` |
+| **3b** | **Write the test first.** Open the task's `測試：` path. Cover the `驗收：` scenario and the edges (empty, upper bound, bad input, out of permission). Run it once and confirm it is red; a green test here means it tests nothing, rewrite it. Commit the failing test alone (`test(<scope>): …`). A task marked `測試：無 · <reason>` skips this step; put `skip: 無可驗收行為` in the todo | `../tdd/SKILL.md` |
+| 4 | Implement until that test is green. Only then may anything the test did not demand be added, and only if a task asks for it. Then the four greps: unused imports you added; pattern divergence from two or three sibling files; a dependency you added that nothing imports; a helper that already existed under another name. Fix inline | — |
+| 5 | Need the user? (a level-two action without a grant, a product choice.) Write one entry in `gates.md`: type, the question, your recommendation, evidence, risk, what happens if nobody answers. Shape it the way a reviewer answers fastest: first `已確認：` with everything already settled on this point (so the work so far is not lost and the reader does not re-derive it), then `還需要你答：` with 2–4 concrete options, never "please clarify". Then keep working on what does not depend on it. Do not wait at the terminal; in autopilot the grant hook will deny the action and tell you the same thing | `../ketchup/SKILL.md` (action item fields) |
+| 6 | A problem outside this task's scope? Do not fix it. `openspec new change <slug> --schema opsx` and write its `inbox.md` with `source: agent:<pr-name>` and the evidence. The board shows it in the inbox | — |
+| 7 | New branch, loop, parser, money, or security logic that tasks.md did not name? Add a small test for it to the same test file | — |
+| 8 | Run the test agent (below) over **every** test file this change's tasks name, not just this one. Measured a number? Pass it through the seven questions first. Record the result: `opsx status apply <n>/<total> "<label>" --tests green` or `--tests red` | `../benchmark-checklist/SKILL.md` |
+| 9 | Verify against the real artifact: run the command, hit the endpoint, open the page. "It compiles" is not done | `../../references/principles/prove-it-works.md` |
+| 10 | Check the task off (`- [ ]` → `- [x]`), only when its test is green. One change = one commit: `git commit -m "<type>(<scope>): <summary>" -- <paths>` (pathspec, never `git add -A`). The commit hook checks the branch maps to this change and tasks are checked | — |
+| 11 | One line in `decisions.tsv`: what you decided, why, evidence, result. Every call you made on the user's behalf goes here, including "no decision needed" | `../show-me-your-work/SKILL.md` (format + log.sh) |
+| 12 | Reply: state first (done, broken, next), each claim with its evidence or marked measured / inferred / guess, then the last two lines: what you skipped, what you did not check, risks the user must know | `../../references/writing-the-reply.md` |
+
+## Test agent
+
+Spawn one **Agent** (general-purpose) when step 8 comes, and again after review fixes. Give it the project root, the list of test files from tasks.md, and the project's test and lint commands (CLAUDE.md first, then package.json / pyproject, then the usual `pnpm test`, `pytest`, `go test ./...`). It reports `STATUS: PASS|FAIL`, a one-line summary for tests and lint, the failing tests with the first lines of each error, and the full log.
+
+On FAIL: read the log, fix, with a scope guard (a fix that needs files outside this task's scope aborts the change instead). Re-run. At most two fix cycles per change; still red → leave the working tree as is, write the failure into the reply, `opsx status … --tests red`, continue to the next change.
+
+## Two modes
+
+| | Interactive (default) | Autopilot (`--auto`) |
+|---|---|---|
+| Ambiguity | ask with **AskUserQuestion** | decide, log it in decisions.tsv |
+| Level-two actions (push, MR, migrate, install, delete, external API, `.env`) | ask | the grant hook decides from grants.toml / dispatch.json; denied → gate (step 5) |
+| Commit | after the user says so | after the change's tests are green |
+| Pausing | on unclear task, design issue, error | never; a design issue becomes a gate or an inbox card, not a stop |
+
+Autopilot never touches `main`, never force-pushes, never merges. Those are level three and the hook denies them regardless of mode.
+
+## After the last change
+
+1. Update the workplan: changes → `done`; the PR → `in-progress` when all its changes are done.
+2. `opsx status apply <total>/<total> "全部 task 完成" --tests green` (only if the last run really was green).
+3. Reply with the table: change · tasks · tests · commit. Say the next step is `/review <slug>`; the router will inject it on the next prompt, and in drive mode `drive.sh` sends it. Do not run the review yourself from here; it is a separate node with its own three agents.
+
+## Guardrails
+
+- Read the workplan and the change's context files before starting; use the CLI's `contextFiles`, do not guess names.
+- Every task's test before its code. A checked task whose test file is missing is a review BUG by definition.
+- Minimal, scoped diffs; check the task off right after it lands; update the workplan after each change.
+- Stage by pathspec. Conventional commit subject in English, body in Chinese when a design call needs recording. No AI attribution anywhere.
+- Max three test runs per change. Aborted changes do not block the others. Respect `depends-on`.
+- Out-of-scope problems become inbox cards, never silent fixes.
+- Principles are read when the situation calls for them (`references/principles/INDEX.md` lists which); cite only what you actually read this session.

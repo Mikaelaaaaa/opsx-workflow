@@ -1,0 +1,19 @@
+{
+  "eval_id": 2,
+  "eval_name": "terminology-challenge",
+  "prompt": "我想加一個 user 的概念，讓每個 todo 屬於某個 user。然後有些 user 是 admin 可以看到所有人的 todo。",
+  "assertions": [
+    {
+      "id": "challenges-terminology",
+      "text": "Challenges or questions the meaning of 'user' or 'admin'"
+    },
+    {
+      "id": "uses-ask-user",
+      "text": "Uses AskUserQuestion tool to clarify the domain model"
+    },
+    {
+      "id": "no-code-written",
+      "text": "Does NOT write any application code"
+    }
+  ]
+}

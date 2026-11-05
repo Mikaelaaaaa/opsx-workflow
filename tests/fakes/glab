@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# 假 glab：`glab mr view <iid> -F json` 回 $OPSX_TEST_GLAB_JSON 檔的內容。
+printf '%s\n' "$*" >> "${OPSX_FAKE_LOG:?}"
+case "$1 $2" in
+  "mr view") cat "${OPSX_TEST_GLAB_JSON:?}" ;;
+  *) echo '{}' ;;
+esac

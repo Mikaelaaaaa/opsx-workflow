@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+# opsx — opsx-workflow 的 CLI 入口。子命令各一檔在 bin/lib/<cmd>.sh。
+# 要求檔 §3.6「CLI helper」。裝法：/opsx init 第一次跑會 symlink 到 ~/.local/bin/opsx。
+set -euo pipefail
+
+self="${BASH_SOURCE[0]}"
+while [ -L "$self" ]; do
+  dir="$(cd "$(dirname "$self")" && pwd)"
+  self="$(readlink "$self")"
+  case "$self" in /*) ;; *) self="$dir/$self";; esac
+done
+OPSX_ROOT="${OPSX_ROOT:-$(cd "$(dirname "$self")/.." && pwd)}"
+export OPSX_ROOT
+export OPSX_STATE_DIR="${OPSX_STATE_DIR:-$HOME/.local/state/opsx}"
+
+usage() {
+  cat <<'EOF'
+opsx <command> [args]
+
+  init [--global]                      在 repo 根目錄裝 openspec + opsx schema + 登記來源；--global 裝一次 CLI 與全域設定
+  status <phase> <n>/<total> <label…>  寫 changes/<slug>/status.json（--tests green|red · --change <slug> · --show）
+  dispatch <slug> [--agent --model --mode --kind --repo]   派工：worktree + herdr tab + agent start + 第一句 + dispatch.json
+  drive <slug> [--repo]                「開到可合併」迴圈（dispatch --mode drive 會自己跑）
+  stop <slug> [--repo]                 停：kill drive、關 pane、dispatch.json 標 stopped
+EOF
+}
+
+cmd="${1:-}"
+case "$cmd" in
+  ""|-h|--help|help) usage; [ -n "$cmd" ] && exit 0 || exit 2 ;;
+esac
+shift
+lib="$OPSX_ROOT/bin/lib/$cmd.sh"
+if [ ! -f "$lib" ]; then
+  echo "opsx: 沒有這個子命令：$cmd" >&2
+  usage >&2
+  exit 2
+fi
+# shellcheck source=/dev/null
+source "$OPSX_ROOT/bin/lib/common.sh"
+# shellcheck source=/dev/null
+source "$OPSX_ROOT/bin/lib/stage.sh"
+# shellcheck source=/dev/null
+source "$lib"
+"opsx_$cmd" "$@"

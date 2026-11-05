@@ -1,0 +1,36 @@
+  - id: inbox
+    generates: inbox.md
+    description: 收件卡：這張卡從哪來、為什麼、證據
+    template: inbox.md
+    instruction: >
+      收件時建殼就寫，不處理內容。frontmatter 四欄：type（bug / 功能 / 想法 / 技術債 /
+      待定）、source（me / paste / agent:<pr> / gitlab:<repo>#<iid> / github:<repo>#<n> /
+      obsidian:<path> / customer:<id> / shortcut:<repo>:<file>:<hash> / audit / deepen）、
+      found（日期）、related（相關卡 slug，可空）。內文貼證據原文：log 片段、issue 連結、
+      截圖路徑、留的 shortcut 註解。不要在這裡分析或提方案，那是 explore 的事。
+      建殼前先對一次去重：grep openspec/changes/*/inbox.md 與 archive/*/ 的「一句話」和
+      explore.md 的 不做；撞到進行中的卡就把 slug 填進 related 不另開；撞到歸檔的「不做」
+      就把那段理由貼進證據，讓 explore 看到上次為什麼不做，不重新辯論。
+    requires: []
+  - id: explore
+    generates: explore.md
+    description: explore 的結論：已知、待決、不做
+    template: explore.md
+    instruction: >
+      /explore 跑完寫這份。三段：**已知**（查 code 查出來的事實，每條附檔案路徑或指令輸出）、
+      **待決**（只有人能答的題，每題列 2–4 個具體選項，推薦的標 (Recommended)）、**不做**
+      （明確排除的方向和原因）。待決非空 → 下一步是 /grill；待決空 → 直接 /propose。
+      待決裡不准放查 code 或跑一次就能答的題，那種自己答完放進已知。
+    requires:
+      - inbox
+  - id: grill
+    generates: grill.md
+    description: 待決的答案：決策 D1…Dn 與未決
+    template: grill.md
+    instruction: >
+      只在 explore.md 的待決非空時才有。一題一題問，每題 2–4 個具體選項，不出 Yes / No，
+      等答案再下一題。答完寫兩段：**決策**（D1、D2… 每條一句話 + 理由 + 否決了哪個替代方案
+      和原因）、**未決**（只有跑了才知道的事，附預計怎麼驗證）。D-id 一旦給了不重編，
+      propose 生成 design.md 時原樣引用。
+    requires:
+      - explore

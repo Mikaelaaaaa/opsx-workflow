@@ -1,0 +1,21 @@
+{
+  "eval_name": "terminology-challenge",
+  "variant": "with_skill",
+  "expectations": [
+    {
+      "text": "Challenges or questions the meaning of 'user' or 'admin'",
+      "passed": true,
+      "evidence": "Explicitly challenged 'user' with a 4-option table (Session User / Named Account / Authenticated User / Tenant). Decomposed the concept into 3 layers: Identity, Ownership, Authorization. Also questioned how 'admin' is determined (4 options: hardcoded / role field / header / env var)."
+    },
+    {
+      "text": "Uses AskUserQuestion tool to clarify the domain model",
+      "passed": true,
+      "evidence": "Simulated 3 AskUserQuestion interactions: Q1 (how admin is determined), Q2 (need real auth?), Q3 (edge cases: no userId, admin modify vs view-only)."
+    },
+    {
+      "text": "Does NOT write any application code",
+      "passed": true,
+      "evidence": "No .js/.ts files modified. Only created response.md in outputs directory."
+    }
+  ]
+}

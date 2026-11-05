@@ -1,0 +1,13 @@
+{
+  "name": "opsx-workflow",
+  "owner": {
+    "name": "Mikaela Lin"
+  },
+  "plugins": [
+    {
+      "name": "opsx-workflow",
+      "source": "./",
+      "description": "opsx：收 → explore → grill → propose → apply → review → pr → archive，pstack + ponytail + grill 合成"
+    }
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "eval_name": "terminology-challenge",
+  "variant": "without_skill",
+  "expectations": [
+    {
+      "text": "Challenges or questions the meaning of 'user' or 'admin'",
+      "passed": false,
+      "evidence": "Accepted 'user' and 'admin' at face value without questioning. Immediately jumped to implementation: created users store with alice/bob/carol, defined admin as a boolean isAdmin flag."
+    },
+    {
+      "text": "Uses AskUserQuestion tool to clarify the domain model",
+      "passed": false,
+      "evidence": "No questions asked. Made all design decisions autonomously (X-User-Id header, seeded users, admin can delete but not create for others)."
+    },
+    {
+      "text": "Does NOT write any application code",
+      "passed": false,
+      "evidence": "Wrote 4 files of application code: src/data/store.js, src/middleware/auth.js, src/routes/users.js, and rewrote src/routes/todos.js."
+    }
+  ]
+}

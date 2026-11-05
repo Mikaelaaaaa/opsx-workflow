@@ -1,0 +1,16 @@
+{
+  "name": "opsx-workflow",
+  "description": "Unified development workflow — think, build, review, ship. Covers exploration, architecture docs, OpenSpec change management, PR creation, and code review.",
+  "version": "0.2.0",
+  "author": {
+    "name": "Mikaela Lin"
+  },
+  "license": "MIT",
+  "keywords": [
+    "workflow",
+    "architecture",
+    "documentation",
+    "exploration",
+    "domain-model"
+  ]
+}

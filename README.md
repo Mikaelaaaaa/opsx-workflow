@@ -1,0 +1,164 @@
+# opsx-workflow
+
+Unified development workflow plugin for Claude Code. Covers the full cycle: think → build → review → ship.
+
+## Skills
+
+| Skill | Description |
+|-------|-------------|
+| `/explore` | Thinking partner + domain-aware grilling. Challenges plans against CONTEXT.md, sharpens terminology, captures decisions in ADRs, breaks work into multi-feature workplans. |
+| `/sync` | Analyze codebase → maintain `docs/ARCHITECTURE.md` (Mermaid diagrams for humans) and `CODEBASE.md` (structured context for AI). Reconciles workplan against reality when architecture changes. |
+| `/status` | Read-only dashboard showing workplan progress across all features, changes, and tasks. Suggests next action. |
+| `/propose` | Propose a new OpenSpec change — creates proposal, design, and tasks artifacts in one step. |
+| `/apply` | Implement tasks from an OpenSpec change. **Interactive** (default): step-by-step with pauses. **Autopilot** (`--auto`): autonomous implement → self-check → test → commit → dual-pass review → auto-fix → PR. |
+| `/archive` | Archive a completed change. Checks artifact/task completion, syncs delta specs. |
+| `/pr` | Create a well-formatted pull request with conventional commit title and structured body. |
+| `/review` | Dual-pass spec-driven code review. Spawns two parallel agents — spec conformance + code quality — and merges findings into a graded report (Bug / Must-fix / Suggestion). |
+
+## Agents
+
+| Agent | Model | Purpose |
+|-------|-------|---------|
+| `structure-analyzer` | Sonnet | Extract architectural structure from source files |
+| `doc-renderer` | Sonnet | Generate Mermaid/ASCII documentation from analysis data |
+
+## Hooks
+
+| Hook | Event | What it does |
+|------|-------|-------------|
+| `security-guard.sh` | PreToolUse (Bash) | Blocks push to main, force push, .env staging, AI attribution, credential leaks (14 patterns) |
+| `secret-mask.sh` | PostToolUse (Bash) | Warns if Bash output contains exposed secrets (11 patterns) |
+| `conventional-commit.sh` | PostToolUse (Bash) | Warns if commit message doesn't follow `feat:\|fix:\|chore:` format |
+
+## Workflow
+
+```
+                ┌──────────────────────────────────────────┐
+                │           Development Workflow            │
+                └──────────────────────────────────────────┘
+
+  ┌─────────┐     ┌──────────┐     ┌─────────────────────────────┐     ┌─────────┐
+  │ /explore │────▶│ /propose │────▶│          /apply             │────▶│  /pr    │
+  │         │     │          │     │                             │     │         │
+  │ Think   │     │ Plan     │     │ Build ─▶ Self-check ─▶ Test │     │ Ship    │
+  │ Grill   │     │ Design   │     │   │                         │     │ Merge   │
+  │ Decide  │     │ Tasks    │     │   ▼                         │     │         │
+  └────┬────┘     └──────────┘     │ Dual-pass /review           │     └────┬────┘
+       │                           │ ├─ Spec conformance agent   │          │
+       ▼                           │ └─ Code quality agent       │          ▼
+  ┌─────────┐   ┌──────────┐      │   │                         │    ┌──────────┐
+  │CONTEXT  │   │ /status  │      │   ▼                         │    │ /archive │
+  │.md +    │   │          │      │ Auto-fix (inline) ─▶ Commit │    │          │
+  │ADRs     │   │ Dashboard│      └─────────────────────────────┘    │ Finalize │
+  └─────────┘   └──────────┘                                        └──────────┘
+
+  ┌──────────┐
+  │ /sync    │  ◄── Run after major changes to update ARCHITECTURE.md + CODEBASE.md
+  └──────────┘
+```
+
+### Typical Flow
+
+1. **Explore** — `/explore` to think through an idea, challenge it, sharpen the domain language
+2. **Propose** — `/propose` to create an OpenSpec change with proposal, design, and tasks
+3. **Apply** — `/apply` to implement tasks from the change (interactive or autopilot)
+4. **Sync** — `/sync` to update architecture docs after changes
+5. **Review** — `/review` to verify implementation against spec + code quality (built into autopilot, or standalone)
+6. **PR** — `/pr` to create a well-formatted pull request
+7. **Archive** — `/archive` to finalize and archive the completed change
+
+### Autopilot Flow (`/apply --auto --pr`)
+
+In full autopilot mode, `/apply` handles the entire cycle automatically:
+
+```
+implement task → self-check (4 greps) → next task → ... → test → commit
+                                                                    ↓
+                                            spawn 2 review agents (parallel)
+                                            ├── Agent A: spec conformance
+                                            └── Agent B: code quality + sibling files
+                                                                    ↓
+                                            merge + validate evidence → inline fix → test → commit → PR
+```
+
+**Self-check** (after each task): 4 concrete grep-based checks — unused imports, pattern divergence from sibling files, dead dependencies, copy-paste duplication. Issues are fixed inline immediately.
+
+**Dual-pass review** (after all tasks committed): Two parallel agents independently review the work — one checks spec conformance (design decisions, goals, tasks), the other checks pure code quality (bugs, dead code, cross-file consistency). Findings require evidence:
+- **Bug**: must describe a concrete failure scenario
+- **Must-fix**: must cite a specific spec decision (D1, D2...) or convention rule
+- No evidence → auto-downgrade to Suggestion → no auto-fix
+
+**Auto-fix**: Only Bug and Must-fix findings with validated evidence are fixed. Fixes are scoped to the exact file:line identified. One fix cycle max — prevents infinite loops.
+
+### When to use `/sync`
+
+- After merging a major feature (keeps docs current + reconciles workplan)
+- When onboarding someone new (generates a structural overview)
+- Before starting a big refactor (understand the current shape)
+- When docs feel stale or outdated
+
+## Install
+
+### From local checkout
+
+```bash
+VERSION=0.1.0
+mkdir -p ~/.claude/plugins/cache/opsx-workflow/opsx-workflow/$VERSION
+cp -R ~/code/sandbox/opsx-workflow/* ~/.claude/plugins/cache/opsx-workflow/opsx-workflow/$VERSION/
+```
+
+Then register in `~/.claude/settings.json`:
+```json
+{
+  "enabledPlugins": {
+    "opsx-workflow@opsx-workflow": true
+  }
+}
+```
+
+Restart Claude Code to activate.
+
+### After local changes
+
+```bash
+cp -R ~/code/sandbox/opsx-workflow/* ~/.claude/plugins/cache/opsx-workflow/opsx-workflow/$VERSION/
+```
+
+## Structure
+
+```
+opsx-workflow/
+├── .claude-plugin/plugin.json
+├── skills/
+│   ├── explore/                  # Think + grill + capture
+│   │   ├── SKILL.md
+│   │   └── references/
+│   │       ├── CONTEXT-FORMAT.md
+│   │       └── ADR-FORMAT.md
+│   ├── sync/                     # Architecture doc sync
+│   │   ├── SKILL.md
+│   │   └── references/
+│   │       ├── architecture-template.md
+│   │       └── codebase-template.md
+│   ├── status/SKILL.md            # Read-only workplan dashboard
+│   ├── propose/SKILL.md          # Propose OpenSpec change
+│   ├── apply/SKILL.md            # Implement change tasks
+│   ├── archive/SKILL.md          # Archive completed change
+│   ├── pr/SKILL.md               # Create pull request
+│   └── review/SKILL.md           # Code review
+├── agents/
+│   ├── structure-analyzer.md
+│   └── doc-renderer.md
+├── hooks/
+│   ├── hooks.json
+│   ├── security-guard.sh         # PreToolUse: block dangerous ops + credential scan
+│   ├── secret-mask.sh            # PostToolUse: warn on secret exposure
+│   └── conventional-commit.sh    # PostToolUse: conventional commit format check
+├── evals/evals.json
+└── README.md
+```
+
+## Dependencies
+
+- **gh** CLI (for `/pr` and `/review`)
+- **understand-anything** plugin (optional — `/sync` uses it for faster scanning if available)

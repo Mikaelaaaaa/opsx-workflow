@@ -1,0 +1,26 @@
+{
+  "eval_name": "auth-feature-breakdown",
+  "variant": "without_skill",
+  "expectations": [
+    {
+      "text": "Uses AskUserQuestion tool at least once to clarify requirements",
+      "passed": false,
+      "evidence": "No questions asked. Directly decided JWT + 2 roles + SQLite without consulting the user."
+    },
+    {
+      "text": "Discusses trade-offs between at least 2 auth approaches",
+      "passed": true,
+      "evidence": "Provides a JWT vs Session comparison table with 4 dimensions. Recommends JWT with reasoning."
+    },
+    {
+      "text": "Produces a work breakdown showing PR groups with changes",
+      "passed": false,
+      "evidence": "Produces 8 issues with dependency graph, but NO PR grouping. Issues are flat, not organized into PRs or branches."
+    },
+    {
+      "text": "Does NOT write any application code",
+      "passed": false,
+      "evidence": "Wrote application code: created src/data/store.js, src/middleware/auth.js, src/routes/users.js, and rewrote src/routes/todos.js with full auth implementation."
+    }
+  ]
+}

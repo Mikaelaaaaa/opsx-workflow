@@ -1,0 +1,33 @@
+{
+  "skill_name": "grill",
+  "evals": [
+    {
+      "id": 0,
+      "name": "three-bucket-pending",
+      "prompt": "/grill retry-backoff — this repo's openspec/changes/retry-backoff/explore.md has three open items in 待決. Close them. You cannot talk to a human in this run: whenever you would ask the user a question, read answers.md in the repo root and treat its content as the user's reply, but still write down the exact question and options you would have shown (into questions.md in the repo root). Leave the repo's files as the skill's real output.",
+      "expected_output": "explore.md 已知 gains the code answer (client.ts has no retry) with a file path and the measured expDelays(5) total; 待決 shrinks to the one user-only item; questions.md shows one question with 2–4 concrete options, recommended option first; grill.md has D1 (exponential backoff, cap 30s) with 理由 and 否決, 未決 only if genuinely needs a run; no code written in src/.",
+      "files": ["fixtures/retry-backoff"],
+      "assertions": [
+        "explore.md 已知 states src/client.ts has no retry today, citing the file path",
+        "explore.md 已知 records the measured expDelays(5) total (15500 ms / 15.5 s) from an actual run, not a guess",
+        "explore.md 待決 no longer contains the client.ts item or the expDelays item (bucket 1 and 2 resolved without asking)",
+        "questions.md contains exactly one question with 2 to 4 concrete options and the first option marked (Recommended)",
+        "grill.md exists with ## 決策 containing D1 = exponential backoff capped at 30s, with 理由 and 否決 lines",
+        "No file under src/ was modified or created (git status shows no src/ changes)",
+        "Final reply names /propose retry-backoff as the next step"
+      ]
+    },
+    {
+      "id": 1,
+      "name": "empty-pending-stops",
+      "prompt": "/grill kb-export in this repo. If you would need to ask the user anything, read answers.md (there is none) and stop. Write any files the skill would write.",
+      "expected_output": "Replies that kb-export has no 待決 and the next step is /propose. Writes no grill.md, changes nothing in the repo.",
+      "files": ["fixtures/empty-pending"],
+      "assertions": [
+        "Final reply says kb-export has no 待決 and points to /propose as the next step",
+        "No grill.md was written for kb-export",
+        "Repo is unchanged (git status --short is empty)"
+      ]
+    }
+  ]
+}

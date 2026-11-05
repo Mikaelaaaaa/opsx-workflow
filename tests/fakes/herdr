@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# 假 herdr：把每個呼叫記到 $OPSX_FAKE_LOG，回合理的 JSON。測試用。
+# agent prompt / agent wait 會呼叫 $OPSX_TEST_ON_PROMPT / $OPSX_TEST_ON_WAIT（若設定），讓測試推進 fixture 的狀態。
+printf '%s\n' "$*" >> "${OPSX_FAKE_LOG:?}"
+case "$1 $2" in
+  "workspace create") echo '{"result":{"workspace":"w9","tab":"t1","root_pane":"p1"}}' ;;
+  "tab create") echo '{"result":{"tab":"t7","root_pane":"p42"}}' ;;
+  "agent start") echo '{"result":{"ok":true}}' ;;
+  "agent prompt") [ -n "${OPSX_TEST_ON_PROMPT:-}" ] && bash "$OPSX_TEST_ON_PROMPT" "$4"; echo '{"result":{"submitted":true}}' ;;
+  "agent wait") [ -n "${OPSX_TEST_ON_WAIT:-}" ] && bash "$OPSX_TEST_ON_WAIT"; echo '{"result":{"status":"idle"}}' ;;
+  "pane close") echo '{"result":{"closed":true}}' ;;
+  "pane current") echo '{"result":{"pane_id":"p42"}}' ;;
+  "pane report-metadata") echo '{"result":{"ok":true}}' ;;
+  *) echo '{"result":{}}' ;;
+esac

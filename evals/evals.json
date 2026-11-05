@@ -1,0 +1,56 @@
+{
+  "skill_name": "explore",
+  "evals": [
+    {
+      "id": 1,
+      "eval_name": "auth-feature-breakdown",
+      "prompt": "我想幫這個 todo API 加上使用者認證，但不確定要用 JWT 還是 session，也不確定要不要分 role。幫我想一下怎麼做比較好，然後拆成可以執行的工作項目。",
+      "expected_output": "Should explore JWT vs session trade-offs, ask about role requirements, then produce a work breakdown with PR groups and OpenSpec changes.",
+      "assertions": [
+        {
+          "id": "uses-ask-user",
+          "text": "Uses AskUserQuestion tool at least once to clarify requirements",
+          "type": "tool_usage"
+        },
+        {
+          "id": "mentions-tradeoffs",
+          "text": "Discusses trade-offs between at least 2 auth approaches (JWT vs session, or similar)",
+          "type": "content"
+        },
+        {
+          "id": "produces-breakdown",
+          "text": "Produces a work breakdown showing PR groups with changes listed under each",
+          "type": "content"
+        },
+        {
+          "id": "no-code-written",
+          "text": "Does NOT write any application code (no .js/.ts files modified)",
+          "type": "constraint"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "eval_name": "terminology-challenge",
+      "prompt": "我想加一個 user 的概念，讓每個 todo 屬於某個 user。然後有些 user 是 admin 可以看到所有人的 todo。",
+      "expected_output": "Should challenge the vague term 'user' — is it an account owner, a tenant, an API consumer? Should probe 'admin' — is this RBAC or just a boolean flag? Should sharpen terminology before jumping to implementation.",
+      "assertions": [
+        {
+          "id": "challenges-terminology",
+          "text": "Challenges or questions the meaning of 'user' or 'admin' before accepting the terms at face value",
+          "type": "content"
+        },
+        {
+          "id": "uses-ask-user",
+          "text": "Uses AskUserQuestion tool to clarify the domain model",
+          "type": "tool_usage"
+        },
+        {
+          "id": "no-code-written",
+          "text": "Does NOT write any application code",
+          "type": "constraint"
+        }
+      ]
+    }
+  ]
+}
