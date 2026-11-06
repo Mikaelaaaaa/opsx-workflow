@@ -3,5 +3,5 @@
 # 退出碼：0 跑完（個別來源失敗記在 sync.log 的 errors），2 參數錯，3 另一支 sync 還在跑。specs/board-sync。
 
 opsx_sync() {
-  python3 -I "$OPSX_ROOT/bin/lib/sync.py" --state "$OPSX_STATE_DIR" --opsx-root "$OPSX_ROOT" "$@"
+  "$OPSX_PY" -I "$OPSX_ROOT/bin/lib/sync.py" --state "$OPSX_STATE_DIR" --opsx-root "$OPSX_ROOT" "$@"
 }

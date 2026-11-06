@@ -63,6 +63,9 @@ for i in 1 2 3; do D2="$ROOT/a/openspec/changes/archive/2026-10-0$i-old$i"; mkdi
 # x6：已經 answered 的 gate 不算待處理；x7：action=merge 的 approval gate 沒有「這個 repo 永遠」
 D=$(mkcard a x6); printf '## 1\n\n- [ ] 1.1 a\n' > "$D/tasks.md"; printf '## g1\ntype: approval\naction: push\nstatus: answered\nanswer: 允許\n' > "$D/gates.md"
 D=$(mkcard a x7); printf '## 1\n\n- [ ] 1.1 a\n' > "$D/tasks.md"; printf '## g1\ntype: approval\naction: merge\nstatus: open\n問題: 合併？\n' > "$D/gates.md"
+# x10：兩個 open gate（一個有 opened_at）、一個 answered
+D=$(mkcard a x10); printf '## 1\n\n- [ ] 1.1 a\n' > "$D/tasks.md"
+printf '## g1\ntype: approval\naction: push\nstatus: open\nopened_at: 2026-11-06T10:00:00+08:00\n問題: push？\n\n## g2\ntype: decision\nstatus: open\n問題: 哪個？\n\n## g3\ntype: decision\nstatus: answered\nopened_at: 2026-11-06T09:00:00+08:00\nanswer: A\n' > "$D/gates.md"
 # y1：派出、herdr blocked、沒 gate
 D=$(mkcard b y1); printf '## 1\n\n- [ ] 1.1 a\n' > "$D/tasks.md"
 # x8：explore 過（有 explore.md）沒派出 → 待指派；x9：上游已關閉、註解已刪，仍在收件匣
@@ -84,7 +87,7 @@ cat > "$OPSX_STATE_DIR/dispatch.json" <<'EOF'
 EOF
 # glab：iid 7 全綠、8 pipeline 紅（fake glab 依 iid 讀不同檔）
 export OPSX_TEST_GLAB_JSON="$FX/mr.json" OPSX_TEST_GLAB_JSON_BY_IID="$FX/mr-"
-printf '{"state":"opened","draft":false,"has_conflicts":false,"sha":"aaa111","head_pipeline":{"status":"success"},"unresolved_discussions_count":0}' > "$FX/mr-7.json"
+printf '{"state":"opened","draft":false,"has_conflicts":false,"sha":"aaa111","head_pipeline":{"status":"success"},"unresolved_discussions_count":0,"created_at":"2026-11-05T01:10:00.000Z","merged_at":null}' > "$FX/mr-7.json"
 printf '{"state":"opened","draft":false,"has_conflicts":false,"sha":"bbb222","head_pipeline":{"status":"failed"},"unresolved_discussions_count":0}' > "$FX/mr-8.json"
 # herdr：x4 working、y1 blocked、foo 沒對到卡
 export OPSX_TEST_HERDR_AGENTS="$FX/agents.json"
@@ -94,6 +97,12 @@ printf '{"id":"cli:agent:list","result":{"agents":[{"agent":"claude","pane_id":"
 # ---------- 在 herdr 內 ----------
 export HERDR_ENV=1
 J="$(opsx collect --root "$ROOT")"; rc=$?; assert_eq "$rc" 0 "collect rc: $J"
+
+# gate 與 MR 的時間（specs/board-collect「gate 與 MR 的時間」）
+assert_eq "$(q "$(card "$J" a x10)" open_gates)" '[{"id": "g1", "opened_at": "2026-11-06T10:00:00+08:00"}, {"id": "g2", "opened_at": null}]'
+assert_eq "$(q "$(card "$J" a x1)" open_gates)" '[]'
+assert_eq "$(q "$(card "$J" a x4)" mr.created_at)" "2026-11-05T01:10:00.000Z"
+assert_eq "$(q "$(card "$J" a x4)" mr.merged_at)" null
 
 # 範圍：只有 a、b；a 掛 develop，b 沒掛；a-wt 是 worktree 不算 repo；舊 schema 只計數
 assert_eq "$(q "$J" scopes)" '[{"repos": ["a"], "workspace": "develop"}, {"repos": ["b"], "workspace": null}]'
@@ -156,8 +165,8 @@ J2="$(OPSX_TEST_HERDR_AGENTS= opsx collect --root "$ROOT")"; assert_eq "$(q "$J2
 assert_eq "$(q "$J" unfiled)" '[]' "沒有 unfiled/ 時是空陣列"
 assert_eq "$(q "$J" last_sync)" null "沒有 sync.log 時是 null"
 assert_eq "$(q "$J" errors)" '[]'
-# 不寫檔（cache/ 除外）
-[ "$(find "$OPSX_STATE_DIR" -type f ! -path '*/cache/*' ! -name '*.lock' | wc -l | tr -d ' ')" = 3 ] || fail "collect 不該在 state 寫檔：$(find "$OPSX_STATE_DIR" -type f)"
+# 不寫檔（cache/ 與 fixture 的 python 除外）
+[ "$(find "$OPSX_STATE_DIR" -type f ! -path '*/cache/*' ! -name '*.lock' ! -name python | wc -l | tr -d ' ')" = 3 ] || fail "collect 不該在 state 寫檔：$(find "$OPSX_STATE_DIR" -type f)"
 [ -z "$(find "$ROOT" -newer "$OPSX_STATE_DIR/dispatch.json" -type f)" ] || fail "collect 不該動卡的檔"
 
 # ---------- 待分類：unfiled/*.md 列出，dropped/ 不算 ----------
@@ -167,8 +176,8 @@ printf -- '---\nsource: me\n---\n\n## 一句話\n\n丟掉的\n' > "$OPSX_STATE_D
 J6="$(opsx collect --root "$ROOT")"
 assert_eq "$(q "$J6" unfiled)" '[{"found": "2026-11-06", "slug": "me-20261106-1430", "source": "me", "title": "試試看"}]'
 mv "$OPSX_STATE_DIR/unfiled" "$FX/unfiled-done"
-# ---------- 上次同步：sync.log 最後一行 ----------
-printf '2026-11-05T09:00:00+08:00\t5\t0\t0\t1\tglab: 沒登入\n2026-11-06T09:00:00+08:00\t2\t1\t3\t0\t\n' > "$OPSX_STATE_DIR/sync.log"
+# ---------- 上次同步：sync.log 最後一列 source = sync（debt.sh 自己的 debt 列不算） ----------
+printf '2026-11-05T09:00:00+08:00\tsync\t5\t新建 5 · 更新 0 · 沒變 0 · 錯誤 1：glab: 沒登入\n2026-11-06T09:00:00+08:00\tsync\t2\t新建 2 · 更新 1 · 沒變 3 · 錯誤 0\n2026-11-06T09:00:01+08:00\tdebt\t0\t掃到 4 處 shortcut\n' > "$OPSX_STATE_DIR/sync.log"
 J7="$(opsx collect --root "$ROOT")"
 assert_eq "$(q "$J7" last_sync)" '{"at": "2026-11-06T09:00:00+08:00", "created": 2, "errors": 0, "first_error": "", "unchanged": 3, "updated": 1}'
 mv "$OPSX_STATE_DIR/sync.log" "$FX/sync-done.log"
@@ -203,4 +212,35 @@ assert_eq "$(printf '%s' "$J" | python3 -I -c 'import json,sys;print(sorted(r fo
 assert_eq "$(q "$(card "$J" z z1)" section)" 收件匣
 assert_eq "$(printf '%s' "$J" | python3 -I -c 'import json,sys;print(sum(1 for c in json.load(sys.stdin)["cards"] if c["repo"]=="a" and c["slug"]=="x1"))')" 1 "a 兩邊都有，卡不能重複"
 assert_eq "$(q "$J" errors.0.source)" herdr; assert_eq "$(printf '%s' "$J" | python3 -I -c 'import json,sys;print(len(json.load(sys.stdin)["errors"]))')" 1 "不存在的 path 不該進 errors"
+# ---------- 舊卡在算 stage 之前就濾掉，只計數（collect-perf） ----------
+R2="$FX/code2"; mkdir -p "$R2/r/.git" "$R2/r/openspec/changes"
+for o in old-1 old-2 old-ws old-ideo old-nbsp sd-inbox; do mkdir -p "$R2/r/openspec/changes/$o"; printf 'schema: spec-driven\n' > "$R2/r/openspec/changes/$o/.openspec.yaml"; done
+printf '\n  \n\t\n' > "$R2/r/openspec/changes/old-ws/inbox.md"
+printf '\xe3\x80\x80\n' > "$R2/r/openspec/changes/old-ideo/inbox.md"   # 只有全形空白 U+3000
+printf '\xc2\xa0\n' > "$R2/r/openspec/changes/old-nbsp/inbox.md"       # 只有 NBSP
+printf '## 一句話\n\n有 inbox 的舊 schema\n' > "$R2/r/openspec/changes/sd-inbox/inbox.md"
+mkdir -p "$R2/r/openspec/changes/new-1"; printf 'schema: opsx\n' > "$R2/r/openspec/changes/new-1/.openspec.yaml"
+rm -f "$OPSX_STATE_DIR/sources.toml"; : > "$FX/stage.log"
+J="$(
+  # shellcheck source=/dev/null
+  source "$OPSX_ROOT/bin/lib/common.sh"; source "$OPSX_ROOT/bin/lib/stage.sh"; source "$OPSX_ROOT/bin/lib/collect.sh"; source "$OPSX_ROOT/bin/lib/python.sh"; opsx_python_load
+  stage_name() { printf '%s\n' "$2" >> "$FX/stage.log"; printf 'explore'; }
+  LC_ALL=C opsx_collect --root "$R2" --state "$OPSX_STATE_DIR"   # 沒有 LANG 的啟動方式（launchd、nohup）
+)"
+assert_eq "$(sort "$FX/stage.log" | tr '\n' ' ')" "new-1 sd-inbox " "只有 opsx 卡和有 inbox 的卡算 stage"
+assert_eq "$(q "$J" legacy)" '{"r": 5}'
+assert_eq "$(card "$J" r old-ws)" null "只有空白的 inbox 仍是舊卡"
+assert_eq "$(card "$J" r old-ideo)" null "只有 U+3000 的 inbox 在 LC_ALL=C 下仍是舊卡"
+assert_eq "$(card "$J" r old-nbsp)" null "只有 NBSP 的 inbox 在 LC_ALL=C 下仍是舊卡"
+assert_eq "$(q "$(card "$J" r sd-inbox)" stage)" explore
+# ---------- 舊卡不查 MR：glab / gh 不被叫，errors 不記它（collect-legacy-mr-errors） ----------
+R3="$FX/code3"; D="$R3/r3/openspec/changes/legacy-mr"; mkdir -p "$R3/r3/.git" "$D"
+printf 'schema: spec-driven\n' > "$D/.openspec.yaml"
+printf '# report\n\n## MR\nhttps://gitlab.tsg-navigator.com/agentory/r3/-/merge_requests/4242\n' > "$D/report.md"
+: > "$FX/glab-empty.json"; : > "$OPSX_FAKE_LOG"
+J="$(OPSX_TEST_GLAB_JSON="$FX/glab-empty.json" OPSX_TEST_GLAB_JSON_BY_IID= opsx collect --root "$R3")"; assert_eq "$?" 0
+[ ! -s "$OPSX_FAKE_LOG" ] || fail "只有舊卡的 repo 不該叫 glab / gh：$(cat "$OPSX_FAKE_LOG")"
+assert_eq "$(q "$J" legacy)" '{"r3": 1}'
+E="$(q "$J" errors)" || fail "errors 讀不到：$J"
+case "$E" in *legacy-mr*|*glab*) fail "errors 不該指名舊卡：$E" ;; esac
 echo ok

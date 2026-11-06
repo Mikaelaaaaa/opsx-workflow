@@ -35,8 +35,10 @@ class Tally:
         if not self.first_error:
             self.first_error = " ".join(("%s: %s" % (source, message)).split())[:300]
 
-    def log_line(self, at: str) -> str:
-        return "\t".join([at, str(self.created), str(self.updated), str(self.unchanged), str(self.errors), self.first_error]) + "\n"
+    def summary(self) -> str:
+        """sync.log 那一列的文字；collect 的 last_sync 照這個格式解析回數字。"""
+        text = "新建 %d · 更新 %d · 沒變 %d · 錯誤 %d" % (self.created, self.updated, self.unchanged, self.errors)
+        return text + ("：" + self.first_error if self.first_error else "")
 
 
 def fm_get(text: str, key: str) -> str | None:
@@ -336,8 +338,12 @@ def main() -> int:
     if "debt" in wanted:
         mark_stale(index, seen, scanned, tally)
 
-    with open(a.state / "sync.log", "a", encoding="utf-8") as f:
-        f.write(tally.log_line(now.isoformat(timespec="seconds")))
+    # sync.log 的格式只在 opsx log --sync（bin/lib/log.sh）；一次同步一列，source 是 sync
+    p = subprocess.run(["bash", str(a.opsx_root / "bin" / "opsx"), "log", "--sync", "sync", str(tally.created), tally.summary()],
+                       capture_output=True, text=True, env=dict(os.environ, OPSX_STATE_DIR=str(a.state)))
+    if p.returncode != 0:
+        print("opsx sync: 寫 sync.log 失敗：%s" % p.stderr.strip(), file=sys.stderr)
+        return 1
     print("opsx sync: 新建 %d · 更新 %d · 沒變 %d · 錯誤 %d%s" % (
         tally.created, tally.updated, tally.unchanged, tally.errors, "（%s）" % tally.first_error if tally.first_error else ""))
     return 0

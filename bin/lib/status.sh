@@ -32,7 +32,7 @@ opsx_status() {
 
   if [ -n "$show" ]; then
     [ -f "$file" ] || { say none; return 0; }
-    python3 -I -c 'import json,sys;d=json.load(open(sys.argv[1]));print("%s %s/%s · %s · tests %s · %s"%(d["phase"],d["step"],d["total"],d["label"],d["tests"],d["at"]))' "$file"
+    "$OPSX_PY" -I -c 'import json,sys;d=json.load(open(sys.argv[1]));print("%s %s/%s · %s · tests %s · %s"%(d["phase"],d["step"],d["total"],d["label"],d["tests"],d["at"]))' "$file"
     return 0
   fi
 
@@ -46,13 +46,13 @@ opsx_status() {
   [ "$n" -le "$t" ] 2>/dev/null || die "status: step $n 大於 total $t"
   case "$tests" in ""|green|red|unknown) ;; *) die "status: --tests 只收 green|red，收到 $tests" ;; esac
   if [ -z "$tests" ] && [ -f "$file" ]; then
-    tests="$(python3 -I -c 'import json,sys;print(json.load(open(sys.argv[1])).get("tests","unknown"))' "$file")"
+    tests="$("$OPSX_PY" -I -c 'import json,sys;print(json.load(open(sys.argv[1])).get("tests","unknown"))' "$file")"
   fi
   [ -n "$tests" ] || tests=unknown
 
   local lbl="${label[*]}" at; at="$(now_iso)"
   OPSX_PHASE="$phase" OPSX_N="$n" OPSX_T="$t" OPSX_LABEL="$lbl" OPSX_TESTS="$tests" OPSX_AT="$at" \
-  python3 -I - "$file" <<'PY'
+  "$OPSX_PY" -I - "$file" <<'PY'
 import json,os,sys
 d={"phase":os.environ["OPSX_PHASE"],"step":int(os.environ["OPSX_N"]),"total":int(os.environ["OPSX_T"]),
    "label":os.environ["OPSX_LABEL"],"tests":os.environ["OPSX_TESTS"],"at":os.environ["OPSX_AT"]}
@@ -62,7 +62,7 @@ PY
 
   # herdr 鏡像：有 herdr 才做，失敗不影響
   if [ -n "${HERDR_ENV:-}" ] && command -v herdr >/dev/null; then
-    local pane; pane="$(herdr pane current --json 2>/dev/null | python3 -I -c 'import json,sys;print(json.load(sys.stdin).get("result",{}).get("pane_id",""))' 2>/dev/null || true)"
+    local pane; pane="$(herdr pane current --json 2>/dev/null | "$OPSX_PY" -I -c 'import json,sys;print(json.load(sys.stdin).get("result",{}).get("pane_id",""))' 2>/dev/null || true)"
     [ -n "$pane" ] && herdr pane report-metadata --source opsx "$pane" --tokens "phase=$phase" --tokens "step=$n/$t" --tokens "tests=$tests" >/dev/null 2>&1 || true
   fi
 }

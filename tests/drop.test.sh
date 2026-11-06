@@ -29,6 +29,7 @@ D="$CH/archive/2026-11-06-$X"; assert_dir "$D"
 assert_grep '^outcome: declined$' "$D/.openspec.yaml"
 assert_grep '^## 捨棄理由$' "$D/inbox.md"; assert_grep '^跟 y 重複$' "$D/inbox.md"
 assert_grep '捨棄' "$D/decisions.tsv"; assert_grep '跟 y 重複' "$D/decisions.tsv"
+assert_grep $'\t你\t已決定\t捨棄：跟 y 重複\t' "$D/decisions.tsv"
 
 printf '{"a/%s":{"mode":"stopped","pane":"p4"}}' "$Y" > "$OPSX_STATE_DIR/dispatch.json"
 assert_rc 0 opsx drop "$Y" --repo "$A" -- 停了再丟

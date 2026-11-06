@@ -10,7 +10,14 @@ CH="$A/openspec/changes"
 LOG="$OPSX_STATE_DIR/sync.log"
 sync_debt() { opsx sync --root "$ROOT" --source debt; }
 cards() { find "$CH" -mindepth 1 -maxdepth 1 -type d ! -name archive | sort; }
-logcols() { tail -1 "$LOG" | cut -f2-6; }
+# sync.log 是 opsx log --sync 的格式（ts · source · 新卡數 · 文字）；opsx sync 每次跑完寫一列 source = sync，
+# debt.sh 自己也會寫 source = debt 的掃描列。logcols 取最後一列 sync，拆成 新建 · 更新 · 沒變 · 錯誤 · 第一個錯誤
+lastsync() { awk -F'\t' '$2=="sync"' "$LOG" | tail -1; }
+logcols() { lastsync | python3 -I -c 'import re,sys
+ts,src,new,text=sys.stdin.read().rstrip("\n").split("\t")
+m=re.fullmatch(r"新建 (\d+) · 更新 (\d+) · 沒變 (\d+) · 錯誤 (\d+)(?:：(.*))?",text)
+assert m and m[1]==new, (new,text)
+print("\t".join([m[1],m[2],m[3],m[4],m[5] or ""]))'; }
 
 # ========== debt ==========
 COMMENT='單 worker, 跑第二個 instance 時改 redis'
@@ -27,9 +34,10 @@ assert_grep "^$COMMENT\$" "$I"
 assert_eq "$(cat "$OPSX_FAKE_LOG")" "" "--source debt 不呼叫 glab、gh"
 
 # --- 一次同步一行：at、created、updated、unchanged、errors、first_error ---
-assert_eq "$(wc -l < "$LOG" | tr -d ' ')" 1
+assert_eq "$(awk -F'\t' '$2=="sync"' "$LOG" | wc -l | tr -d ' ')" 1 "一次同步一列 sync"
+assert_eq "$(awk -F'\t' '$2=="debt"' "$LOG" | wc -l | tr -d ' ')" 1 "debt.sh 自己的掃描列照舊"
 assert_eq "$(logcols)" "$(printf '1\t0\t0\t0\t')"
-tail -1 "$LOG" | cut -f1 | grep -qE '^20[0-9]{2}-[0-9]{2}-[0-9]{2}T[0-9:]{8}[+-][0-9]{2}:[0-9]{2}$' || fail "at 要 ISO 8601 含時區：$(tail -1 "$LOG")"
+lastsync | cut -f1 | grep -qE '^20[0-9]{2}-[0-9]{2}-[0-9]{2}T[0-9:]{8}[+-][0-9]{2}:[0-9]{2}$' || fail "ts 要 ISO 8601 含時區：$(lastsync)"
 
 # --- 重跑不長新卡 ---
 before="$(cards)"; sync_debt >/dev/null 2>&1
@@ -124,7 +132,7 @@ assert_eq "$(grep -c '^issue list' "$OPSX_FAKE_LOG")" 3 "兩個 gitlab、一個 
 # --- 重跑不長新卡 ---
 snap_all() { find "$A/openspec/changes" "$CS/openspec/changes" "$Z/openspec/changes" -mindepth 1 -maxdepth 1 | sort; }
 before="$(snap_all)"; opsx sync --root "$ROOT" >/dev/null 2>&1
-assert_eq "$(snap_all)" "$before"; assert_eq "$(tail -1 "$LOG" | cut -f2)" 0
+assert_eq "$(snap_all)" "$before"; assert_eq "$(logcols | cut -f1)" 0
 
 # --- 還沒 explore 的卡內容更新：一句話換新、upstream_updated 換新 ---
 printf '[%s,%s]' "$(gl 412 鍵盤蓋住輸入框 2026-11-06T08:00:00Z '["bug"]')" "$(gl 500 撞名的 2026-11-05T10:00:00Z)" > "$OPSX_TEST_ISSUES/a.json"
@@ -138,7 +146,7 @@ assert_grep '^upstream_updated: 2026-11-06T08:00:00Z$' "$I"
 CI="$CS/openspec/changes/gl-agentory-cs-9/inbox.md"
 assert_eq "$(awk '/^## 一句話/{f=1;next} f&&NF{print;exit}' "$CI")" 大寫的
 awk '/^## 證據/{f=1;next} /^## /{f=0} f' "$CI" | grep -q 'gitlab:Agentory-CS#9.*2026-11-06' || fail "證據要多一行更新：$(cat "$CI")"
-assert_eq "$(tail -1 "$LOG" | cut -f3)" 2
+assert_eq "$(logcols | cut -f2)" 2
 opsx sync --root "$ROOT" >/dev/null 2>&1
 assert_eq "$(grep -c 'gitlab:Agentory-CS#9' "$CI")" 2 "同一次更新不重複追加（source 那行加一行證據）"
 
@@ -168,8 +176,8 @@ out="$(opsx sync --root "$ROOT" 2>&1)"; assert_eq "$?" 0 "一個來源失敗仍�
 assert_file "$Z/openspec/changes/gh-z-4/inbox.md"
 assert_file "$ND/inbox.md"
 rm "$OPSX_TEST_ISSUES/a.fail"
-[ "$(tail -1 "$LOG" | cut -f5)" -ge 1 ] || fail "errors 要 >= 1：$(tail -1 "$LOG")"
-tail -1 "$LOG" | cut -f6 | grep -q '401' || fail "first_error 要含 glab 的 stderr：$(tail -1 "$LOG")"
+[ "$(logcols | cut -f4)" -ge 1 ] || fail "errors 要 >= 1：$(lastsync)"
+logcols | cut -f5 | grep -q '401' || fail "first_error 要含 glab 的 stderr：$(lastsync)"
 
 # ========== review 修正 ==========
 # --- slug：repo 名的底線、連續符號換成單一 -，截斷不留 --；openspec 收得下 ---
@@ -242,7 +250,7 @@ python3 -I -c 'import json,sys;print(json.dumps([{"iid":600,"title":"又改了",
 grep -v '^upstream_updated:' "$H600" > "$FX/h600"; cp "$FX/h600" "$H600"
 opsx sync --root "$ROOT" --source gitlab >/dev/null 2>&1
 assert_eq "$(cat "$H600")" "$(cat "$FX/h600")" "沒有 upstream_updated 不能改寫"
-tail -1 "$LOG" | cut -f6 | grep -q 'upstream_updated' || fail "要記錯：$(tail -1 "$LOG")"
+logcols | cut -f5 | grep -q 'upstream_updated' || fail "要記錯：$(lastsync)"
 
 # --- sources.toml 的 path 不是 repo 根（linked worktree）：不建殼、記錯，不會每次多一張 ---
 WT="$FX/elsewhere/wt"; mkdir -p "$WT/openspec/changes"; printf 'gitdir: /nowhere\n' > "$WT/.git"
@@ -250,7 +258,7 @@ printf '\n[[source]]\nkind = "gitlab"\nrepo = "wt"\nproject = "g/wt"\npath = "%s
 printf '[%s]' "$(gl 7 worktree 的 2026-11-06T08:00:00Z)" > "$OPSX_TEST_ISSUES/wt.json"
 opsx sync --root "$ROOT" --source gitlab >/dev/null 2>&1
 assert_eq "$(find "$WT/openspec/changes" -mindepth 1 -maxdepth 1 | wc -l | tr -d ' ')" 0 "worktree 不建殼"
-[ "$(tail -1 "$LOG" | cut -f5)" -ge 1 ] || fail "要記錯：$(tail -1 "$LOG")"
+[ "$(logcols | cut -f4)" -ge 1 ] || fail "要記錯：$(lastsync)"
 
 # ========== 真實樣本（board-inbox 1.1，tests/fakes/gh-samples/，cli/cli 公開 issue 2026-11-06 實抓）==========
 GS="$OPSX_ROOT/tests/fakes/gh-samples"

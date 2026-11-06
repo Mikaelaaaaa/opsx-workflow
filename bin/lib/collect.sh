@@ -5,17 +5,35 @@
 #
 # 輸出：{generated_at, scopes[{workspace, repos[]}], repo_paths{repo: 實體路徑}, cards[], unfiled[{slug, title, source, found}],
 #       last_sync（sync.log 最後一行，沒有檔時 null）， unmatched_agents[], errors[{source,message}]}
-# 每張卡：{repo, slug, title, kind, stage, section, since, waiting, dispatch, status, agent_status, mr, last_output, source, upstream, stale}
+# 每張卡：{repo, slug, title, kind, stage, section, since, waiting, open_gates[{id, opened_at}], dispatch, status, agent_status, mr, last_output,
+#        source, upstream, stale}
 #   section ∈ 待處理 | 進行中 | 待指派 | 收件匣 | 已完成（收件匣＝沒派出、stage 還是 explore）；waiting.type ∈ 等待授權 | 等待決定 | 可以合併 | 終端機等待輸入
 #
 # gates.md 的格式（apply 步 5 寫、answer 改）：每個 gate 一段
 #   ## <gate id>
-#   type: approval | decision      action: push|mr|migrate|…（approval 才有）      status: open | answered
+#   type: approval | decision      action: push|mr|migrate|…（approval 才有）      status: open | answered      opened_at: <ISO>
 #   問題: …   建議: …   選項: a | b (Recommended) | c（decision 才有）   證據: …   風險: …   預設: …
 #   已確認: …（可多行，到下一個欄位為止）   answer: …（answered 時）
 
 # shellcheck source=/dev/null
 source "$OPSX_ROOT/bin/lib/mr.sh"
+
+# 舊 spec-driven 的 change：.openspec.yaml 沒有 schema: opsx，inbox.md 不存在或只有空白。只計數，不當卡。
+# 只用 builtin：真 repo 裡有幾百張舊卡，每張 fork 一次 stage 判斷就是十幾秒。
+collect_is_legacy() { # <change dir>
+  local line inbox
+  if [ -f "$1/.openspec.yaml" ]; then
+    while IFS= read -r line || [ -n "$line" ]; do
+      [[ $line =~ ^schema:[[:space:]]*opsx[[:space:]]*$ ]] && return 1
+    done < "$1/.openspec.yaml"
+  fi
+  if [ -f "$1/inbox.md" ]; then
+    # [:space:] 依 locale：先刪掉全形空白 U+3000 與 NBSP 的位元組，沒有 LANG 的啟動方式（launchd、nohup）下也算空白
+    inbox=$(<"$1/inbox.md"); inbox=${inbox//$'\xe3\x80\x80'/}; inbox=${inbox//$'\xc2\xa0'/}
+    [[ $inbox =~ [^[:space:]] ]] && return 1
+  fi
+  return 0
+}
 
 opsx_collect() {
   local root="$HOME/code" state="$OPSX_STATE_DIR"
@@ -35,7 +53,7 @@ opsx_collect() {
   # repo 的判準：<root>/<name>/openspec/changes 存在，而且 <name>/.git 是目錄。linked worktree 的 .git 是檔案，跳過，
   # 不然 Agentory-AI-langflow、*-wt-* 會被當成別的 repo。archive 只取最新 N 張，已完成不能無限長。
   local repo_dir repo d slug archived stage mrfile n=0 archive_cap="${OPSX_COLLECT_ARCHIVE_CAP:-30}" seen_archive real
-  : > "$work/cards.tsv"; : > "$work/seen"; mkdir -p "$work/mr"
+  : > "$work/cards.tsv"; : > "$work/legacy"; : > "$work/seen"; mkdir -p "$work/mr"
   # repo 清單（D1）：<root>/*/ 加上 sources.toml 登記的 path，init 過的 repo 不在 root 底下也算（opsx-workflow 在 ~/code/sandbox/）
   local -a repo_dirs=()
   for repo_dir in "$root"/*/; do repo_dirs+=("${repo_dir%/}"); done
@@ -53,12 +71,13 @@ opsx_collect() {
     seen_archive=0
     for d in "$repo_dir"openspec/changes/*/ $(ls -1dt "$repo_dir"openspec/changes/archive/*/ 2>/dev/null); do
       [ -d "$d" ] || continue
-      d="${d%/}"; slug="$(basename "$d")"
+      d="${d%/}"; slug="${d##*/}"
       case "$d" in
         */changes/archive) continue ;;
         */changes/archive/*) seen_archive=$((seen_archive+1)); [ "$seen_archive" -le "$archive_cap" ] || continue
            archived=true; slug="${slug#[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]-}"; stage=archive ;;
-        *) archived=false; stage="$(stage_name "${repo_dir%/}" "$slug")" ;;
+        *) if collect_is_legacy "$d"; then printf '%s\n' "$repo" >> "$work/legacy"; continue; fi
+           archived=false; stage="$(stage_name "${repo_dir%/}" "$slug")" ;;
       esac
       mrfile=""
       if [ "$archived" = false ] && st_mr_in_report "$d"; then n=$((n+1)); mrfile="$work/mr/$n.json"; mr_json "$d" > "$mrfile"; fi
@@ -76,7 +95,7 @@ opsx_collect() {
   fi
 
   # 讀卡的檔與全域狀態，組 JSON
-  OPSX_C_WORK="$work" OPSX_C_STATE="$state" OPSX_C_HERDR_ERR="$herdr_err" python3 -I - <<'PY'
+  OPSX_C_WORK="$work" OPSX_C_STATE="$state" OPSX_C_HERDR_ERR="$herdr_err" "$OPSX_PY" -I - <<'PY'
 import datetime, json, os, re, sys, tomllib
 
 work, state = os.environ["OPSX_C_WORK"], os.environ["OPSX_C_STATE"]
@@ -131,7 +150,7 @@ if os.path.exists(agents_path) and not os.environ["OPSX_C_HERDR_ERR"]:
         agents = None
         errors.append({"source": "herdr", "message": "agent list 讀不懂（要 result.agents）：%s" % e})
 
-FIELD = re.compile(r"^(type|action|status|問題|建議|選項|證據|風險|預設|已確認|answer):\s*(.*)$")
+FIELD = re.compile(r"^(type|action|status|opened_at|問題|建議|選項|證據|風險|預設|已確認|answer):\s*(.*)$")
 
 def parse_gates(text):
     gates, cur, key = [], None, None
@@ -186,6 +205,8 @@ def waiting_of(card, gates, agent_status):
     return None
 
 cards, matched_panes, legacy = [], set(), {}
+for r in read(os.path.join(work, "legacy")).split("\n"):
+    if r: legacy[r] = legacy.get(r, 0) + 1
 now = datetime.datetime.now().astimezone().isoformat(timespec="seconds")
 for line in read(os.path.join(work, "cards.tsv")).split("\n"):
     if not line: continue
@@ -195,12 +216,7 @@ for line in read(os.path.join(work, "cards.tsv")).split("\n"):
     d = c["dir"]
     if c["mr"] and c["mr"].get("error"):
         errors.append({"source": "glab" if "glab" in c["mr"]["error"] else "gh", "message": "%s/%s：%s" % (repo_, slug_, c["mr"]["error"])})
-    spec_yaml = read(os.path.join(d, ".openspec.yaml"))
     inbox = read(os.path.join(d, "inbox.md"))
-    # 卡的資格：schema: opsx 或有 inbox.md。舊 spec-driven 的 change 只計數，不當卡（真 repo 裡有幾百張，會灌爆待指派）
-    if not c["archived"] and not re.search(r"^schema:\s*opsx\s*$", spec_yaml, re.M) and not inbox.strip():
-        legacy[repo_] = legacy.get(repo_, 0) + 1
-        continue
     key = "%s/%s" % (c["repo"], c["slug"])
     disp = dispatch.get(key)
     if disp and disp.get("mode") == "stopped": disp = None
@@ -220,7 +236,8 @@ for line in read(os.path.join(work, "cards.tsv")).split("\n"):
         "repo": c["repo"], "slug": c["slug"], "title": one_liner(inbox) or c["slug"], "kind": kind_of(d),
         "stage": c["stage"], "section": section,
         "since": frontmatter(inbox, "found") or (re.search(r"^created:\s*(\S+)", read(os.path.join(d, ".openspec.yaml")), re.M) or [None, None])[1],
-        "waiting": waiting, "dispatch": disp, "status": load_json(os.path.join(d, "status.json"), None),
+        "waiting": waiting, "open_gates": [{"id": g["id"], "opened_at": g.get("opened_at")} for g in gates if g.get("status") == "open"],
+        "dispatch": disp, "status": load_json(os.path.join(d, "status.json"), None),
         "agent_status": agent_status, "mr": c["mr"], "last_output": None,
         "grants_repo": grants.get(c["repo"]), "path": d,
         "source": frontmatter(inbox, "source"), "upstream": frontmatter(inbox, "upstream"), "stale": frontmatter(inbox, "stale") == "true",
@@ -234,11 +251,16 @@ for name in sorted(os.listdir(unfiled_dir)) if os.path.isdir(unfiled_dir) else [
     if not name.endswith(".md"): continue
     text = read(os.path.join(unfiled_dir, name))
     unfiled.append({"slug": name[:-3], "title": one_liner(text) or name[:-3], "source": frontmatter(text, "source"), "found": frontmatter(text, "found")})
+# 上次同步：sync.log（opsx log --sync 的格式 ts · source · 新卡數 · 文字）最後一列 source = sync，文字是 sync.py 的 Tally.summary()。
+# debt.sh 自己寫的 debt 掃描列、別的工具寫的列不算。
+SYNC_TEXT = re.compile(r"新建 (\d+) · 更新 (\d+) · 沒變 (\d+) · 錯誤 (\d+)(?:：(.*))?")
 last_sync = None
-log_lines = [l for l in read(os.path.join(state, "sync.log")).split("\n") if l]
-if log_lines:
-    at_, created_, updated_, unchanged_, errors_, first_ = (log_lines[-1].split("\t") + [""] * 6)[:6]
-    last_sync = {"at": at_, "created": int(created_), "updated": int(updated_), "unchanged": int(unchanged_), "errors": int(errors_), "first_error": first_}
+for line in reversed([l for l in read(os.path.join(state, "sync.log")).split("\n") if l]):
+    cols = line.split("\t")
+    m = SYNC_TEXT.fullmatch(cols[3]) if len(cols) == 4 and cols[1] == "sync" else None
+    if m:
+        last_sync = {"at": cols[0], "created": int(m[1]), "updated": int(m[2]), "unchanged": int(m[3]), "errors": int(m[4]), "first_error": m[5] or ""}
+        break
 unmatched = [{"name": a.get("terminal_title_stripped") or a.get("agent") or "", "pane": a.get("pane_id"),
               "agent_status": a.get("agent_status"), "cwd": a.get("cwd"), "workspace": a.get("workspace_id")}
              for a in (agents or []) if str(a.get("pane_id")) not in matched_panes]

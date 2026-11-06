@@ -36,12 +36,12 @@ opsx_drop() {
   local repo d; repo="$(basename "$top")"; d="$top/openspec/changes/$slug"
   [ -d "$d" ] || die "drop: 沒有這張卡：$d"
   local f="$OPSX_STATE_DIR/dispatch.json" mode=""
-  [ -f "$f" ] && mode="$(OPSX_KEY="$repo/$slug" python3 -I -c 'import json,os,sys;e=json.load(open(sys.argv[1])).get(os.environ["OPSX_KEY"]);print("" if e is None else e.get("mode") or "running")' "$f")"
+  [ -f "$f" ] && mode="$(OPSX_KEY="$repo/$slug" "$OPSX_PY" -I -c 'import json,os,sys;e=json.load(open(sys.argv[1])).get(os.environ["OPSX_KEY"]);print("" if e is None else e.get("mode") or "running")' "$f")"
   [ -z "$mode" ] || [ "$mode" = stopped ] || die "drop: $repo/$slug 還派著（${mode}），先在板上按停止或 opsx stop $slug"
 
   printf 'outcome: declined\n' >> "$d/.openspec.yaml"
   printf '\n## 捨棄理由\n\n%s\n' "$reason" >> "$d/inbox.md"
-  printf '%s\t%s\t%s\n' "$(now_iso)" "你：捨棄：${reason//$'\t'/ }" "declined" >> "$d/decisions.tsv"
+  log_row "$d" 你 已決定 "捨棄：$reason" declined
   ( cd "$top" && openspec archive "$slug" --yes --skip-specs >/dev/null ) || die "drop: openspec archive $slug 失敗；outcome 與理由已寫進 $d"
   say "drop: $repo/$slug 已捨棄並歸檔"
 }

@@ -14,19 +14,19 @@ opsx_stop() {
   local repo; repo="$(basename "$(cd "$top" && pwd -P)")"
   local f="$OPSX_STATE_DIR/dispatch.json"
   [ -f "$f" ] || die "stop: 沒有 dispatch.json"
-  local entry; entry="$(OPSX_KEY="$repo/$slug" python3 -I -c 'import json,os,sys;d=json.load(open(sys.argv[1]));print(json.dumps(d.get(os.environ["OPSX_KEY"],{})))' "$f")"
+  local entry; entry="$(OPSX_KEY="$repo/$slug" "$OPSX_PY" -I -c 'import json,os,sys;d=json.load(open(sys.argv[1]));print(json.dumps(d.get(os.environ["OPSX_KEY"],{})))' "$f")"
   [ "$entry" != "{}" ] || die "stop: $repo/$slug 沒派過"
   local pid pane; pid="$(printf '%s' "$entry" | jq -r '.drive_pid // empty')"; pane="$(printf '%s' "$entry" | jq -r '.pane // empty')"
   if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then kill "$pid" 2>/dev/null || true; say "stop: drive pid $pid 已 kill"; fi
   if [ -n "$pane" ]; then herdr pane close "$pane" >/dev/null 2>&1 && say "stop: pane $pane 關了" || say "stop: pane $pane 關不掉（可能已經不在）"; fi
-  OPSX_KEY="$repo/$slug" OPSX_AT="$(now_iso)" OPSX_LIB="$OPSX_ROOT/bin/lib" python3 -I - "$f" <<'PY'
+  OPSX_KEY="$repo/$slug" OPSX_AT="$(now_iso)" OPSX_LIB="$OPSX_ROOT/bin/lib" "$OPSX_PY" -I - "$f" <<'PY'
 import os, sys
 sys.path.insert(0, os.environ["OPSX_LIB"]); import jsonfile
 def put(d):
     e = d[os.environ["OPSX_KEY"]]; e["mode"] = "stopped"; e["drive_pid"] = None; e["stopped_at"] = os.environ["OPSX_AT"]
 jsonfile.update(sys.argv[1], put)
 PY
-  printf '%s\t%s\t%s\n' "$(now_iso)" "停止" "stopped" >> "$top/openspec/changes/$slug/decisions.tsv"
+  log_row "$top/openspec/changes/$slug" 你 已停止 停止
   say "stop: $repo/$slug 標 stopped"
 }
 
