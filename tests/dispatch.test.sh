@@ -188,4 +188,11 @@ assert_eq "$(cat "$OPSX_FAKE_LOG")" "" "拒絕時不碰 herdr"
 mkdir -p "$R/openspec/changes/coord2"; printf 'schema: opsx\nkind: dev\n' > "$R/openspec/changes/coord2/.openspec.yaml"
 python3 -I -c 'import json,sys;p=sys.argv[1];d=json.load(open(p));d["Other-Repo/old"]={"mode":"autopilot","pane":"w9:p2","herdr_name":"coord2","handed_to":["coord2"]};json.dump(d,open(p,"w"))' "$OPSX_STATE_DIR/dispatch.json"
 out="$(opsx dispatch coord2 --agent claude --mode autopilot 2>&1)" || fail "已交接的條目不該擋重派: $out"
+
+# --- fan-out 的父卡（auto-dispatch 6.7）：handed_to 列了子卡，但 pane 還活著、herdr 名還是父卡，同名的卡照樣不准派 ---
+mkdir -p "$R/openspec/changes/coord3"; printf 'schema: opsx\nkind: dev\n' > "$R/openspec/changes/coord3/.openspec.yaml"
+python3 -I -c 'import json,sys;p=sys.argv[1];d=json.load(open(p));d["Other-Repo/coord3"]={"mode":"autopilot","pane":"w9:p3","handed_to":["k1","k2"]};json.dump(d,open(p,"w"))' "$OPSX_STATE_DIR/dispatch.json"
+: > "$OPSX_FAKE_LOG"
+out="$(opsx dispatch coord3 --agent claude --mode autopilot 2>&1)"; [ $? -eq 2 ] || fail "fan-out 父卡的 pane 還活著，同名要拒絕: $out"
+assert_eq "$(cat "$OPSX_FAKE_LOG")" "" "拒絕時不碰 herdr"
 echo ok
