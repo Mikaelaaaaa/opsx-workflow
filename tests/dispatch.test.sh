@@ -46,7 +46,9 @@ R4="$(mk_repo Agentory-X)"; mkdir -p "$R4/openspec/changes/retry-backoff"; print
 printf '"Agentory-X" = "agnetory-ai"\n' >> "$OPSX_STATE_DIR/workspaces.toml"
 out="$(cd "$R4" && opsx dispatch retry-backoff --agent claude --mode autopilot --kind dev 2>&1)"; [ $? -ne 0 ] || fail "同名 slug 要拒絕"
 echo "$out" | grep -q 'Agentory-CS/retry-backoff' || fail "要指名撞到哪張: $out"
-assert_grep 'dispatched' "$R/openspec/changes/retry-backoff/decisions.tsv"
+last_row() { tail -1 "$R/openspec/changes/retry-backoff/decisions.tsv" | cut -f2-3; }
+assert_eq "$(last_row)" "你$(printf '\t')已指派"
+assert_eq "$(tail -1 "$R/openspec/changes/retry-backoff/decisions.tsv" | awk -F'\t' '{print NF}')" 5
 
 # --- 重派同一張卡：worktree 已在就重用，不報錯 ---
 : > "$OPSX_FAKE_LOG"
@@ -82,6 +84,6 @@ assert_eq "$(git -C "$R3/.claude/worktrees/eval-core" rev-parse --abbrev-ref HEA
 opsx stop retry-backoff >/dev/null 2>&1 || fail "stop"
 assert_grep '^pane close w1:pE$' "$OPSX_FAKE_LOG"
 python3 -I -c 'import json,sys;d=json.load(open(sys.argv[1]))["Agentory-CS/retry-backoff"];assert d["mode"]=="stopped" and d["stopped_at"],d' "$OPSX_STATE_DIR/dispatch.json"
-assert_grep 'stopped' "$R/openspec/changes/retry-backoff/decisions.tsv"
+assert_eq "$(last_row)" "你$(printf '\t')已停止"
 assert_rc 2 opsx stop nope
 echo ok

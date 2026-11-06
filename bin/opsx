@@ -46,5 +46,7 @@ source "$OPSX_ROOT/bin/lib/common.sh"
 # shellcheck source=/dev/null
 source "$OPSX_ROOT/bin/lib/stage.sh"
 # shellcheck source=/dev/null
+source "$OPSX_ROOT/bin/lib/log.sh"
+# shellcheck source=/dev/null
 source "$lib"
 "opsx_$cmd" "$@"

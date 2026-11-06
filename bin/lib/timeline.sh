@@ -5,9 +5,6 @@
 # 讀全部 archive，不套 collect 的張數上限。不是五欄新格式的列 tag 記「其他」、text 是整列原文。
 # repo 的判準跟 collect 一樣：<root>/<name>/openspec/changes 存在，而且 <name>/.git 是目錄。
 
-# shellcheck source=/dev/null
-source "$OPSX_ROOT/bin/lib/log.sh"
-
 opsx_timeline() {
   local root="$HOME/code" state="$OPSX_STATE_DIR" since=""
   while [ $# -gt 0 ]; do
