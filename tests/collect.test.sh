@@ -220,6 +220,8 @@ printf '\xe3\x80\x80\n' > "$R2/r/openspec/changes/old-ideo/inbox.md"   # 只有�
 printf '\xc2\xa0\n' > "$R2/r/openspec/changes/old-nbsp/inbox.md"       # 只有 NBSP
 printf '## 一句話\n\n有 inbox 的舊 schema\n' > "$R2/r/openspec/changes/sd-inbox/inbox.md"
 mkdir -p "$R2/r/openspec/changes/new-1"; printf 'schema: opsx\n' > "$R2/r/openspec/changes/new-1/.openspec.yaml"
+mkdir -p "$R2/r/openspec/changes/opsx-noeol"; printf 'schema: opsx' > "$R2/r/openspec/changes/opsx-noeol/.openspec.yaml"
+mkdir -p "$R2/r/openspec/changes/opsx-crlf"; printf 'schema: opsx\r\n' > "$R2/r/openspec/changes/opsx-crlf/.openspec.yaml"
 rm -f "$OPSX_STATE_DIR/sources.toml"; : > "$FX/stage.log"
 J="$(
   # shellcheck source=/dev/null
@@ -227,12 +229,14 @@ J="$(
   stage_name() { printf '%s\n' "$2" >> "$FX/stage.log"; printf 'explore'; }
   LC_ALL=C opsx_collect --root "$R2" --state "$OPSX_STATE_DIR"   # 沒有 LANG 的啟動方式（launchd、nohup）
 )"
-assert_eq "$(sort "$FX/stage.log" | tr '\n' ' ')" "new-1 sd-inbox " "只有 opsx 卡和有 inbox 的卡算 stage"
+assert_eq "$(sort "$FX/stage.log" | tr '\n' ' ')" "new-1 opsx-crlf opsx-noeol sd-inbox " "只有 opsx 卡和有 inbox 的卡算 stage，沒有結尾換行或 CRLF 的 opsx 卡也算"
 assert_eq "$(q "$J" legacy)" '{"r": 5}'
 assert_eq "$(card "$J" r old-ws)" null "只有空白的 inbox 仍是舊卡"
 assert_eq "$(card "$J" r old-ideo)" null "只有 U+3000 的 inbox 在 LC_ALL=C 下仍是舊卡"
 assert_eq "$(card "$J" r old-nbsp)" null "只有 NBSP 的 inbox 在 LC_ALL=C 下仍是舊卡"
 assert_eq "$(q "$(card "$J" r sd-inbox)" stage)" explore
+assert_eq "$(q "$(card "$J" r opsx-noeol)" stage)" explore "沒有結尾換行的 opsx 卡要在 cards"
+assert_eq "$(q "$(card "$J" r opsx-crlf)" stage)" explore "CRLF 的 opsx 卡要在 cards"
 # ---------- 舊卡不查 MR：glab / gh 不被叫，errors 不記它（collect-legacy-mr-errors） ----------
 R3="$FX/code3"; D="$R3/r3/openspec/changes/legacy-mr"; mkdir -p "$R3/r3/.git" "$D"
 printf 'schema: spec-driven\n' > "$D/.openspec.yaml"

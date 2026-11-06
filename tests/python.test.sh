@@ -42,6 +42,10 @@ assert_grep "/nonexistent/py3" "$FX/err"; assert_grep "opsx init --global" "$FX/
 printf '/usr/bin\n' > "$P"
 opsx collect --root "$FX" > /dev/null 2> "$FX/err" && fail "python 指到目錄時 collect 要失敗"
 assert_grep "/usr/bin" "$FX/err"; assert_grep "opsx init --global" "$FX/err"
+rm -f "$P"; RI="$(mk_repo init-nopy)"
+(cd "$RI" && opsx init) > /dev/null 2> "$FX/err" && fail "缺 python 檔時 repo 層 opsx init 要失敗"
+assert_grep "$P" "$FX/err"; assert_grep "opsx init --global" "$FX/err"
+assert_no_file "$RI/openspec"
 
 # ---------- python 在但跑不起來：授權閘門要 deny，不能因為 hook 非 0 結束而放行 ----------
 printf '/usr/bin/false\n' > "$P"
