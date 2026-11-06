@@ -50,6 +50,10 @@ The skills copied from pstack use Cursor names. In Claude Code, read this file o
 | `https://github.com/cursor/plugins/blob/main/pstack/<path>` | `<pstack>/<path>` when `UPSTREAM.md` lists a local copy. Read the local copy and never fetch it. Give the user the URL when they need a link. |
 | Transcripts in `~/.cursor/projects/<slug>/agent-transcripts/` | `~/.claude/projects/<slug>/<session>.jsonl`. The slug is the workspace path with each `/` and `.` changed to `-`, so `/Users/you/proj` is `-Users-you-proj`. The newest `.jsonl` directly in that folder is the current session. Its `<session>/subagents/` folder holds subagent transcripts. Read only this workspace's folder. |
 
+## Blocked actions
+
+When a hook, a safety check, or auto mode blocks an action, follow step 5 in `<pstack>/skills/apply/SKILL.md`.
+
 ## Cursor-only features
 
 Claude Code has no Cursor Automations, Bugbot, Cursor cloud agents, or built-in PR tool. This plugin also ships no `deslop`, `control-ui`, `control-cli`, `cursor-team-kit`, `arena`, `swarm`, `create-skill`, `watch-pr`, or `shipping`. When a step needs one, put one line in your reply, `Skipped in Claude Code: <step>. <reason>.`, then go on to the next step. Do not stop, ask, or retry. When a later step needs what the skipped step made, such as a URL or a key, leave a placeholder and name it in the line.
