@@ -28,7 +28,8 @@ opsx_dispatch() {
   command -v herdr >/dev/null || die "dispatch: 找不到 herdr"
   ensure_dir "$OPSX_STATE_DIR"
 
-  # herdr agent 只認名字（agent start <name>），名字 = slug；另一個 repo 已派出同名 slug 的卡時，prompt 會送錯人，所以拒絕
+  # herdr agent 只認名字（agent start <name>），新卡的名字 = slug。還在跑的條目用的 herdr 名（herdr_name，沒有就是它的 slug）
+  # 跟這個 slug 一樣時，prompt 會送錯人，所以拒絕；代管卡的 herdr 名是協調它的 pane
   OPSX_KEY="$repo/$slug" OPSX_SLUG="$slug" OPSX_LIB="$OPSX_ROOT/bin/lib" "$OPSX_PY" -I - "$OPSX_STATE_DIR/dispatch.json" <<'PY' || exit 2
 import os, sys
 sys.path.insert(0, os.environ["OPSX_LIB"]); import jsonfile
@@ -36,9 +37,9 @@ d = jsonfile.load(sys.argv[1]); me = os.environ["OPSX_KEY"]; slug = os.environ["
 mine = d.get(me)
 if mine and mine.get("mode") != "stopped":
     sys.exit("dispatch: %s 已經派出去了，在 %s · %s · %s（%s 起）。要換人先 opsx stop %s" % (me, mine.get("workspace"), mine.get("tab"), mine.get("pane"), mine.get("started_at"), slug))
-clash = [k for k, v in d.items() if k != me and k.endswith("/" + slug) and v.get("mode") != "stopped"]
+clash = [k for k, v in d.items() if k != me and v.get("mode") != "stopped" and (v.get("herdr_name") or k.split("/", 1)[1]) == slug]
 if clash:
-    sys.exit("dispatch: herdr agent 名字就是 slug，而 %s 已經派出同名的卡，herdr agent prompt 會送錯 agent。先 opsx stop 那張，或把這張卡改名" % "、".join(clash))
+    sys.exit("dispatch: herdr agent 名字就是 slug，而 %s 還在跑、用的 herdr 名也是 %s，herdr agent prompt 會送錯 agent。先 opsx stop 那張，或把這張卡改名" % ("、".join(clash), slug))
 PY
 
   # kind：沒給就從 .openspec.yaml 讀，再沒有就是 dev；寫回 .openspec.yaml
