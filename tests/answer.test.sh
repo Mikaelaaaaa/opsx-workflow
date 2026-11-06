@@ -106,4 +106,14 @@ out="$(opsx answer x --gate g2 --grant repo "檔案" 2>&1)"; [ $? -ne 0 ] || fai
 gates; printf '{}' > "$OPSX_STATE_DIR/dispatch.json"; : > "$OPSX_FAKE_LOG"
 out="$(opsx answer x --gate g2 "檔案" 2>&1)"; assert_eq "$?" 0 "沒派出: $out"
 assert_eq "$(cat "$OPSX_FAKE_LOG")" "" "沒 agent 就不 prompt"; echo "$out" | grep -q '沒派出' || fail "要說沒派出: $out"
+# --- 代管卡（auto-dispatch）：送給 herdr_name，prompt 帶 [<slug>]；沒有 herdr_name 的舊條目照舊送 slug（上面幾段已驗）---
+gates; : > "$OPSX_FAKE_LOG"
+printf '{"Agentory-AI/x":{"mode":"autopilot","pane":"p4","agent":"claude","grants":[],"via":"p","herdr_name":"p"}}' > "$OPSX_STATE_DIR/dispatch.json"
+out="$(opsx answer x --gate g2 "選 B" 2>&1)"; assert_eq "$?" 0 "代管卡 answer: $out"
+assert_grep '^agent prompt p \[x\] 選 B$' "$OPSX_FAKE_LOG"
+# 單一續接後的卡：herdr_name 就是自己，沒有 via，不加前綴
+gates; : > "$OPSX_FAKE_LOG"
+printf '{"Agentory-AI/x":{"mode":"autopilot","pane":"p4","agent":"claude","grants":[],"herdr_name":"x"}}' > "$OPSX_STATE_DIR/dispatch.json"
+out="$(opsx answer x --gate g2 "選 B" 2>&1)"; assert_eq "$?" 0 "續接卡 answer: $out"
+assert_grep '^agent prompt x 選 B$' "$OPSX_FAKE_LOG"
 echo ok

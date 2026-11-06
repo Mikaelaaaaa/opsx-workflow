@@ -43,4 +43,10 @@ out="$(opsx merge x 2>&1)"; [ $? -ne 0 ] || fail "merge 要重抓，不吃快取
 printf '{"state":"opened","draft":false,"has_conflicts":false,"sha":"abc123","head_pipeline":{"status":"success"},"unresolved_discussions_count":0}' > "$OPSX_TEST_GLAB_JSON"
 printf '{}' > "$OPSX_STATE_DIR/dispatch.json"
 out="$(opsx merge x 2>&1)"; [ $? -ne 0 ] || fail "沒派出要拒絕"; echo "$out" | grep -q '沒派出' || fail "要說沒派出: $out"
+# --- 代管卡（auto-dispatch）：送給 herdr_name，prompt 帶 slug ---
+printf '{"state":"opened","draft":false,"has_conflicts":false,"sha":"abc123","head_pipeline":{"status":"success"},"unresolved_discussions_count":0}' > "$OPSX_TEST_GLAB_JSON"
+printf '{"Agentory-AI/x":{"mode":"autopilot","pane":"p4","agent":"claude","grants":[],"via":"p","herdr_name":"p"}}' > "$OPSX_STATE_DIR/dispatch.json"; : > "$OPSX_FAKE_LOG"
+out="$(opsx merge x 2>&1)"; assert_eq "$?" 0 "代管卡 merge: $out"
+assert_grep '^agent prompt p /babysit merge abc123 x$' "$OPSX_FAKE_LOG"
+assert_eq "$(jq -r '."Agentory-AI/x".merge_approved' "$OPSX_STATE_DIR/dispatch.json")" abc123
 echo ok
