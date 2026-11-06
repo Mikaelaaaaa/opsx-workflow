@@ -25,6 +25,8 @@ opsx <command> [args]
   collect [--root ~/code] [--state …]  看板的資料：掃 repo 的卡 + 全域狀態 + herdr / glab，印一份 JSON（不寫檔）
   answer <slug> --gate <id> [--grant this|card|repo] <text…>   回 gate：gates.md answered、授權落檔、decisions、herdr agent prompt
   merge <slug> [--repo]                核准合併：重驗五條件、dispatch.json 寫一次性核准、叫 agent /babysit merge（不自己 glab mr merge）
+  log <slug> <who> <tag> <文字> [證據] [--repo]   在卡的 decisions.tsv 記一列（tag：已允許 已決定 替你決定 已指派 已停止 已合併 同步 驗證）
+  timeline [--root ~/code] [--state …] [--since <iso>]   跨卡時間軸：所有卡的 decisions.tsv，印一份 JSON（不寫檔）
 EOF
 }
 
