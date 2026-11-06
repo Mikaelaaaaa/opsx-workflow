@@ -51,7 +51,7 @@ opsx_drive() {
 
 dispatched() { # <repo> <slug>
   [ -f "$OPSX_STATE_DIR/dispatch.json" ] || return 1
-  OPSX_KEY="$1/$2" python3 -I - "$OPSX_STATE_DIR/dispatch.json" <<'PY'
+  OPSX_KEY="$1/$2" "$OPSX_PY" -I - "$OPSX_STATE_DIR/dispatch.json" <<'PY'
 import json,os,sys
 d=json.load(open(sys.argv[1])); sys.exit(0 if os.environ["OPSX_KEY"] in d else 1)
 PY

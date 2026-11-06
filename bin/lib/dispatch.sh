@@ -29,7 +29,7 @@ opsx_dispatch() {
   ensure_dir "$OPSX_STATE_DIR"
 
   # herdr agent 只認名字（agent start <name>），名字 = slug；另一個 repo 已派出同名 slug 的卡時，prompt 會送錯人，所以拒絕
-  OPSX_KEY="$repo/$slug" OPSX_SLUG="$slug" OPSX_LIB="$OPSX_ROOT/bin/lib" python3 -I - "$OPSX_STATE_DIR/dispatch.json" <<'PY' || exit 2
+  OPSX_KEY="$repo/$slug" OPSX_SLUG="$slug" OPSX_LIB="$OPSX_ROOT/bin/lib" "$OPSX_PY" -I - "$OPSX_STATE_DIR/dispatch.json" <<'PY' || exit 2
 import os, sys
 sys.path.insert(0, os.environ["OPSX_LIB"]); import jsonfile
 d = jsonfile.load(sys.argv[1]); me = os.environ["OPSX_KEY"]; slug = os.environ["OPSX_SLUG"]
@@ -70,7 +70,7 @@ PY
   # 所以用 `herdr workspace list`（result.workspaces[].{label,workspace_id}，2026-11-06 實跑）換；沒掛就開一個以 repo 為 label 的
   local ws ws_id; ws="$(workspace_for "$repo")"
   if [ -n "$ws" ]; then
-    ws_id="$(OPSX_WSJSON="$(herdr workspace list 2>/dev/null || true)" OPSX_WS="$ws" python3 -I - <<'PY'
+    ws_id="$(OPSX_WSJSON="$(herdr workspace list 2>/dev/null || true)" OPSX_WS="$ws" "$OPSX_PY" -I - <<'PY'
 import json, os, sys
 want = os.environ["OPSX_WS"]
 try:
@@ -137,7 +137,7 @@ $(herdr pane read "$pane" 2>/dev/null | tail -20)"
 
   # dispatch.json
   OPSX_KEY="$repo/$slug" OPSX_WS="$ws" OPSX_WSID="$ws_id" OPSX_TAB="$tab" OPSX_PANE="$pane" OPSX_AGENT="$agent" OPSX_MODEL="$model" OPSX_MODE="$mode" OPSX_KIND="$kind" OPSX_WT="$wt" OPSX_BR="$branch" OPSX_AT="$(now_iso)" OPSX_LIB="$OPSX_ROOT/bin/lib" \
-  python3 -I - "$OPSX_STATE_DIR/dispatch.json" <<'PY'
+  "$OPSX_PY" -I - "$OPSX_STATE_DIR/dispatch.json" <<'PY'
 import os, sys
 sys.path.insert(0, os.environ["OPSX_LIB"]); import jsonfile
 e = os.environ
@@ -158,7 +158,7 @@ PY
   if [ "$mode" = drive ]; then
     nohup bash "$OPSX_ROOT/bin/opsx" drive "$slug" --repo "$top" >> "$OPSX_STATE_DIR/drive-$repo-$slug.log" 2>&1 &
     local pid=$!
-    OPSX_KEY="$repo/$slug" OPSX_PID="$pid" OPSX_LIB="$OPSX_ROOT/bin/lib" python3 -I - "$OPSX_STATE_DIR/dispatch.json" <<'PY'
+    OPSX_KEY="$repo/$slug" OPSX_PID="$pid" OPSX_LIB="$OPSX_ROOT/bin/lib" "$OPSX_PY" -I - "$OPSX_STATE_DIR/dispatch.json" <<'PY'
 import os, sys
 sys.path.insert(0, os.environ["OPSX_LIB"]); import jsonfile
 def put(d): d[os.environ["OPSX_KEY"]]["drive_pid"] = int(os.environ["OPSX_PID"])
@@ -174,7 +174,7 @@ workplan_branch() { # <top> <slug>：印 workplan 裡這張卡的 branch，沒�
 }
 workspace_for() { # <repo>：印 workspaces.toml 記的 label（或 id），沒有就空
   [ -f "$OPSX_STATE_DIR/workspaces.toml" ] || return 0
-  OPSX_REPO="$1" python3 -I - "$OPSX_STATE_DIR/workspaces.toml" <<'PY'
+  OPSX_REPO="$1" "$OPSX_PY" -I - "$OPSX_STATE_DIR/workspaces.toml" <<'PY'
 import os, sys, tomllib
 try:
     print(tomllib.load(open(sys.argv[1], "rb")).get("repos", {}).get(os.environ["OPSX_REPO"], ""))
@@ -183,7 +183,7 @@ except tomllib.TOMLDecodeError as e:
 PY
 }
 write_settings() { # <file> <repo>：直接做那級 allow，永遠要人那級 deny；repo 永遠的授權也進 allow
-  OPSX_REPO="$2" OPSX_SD="$OPSX_STATE_DIR" python3 -I - "$1" <<'PY'
+  OPSX_REPO="$2" OPSX_SD="$OPSX_STATE_DIR" "$OPSX_PY" -I - "$1" <<'PY'
 import json,os,sys,tomllib
 sd=os.environ["OPSX_SD"]; repo=os.environ["OPSX_REPO"]
 allow=["Read","Edit","Write","Glob","Grep","Bash(git status:*)","Bash(git diff:*)","Bash(git log:*)","Bash(git add:*)","Bash(git commit:*)","Bash(git checkout:*)","Bash(git worktree:*)",

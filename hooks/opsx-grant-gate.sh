@@ -6,6 +6,8 @@ source "$(dirname "${BASH_SOURCE[0]}")/_lib.sh"
 
 top="$(repo_top)"; slug="$(card_slug)"
 [ -n "$top" ] && [ -n "$slug" ] || exit 0
+# 讀不到授權就判斷不了模式；hook 非 0 結束 Claude Code 會當成放行，所以明確 deny
+[ -n "$OPSX_PY" ] || deny "opsx 授權閘門：讀不到授權，先擋下。$OPSX_PY_ERR"
 repo="$(repo_name)"
 mode="$(card_mode "$repo" "$slug")"
 case "$mode" in autopilot|drive) ;; *) exit 0 ;; esac
@@ -24,7 +26,7 @@ merge_gate() { # 回 0 放行；否則 deny（deny 會 exit）
   source "$OPSX_ROOT/bin/lib/mr.sh"
   local d="$top/openspec/changes/$slug" approved head want_iid cmd_iid
   printf '%s' "$c" | grep -qE '(&&|\|\||;|\||\$\(|`)' && deny "opsx 授權閘門：合併指令要單獨一條，不能跟別的指令串在一起（收到：${c}）"
-  approved="$(OPSX_KEY="$repo/$slug" OPSX_LIB="$OPSX_ROOT/bin/lib" python3 -I - "$OPSX_STATE_DIR/dispatch.json" <<'PY'
+  approved="$(OPSX_KEY="$repo/$slug" OPSX_LIB="$OPSX_ROOT/bin/lib" "$OPSX_PY" -I - "$OPSX_STATE_DIR/dispatch.json" <<'PY'
 import os, sys
 sys.path.insert(0, os.environ["OPSX_LIB"]); import jsonfile
 print(jsonfile.load(sys.argv[1]).get(os.environ["OPSX_KEY"], {}).get("merge_approved") or "")
@@ -36,7 +38,7 @@ PY
   if [ -n "$cmd_iid" ] && [ "$cmd_iid" != "$want_iid" ]; then
     deny "opsx 授權閘門：核准的是這張卡的 MR ${want_iid:-（report.md 沒有）}，指令要合併的是 ${cmd_iid}"
   fi
-  head="$(OPSX_MR_CACHE_TTL=0 mr_json "$d" | python3 -I -c 'import json,sys; print(json.load(sys.stdin).get("head_sha") or "")')"
+  head="$(OPSX_MR_CACHE_TTL=0 mr_json "$d" | "$OPSX_PY" -I -c 'import json,sys; print(json.load(sys.stdin).get("head_sha") or "")')"
   if [ "$head" != "$approved" ]; then
     deny "opsx 授權閘門：看板核准的是 ${approved}，MR 現在的 head 是 ${head:-讀不到}（又推了 commit？）。寫 gates.md 請人在看板重新按「合併」"
   fi

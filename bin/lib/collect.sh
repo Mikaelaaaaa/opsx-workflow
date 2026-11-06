@@ -89,7 +89,7 @@ opsx_collect() {
   fi
 
   # 讀卡的檔與全域狀態，組 JSON
-  OPSX_C_WORK="$work" OPSX_C_STATE="$state" OPSX_C_HERDR_ERR="$herdr_err" python3 -I - <<'PY'
+  OPSX_C_WORK="$work" OPSX_C_STATE="$state" OPSX_C_HERDR_ERR="$herdr_err" "$OPSX_PY" -I - <<'PY'
 import datetime, json, os, re, sys, tomllib
 
 work, state = os.environ["OPSX_C_WORK"], os.environ["OPSX_C_STATE"]

@@ -29,7 +29,7 @@ mr_json() { # <card dir>
     *) forge=gitlab; path="$(printf '%s' "$url" | sed -E 's#^https?://[^/]+/(.*)/-/merge_requests/.*#\1#')"; proj="$host/$path"
       raw="$(glab mr view "$iid" -R "$proj" -F json 2>/dev/null || true)" ;;
   esac
-  out="$(OPSX_MR_RAW="$raw" python3 -I - "$url" "$forge" "$proj" "$iid" <<'PY'
+  out="$(OPSX_MR_RAW="$raw" "$OPSX_PY" -I - "$url" "$forge" "$proj" "$iid" <<'PY'
 import json, os, sys
 url, forge, proj, iid = sys.argv[1:5]
 raw = os.environ.get("OPSX_MR_RAW", "").strip()   # heredoc 占了 stdin，原始 JSON 走環境變數
@@ -78,5 +78,5 @@ PY
 }
 
 mr_state() { # <card dir>
-  mr_json "$1" | python3 -I -c 'import json,sys; print(json.load(sys.stdin)["state"])'
+  mr_json "$1" | "$OPSX_PY" -I -c 'import json,sys; print(json.load(sys.stdin)["state"])'
 }

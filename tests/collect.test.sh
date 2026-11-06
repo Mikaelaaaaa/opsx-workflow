@@ -137,8 +137,8 @@ assert_eq "$(q "$J" unmatched_agents)" '[{"agent_status": "idle", "cwd": "/Users
 # 真樣本也讀得懂（兩個 agent 都沒對到卡）
 J2="$(OPSX_TEST_HERDR_AGENTS= opsx collect --root "$ROOT")"; assert_eq "$(q "$J2" unmatched_agents.0.pane)" "w1:p2"; assert_eq "$(q "$J2" unmatched_agents.1.name)" "Worktree cleanup"
 assert_eq "$(q "$J" errors)" '[]'
-# 不寫檔（cache/ 除外）
-[ "$(find "$OPSX_STATE_DIR" -type f ! -path '*/cache/*' ! -name '*.lock' | wc -l | tr -d ' ')" = 3 ] || fail "collect 不該在 state 寫檔：$(find "$OPSX_STATE_DIR" -type f)"
+# 不寫檔（cache/ 與 fixture 的 python 除外）
+[ "$(find "$OPSX_STATE_DIR" -type f ! -path '*/cache/*' ! -name '*.lock' ! -name python | wc -l | tr -d ' ')" = 3 ] || fail "collect 不該在 state 寫檔：$(find "$OPSX_STATE_DIR" -type f)"
 [ -z "$(find "$ROOT" -newer "$OPSX_STATE_DIR/dispatch.json" -type f)" ] || fail "collect 不該動卡的檔"
 
 # ---------- glab 讀不到：卡還在、errors 記 glab、exit 0 ----------
@@ -180,7 +180,7 @@ mkdir -p "$R2/r/openspec/changes/new-1"; printf 'schema: opsx\n' > "$R2/r/opensp
 rm -f "$OPSX_STATE_DIR/sources.toml"; : > "$FX/stage.log"
 J="$(
   # shellcheck source=/dev/null
-  source "$OPSX_ROOT/bin/lib/common.sh"; source "$OPSX_ROOT/bin/lib/stage.sh"; source "$OPSX_ROOT/bin/lib/collect.sh"
+  source "$OPSX_ROOT/bin/lib/common.sh"; source "$OPSX_ROOT/bin/lib/stage.sh"; source "$OPSX_ROOT/bin/lib/collect.sh"; source "$OPSX_ROOT/bin/lib/python.sh"; opsx_python_load
   stage_name() { printf '%s\n' "$2" >> "$FX/stage.log"; printf 'explore'; }
   opsx_collect --root "$R2" --state "$OPSX_STATE_DIR"
 )"
