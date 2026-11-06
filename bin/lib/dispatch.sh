@@ -58,7 +58,10 @@ PY
   local branch; branch="$(workplan_branch "$top" "$slug")"
   if [ -z "$branch" ]; then
     local t=feat; case "$kind" in bug-fix) t=fix ;; refactoring) t=refactor ;; ops|chore) t=chore ;; esac
-    branch="$t/$slug/${OPSX_USER:-$(git -C "$top" config user.name 2>/dev/null | tr ' ' '-' | tr '[:upper:]' '[:lower:]')}"
+    local user="${OPSX_USER:-$(git -C "$top" config user.name 2>/dev/null | tr ' ' '-' | tr '[:upper:]' '[:lower:]')}"
+    # git 沒設身分時 user.name 是占位字「Your Name」，會變成 feat/<slug>/your-name
+    case "$user" in ""|your-name) die "dispatch: 分支尾巴沒有名字：OPSX_USER 沒設，git config user.name 是「$(git -C "$top" config user.name 2>/dev/null)」。設 OPSX_USER，或在這個 repo git config user.name" ;; esac
+    branch="$t/$slug/$user"
   fi
 
   # worktree：一卡一棵
