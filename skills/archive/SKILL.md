@@ -103,7 +103,7 @@ If `openspec/workplan.yaml` exists:
 
 ### 6b. Continue the chain
 
-Run `opsx chain <change-name>`. It decides from the workplan and `dispatch.json` whether this pane goes on to a child card, and it exits 0 with one line of reason when there is none (no workplan, the card was not dispatched, no child is ready). Report that line and stop.
+Run `opsx chain <change-name>`. It decides from the workplan and `dispatch.json` whether this pane goes on to a child card, and it exits 0 with one line of reason when there is none (no workplan, the card was not dispatched, no child is ready). Report that line and stop. A non-zero exit means the workplan is wrong for a ready child (for example its PR has no `branch:`); report the message, which names the PR, and stop without retrying.
 
 - One child: `opsx chain` switches this worktree to the child's branch and the child's first command arrives as the next prompt. Do nothing more in this turn.
 - Several children (`chain: fan out …` lines): this pane becomes their coordinator. Follow `../../references/fan-out.md`: spawn one worktree-isolated subagent per line, then relay.
