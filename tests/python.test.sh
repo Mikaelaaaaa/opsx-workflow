@@ -54,6 +54,13 @@ out="$(bash_hook "$R" 'pnpm test')"; assert_eq "$(decision "$out")" deny "缺 py
 reason "$out" | grep -q 'opsx init --global' || fail "deny 理由要給修法：$(reason "$out")"
 out="$(bash_hook "$FX" 'pnpm test')"; assert_eq "$(decision "$out")" allow "不在卡上不管"
 out="$(bash_hook "$R" 'opsx init --global')"; assert_eq "$(decision "$out")" allow "修法那一條要放行"
+for m in interactive stopped; do
+  printf '{"r/c1":{"mode":"%s","grants":[]}}' "$m" > "$OPSX_STATE_DIR/dispatch.json"
+  out="$(bash_hook "$R" 'git push')"; assert_eq "$(decision "$out")" allow "缺 python 檔時 $m 卡不歸閘門管"
+done
+printf '{"r/c1":{"mode":"drive","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"
+out="$(bash_hook "$R" 'pnpm test')"; assert_eq "$(decision "$out")" deny "缺 python 檔時 drive 卡要 deny"
+printf '{"r/c1":{"mode":"autopilot","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"
 R2="$(mk_repo r2)"; git -C "$R2" checkout -q -b feat/foo/mikaela
 out="$(bash_hook "$R2" 'pnpm test')"; assert_eq "$(decision "$out")" allow "三段式 branch 但沒有卡：不管"
 mk_change "$R" c2
