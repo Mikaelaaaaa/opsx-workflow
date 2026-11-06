@@ -3,8 +3,26 @@ herdr-board D4 / 5.2，specs/board-plugin「最小 TUI」。
 """
 from __future__ import annotations
 
+import unicodedata
+
 SECTIONS = ("待處理", "進行中", "待指派", "已完成")
 MARK = {"待處理": "▲", "進行中": "●", "待指派": "○", "已完成": "—"}
+
+
+def width(s: str) -> int:
+    """終端機欄寬：CJK 與全形算 2，其餘算 1（curses 的 addnstr 數的是字元，CJK 一行會超出視窗）。"""
+    return sum(2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1 for ch in s)
+
+
+def fit(s: str, cols: int) -> str:
+    """截到 cols 欄寬以內，不切到半個全形字。"""
+    out, used = [], 0
+    for ch in s:
+        w = 2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1
+        if used + w > cols:
+            break
+        out.append(ch); used += w
+    return "".join(out)
 
 
 def _line(card: dict) -> str:

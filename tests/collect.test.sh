@@ -1,9 +1,7 @@
 #!/usr/bin/env bash
 # opsx collect：三個來源投影成一份 JSON。驗收：specs/board-collect/spec.md 全部 Scenario（herdr-board 2.2）
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
-FAKES="$OPSX_ROOT/tests/fakes"; mkdir -p "$FX/fakebin"
-for f in herdr glab; do printf '#!/usr/bin/env bash\nexec bash "%s/%s" "$@"\n' "$FAKES" "$f" > "$FX/fakebin/$f"; chmod +x "$FX/fakebin/$f"; done
-export PATH="$FX/fakebin:$PATH"
+use_fakes herdr glab gh
 export OPSX_FAKE_LOG="$FX/fake.log"; : > "$OPSX_FAKE_LOG"
 export OPSX_MR_CACHE_TTL=0
 
@@ -15,7 +13,12 @@ card() { printf '%s' "$1" | python3 -I -c 'import json,sys;d=json.load(sys.stdin
 c=[c for c in d["cards"] if c["repo"]==sys.argv[1] and c["slug"]==sys.argv[2]]
 print(json.dumps(c[0],ensure_ascii=False) if c else "null")' "$2" "$3"; }
 
-ROOT="$FX/code"; mkdir -p "$ROOT/a/openspec/changes/archive" "$ROOT/b/openspec/changes" "$ROOT/c" "$OPSX_STATE_DIR"
+ROOT="$FX/code"; mkdir -p "$ROOT/a/openspec/changes/archive" "$ROOT/b/openspec/changes" "$ROOT/c" "$ROOT/a-wt/openspec/changes/x9" "$OPSX_STATE_DIR"
+mkdir -p "$ROOT/a/.git" "$ROOT/b/.git"; printf 'gitdir: %s/a/.git/worktrees/x9\n' "$ROOT" > "$ROOT/a-wt/.git"   # a-wt 是 linked worktree，不是 repo
+printf 'schema: opsx\n' > "$ROOT/a-wt/openspec/changes/x9/.openspec.yaml"; printf '## 一句話\n\nworktree 的\n' > "$ROOT/a-wt/openspec/changes/x9/inbox.md"
+# 舊 schema 的 change（spec-driven，沒 inbox.md）：只計數不當卡
+mkdir -p "$ROOT/a/openspec/changes/old-1" "$ROOT/a/openspec/changes/old-2"
+for o in old-1 old-2; do printf 'schema: spec-driven\n' > "$ROOT/a/openspec/changes/$o/.openspec.yaml"; printf '## 1\n\n- [ ] 1.1 a\n' > "$ROOT/a/openspec/changes/$o/tasks.md"; done
 mkcard() { # <repo> <slug> [title]
   local d="$ROOT/$1/openspec/changes/$2"; mkdir -p "$d"
   printf 'schema: opsx\ncreated: 2026-11-05\nkind: dev\n' > "$d/.openspec.yaml"
@@ -54,8 +57,12 @@ EOF
 D=$(mkcard a x4); printf '## 1\n\n- [x] 1.1 a\n' > "$D/tasks.md"
 printf '{"phase":"pr","step":"5","total":"5","label":"可以合併","tests":"green","at":"2026-11-05T10:00:00+08:00"}' > "$D/status.json"
 printf '# report\n\n## MR\nhttps://gitlab.tsg-navigator.com/agentory/a/-/merge_requests/7\n' > "$D/report.md"
-# x5：archive
+# x5：archive；另外塞 3 張更舊的，cap 設 2 時只留最新 2 張
 D="$ROOT/a/openspec/changes/archive/2026-11-01-x5"; mkdir -p "$D"; printf 'schema: opsx\nkind: chore\n' > "$D/.openspec.yaml"; printf '## 一句話\n\n舊的\n' > "$D/inbox.md"
+for i in 1 2 3; do D2="$ROOT/a/openspec/changes/archive/2026-10-0$i-old$i"; mkdir -p "$D2"; printf 'schema: opsx\n' > "$D2/.openspec.yaml"; touch -t "2026100${i}0000" "$D2"; done; touch "$D"
+# x6：已經 answered 的 gate 不算待處理；x7：action=merge 的 approval gate 沒有「這個 repo 永遠」
+D=$(mkcard a x6); printf '## 1\n\n- [ ] 1.1 a\n' > "$D/tasks.md"; printf '## g1\ntype: approval\naction: push\nstatus: answered\nanswer: 允許\n' > "$D/gates.md"
+D=$(mkcard a x7); printf '## 1\n\n- [ ] 1.1 a\n' > "$D/tasks.md"; printf '## g1\ntype: approval\naction: merge\nstatus: open\n問題: 合併？\n' > "$D/gates.md"
 # y1：派出、herdr blocked、沒 gate
 D=$(mkcard b y1); printf '## 1\n\n- [ ] 1.1 a\n' > "$D/tasks.md"
 # y2：MR pipeline 紅、已派出
@@ -82,8 +89,17 @@ printf '{"id":"cli:agent:list","result":{"agents":[{"agent":"claude","pane_id":"
 export HERDR_ENV=1
 J="$(opsx collect --root "$ROOT")"; rc=$?; assert_eq "$rc" 0 "collect rc: $J"
 
-# 範圍：只有 a、b；a 掛 develop，b 沒掛
+# 範圍：只有 a、b；a 掛 develop，b 沒掛；a-wt 是 worktree 不算 repo；舊 schema 只計數
 assert_eq "$(q "$J" scopes)" '[{"repos": ["a"], "workspace": "develop"}, {"repos": ["b"], "workspace": null}]'
+assert_eq "$(q "$J" worktrees_skipped)" '["a-wt"]'; assert_eq "$(card "$J" a-wt x9)" null
+assert_eq "$(q "$J" legacy)" '{"a": 2}'; assert_eq "$(card "$J" a old-1)" null
+# archive cap：預設 30 全在；設 2 只留最新的 x5 與 old3
+assert_eq "$(printf '%s' "$J" | python3 -I -c 'import json,sys;print(sum(1 for c in json.load(sys.stdin)["cards"] if c["section"]=="已完成"))')" 4
+J3="$(OPSX_COLLECT_ARCHIVE_CAP=2 opsx collect --root "$ROOT")"
+assert_eq "$(printf '%s' "$J3" | python3 -I -c 'import json,sys;print(sorted(c["slug"] for c in json.load(sys.stdin)["cards"] if c["section"]=="已完成"))')" "['old3', 'x5']"
+# answered 的 gate 不是待處理；merge gate 的選項沒有「這個 repo 永遠」
+C="$(card "$J" a x6)"; assert_eq "$(q "$C" waiting)" null; assert_eq "$(q "$C" section)" 待指派
+C="$(card "$J" a x7)"; assert_eq "$(q "$C" waiting.options)" '["這次", "這張卡", "拒絕"]'
 
 # 節點與分段
 C="$(card "$J" a x1)"; assert_eq "$(q "$C" stage)" explore; assert_eq "$(q "$C" section)" 待指派; assert_eq "$(q "$C" title)" 第一張
@@ -122,8 +138,19 @@ assert_eq "$(q "$J" unmatched_agents)" '[{"agent_status": "idle", "cwd": "/Users
 J2="$(OPSX_TEST_HERDR_AGENTS= opsx collect --root "$ROOT")"; assert_eq "$(q "$J2" unmatched_agents.0.pane)" "w1:p2"; assert_eq "$(q "$J2" unmatched_agents.1.name)" "Worktree cleanup"
 assert_eq "$(q "$J" errors)" '[]'
 # 不寫檔（cache/ 除外）
-[ "$(find "$OPSX_STATE_DIR" -type f ! -path '*/cache/*' | wc -l | tr -d ' ')" = 3 ] || fail "collect 不該在 state 寫檔：$(find "$OPSX_STATE_DIR" -type f)"
+[ "$(find "$OPSX_STATE_DIR" -type f ! -path '*/cache/*' ! -name '*.lock' | wc -l | tr -d ' ')" = 3 ] || fail "collect 不該在 state 寫檔：$(find "$OPSX_STATE_DIR" -type f)"
 [ -z "$(find "$ROOT" -newer "$OPSX_STATE_DIR/dispatch.json" -type f)" ] || fail "collect 不該動卡的檔"
+
+# ---------- glab 讀不到：卡還在、errors 記 glab、exit 0 ----------
+printf '' > "$FX/mr-7.json"
+J4="$(opsx collect --root "$ROOT")"; assert_eq "$?" 0
+assert_eq "$(q "$(card "$J4" a x4)" mr.state)" none; assert_eq "$(q "$(card "$J4" a x4)" section)" 進行中
+assert_eq "$(q "$J4" errors.0.source)" glab; q "$J4" errors.0.message | grep -q 'a/x4' || fail "glab error 要指名卡: $(q "$J4" errors)"
+printf '{"state":"opened","draft":false,"has_conflicts":false,"sha":"aaa111","head_pipeline":{"status":"success"},"unresolved_discussions_count":0}' > "$FX/mr-7.json"
+# herdr 有設但沒有 agent：都是 unknown，不報錯
+printf '{"id":"cli:agent:list","result":{"agents":[],"type":"agent_list"}}' > "$OPSX_TEST_HERDR_AGENTS"
+J5="$(opsx collect --root "$ROOT")"; assert_eq "$(q "$(card "$J5" a x4)" agent_status)" unknown; assert_eq "$(q "$J5" errors)" '[]'
+printf '{"id":"cli:agent:list","result":{"agents":[{"agent":"claude","pane_id":"p4","agent_status":"working"},{"agent":"claude","pane_id":"p9","agent_status":"blocked"},{"agent":"claude","pane_id":"p7","agent_status":"idle","cwd":"/Users/me","workspace_id":"w9","terminal_title_stripped":"foo"}],"type":"agent_list"}}' > "$OPSX_TEST_HERDR_AGENTS"
 
 # ---------- 不在 herdr 內 ----------
 export HERDR_ENV=""

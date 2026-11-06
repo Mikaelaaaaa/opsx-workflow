@@ -29,17 +29,31 @@ port=$(python3 -I -c 'import socket;s=socket.socket();s.bind(("127.0.0.1",0));pr
 export OPSX_BOARD_PORT="$port" HERDR_PANE_ID=p1 HERDR_TAB_ID=t1 HERDR_WORKSPACE_ID=w1
 out="$(bash "$OPSX_ROOT/herdr-board/scripts/open-board.sh" 2>&1)"; rc=$?; assert_eq "$rc" 0 "open-board 第一次: $out"
 assert_file "$OPSX_STATE_DIR/board.pid"; pid1="$(cat "$OPSX_STATE_DIR/board.pid")"
-kill -0 "$pid1" || fail "server 沒在跑（pid $pid1）"
+kill -0 "$pid1" || fail "server 沒在跑（pid ${pid1}）"
 tok="$(cat "$OPSX_STATE_DIR/board-token")"
-assert_grep "http://127.0.0.1:$port/?token=$tok" "$FX/open.log"
+assert_grep "http://127.0.0.1:$port/#token=$tok" "$FX/open.log"   # fragment，不進 log / Referer
+curl -sf "http://127.0.0.1:$port/healthz" | grep -q '"app": *"opsx-board"' || fail "healthz 要說自己是 opsx-board"
 curl -sf "http://127.0.0.1:$port/healthz" >/dev/null || fail "healthz 不通"
 out="$(bash "$OPSX_ROOT/herdr-board/scripts/open-board.sh" 2>&1)"; assert_eq "$?" 0 "open-board 第二次: $out"
 assert_eq "$(cat "$OPSX_STATE_DIR/board.pid")" "$pid1" "第二次不該換 pid"
 assert_eq "$(grep -c '^open ' "$FX/open.log" || true)" 2 "兩次都要開瀏覽器"
 assert_eq "$(grep -c '^listening' "$OPSX_STATE_DIR/board.log" || true)" 1 "只該起過一支 server（沙盒不能 pgrep，數 log 的 listening 行）"
-kill "$pid1" 2>/dev/null || true
+# --- token 檔被刪 → 下一次 open-board 重起 server，新 token ---
+rm -f "$OPSX_STATE_DIR/board-token"
+out="$(bash "$OPSX_ROOT/herdr-board/scripts/open-board.sh" 2>&1)"; assert_eq "$?" 0 "open-board 第三次: $out"
+[ "$(cat "$OPSX_STATE_DIR/board.pid")" != "$pid1" ] || fail "token 不見了要重起 server"
+assert_file "$OPSX_STATE_DIR/board-token"
+# --- opsx stop --board 關掉它 ---
+pid2="$(cat "$OPSX_STATE_DIR/board.pid")"
+out="$(opsx stop --board 2>&1)"; assert_eq "$?" 0 "stop --board: $out"
+sleep 0.3; kill -0 "$pid2" 2>/dev/null && fail "stop --board 後 server 還活著"
+assert_no_file "$OPSX_STATE_DIR/board.pid"
+out="$(opsx stop --board 2>&1)"; assert_eq "$?" 0 "stop --board 第二次要是 no-op: $out"
 
-# --- init --global 做 herdr plugin link（herdr 在 PATH 上才做）---
+# --- init --global 做 herdr plugin link（herdr 在 PATH 上才做；已掛就不再 link）---
 out="$(opsx init --global 2>&1)"; assert_eq "$?" 0 "init --global: $out"
 assert_grep "^plugin link $OPSX_ROOT\$" "$OPSX_FAKE_LOG"
+printf '[{"plugin_id":"opsx-board"}]\n' > "$FX/plugin-list.json"; export OPSX_TEST_HERDR_PLUGINS="$FX/plugin-list.json"; : > "$OPSX_FAKE_LOG"
+out="$(opsx init --global 2>&1)"; assert_eq "$?" 0; echo "$out" | grep -q '已掛' || fail "已掛要說已掛: $out
+log: $(cat "$OPSX_FAKE_LOG")"; assert_not_grep '^plugin link' "$OPSX_FAKE_LOG"
 echo ok

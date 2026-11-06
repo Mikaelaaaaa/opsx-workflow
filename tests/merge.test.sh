@@ -2,9 +2,7 @@
 # opsx merge：重驗五條件 → dispatch.json 寫一次性核准 → decisions → herdr agent prompt "/babysit merge"。不自己跑 glab mr merge。
 # 驗收：specs/board-actions/spec.md「核准合併」兩個 Scenario（herdr-board 3.2）
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
-FAKES="$OPSX_ROOT/tests/fakes"; mkdir -p "$FX/fakebin"
-for f in herdr glab; do printf '#!/usr/bin/env bash\nexec bash "%s/%s" "$@"\n' "$FAKES" "$f" > "$FX/fakebin/$f"; chmod +x "$FX/fakebin/$f"; done
-export PATH="$FX/fakebin:$PATH"
+use_fakes herdr glab
 export OPSX_FAKE_LOG="$FX/fake.log"; : > "$OPSX_FAKE_LOG"
 export OPSX_TEST_GLAB_JSON="$FX/mr.json"
 
@@ -19,7 +17,11 @@ out="$(opsx merge x 2>&1)"; assert_eq "$?" 0 "merge: $out"
 assert_eq "$(jq -r '."Agentory-AI/x".merge_approved' "$OPSX_STATE_DIR/dispatch.json")" abc123
 jq -e '."Agentory-AI/x".merge_approved_at | startswith("20")' "$OPSX_STATE_DIR/dispatch.json" >/dev/null || fail "要有 merge_approved_at"
 assert_grep $'\tyou\tmerge-approved\tabc123' "$C/decisions.tsv"
-assert_grep '^agent prompt x /babysit merge$' "$OPSX_FAKE_LOG"
+assert_grep '^agent prompt x /babysit merge abc123$' "$OPSX_FAKE_LOG"
+# 互動模式的卡：沒有閘門，拒絕並說去 pane
+printf '{"Agentory-AI/x":{"mode":"interactive","pane":"p4","agent":"x","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"
+out="$(opsx merge x 2>&1)"; [ $? -ne 0 ] || fail "互動模式要拒絕"; echo "$out" | grep -q 'pane' || fail "要說去 pane: $out"
+printf '{"Agentory-AI/x":{"mode":"autopilot","pane":"p4","agent":"x","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"; : > "$OPSX_FAKE_LOG"
 assert_not_grep '^mr merge' "$OPSX_FAKE_LOG"   # 不自己合
 
 # --- 有未解 thread：退出非零、什麼都不寫 ---

@@ -66,8 +66,9 @@ opsx 的看板：herdr plugin（薄）+ 本機網頁，三個 tab（首頁 / 收
 
 ## 3. 這一輪沒做、要注意的
 
-- `herdr tab create` 回的 JSON 結構我照 herdr skill 文件猜是 `.result.root_pane`；`herdr agent list` 連有沒有 JSON 都不知道（`--help` 沒有 `--json`）。herdr-board 卡的 task 1.1 就是在 pane 裡跑一次把真輸出存進 `tests/fakes/herdr-samples/`，然後改 `bin/lib/dispatch.sh` 的解析和 `bin/lib/collect.sh` 第二段的 `agents` 讀法（現在接受 `[{name,pane,agent_status}]` 或 `{"result":[…]}`）。
-- `glab mr view -F json` 的欄位名（`head_pipeline.status`、`unresolved_discussions_count`、`sha`）同樣要用真 MR 驗一次，在 `bin/lib/mr.sh` 的 `mr_json`（drive、collect、merge、grant-gate 都用它）。
+- herdr 的 `agent list`、`pane list`、`workspace list`、`tab create` 四個輸出已在 pane 裡實跑過，樣本在 `tests/fakes/herdr-samples/`，假 herdr 回的就是它們；`collect.sh` 讀 `result.agents[].pane_id`，`dispatch.sh` 讀 `result.root_pane.pane_id` 與 `result.tab.tab_id`，workspace 用 `result.workspaces[].label` 換成 `workspace_id`。**`herdr workspace create` 還沒跑過**，`dispatch.sh` 猜 `result.workspace.workspace_id`，第一次對沒掛 workspace 的 repo 派工時看一眼。
+- `glab mr view -F json` 的欄位名（`head_pipeline.status`、`unresolved_discussions_count`、`sha`）**還沒用真 MR 驗**，在 `bin/lib/mr.sh` 的 `mr_json`（drive、collect、merge、grant-gate 都用它）。`gh pr view --json` 的欄位清單已實跑（`reviewThreads` 不存在），假 gh 照真清單擋未知欄位。
+- 要 Python 3.11 以上（tomllib）；`opsx init --global` 會先檢查。
 - 看板（herdr-board 卡，board-core PR）：`opsx collect / answer / merge`、`herdr-board/{server.py,web/index.html,tui.py}`、根目錄 `herdr-plugin.toml`。開法：`opsx init --global` 會 `herdr plugin link`，之後 herdr 裡叫 action `open-board`；手動：`bash herdr-board/scripts/open-board.sh`。要先對原型看畫面：`python3 herdr-board/server.py --collect herdr-board/tests/fixtures/collect-sample.json`，開 `http://127.0.0.1:8791/?token=$(cat ~/.local/state/opsx/board-token)`。網頁的「開啟 pane」只複製指令（`shortcut:` 在 index.html），server 還沒有 focus 動作。
 - 搬進來的 pstack / ponytail 檔見 `UPSTREAM.md`；相對路徑改過，但各 skill 還沒逐支跑過 eval。grill 跑過一輪（skills/grill/evals/）。
 - `~/.claude/skills/grill-me`、`grill-with-docs`、`tdd`、`prototype`、`diagnose`、`to-issues`、`to-prd`、`triage`、`zoom-out`、`improve-codebase-architecture` 照要求檔要刪，等 plugin 重裝好確認新的接得上再刪。

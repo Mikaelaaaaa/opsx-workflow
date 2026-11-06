@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # opsx answer <slug> --gate <id> [--grant this|card|repo] [--repo <top>] <text…>：回一個 gate。
-# 依序：驗 gate → 授權落檔（repo → grants.toml；card → dispatch.json；this 不記）→ gates.md 改 answered
-# → decisions.tsv 一行 → herdr agent prompt（卡沒派出就跳過，gates.md 已改，agent 下次讀得到）。
+# 先驗 gate，再把授權落檔（repo 寫 grants.toml；card 寫 dispatch.json 的 grants；this 寫 dispatch.json 的 once，閘門用掉就刪），
+# 把 gates.md 那段改成 answered，在 decisions.tsv 記一行，最後 herdr agent prompt 送給 agent。卡沒派出就不送，agent 派出時會讀 gates.md。
 # 看板的「回它」按鈕背後就是這支；終端機打也一樣。specs/board-actions/spec.md、要求檔 §3.6 授權三級。
 
 opsx_answer() {
@@ -11,7 +11,8 @@ opsx_answer() {
       --gate) gate="$2"; shift 2 ;;
       --grant) grant="$2"; shift 2 ;;
       --repo) top="$2"; shift 2 ;;
-      --*) die "answer: 不認得的選項 $1" ;;
+      --) shift; text+=("$@"); break ;;   # 之後全是文字（答案本身以 -- 開頭時用；server 一律這樣送）
+      --*) die "answer: 不認得的選項 $1（答案以 -- 開頭請先放一個 --）" ;;
       *) if [ -z "$slug" ]; then slug="$1"; else text+=("$1"); fi; shift ;;
     esac
   done
@@ -28,17 +29,23 @@ opsx_answer() {
   # 一段 python 做完驗證與所有檔案改動：失敗在哪一步就印哪一步，退出 2；成功印 "dispatched" 或 "undispatched"
   local result
   result="$(OPSX_A_DIR="$d" OPSX_A_GATE="$gate" OPSX_A_GRANT="$grant" OPSX_A_TEXT="$answer" OPSX_A_REPO="$repo" OPSX_A_SLUG="$slug" \
-            OPSX_A_SD="$OPSX_STATE_DIR" OPSX_A_NOW="$(now_iso)" python3 -I - <<'PY'
-import json, os, re, sys, tomllib
+            OPSX_A_SD="$OPSX_STATE_DIR" OPSX_A_NOW="$(now_iso)" OPSX_LIB="$OPSX_ROOT/bin/lib" python3 -I - <<'PY'
+import os, re, sys, tomllib
+sys.path.insert(0, os.environ["OPSX_LIB"]); import jsonfile
 e = os.environ
 d, gate, grant, text, repo, slug, sd, now = (e["OPSX_A_DIR"], e["OPSX_A_GATE"], e["OPSX_A_GRANT"], e["OPSX_A_TEXT"],
                                              e["OPSX_A_REPO"], e["OPSX_A_SLUG"], e["OPSX_A_SD"], e["OPSX_A_NOW"])
 key = "%s/%s" % (repo, slug)
+ACTION_RE = re.compile(r"^[a-z][a-z0-9_-]{0,31}$")   # 要當 grants.toml 的 key 與 hook 的比對字串，只准這些字元
 
 def fail(msg):
     print(msg, file=sys.stderr); sys.exit(2)
 
-# --- 1. 找 gate 那一段 ---
+# 多行答案會在 gates.md 裡變成新欄位甚至新 gate（`ok\nstatus: open` 會把已答的 gate 重開），所以壓成一行
+text = " ".join(text.splitlines()).strip()
+if not text:
+    fail("answer: 答案壓成一行後是空的")
+
 gates_path = os.path.join(d, "gates.md")
 src = open(gates_path, encoding="utf-8").read()
 parts = re.split(r"(?m)^(?=## )", src)
@@ -55,16 +62,16 @@ if grant and gtype != "approval":
     fail("answer: --grant 只對 type: approval 的 gate 有意義，「%s」是 %s" % (gate, gtype or "沒寫 type"))
 if grant == "repo" and action == "merge":
     fail("answer: merge 永遠要人，不能給「這個 repo 永遠」")
-if grant in ("card", "repo") and not action:
+if grant and not action:
     fail("answer: gate「%s」沒寫 action:，不知道要授權哪個動作" % gate)
+if grant and not ACTION_RE.match(action):
+    fail("answer: gate「%s」的 action「%s」不合格（只准 [a-z][a-z0-9_-]，最多 32 字），不能當授權的 key" % (gate, action))
 
-# --- 2. 授權落檔 ---
 dispatch_path = os.path.join(sd, "dispatch.json")
-try:
-    dispatch = json.load(open(dispatch_path, encoding="utf-8"))
-except (FileNotFoundError, json.JSONDecodeError):
-    dispatch = {}
+dispatch = jsonfile.load(dispatch_path)
 dispatched = key in dispatch and dispatch[key].get("mode") != "stopped"
+def add_card_grant(dd): gl = dd[key].setdefault("grants", []); action in gl or gl.append(action)
+def add_once(dd): ol = dd[key].setdefault("once", []); action in ol or ol.append(action)
 if grant == "repo":
     gp = os.path.join(sd, "grants.toml")
     try:
@@ -74,7 +81,13 @@ if grant == "repo":
     except tomllib.TOMLDecodeError as ex:
         fail("answer: grants.toml 壞了：%s" % ex)
     repos = g.get("repos", {}); repos.setdefault(repo, {})[action] = True
-    lines = ["# 「這個 repo 永遠」那級的授權。每 repo 一個表：push / mr / migrate … 布林。merge 永遠不可寫。"]
+    # 只重寫 [repos."…"] 那些表；第一個 [repos. 之前的註解與別的表原樣留著
+    try:
+        old = open(gp, encoding="utf-8").read()
+    except FileNotFoundError:
+        old = "# 「這個 repo 永遠」那級的授權。每 repo 一個表：push / mr / migrate … 布林。merge 永遠不可寫。\n"
+    head = re.split(r'(?m)^\[repos\.', old, maxsplit=1)[0].rstrip("\n")
+    lines = [head] if head else []
     for r, acts in repos.items():
         lines.append('\n[repos."%s"]' % r)
         for a, v in acts.items():
@@ -83,11 +96,13 @@ if grant == "repo":
 elif grant == "card":
     if not dispatched:
         fail("answer: 「這張卡」的授權記在 dispatch.json，但 %s 沒派出；用 --grant repo 或不帶 --grant" % key)
-    gl = dispatch[key].setdefault("grants", [])
-    if action not in gl: gl.append(action)
-    tmp = dispatch_path + ".tmp"; json.dump(dispatch, open(tmp, "w", encoding="utf-8"), ensure_ascii=False, indent=1); os.replace(tmp, dispatch_path)
+    jsonfile.update(dispatch_path, add_card_grant)
+elif grant == "this":
+    # 「這次」也要留痕，不然 agent 重試還是被 deny：寫進 once，閘門用掉就刪
+    if not dispatched:
+        fail("answer: 「這次」的授權記在 dispatch.json 的 once，但 %s 沒派出" % key)
+    jsonfile.update(dispatch_path, add_once)
 
-# --- 3. gates.md：status → answered，附 answer / answered_at ---
 sec2 = re.sub(r"(?m)^status:\s*open\s*$", "status: answered", sec, count=1).rstrip("\n")
 sec2 += "\nanswer: %s\nanswered_at: %s\n" % (text, now)
 if grant: sec2 += "grant: %s\n" % grant
@@ -95,15 +110,13 @@ if idx + 1 < len(parts): sec2 += "\n"
 parts[idx] = sec2
 tmp = gates_path + ".tmp"; open(tmp, "w", encoding="utf-8").write("".join(parts)); os.replace(tmp, gates_path)
 
-# --- 4. decisions.tsv ---
-note = text + ("（grant: %s）" % grant if grant else "")
+# decisions.tsv 的欄位：time、you、answer、gate、text，有授權時第六欄是 grant
 with open(os.path.join(d, "decisions.tsv"), "a", encoding="utf-8") as f:
-    f.write("%s\tyou\tanswer\t%s\t%s\n" % (now, gate, note.replace("\t", " ").replace("\n", " ")))
+    f.write("%s\tyou\tanswer\t%s\t%s%s\n" % (now, gate, text.replace("\t", " "), ("\t" + grant) if grant else ""))
 print("dispatched" if dispatched else "undispatched")
 PY
 )" || exit 2
 
-  # --- 5. 回給 agent ---
   if [ "$result" = dispatched ]; then
     herdr agent prompt "$slug" "$answer" >/dev/null || die "answer: gates.md 與 decisions 已寫，但 herdr agent prompt 失敗；agent 下次讀 gates.md 會看到答案"
     say "answer: $slug 的 $gate 已回「${answer}」${grant:+（grant: ${grant}）}，已送進 agent"

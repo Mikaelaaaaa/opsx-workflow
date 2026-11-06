@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# 假 gh：`gh pr view <n> -R <owner/repo> --json <fields>` 回 $OPSX_TEST_GH_JSON 檔的內容。
+# 欄位清單照真 gh（`gh pr view 1 --json nonexistent` 會列出全部）：不在清單裡就像真 gh 一樣報
+# "Unknown JSON field" 並以非 0 結束，這樣 mr.sh 要了不存在的欄位（例如 reviewThreads）測試會抓到。
+printf '%s\n' "$*" >> "${OPSX_FAKE_LOG:?}"
+KNOWN=" additions assignees author autoMergeRequest baseRefName baseRefOid body changedFiles closed closedAt closingIssuesReferences comments commits createdAt deletions files fullDatabaseId headRefName headRefOid headRepository headRepositoryOwner id isCrossRepository isDraft labels latestReviews maintainerCanModify mergeCommit mergeStateStatus mergeable mergedAt mergedBy milestone number potentialMergeCommit projectCards projectItems reactionGroups reviewDecision reviewRequests reviews state statusCheckRollup title updatedAt url "
+case "$1 $2" in
+  "pr view")
+    case " $* " in *" -R "*) ;; *) echo "fake gh: 沒帶 -R" >&2; exit 1 ;; esac
+    fields=""; prev=""
+    for a in "$@"; do [ "$prev" = "--json" ] && fields="$a"; prev="$a"; done
+    IFS=, read -r -a arr <<< "$fields"
+    for f in "${arr[@]}"; do case "$KNOWN" in *" $f "*) ;; *) echo "Unknown JSON field: \"$f\"" >&2; exit 1 ;; esac; done
+    cat "${OPSX_TEST_GH_JSON:?}" ;;
+  *) echo '{}' ;;
+esac

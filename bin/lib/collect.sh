@@ -29,27 +29,33 @@ opsx_collect() {
   local work; work="$(mktemp -d "${TMPDIR:-/tmp}/opsx-collect.XXXXXX")"
   trap 'rm -rf "$work"' RETURN
 
-  # 第一段（bash）：每張卡一行 NDJSON：repo、slug、dir、archived、stage、mr。stage 用 stage_of，MR 用 mr_json，不另算。
-  local repo_dir repo d slug archived stage mr
-  : > "$work/cards.ndjson"
+  # bash 只掃目錄，每張卡寫一行 TSV（repo、slug、dir、archived、stage、mr 檔）給下面那段 python 組 JSON。
+  # stage 用 stage_of，MR 用 mr_json，不另算；這裡不 fork python，1000 張卡就是 1000 次啟動。mr_json 只對有 MR 的卡跑。
+  # repo 的判準：<root>/<name>/openspec/changes 存在，而且 <name>/.git 是目錄。linked worktree 的 .git 是檔案，跳過，
+  # 不然 Agentory-AI-langflow、*-wt-* 會被當成別的 repo。archive 只取最新 N 張，已完成不能無限長。
+  local repo_dir repo d slug archived stage mrfile n=0 archive_cap="${OPSX_COLLECT_ARCHIVE_CAP:-30}" seen_archive
+  : > "$work/cards.tsv"; mkdir -p "$work/mr"
   for repo_dir in "$root"/*/; do
     [ -d "$repo_dir/openspec/changes" ] || continue
+    if [ -f "$repo_dir/.git" ]; then printf '%s\n' "$(basename "$repo_dir")" >> "$work/worktrees"; continue; fi
     repo="$(basename "$repo_dir")"
     printf '%s\n' "$repo" >> "$work/repos"
-    for d in "$repo_dir"openspec/changes/*/ "$repo_dir"openspec/changes/archive/*/; do
+    seen_archive=0
+    for d in "$repo_dir"openspec/changes/*/ $(ls -1dt "$repo_dir"openspec/changes/archive/*/ 2>/dev/null); do
       [ -d "$d" ] || continue
       d="${d%/}"; slug="$(basename "$d")"
       case "$d" in
         */changes/archive) continue ;;
-        */changes/archive/*) archived=true; slug="${slug#[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]-}"; stage=archive ;;
+        */changes/archive/*) seen_archive=$((seen_archive+1)); [ "$seen_archive" -le "$archive_cap" ] || continue
+           archived=true; slug="${slug#[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]-}"; stage=archive ;;
         *) archived=false; stage="$(stage_name "${repo_dir%/}" "$slug")" ;;
       esac
-      if [ "$archived" = false ] && st_mr_in_report "$d"; then mr="$(mr_json "$d")"; else mr=null; fi
-      OPSX_C_REPO="$repo" OPSX_C_SLUG="$slug" OPSX_C_DIR="$d" OPSX_C_ARCHIVED="$archived" OPSX_C_STAGE="$stage" OPSX_C_MR="$mr" \
-        python3 -I -c 'import json,os;e=os.environ;print(json.dumps({"repo":e["OPSX_C_REPO"],"slug":e["OPSX_C_SLUG"],"dir":e["OPSX_C_DIR"],"archived":e["OPSX_C_ARCHIVED"]=="true","stage":e["OPSX_C_STAGE"],"mr":json.loads(e["OPSX_C_MR"])}))' >> "$work/cards.ndjson"
+      mrfile=""
+      if [ "$archived" = false ] && st_mr_in_report "$d"; then n=$((n+1)); mrfile="$work/mr/$n.json"; mr_json "$d" > "$mrfile"; fi
+      printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$repo" "$slug" "$d" "$archived" "$stage" "$mrfile" >> "$work/cards.tsv"
     done
   done
-  [ -f "$work/repos" ] || : > "$work/repos"
+  [ -f "$work/repos" ] || : > "$work/repos"; [ -f "$work/worktrees" ] || : > "$work/worktrees"
 
   # herdr：只在 herdr 內問；失敗記 errors，不中斷
   local herdr_err=""
@@ -59,7 +65,7 @@ opsx_collect() {
     herdr_err="不在 herdr 內（HERDR_ENV 未設），agent 狀態不可得"
   fi
 
-  # 第二段（python）：讀卡的檔與全域狀態，組 JSON
+  # 讀卡的檔與全域狀態，組 JSON
   OPSX_C_WORK="$work" OPSX_C_STATE="$state" OPSX_C_HERDR_ERR="$herdr_err" python3 -I - <<'PY'
 import datetime, json, os, re, sys, tomllib
 
@@ -87,11 +93,12 @@ def load_toml(path):
         errors.append({"source": path, "message": "TOML 壞了：%s" % e}); return {}
 
 repos = [r for r in read(os.path.join(work, "repos")).split("\n") if r]
+worktrees = [r for r in read(os.path.join(work, "worktrees")).split("\n") if r]
 workspaces = load_toml(os.path.join(state, "workspaces.toml")).get("repos", {})
 grants = load_toml(os.path.join(state, "grants.toml")).get("repos", {})
 dispatch = load_json(os.path.join(state, "dispatch.json"), {}) or {}
 
-# scopes：workspace → repos；沒掛的 workspace = null
+# scopes：每個 workspace 底下掛哪些 repo；沒掛的 repo 歸在 workspace null
 by_ws = {}
 for r in repos:
     by_ws.setdefault(workspaces.get(r), []).append(r)
@@ -103,16 +110,15 @@ if None in by_ws:
 #   {"id":"cli:agent:list","result":{"agents":[{"agent":"claude","agent_status":"idle","pane_id":"w1:p2","tab_id":"w1:t2",
 #    "workspace_id":"w1","terminal_title_stripped":"…","agent_session":{"value":"<uuid>"}}],"type":"agent_list"}}
 # 沒有 agent 名字；卡對 agent 只靠 pane_id == dispatch.json 的 pane。
-agents = []
+agents = None   # None = herdr 不可用（agent_status 一律 null）；[] = herdr 在但沒有 agent（派出的卡都是 unknown）
 agents_path = os.path.join(work, "agents.json")
 if os.path.exists(agents_path) and not os.environ["OPSX_C_HERDR_ERR"]:
     try:
         raw = json.loads(read(agents_path) or "{}")
-        agents = raw["result"]["agents"] if isinstance(raw, dict) and isinstance(raw.get("result"), dict) else []
-        if not agents and isinstance(raw, dict) and "result" not in raw:
-            raise ValueError("沒有 result.agents，herdr 的格式變了？")
-    except (json.JSONDecodeError, KeyError, TypeError, ValueError) as e:
-        errors.append({"source": "herdr", "message": "agent list 讀不懂：%s" % e})
+        agents = raw["result"]["agents"]
+    except (json.JSONDecodeError, KeyError, TypeError) as e:
+        agents = None
+        errors.append({"source": "herdr", "message": "agent list 讀不懂（要 result.agents）：%s" % e})
 
 FIELD = re.compile(r"^(type|action|status|問題|建議|選項|證據|風險|預設|已確認|answer):\s*(.*)$")
 
@@ -147,7 +153,9 @@ def waiting_of(card, gates, agent_status):
         base = {"gate_id": g["id"], "question": g.get("問題"), "recommended": g.get("建議"), "evidence": g.get("證據"),
                 "risk": g.get("風險"), "default_if_unanswered": g.get("預設"), "confirmed": g.get("已確認")}
         if g.get("type") == "approval":
-            return {"type": "等待授權", "action": g.get("action"), "options": ["這次", "這張卡", "這個 repo 永遠", "拒絕"], **base}
+            opts = ["這次", "這張卡", "這個 repo 永遠", "拒絕"]
+            if g.get("action") == "merge": opts = ["這次", "這張卡", "拒絕"]   # merge 永遠不可長期授權，answer 會拒，按鈕就不要給
+            return {"type": "等待授權", "action": g.get("action"), "options": opts, **base}
         opts = [o.strip() for o in (g.get("選項") or "").split("|") if o.strip()]
         rec = base["recommended"]
         cleaned = []
@@ -166,17 +174,27 @@ def waiting_of(card, gates, agent_status):
                 "default_if_unanswered": "agent 停在那裡", "confirmed": None}
     return None
 
-cards, matched_panes = [], set()
+cards, matched_panes, legacy = [], set(), {}
 now = datetime.datetime.now().astimezone().isoformat(timespec="seconds")
-for line in read(os.path.join(work, "cards.ndjson")).split("\n"):
+for line in read(os.path.join(work, "cards.tsv")).split("\n"):
     if not line: continue
-    c = json.loads(line); d = c["dir"]
+    repo_, slug_, dir_, archived_, stage_, mrfile = line.split("\t")
+    c = {"repo": repo_, "slug": slug_, "dir": dir_, "archived": archived_ == "true", "stage": stage_,
+         "mr": json.loads(read(mrfile)) if mrfile else None}
+    d = c["dir"]
+    if c["mr"] and c["mr"].get("error"):
+        errors.append({"source": "glab" if "glab" in c["mr"]["error"] else "gh", "message": "%s/%s：%s" % (repo_, slug_, c["mr"]["error"])})
+    spec_yaml = read(os.path.join(d, ".openspec.yaml"))
     inbox = read(os.path.join(d, "inbox.md"))
+    # 卡的資格：schema: opsx 或有 inbox.md。舊 spec-driven 的 change 只計數，不當卡（真 repo 裡有幾百張，會灌爆待指派）
+    if not c["archived"] and not re.search(r"^schema:\s*opsx\s*$", spec_yaml, re.M) and not inbox.strip():
+        legacy[repo_] = legacy.get(repo_, 0) + 1
+        continue
     key = "%s/%s" % (c["repo"], c["slug"])
     disp = dispatch.get(key)
     if disp and disp.get("mode") == "stopped": disp = None
     agent_status = None
-    if disp and agents:
+    if disp and agents is not None:
         hit = [a for a in agents if str(a.get("pane_id")) == str(disp.get("pane"))]
         agent_status = (hit[0].get("agent_status") or "unknown") if hit else "unknown"
         if hit: matched_panes.add(str(hit[0].get("pane_id")))
@@ -199,7 +217,8 @@ order = {"待處理": 0, "進行中": 1, "待指派": 2, "已完成": 3}
 cards.sort(key=lambda x: (order[x["section"]], x["repo"], x["slug"]))
 unmatched = [{"name": a.get("terminal_title_stripped") or a.get("agent") or "", "pane": a.get("pane_id"),
               "agent_status": a.get("agent_status"), "cwd": a.get("cwd"), "workspace": a.get("workspace_id")}
-             for a in agents if str(a.get("pane_id")) not in matched_panes]
-print(json.dumps({"generated_at": now, "scopes": scopes, "cards": cards, "unmatched_agents": unmatched, "errors": errors}, ensure_ascii=False))
+             for a in (agents or []) if str(a.get("pane_id")) not in matched_panes]
+print(json.dumps({"generated_at": now, "scopes": scopes, "cards": cards, "unmatched_agents": unmatched, "errors": errors,
+                  "legacy": legacy, "worktrees_skipped": worktrees}, ensure_ascii=False))
 PY
 }

@@ -51,6 +51,19 @@ class RowsTest(unittest.TestCase):
         self.assertIn("apply 3/8", run["text"])
 
 
+class WidthTest(unittest.TestCase):
+    def test_cjk_counts_two_columns(self):
+        self.assertEqual(tm.width("ab"), 2)
+        self.assertEqual(tm.width("中文"), 4)
+        self.assertEqual(tm.width("a中"), 3)
+
+    def test_fit_never_splits_a_wide_char(self):
+        self.assertEqual(tm.fit("中文字", 4), "中文")
+        self.assertEqual(tm.fit("中文字", 5), "中文")
+        self.assertEqual(tm.fit("abc", 2), "ab")
+        self.assertEqual(tm.fit("", 3), "")
+
+
 class CursorTest(unittest.TestCase):
     def test_moves_only_over_cards_and_stays_in_bounds(self):
         rows = tm.rows(DATA, done_open=False)

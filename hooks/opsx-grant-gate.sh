@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # PreToolUse(Bash / Edit / Write)：自動 / 開到可合併 模式下的授權閘門。要求檔 §3.6 授權三級、§8.5。
 #   第三級（永遠要人）一律 deny；第二級查 grants.toml（repo 永遠）與 dispatch.json（這張卡）；
-#   互動模式或不在卡上 → 不管。deny 訊息要 worker 寫 gates.md 然後做能做的。
+#   互動模式或不在卡上就不管。deny 訊息要 worker 寫 gates.md 然後做能做的。
 source "$(dirname "${BASH_SOURCE[0]}")/_lib.sh"
 
 top="$(repo_top)"; slug="$(card_slug)"
@@ -15,30 +15,32 @@ GATE_MSG="寫 gates.md（type、問題、建議、證據、風險、沒回答的
 
 level3() { deny "opsx 授權閘門：「$1」是永遠要人的動作（第三級），任何授權蓋不掉。$GATE_MSG"; }
 
-# 合併唯一的例外：看板「合併」按鈕（opsx merge）在 dispatch.json 這張卡寫了 merge_approved = <MR head sha>。
-# sha 等於現在的 head 才放行，放行即刪（一次性）；MR 又推了 commit 就 deny，agent 得再要一次。herdr-board D5。
-merge_gate() {
+# 合併唯一的例外：看板「合併」按鈕（opsx merge）在 dispatch.json 這張卡寫了 merge_approved = <MR head sha>。herdr-board D5。
+# 放行條件：指令整條只有這一個 merge（沒有 && ; | $( ` 夾帶別的）、合併的 MR 號碼等於卡的 report.md
+# 那條、現在的 head sha 等於核准的 sha。核准不刪：它綁 sha，合併成功後 MR 變 merged 就自然不成立，又推了 commit 也不成立；
+# 不在執行前刪，是因為 glab 可能失敗（405 要 rebase、網路），刪了人就得重按。放行後不 exit，後面的第三級檢查照跑。
+merge_gate() { # 回 0 放行；否則 deny（deny 會 exit）
   # shellcheck source=/dev/null
   source "$OPSX_ROOT/bin/lib/mr.sh"
-  local d="$top/openspec/changes/$slug" approved head
-  approved="$(OPSX_KEY="$repo/$slug" python3 -I - "$OPSX_STATE_DIR/dispatch.json" <<'PY' 2>/dev/null || true
-import json,os,sys
-try: print(json.load(open(sys.argv[1])).get(os.environ["OPSX_KEY"],{}).get("merge_approved") or "")
-except (FileNotFoundError,json.JSONDecodeError): print("")
+  local d="$top/openspec/changes/$slug" approved head want_iid cmd_iid
+  printf '%s' "$c" | grep -qE '(&&|\|\||;|\||\$\(|`)' && deny "opsx 授權閘門：合併指令要單獨一條，不能跟別的指令串在一起（收到：${c}）"
+  approved="$(OPSX_KEY="$repo/$slug" OPSX_LIB="$OPSX_ROOT/bin/lib" python3 -I - "$OPSX_STATE_DIR/dispatch.json" <<'PY'
+import os, sys
+sys.path.insert(0, os.environ["OPSX_LIB"]); import jsonfile
+print(jsonfile.load(sys.argv[1]).get(os.environ["OPSX_KEY"], {}).get("merge_approved") or "")
 PY
 )"
-  [ -n "$approved" ] || deny "opsx 授權閘門：merge 是永遠要人的動作（第三級）。看板上按「合併」（opsx merge ${slug}）才會放行這一次；沒有核准就寫 gates.md type: approval action: merge，然後做能做的"
+  [ -n "$approved" ] || deny "opsx 授權閘門：merge 是永遠要人的動作（第三級）。要人在看板上按「合併」（opsx merge ${slug}）才會放行；在這之前把 MR 弄到五條件全綠（/babysit），不要自己合"
+  want_iid="$(st_mr_url "$d" | grep -oE '[0-9]+$' || true)"
+  cmd_iid="$(printf '%s' "$c" | grep -oE '(glab mr merge|gh pr merge)[[:space:]]+[^-[:space:]][^[:space:]]*' | grep -oE '[0-9]+$' || true)"
+  if [ -n "$cmd_iid" ] && [ "$cmd_iid" != "$want_iid" ]; then
+    deny "opsx 授權閘門：核准的是這張卡的 MR ${want_iid:-（report.md 沒有）}，指令要合併的是 ${cmd_iid}"
+  fi
   head="$(OPSX_MR_CACHE_TTL=0 mr_json "$d" | python3 -I -c 'import json,sys; print(json.load(sys.stdin).get("head_sha") or "")')"
   if [ "$head" != "$approved" ]; then
     deny "opsx 授權閘門：看板核准的是 ${approved}，MR 現在的 head 是 ${head:-讀不到}（又推了 commit？）。寫 gates.md 請人在看板重新按「合併」"
   fi
-  OPSX_KEY="$repo/$slug" python3 -I - "$OPSX_STATE_DIR/dispatch.json" <<'PY'
-import json,os,sys
-p=sys.argv[1]; d=json.load(open(p)); c=d[os.environ["OPSX_KEY"]]
-c.pop("merge_approved",None); c["merge_consumed_at"]=c.pop("merge_approved_at",None)
-tmp=p+".tmp"; json.dump(d,open(tmp,"w",encoding="utf-8"),ensure_ascii=False,indent=1); os.replace(tmp,p)
-PY
-  exit 0
+  return 0
 }
 level2() { # <action> <label>
   if has_grant "$repo" "$slug" "$1"; then exit 0; fi
@@ -48,7 +50,7 @@ level2() { # <action> <label>
 if [ "$tool" = "Bash" ]; then
   [ -n "$cmd" ] || exit 0
   c="$(printf '%s' "$cmd" | tr '\n' ' ')"
-  # 第三級
+  # 第三級（merge 放行後不 exit，其餘檢查照跑）
   printf '%s' "$c" | grep -qE '(glab mr merge|gh pr merge)' && merge_gate
   printf '%s' "$c" | grep -qE 'git\s+push.*(--force|-f\b|\+[a-zA-Z])' && level3 "force-push"
   printf '%s' "$c" | grep -qE 'git\s+push.*\b(main|master)\b' && level3 "push main"

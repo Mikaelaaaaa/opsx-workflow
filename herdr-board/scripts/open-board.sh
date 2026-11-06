@@ -10,25 +10,31 @@ url="http://127.0.0.1:${port}/"
 mkdir -p "$state"
 pidfile="$state/board.pid"; logfile="$state/board.log"
 
-alive() { # server 活著且是我們的：pid 在、healthz 通
+alive() { # server 活著且是我們的：pid 在、healthz 回的是 opsx-board、token 檔還在（token 被刪就重起，不然新 tab 永遠 401）
   local pid; pid="$(cat "$pidfile" 2>/dev/null || true)"
-  [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null && curl -sf --max-time 1 "${url}healthz" >/dev/null 2>&1
+  [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null && [ -s "$state/board-token" ] \
+    && curl -sf --max-time 1 "${url}healthz" 2>/dev/null | grep -q '"app": *"opsx-board"'
 }
 
+# 兩個 workspace 同時按 open-board：只有一個能進啟動段（mkdir 是原子的）；另一個等它起好
+lock="$state/board.lock"
+for _ in $(seq 1 100); do mkdir "$lock" 2>/dev/null && break; sleep 0.1; done
+trap 'rmdir "$lock" 2>/dev/null' EXIT
 if ! alive; then
+  pid="$(cat "$pidfile" 2>/dev/null || true)"; [ -n "$pid" ] && kill "$pid" 2>/dev/null || true   # token 不見或 healthz 不對：重起
   rm -f "$pidfile"
   nohup python3 -I "$root/herdr-board/server.py" --port "$port" --state "$state" >>"$logfile" 2>&1 &
   printf '%s\n' "$!" > "$pidfile"
   for _ in $(seq 1 50); do
     curl -sf --max-time 1 "${url}healthz" >/dev/null 2>&1 && break
-    kill -0 "$(cat "$pidfile")" 2>/dev/null || { echo "opsx board: server 起不來，看 $logfile" >&2; tail -n 20 "$logfile" >&2 || true; exit 1; }
+    kill -0 "$(cat "$pidfile")" 2>/dev/null || { echo "opsx board: server 起不來，看 ${logfile}" >&2; tail -n 20 "$logfile" >&2 || true; exit 1; }
     sleep 0.1
   done
-  curl -sf --max-time 1 "${url}healthz" >/dev/null 2>&1 || { echo "opsx board: server 10 秒內沒回應，看 $logfile" >&2; exit 1; }
+  curl -sf --max-time 1 "${url}healthz" >/dev/null 2>&1 || { echo "opsx board: server 10 秒內沒回應，看 ${logfile}" >&2; exit 1; }
 fi
 
 token="$(cat "$state/board-token" 2>/dev/null || true)"
-open_url="$url"; [ -n "$token" ] && open_url="${url}?token=${token}"
+open_url="$url"; [ -n "$token" ] && open_url="${url}#token=${token}"   # fragment 不進 server log、不進 Referer
 if command -v open >/dev/null 2>&1; then open "$open_url"
 elif command -v xdg-open >/dev/null 2>&1; then xdg-open "$open_url"
 else echo "opsx board: 自己開 $open_url"; fi

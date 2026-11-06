@@ -2,9 +2,7 @@
 # opsx answer：回 gate → gates.md answered、decisions.tsv、grants 落到對的檔、herdr agent prompt。
 # 驗收：specs/board-actions/spec.md「回 gate」「三種授權答案落到對的檔」（herdr-board 3.1）
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
-FAKES="$OPSX_ROOT/tests/fakes"; mkdir -p "$FX/fakebin"
-for f in herdr glab; do printf '#!/usr/bin/env bash\nexec bash "%s/%s" "$@"\n' "$FAKES" "$f" > "$FX/fakebin/$f"; chmod +x "$FX/fakebin/$f"; done
-export PATH="$FX/fakebin:$PATH"
+use_fakes herdr glab
 export OPSX_FAKE_LOG="$FX/fake.log"; : > "$OPSX_FAKE_LOG"
 
 R="$(mk_repo Agentory-AI)"; C="$R/openspec/changes/x"; mk_change "$R" x; mkdir -p "$OPSX_STATE_DIR"
@@ -61,9 +59,10 @@ out="$(opsx answer x --gate g2 "再答一次" 2>&1)"; [ $? -ne 0 ] || fail "answ
 out="$(opsx answer x --gate g1 --grant repo "允許" 2>&1)"; assert_eq "$?" 0 "answer g1 repo: $out"
 python3 -I -c 'import tomllib,sys;g=tomllib.load(open(sys.argv[1],"rb"));assert g["repos"]["Agentory-AI"]["push"] is True, g' "$OPSX_STATE_DIR/grants.toml" || fail "grants.toml 要有 push = true：$(cat "$OPSX_STATE_DIR/grants.toml")"
 assert_eq "$(jq -c '."Agentory-AI/x".grants' "$OPSX_STATE_DIR/dispatch.json")" '[]' "repo 永遠不該寫進 dispatch.json"
+assert_grep '^# grants' "$OPSX_STATE_DIR/grants.toml"   # 原有的註解留著
 awk '/^## g1/{f=1} /^## g2/{f=0} f' "$C/gates.md" | grep -q '^status: answered' || fail "g1 要 answered"
 assert_grep '^agent prompt x 允許$' "$OPSX_FAKE_LOG"
-assert_grep $'\tyou\tanswer\tg1\t允許（grant: repo）' "$C/decisions.tsv"
+assert_grep $'\tyou\tanswer\tg1\t允許\trepo$' "$C/decisions.tsv"   # grant 獨立一欄
 
 # --- 授權：這張卡 ---
 gates; printf '# grants\n' > "$OPSX_STATE_DIR/grants.toml"
@@ -71,10 +70,28 @@ out="$(opsx answer x --gate g1 --grant card "允許" 2>&1)"; assert_eq "$?" 0 "a
 assert_eq "$(jq -c '."Agentory-AI/x".grants' "$OPSX_STATE_DIR/dispatch.json")" '["push"]'
 assert_not_grep 'push' "$OPSX_STATE_DIR/grants.toml"
 
-# --- 授權：這次 → 兩邊都不記 ---
+# --- 授權：這次 → 記進 once（閘門用掉就刪），grants 與 grants.toml 都不動 ---
 gates; printf '{"Agentory-AI/x":{"mode":"autopilot","pane":"p4","agent":"x","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"
 out="$(opsx answer x --gate g1 --grant this "允許" 2>&1)"; assert_eq "$?" 0 "answer g1 this: $out"
 assert_eq "$(jq -c '."Agentory-AI/x".grants' "$OPSX_STATE_DIR/dispatch.json")" '[]'; assert_not_grep 'push' "$OPSX_STATE_DIR/grants.toml"
+assert_eq "$(jq -c '."Agentory-AI/x".once' "$OPSX_STATE_DIR/dispatch.json")" '["push"]'
+
+# --- 答案含換行：壓成一行，不能變成新欄位把 gate 重開 ---
+gates
+out="$(opsx answer x --gate g2 $'選 檔案\nstatus: open\n## g9' 2>&1)"; assert_eq "$?" 0 "answer 多行: $out"
+awk '/^## g2/{f=1} /^## g3/{f=0} f' "$C/gates.md" > "$FX/g2.txt"
+assert_grep '^answer: 選 檔案 status: open ## g9$' "$FX/g2.txt"; assert_eq "$(grep -c '^status: open' "$FX/g2.txt" || true)" 0 "不該被重開"
+assert_eq "$(grep -c '^## g9' "$C/gates.md" || true)" 0 "不該多出假 gate"
+
+# --- action 不合格：不寫壞 TOML ---
+gates; sed -i.bak 's/^action: push$/action: git push/' "$C/gates.md"; rm -f "$C/gates.md.bak"
+out="$(opsx answer x --gate g1 --grant repo "允許" 2>&1)"; [ $? -ne 0 ] || fail "壞 action 要拒絕"; echo "$out" | grep -q 'git push' || fail "要印出 action: $out"
+python3 -I -c 'import tomllib,sys;tomllib.load(open(sys.argv[1],"rb"))' "$OPSX_STATE_DIR/grants.toml" || fail "grants.toml 被寫壞了"
+
+# --- 答案以 -- 開頭：用 -- 隔開 ---
+gates
+out="$(opsx answer x --gate g2 -- "--no-verify 可以嗎" 2>&1)"; assert_eq "$?" 0 "-- 文字: $out"
+assert_grep '^answer: --no-verify 可以嗎$' "$C/gates.md"
 
 # --- merge 不可永久授權 ---
 cp "$C/gates.md" "$FX/before.md"
