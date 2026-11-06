@@ -48,6 +48,31 @@ out="$(cd "$R4" && opsx dispatch retry-backoff --agent claude --mode autopilot -
 echo "$out" | grep -q 'Agentory-CS/retry-backoff' || fail "要指名撞到哪張: $out"
 assert_grep 'dispatched' "$R/openspec/changes/retry-backoff/decisions.tsv"
 
+# --- agent start 回 agent_pane_busy（shell 還沒到 prompt）：同一個 pane 重試；一直 busy 就關 tab ---
+export OPSX_DISPATCH_RETRY_SLEEP=0
+mkdir -p "$R/openspec/changes/busy-card"; printf 'schema: opsx\n' > "$R/openspec/changes/busy-card/.openspec.yaml"
+export OPSX_TEST_BUSY_LEFT="$FX/busy-left"
+: > "$OPSX_FAKE_LOG"; echo 2 > "$OPSX_TEST_BUSY_LEFT"
+out="$(opsx dispatch busy-card --agent claude --mode interactive --kind dev 2>&1)" || fail "busy twice should still dispatch: $out"
+assert_eq "$(grep -c '^agent start busy-card ' "$OPSX_FAKE_LOG")" 3 "two busy then ok = three starts"
+assert_not_grep '^tab close' "$OPSX_FAKE_LOG"
+python3 -I -c 'import json,sys;assert "Agentory-CS/busy-card" in json.load(open(sys.argv[1]))' "$OPSX_STATE_DIR/dispatch.json"
+# 一直 busy：六次後放棄，關掉剛開的 tab，什麼都不記
+mkdir -p "$R/openspec/changes/stuck-card"; printf 'schema: opsx\n' > "$R/openspec/changes/stuck-card/.openspec.yaml"
+: > "$OPSX_FAKE_LOG"; echo 99 > "$OPSX_TEST_BUSY_LEFT"
+out="$(opsx dispatch stuck-card --agent claude --mode interactive --kind dev 2>&1)"; [ $? -ne 0 ] || fail "persistent busy must fail"
+assert_eq "$(grep -c '^agent start stuck-card ' "$OPSX_FAKE_LOG")" 6 "six attempts then give up"
+assert_grep '^tab close w1:tB$' "$OPSX_FAKE_LOG"
+echo "$out" | grep -q 'agent_pane_busy' || fail "should print herdr error: $out"
+python3 -I -c 'import json,sys;assert "Agentory-CS/stuck-card" not in json.load(open(sys.argv[1]))' "$OPSX_STATE_DIR/dispatch.json"
+[ -f "$R/openspec/changes/stuck-card/decisions.tsv" ] && grep -q dispatched "$R/openspec/changes/stuck-card/decisions.tsv" && fail "must not record dispatched"
+# 別的錯：不重試，一樣關 tab
+: > "$OPSX_FAKE_LOG"; echo 0 > "$OPSX_TEST_BUSY_LEFT"
+out="$(OPSX_TEST_START_FAIL=agent_kind_unsupported opsx dispatch stuck-card --agent claude --mode interactive --kind dev 2>&1)"; [ $? -ne 0 ] || fail "other error must fail"
+assert_eq "$(grep -c '^agent start stuck-card ' "$OPSX_FAKE_LOG")" 1 "non-busy error is not retried"
+assert_grep '^tab close w1:tB$' "$OPSX_FAKE_LOG"
+unset OPSX_TEST_BUSY_LEFT
+
 # --- 重派同一張卡：worktree 已在就重用，不報錯 ---
 : > "$OPSX_FAKE_LOG"
 out="$(opsx dispatch retry-backoff --agent codex --mode interactive 2>&1)" || fail "redispatch: $out"
