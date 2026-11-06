@@ -260,7 +260,7 @@ const api={
 };
 let data={generated_at:null,scopes:[],cards:[],unmatched_agents:[],errors:[],legacy:{},worktrees_skipped:[]};let lastRaw='';
 const ui={tab:'home',scope:'all',ws:null,repo:null,sel:null,open:null,doneOpen:false,busy:false,logFilter:'all'};
-let tl=null;let tlErr='';let bannerClosed=false;
+let tl=null;let tlErr='';let bannerClosed=false;let seenAt=null;  /* 這頁最後一次送給 /api/seen 的時間 */
 const outputs={};  /* 卡 key → {ok, text} 或 {ok:false, error}；抽屜打開時才抓 */
 const REFRESH_MS=5000;
 
@@ -417,6 +417,7 @@ function bannerItems(events,cards,lastSeen){
     if(c.mr&&after(c.mr.merged_at,lastSeen)&&!merged.has(k)){merged.add(k);items.push({key:k,text:`${c.slug} 已合併`});}
   }
   for(const c of cards){
+    if(c.section==='已完成')continue;  /* archive 不清 dispatch.json，已完成的卡 agent 不在是正常的 */
     const k=c.repo+'/'+c.slug;
     if(c.agent_status==='blocked')items.push({key:k,now:true,text:`${c.slug} 的 agent 卡在終端機`});
     else if(c.dispatch&&c.agent_status==='unknown')items.push({key:k,now:true,text:`${c.slug} 的 agent 不在 herdr 裡（停了或掛了）`});
@@ -433,12 +434,14 @@ function renderBanner(){
   return `<div class="notice" role="status"><span class="t">離開期間 ${esc(ago(tl.last_seen))}</span><ul>${items.map(li).join('')}</ul>${close}</div>`;
 }
 async function closeBanner(){
-  try{await api.post('seen',{at:tl.generated_at});bannerClosed=true;render();}
+  try{await api.post('seen',{at:tl.generated_at});seenAt=tl.generated_at;bannerClosed=true;render();}
   catch(e){toast('關閉 banner 失敗：'+e.message,true);}
 }
 
 async function loadLog(){
   try{tl=await api.log();tlErr='';}catch(e){tlErr=e.message;}
+  /* 分頁一直開著：關過 banner 之後又有新的時間軸，就重新顯示（之後有沒有東西由 bannerItems 決定） */
+  if(tl&&seenAt&&Date.parse(tl.generated_at)>Date.parse(seenAt))bannerClosed=false;
   render();
 }
 function showTab(t){ui.tab=t;history.replaceState(null,'','#'+t);render();if(t==='log')loadLog();}
@@ -637,7 +640,7 @@ async function refresh(force){
   }finally{inflight=false;schedule();}
 }
 function schedule(){clearTimeout(timer);timer=setTimeout(()=>{if(document.hidden){schedule();return;}refresh(false);},REFRESH_MS);}
-document.addEventListener('visibilitychange',()=>{if(!document.hidden)refresh(false);});
+document.addEventListener('visibilitychange',()=>{if(!document.hidden){refresh(false);loadLog();}});
 if(location.hash==='#log')showTab('log');else{if(location.hash!=='#home')history.replaceState(null,'','#home');loadLog();}
 refresh(true);
 </script>
