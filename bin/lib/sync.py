@@ -82,13 +82,15 @@ def append_to_section(text: str, heading: str, line: str) -> str:
 
 
 def repos_under(root: pathlib.Path) -> dict[str, pathlib.Path]:
-    """root 下的 opsx repo：有 openspec/changes 而且 .git 是目錄（linked worktree 的 .git 是檔，不算）。"""
+    """root 下的 opsx repo：有 openspec/changes 而且 .git 是目錄（linked worktree 的 .git 是檔，不算）。
+    repo 名取解析後路徑的 basename，跟 collect 一樣；symlink 進 root 的 repo，debt.sh 在實體目錄掃，回報的也是實體名。"""
     out = {}
     if not root.is_dir():
         return out
     for d in sorted(root.iterdir()):
         if (d / "openspec" / "changes").is_dir() and (d / ".git").is_dir():
-            out[d.name] = d.resolve()
+            real = d.resolve()
+            out[real.name] = real
     return out
 
 
@@ -220,7 +222,10 @@ def update_issue(entry: dict, item: dict) -> bool:
     new = old
     if fm_get(new, "upstream") == "closed":
         new = fm_set(new, "upstream", None)
-    if item["updated_at"] > (fm_get(new, "upstream_updated") or ""):
+    known = fm_get(new, "upstream_updated")
+    if known is None:
+        raise ValueError("inbox.md 沒有 upstream_updated（%s），不知道上游是否較新，不改寫" % path)
+    if item["updated_at"] > known:
         if (path.parent / "explore.md").exists():
             new = append_to_section(new, "證據", "- %s 於 %s 更新" % (item["source"], item["updated_at"][:10]))
         else:

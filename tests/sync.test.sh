@@ -187,6 +187,13 @@ s2="$( source "$OPSX_ROOT/bin/lib/common.sh"; new_shell "$A" "$LONG" "$FX/long.m
 assert_eq "$s1" "$LONG"
 [[ "$s2" =~ ^[a-z][a-z0-9_-]{0,31}$ ]] && [ "$s2" != "$s1" ] || fail "撞名後的 slug 超過 32 字或沒換：$s2"
 assert_dir "$CH/$s2"
+case "$s2" in *-9-2) ;; *) fail "截斷要保留原 slug 的結尾（issue 編號）：$s2" ;; esac
+# 31 字的 …-1 撞名：不能變成 …-2（那是 issue #2 原本的 slug）
+MID="gh-abcdefghijklmnopqrstuvwxyz-1"
+m1="$( source "$OPSX_ROOT/bin/lib/common.sh"; new_shell "$A" "$MID" "$FX/long.md" )"
+m2="$( source "$OPSX_ROOT/bin/lib/common.sh"; new_shell "$A" "$MID" "$FX/long.md" )"
+assert_eq "$m1" "$MID"; [ "$m2" != "gh-abcdefghijklmnopqrstuvwxyz-2" ] || fail "撞名吃掉了 issue 編號：$m2"
+[[ "$m2" =~ ^[a-z][a-z0-9-]{0,31}$ ]] && case "$m2" in *-1-2) true ;; *) false ;; esac || fail "要是 …-1-2 而且不超過 32 字：$m2"
 
 # --- issue 內文有 ## 標題：更新後不殘留舊段，證據段不被擾亂 ---
 python3 -I -c 'import json,sys;print(json.dumps([{"iid":600,"title":"有標題的","description":"intro\n\n## Steps\n1. old","state":"opened","updated_at":"2026-11-06T08:00:00Z","web_url":"u600","labels":[]}]))' > "$OPSX_TEST_ISSUES/a.json"
@@ -205,6 +212,22 @@ echo "# shortcut: z 自己的, 要建" > "$Z/z.py"
 opsx sync --root "$ROOT" --source debt >/dev/null 2>&1
 assert_eq "$(find "$SIB/openspec/changes" -mindepth 1 -maxdepth 1 ! -name archive | wc -l | tr -d ' ')" 0 "沒登記的兄弟 repo 不建卡"
 assert_file "$Z/openspec/changes/debt-$(printf '%s' 'z 自己的, 要建' | shasum -a 1 | cut -c1-8)/inbox.md"
+
+# --- symlink 進 root 的 repo：debt 照樣撈得到，既有的卡不會被標 stale ---
+REAL="$(mk_opsx_repo linked-real)"; ln -s "$REAL" "$ROOT/linked"
+echo "# shortcut: 連結進來的, 要建" > "$REAL/l.py"
+opsx sync --root "$ROOT" --source debt >/dev/null 2>&1
+LD="$REAL/openspec/changes/debt-$(printf '%s' '連結進來的, 要建' | shasum -a 1 | cut -c1-8)/inbox.md"
+assert_file "$LD"
+opsx sync --root "$ROOT" --source debt >/dev/null 2>&1
+assert_not_grep '^stale:' "$LD"
+
+# --- 少了 upstream_updated 的卡（手動改過）：記錯，不默默改寫 ---
+python3 -I -c 'import json,sys;print(json.dumps([{"iid":600,"title":"又改了","description":"x","state":"opened","updated_at":"2026-11-07T08:00:00Z","web_url":"u600","labels":[]}]))' > "$OPSX_TEST_ISSUES/a.json"
+grep -v '^upstream_updated:' "$H600" > "$FX/h600"; cp "$FX/h600" "$H600"
+opsx sync --root "$ROOT" --source gitlab >/dev/null 2>&1
+assert_eq "$(cat "$H600")" "$(cat "$FX/h600")" "沒有 upstream_updated 不能改寫"
+tail -1 "$LOG" | cut -f6 | grep -q 'upstream_updated' || fail "要記錯：$(tail -1 "$LOG")"
 
 # --- sources.toml 的 path 不是 repo 根（linked worktree）：不建殼、記錯，不會每次多一張 ---
 WT="$FX/elsewhere/wt"; mkdir -p "$WT/openspec/changes"; printf 'gitdir: /nowhere\n' > "$WT/.git"
