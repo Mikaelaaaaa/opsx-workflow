@@ -247,11 +247,16 @@ J="$(OPSX_TEST_GLAB_JSON="$FX/glab-empty.json" OPSX_TEST_GLAB_JSON_BY_IID= opsx 
 assert_eq "$(q "$J" legacy)" '{"r3": 1}'
 E="$(q "$J" errors)" || fail "errors 讀不到：$J"
 case "$E" in *legacy-mr*|*glab*) fail "errors 不該指名舊卡：$E" ;; esac
-# ---------- generated_at 在讀任何來源之前取：herdr 慢 2 秒也不會往後（banner-same-second） ----------
+# ---------- generated_at 在讀任何來源之前取：卡片迴圈裡的 glab 慢 4 秒也不會往後（banner-same-second） ----------
+# 慢的是迴圈裡的 mr_json：它比 herdr 早讀，取時點放在迴圈之後的實作會被抓到
+R4="$FX/code4"; D="$R4/r4/openspec/changes/slow-mr"; mkdir -p "$R4/r4/.git" "$D"
+printf 'schema: opsx\ncreated: 2026-11-06\nkind: dev\n' > "$D/.openspec.yaml"; printf '## 一句話\n\n慢\n' > "$D/inbox.md"
+printf '# report\n\n## MR\nhttps://gitlab.tsg-navigator.com/agentory/r4/-/merge_requests/9\n' > "$D/report.md"
 SLOW="$FX/slow-bin"; mkdir -p "$SLOW"
-printf '#!/usr/bin/env bash\n[ "$1 $2" = "agent list" ] && sleep 2\nexec bash "%s/tests/fakes/herdr" "$@"\n' "$OPSX_ROOT" > "$SLOW/herdr"; chmod +x "$SLOW/herdr"
-S="$(date +%s)"
-J="$(HERDR_ENV=1 PATH="$SLOW:$PATH" opsx collect --root "$R3")"; assert_eq "$?" 0
+printf '#!/usr/bin/env bash\n[ "$1 $2" = "mr view" ] && sleep 4\nexec bash "%s/tests/fakes/glab" "$@"\n' "$OPSX_ROOT" > "$SLOW/glab"; chmod +x "$SLOW/glab"
+: > "$OPSX_FAKE_LOG"; S="$(date +%s)"
+J="$(PATH="$SLOW:$PATH" opsx collect --root "$R4")"; assert_eq "$?" 0
+grep -q '^mr view 9 ' "$OPSX_FAKE_LOG" || fail "glab 要真的被叫到，慢才有意義：$(cat "$OPSX_FAKE_LOG")"
 G="$(printf '%s' "$J" | python3 -I -c 'import datetime,json,sys;print(int(datetime.datetime.fromisoformat(json.load(sys.stdin)["generated_at"]).timestamp()))')"
-[ "$G" -le $((S + 1)) ] || fail "generated_at 要在讀來源前取：呼叫前 ${S}，generated_at ${G}"
+[ "$G" -le $((S + 2)) ] || fail "generated_at 要在讀來源前取：呼叫前 ${S}，generated_at ${G}"
 echo ok

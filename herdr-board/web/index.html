@@ -480,7 +480,8 @@ function renderBanner(){
 }
 async function closeBanner(){
   /* last-seen 不能晚於 banner 讀過的任一份快照，否則兩份快照之間發生的事永遠不會進 banner */
-  const at=data.generated_at&&Date.parse(data.generated_at)<Date.parse(tl.generated_at)?data.generated_at:tl.generated_at;
+  if(!data.generated_at){toast('collect 還沒回來，卡片上的 gate 與 MR 還沒讀到，先不能關閉',true);return;}
+  const at=Date.parse(data.generated_at)<Date.parse(tl.generated_at)?data.generated_at:tl.generated_at;
   try{await api.post('seen',{at});seenAt=at;bannerClosed=true;render();}
   catch(e){toast('關閉 banner 失敗：'+e.message,true);}
 }
