@@ -131,6 +131,18 @@ case "$outg" in *"/fake/venv"*"/nonexistent/base3"*|*"/nonexistent/base3"*"/fake
 assert_eq "$(cat "$OPSX_STATE_DIR/python")" "/sentinel/python3" "base 不存在時 python 檔不能動"
 outg="$(PATH="$FX/fakevenv:$PATH" FAKE_PREFIX=/fake/venv FAKE_BASE="$PY" opsx init --global 2>&1)" \
   && fail "base 等於 sys.executable 時 init --global 要失敗：$outg"
-case "$outg" in *"/fake/venv"*) ;; *) fail "訊息要寫 venv prefix：$outg" ;; esac
+case "$outg" in *"/fake/venv"*"$PY"*) ;; *) fail "訊息要寫 venv prefix 和拿到的 base：$outg" ;; esac
 assert_eq "$(cat "$OPSX_STATE_DIR/python")" "/sentinel/python3" "base 等於 sys.executable 時 python 檔不能動"
+printf x > "$FX/noexec"; chmod 644 "$FX/noexec"
+for b in "$FX/noexec" "$FX"; do   # 存在但不能執行、是目錄：都算拿不到
+  outg="$(PATH="$FX/fakevenv:$PATH" FAKE_PREFIX=/fake/venv FAKE_BASE="$b" opsx init --global 2>&1)" \
+    && fail "base 是 $b 時 init --global 要失敗：$outg"
+  assert_eq "$(cat "$OPSX_STATE_DIR/python")" "/sentinel/python3" "base 是 $b 時 python 檔不能動"
+done
+
+# python 路徑：base 是 symlink 時原樣記，不解開（uv、brew 的 base 是 minor 版號的 symlink，解開會釘死 patch 版）
+mkdir -p "$FX/baselink"; ln -s "$PY" "$FX/baselink/python3"
+outg="$(PATH="$FX/fakevenv:$PATH" FAKE_PREFIX=/fake/venv FAKE_BASE="$FX/baselink/python3" opsx init --global 2>&1)"
+assert_eq "$?" 0 "base 是 symlink 時 init --global: $outg"
+assert_eq "$(cat "$OPSX_STATE_DIR/python")" "$FX/baselink/python3" "base 要原樣記，不解 symlink"
 echo ok
