@@ -63,6 +63,9 @@ for i in 1 2 3; do D2="$ROOT/a/openspec/changes/archive/2026-10-0$i-old$i"; mkdi
 # x6：已經 answered 的 gate 不算待處理；x7：action=merge 的 approval gate 沒有「這個 repo 永遠」
 D=$(mkcard a x6); printf '## 1\n\n- [ ] 1.1 a\n' > "$D/tasks.md"; printf '## g1\ntype: approval\naction: push\nstatus: answered\nanswer: 允許\n' > "$D/gates.md"
 D=$(mkcard a x7); printf '## 1\n\n- [ ] 1.1 a\n' > "$D/tasks.md"; printf '## g1\ntype: approval\naction: merge\nstatus: open\n問題: 合併？\n' > "$D/gates.md"
+# x10：兩個 open gate（一個有 opened_at）、一個 answered
+D=$(mkcard a x10); printf '## 1\n\n- [ ] 1.1 a\n' > "$D/tasks.md"
+printf '## g1\ntype: approval\naction: push\nstatus: open\nopened_at: 2026-11-06T10:00:00+08:00\n問題: push？\n\n## g2\ntype: decision\nstatus: open\n問題: 哪個？\n\n## g3\ntype: decision\nstatus: answered\nopened_at: 2026-11-06T09:00:00+08:00\nanswer: A\n' > "$D/gates.md"
 # y1：派出、herdr blocked、沒 gate
 D=$(mkcard b y1); printf '## 1\n\n- [ ] 1.1 a\n' > "$D/tasks.md"
 # y2：MR pipeline 紅、已派出
@@ -78,7 +81,7 @@ cat > "$OPSX_STATE_DIR/dispatch.json" <<'EOF'
 EOF
 # glab：iid 7 全綠、8 pipeline 紅（fake glab 依 iid 讀不同檔）
 export OPSX_TEST_GLAB_JSON="$FX/mr.json" OPSX_TEST_GLAB_JSON_BY_IID="$FX/mr-"
-printf '{"state":"opened","draft":false,"has_conflicts":false,"sha":"aaa111","head_pipeline":{"status":"success"},"unresolved_discussions_count":0}' > "$FX/mr-7.json"
+printf '{"state":"opened","draft":false,"has_conflicts":false,"sha":"aaa111","head_pipeline":{"status":"success"},"unresolved_discussions_count":0,"created_at":"2026-11-05T01:10:00.000Z","merged_at":null}' > "$FX/mr-7.json"
 printf '{"state":"opened","draft":false,"has_conflicts":false,"sha":"bbb222","head_pipeline":{"status":"failed"},"unresolved_discussions_count":0}' > "$FX/mr-8.json"
 # herdr：x4 working、y1 blocked、foo 沒對到卡
 export OPSX_TEST_HERDR_AGENTS="$FX/agents.json"
@@ -88,6 +91,12 @@ printf '{"id":"cli:agent:list","result":{"agents":[{"agent":"claude","pane_id":"
 # ---------- 在 herdr 內 ----------
 export HERDR_ENV=1
 J="$(opsx collect --root "$ROOT")"; rc=$?; assert_eq "$rc" 0 "collect rc: $J"
+
+# gate 與 MR 的時間（specs/board-collect「gate 與 MR 的時間」）
+assert_eq "$(q "$(card "$J" a x10)" open_gates)" '[{"id": "g1", "opened_at": "2026-11-06T10:00:00+08:00"}, {"id": "g2", "opened_at": null}]'
+assert_eq "$(q "$(card "$J" a x1)" open_gates)" '[]'
+assert_eq "$(q "$(card "$J" a x4)" mr.created_at)" "2026-11-05T01:10:00.000Z"
+assert_eq "$(q "$(card "$J" a x4)" mr.merged_at)" null
 
 # 範圍：只有 a、b；a 掛 develop，b 沒掛；a-wt 是 worktree 不算 repo；舊 schema 只計數
 assert_eq "$(q "$J" scopes)" '[{"repos": ["a"], "workspace": "develop"}, {"repos": ["b"], "workspace": null}]'
