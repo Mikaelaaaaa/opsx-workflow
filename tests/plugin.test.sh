@@ -42,7 +42,7 @@ $SPLIT" "本 tab 沒有看板 pane：開 split"
 panes w1:t1; : > "$OPSX_FAKE_LOG"
 out="$(open_pane)"; assert_eq "$?" 0 "open-pane 已開: $out"
 assert_eq "$(cat "$OPSX_FAKE_LOG")" "pane list --workspace w1
-pane focus w1:p7" "本 tab 已有看板 pane：只 focus"
+plugin pane focus w1:p7" "本 tab 已有看板 pane：只 focus"
 
 for v in HERDR_PANE_ID HERDR_TAB_ID HERDR_WORKSPACE_ID; do
   : > "$OPSX_FAKE_LOG"

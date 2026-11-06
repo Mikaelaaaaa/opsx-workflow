@@ -17,8 +17,7 @@ for p in json.load(sys.stdin)["result"]["panes"]:
         print(p["pane_id"]); break
 ' "$tab")"
 
-# 用 pane focus 不用 plugin pane focus：後者對 pane list 列出的看板 pane 實跑回過 plugin_pane_not_found，pane focus 認的就是 pane_id
 if [ -n "$existing" ]; then
-  exec "$herdr" pane focus "$existing"
+  exec "$herdr" plugin pane focus "$existing"
 fi
 exec "$herdr" plugin pane open --plugin opsx-board --entrypoint board --placement split --direction right --target-pane "$pane" --focus
