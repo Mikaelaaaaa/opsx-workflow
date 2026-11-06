@@ -45,8 +45,9 @@ assert_grep "/usr/bin" "$FX/err"; assert_grep "opsx init --global" "$FX/err"
 
 # ---------- python 在但跑不起來：授權閘門要 deny，不能因為 hook 非 0 結束而放行 ----------
 printf '/usr/bin/false\n' > "$P"
-out="$(bash_hook "$R" 'pnpm test')"; assert_eq "$(decision "$out")" deny "python 跑不起來時派出去的卡要 deny"
-reason "$out" | grep -q 'python 執行失敗' || fail "deny 理由要說 python 執行失敗：$(reason "$out")"
+out="$(bash_hook "$R" 'glab mr create -F d.md')"; assert_eq "$(decision "$out")" deny "python 跑不起來時要授權的指令要 deny"
+reason "$out" | grep -q 'python 執行失敗' || fail "deny 理由要說 python 執行失敗，不是要授權：$(reason "$out")"
+out="$(bash_hook "$R" 'pnpm test')"; assert_eq "$(decision "$out")" allow "python 跑不起來時不需授權的指令跟 python 正常時一樣"
 
 # ---------- 授權閘門遇到缺檔就擋，不放行 ----------
 rm -f "$P"
