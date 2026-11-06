@@ -112,7 +112,15 @@ PY
   else
     if [ "$mode" = interactive ]; then aargs+=(-a on-request -s workspace-write); else aargs+=(-a never -s workspace-write); fi
   fi
-  herdr agent start "$slug" --kind "$agent" --pane "$pane" -- "${aargs[@]}" >/dev/null
+  # 剛開的 pane 的 shell 還沒到 prompt 時 herdr 回 agent_pane_busy，同一個 pane 最多試六次；起不來就收掉剛開的 tab，不留空 tab 給人收
+  local out try=1
+  until out="$(herdr agent start "$slug" --kind "$agent" --pane "$pane" -- "${aargs[@]}" 2>&1)"; do
+    case "$out" in
+      *agent_pane_busy*) if [ "$try" -lt 6 ]; then try=$((try + 1)); sleep "${OPSX_DISPATCH_RETRY_SLEEP:-1}"; continue; fi ;;
+    esac
+    herdr tab close "$tab" >/dev/null 2>&1 || true
+    die "dispatch: herdr agent start 失敗（第 ${try} 次）：${out}"
+  done
 
   # dispatch.json
   OPSX_KEY="$repo/$slug" OPSX_WS="$ws" OPSX_WSID="$ws_id" OPSX_TAB="$tab" OPSX_PANE="$pane" OPSX_AGENT="$agent" OPSX_MODEL="$model" OPSX_MODE="$mode" OPSX_KIND="$kind" OPSX_WT="$wt" OPSX_BR="$branch" OPSX_AT="$(now_iso)" OPSX_LIB="$OPSX_ROOT/bin/lib" \
