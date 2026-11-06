@@ -38,6 +38,8 @@ assert_not_grep '^workspace create' "$OPSX_FAKE_LOG"
 # settings：repo 永遠 push 進 allow；merge 在 allow 不在 deny（deny 會蓋過 grant-gate 的放行，merge 由 gate 單獨把關）
 S="$OPSX_STATE_DIR/settings/Agentory-CS-retry-backoff.json"; assert_file "$S"
 python3 -I -c 'import json,sys;d=json.load(open(sys.argv[1]))["permissions"];assert "Bash(git push:*)" in d["allow"],d;assert "Bash(glab mr merge:*)" in d["allow"] and "Bash(gh pr merge:*)" in d["allow"],d;assert not any("merge" in x for x in d["deny"]),d;assert not any("glab mr create" in a for a in d["allow"]),d' "$S"
+# 重啟 / resume 後旗標不在，可寫目錄還要由 settings 供應
+python3 -I -c 'import json,sys;d=json.load(open(sys.argv[1]))["permissions"];assert d["additionalDirectories"]==[sys.argv[2],sys.argv[3]],d' "$S" "$R/openspec" "$OPSX_STATE_DIR" || fail "autopilot settings 缺 additionalDirectories"
 # dispatch.json
 python3 -I -c '
 import json,sys;d=json.load(open(sys.argv[1]))["Agentory-CS/retry-backoff"]
@@ -123,7 +125,9 @@ python3 -I -c 'import json,sys;d=json.load(open(sys.argv[1]))["Agentory-CS/retry
 opsx stop retry-backoff >/dev/null 2>&1 || fail "stop before redispatch"
 : > "$OPSX_FAKE_LOG"
 opsx dispatch retry-backoff --agent claude --mode interactive >/dev/null 2>&1 || fail "redispatch interactive claude"
-assert_grep "^agent start retry-backoff --kind claude --pane w1:pE -- --model claude-sonnet-5-5 --add-dir $R/openspec --add-dir $OPSX_STATE_DIR\$" "$OPSX_FAKE_LOG"   # kind 已是 bug-fix → sonnet
+assert_grep "^agent start retry-backoff --kind claude --pane w1:pE -- --model claude-sonnet-5-5 --settings $OPSX_STATE_DIR/settings/Agentory-CS-retry-backoff.json --add-dir $R/openspec --add-dir $OPSX_STATE_DIR\$" "$OPSX_FAKE_LOG"   # kind 已是 bug-fix → sonnet
+assert_not_grep '--permission-mode' "$OPSX_FAKE_LOG"
+python3 -I -c 'import json,sys;d=json.load(open(sys.argv[1]))["permissions"];assert d=={"additionalDirectories":[sys.argv[2],sys.argv[3]]},d' "$OPSX_STATE_DIR/settings/Agentory-CS-retry-backoff.json" "$R/openspec" "$OPSX_STATE_DIR" || fail "interactive settings 只該有 additionalDirectories"
 
 # --- 沒掛 workspace 的 repo → 開新 workspace 並記下來 ---
 R2="$(mk_repo scam-guard https://github.com/Mikaelaaaaa/scam-guard.git)"
