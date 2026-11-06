@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# opsx dispatch <slug> --agent claude|codex --model <id> --mode interactive|autopilot|drive --kind <kind> [--repo <path>]
+# opsx dispatch <slug> --agent claude|codex --model <id> --mode interactive|autopilot --kind <kind> [--repo <path>]
 # 把一張卡派出去：開 worktree，在 repo 掛的 workspace 開 herdr tab，agent start，送第一句 prompt，記進 dispatch.json。
 # 要求檔 §3.6「派」、§3.6 自主程度表、§3.1。herdr 的每個呼叫都可以被 PATH 上的假 herdr 取代（tests/fakes）。
 
@@ -21,7 +21,7 @@ opsx_dispatch() {
   [ -n "$top" ] || die "dispatch: 不在 git repo 裡，或給 --repo"
   top="$(cd "$top" && pwd -P)"
   case "$agent" in claude|codex) ;; *) die "dispatch: --agent 只收 claude|codex" ;; esac
-  case "$mode" in interactive|autopilot|drive) ;; *) die "dispatch: --mode 只收 interactive|autopilot|drive" ;; esac
+  case "$mode" in interactive|autopilot) ;; drive) mode=autopilot ;; *) die "dispatch: --mode 只收 interactive|autopilot（drive 是 autopilot 的舊名）" ;; esac
   local d="$top/openspec/changes/$slug" repo; repo="$(basename "$top")"
   [ -d "$d" ] || die "dispatch: 沒有這張卡：$d"
   printf '%s' "$slug" | grep -qE '^[a-z][a-z0-9_-]{0,31}$' || die "dispatch: slug 要符合 [a-z][a-z0-9_-]{0,31}（herdr agent 名）：$slug"
@@ -106,14 +106,15 @@ PY
   tab="$(printf '%s' "$tabjson" | jq -r '.result.tab.tab_id // empty' 2>/dev/null || true)"
   [ -n "$pane" ] || die "dispatch: herdr tab create 沒回 root_pane：$tabjson"
 
-  # agent 啟動參數（自動 / 開到可合併 才帶 permission 設定）
+  # agent 啟動參數（autopilot 才帶 permission 設定）
   local -a aargs=()
   if [ "$agent" = claude ]; then
     aargs+=(--model "$model")
     if [ "$mode" != interactive ]; then
       local settings="$OPSX_STATE_DIR/settings/$repo-$slug.json"; ensure_dir "$(dirname "$settings")"
       write_settings "$settings" "$repo"
-      aargs+=(--permission-mode acceptEdits --settings "$settings")
+      # dontAsk：不在 allow 的直接拒絕不跳框；跳框會讓 herdr 判 blocked，drive 送不進下一句
+      aargs+=(--permission-mode dontAsk --settings "$settings")
     fi
     # Claude Code 的沙盒只准寫 working directories；卡的檔在主 repo 的 openspec/（worktree 裡沒有），hook 消耗 once 與 status 鏡像寫 state dir
     aargs+=(--add-dir "$top/openspec" --add-dir "$OPSX_STATE_DIR")
@@ -164,16 +165,10 @@ PY
   printf '%s\t%s\t%s\n' "$(now_iso)" "指派給 ${agent}（${mode} · ${model}），第一句 /${first}" "dispatched" >> "$d/decisions.tsv"
   say "dispatch: $repo/$slug → $agent $model · $mode · kind $kind · $ws $pane · 第一句 /$first"
 
-  if [ "$mode" = drive ]; then
+  if [ "$mode" = autopilot ]; then
+    # pid 由 drive 自己寫進 dispatch.json（手動 opsx drive 也一樣），這裡只負責起
     nohup bash "$OPSX_ROOT/bin/opsx" drive "$slug" --repo "$top" >> "$OPSX_STATE_DIR/drive-$repo-$slug.log" 2>&1 &
-    local pid=$!
-    OPSX_KEY="$repo/$slug" OPSX_PID="$pid" OPSX_LIB="$OPSX_ROOT/bin/lib" "$OPSX_PY" -I - "$OPSX_STATE_DIR/dispatch.json" <<'PY'
-import os, sys
-sys.path.insert(0, os.environ["OPSX_LIB"]); import jsonfile
-def put(d): d[os.environ["OPSX_KEY"]]["drive_pid"] = int(os.environ["OPSX_PID"])
-jsonfile.update(sys.argv[1], put)
-PY
-    say "dispatch: drive.sh 跑起來了（pid ${pid}），log 在 $OPSX_STATE_DIR/drive-$repo-$slug.log"
+    say "dispatch: drive 跑起來了（pid $!），log 在 $OPSX_STATE_DIR/drive-$repo-$slug.log"
   fi
 }
 
@@ -197,7 +192,8 @@ import json,os,sys,tomllib
 sd=os.environ["OPSX_SD"]; repo=os.environ["OPSX_REPO"]
 allow=["Read","Edit","Write","Glob","Grep","Bash(git status:*)","Bash(git diff:*)","Bash(git log:*)","Bash(git add:*)","Bash(git commit:*)","Bash(git checkout:*)","Bash(git worktree:*)",
        "Bash(pnpm test:*)","Bash(pnpm vitest:*)","Bash(pnpm build:*)","Bash(pnpm lint:*)","Bash(pnpm typecheck:*)","Bash(npx vitest:*)","Bash(pytest:*)","Bash(uv run:*)","Bash(ruff:*)","Bash(go test:*)",
-       "Bash(openspec:*)","Bash(opsx:*)","Bash(ls:*)","Bash(cat:*)","Bash(grep:*)","Bash(rg:*)","Bash(find:*)","Bash(node:*)","Bash(python3:*)"]
+       "Bash(openspec:*)","Bash(opsx:*)","Bash(ls:*)","Bash(cat:*)","Bash(grep:*)","Bash(rg:*)","Bash(find:*)","Bash(node:*)","Bash(python3:*)",
+       "Bash(jq:*)","Bash(head:*)","Bash(tail:*)","Bash(wc:*)","Bash(sed -n:*)","Bash(diff:*)","Bash(sort:*)","Bash(bash tests/:*)","Bash(herdr agent:*)","Bash(herdr pane read:*)"]
 # merge 不在 deny：settings 的 deny 蓋得過 hook 的放行，所以 merge 交給 opsx-grant-gate.sh 的 merge_gate 單獨把關；
 # 放進 allow 是為了閘門放行那一次不再跳 Claude Code 自己的權限框。
 allow += ["Bash(glab mr merge:*)", "Bash(gh pr merge:*)"]
