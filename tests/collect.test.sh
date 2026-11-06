@@ -247,4 +247,11 @@ J="$(OPSX_TEST_GLAB_JSON="$FX/glab-empty.json" OPSX_TEST_GLAB_JSON_BY_IID= opsx 
 assert_eq "$(q "$J" legacy)" '{"r3": 1}'
 E="$(q "$J" errors)" || fail "errors 讀不到：$J"
 case "$E" in *legacy-mr*|*glab*) fail "errors 不該指名舊卡：$E" ;; esac
+# ---------- generated_at 在讀任何來源之前取：herdr 慢 2 秒也不會往後（banner-same-second） ----------
+SLOW="$FX/slow-bin"; mkdir -p "$SLOW"
+printf '#!/usr/bin/env bash\n[ "$1 $2" = "agent list" ] && sleep 2\nexec bash "%s/tests/fakes/herdr" "$@"\n' "$OPSX_ROOT" > "$SLOW/herdr"; chmod +x "$SLOW/herdr"
+S="$(date +%s)"
+J="$(HERDR_ENV=1 PATH="$SLOW:$PATH" opsx collect --root "$R3")"; assert_eq "$?" 0
+G="$(printf '%s' "$J" | python3 -I -c 'import datetime,json,sys;print(int(datetime.datetime.fromisoformat(json.load(sys.stdin)["generated_at"]).timestamp()))')"
+[ "$G" -le $((S + 1)) ] || fail "generated_at 要在讀來源前取：呼叫前 ${S}，generated_at ${G}"
 echo ok
