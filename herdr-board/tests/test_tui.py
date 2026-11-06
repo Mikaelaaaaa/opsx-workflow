@@ -21,6 +21,7 @@ def card(slug, section, pane=None, waiting=None, status=None, repo="a"):
 DATA = {"generated_at": "t", "scopes": [], "errors": [], "unmatched_agents": [],
         "cards": [
             card("done1", "已完成"),
+            card("inbox1", "收件匣"),
             card("ready1", "待指派"),
             card("run1", "進行中", pane="p5", status={"phase": "apply", "step": "3", "total": "8", "label": "x"}),
             card("ask1", "待處理", pane="p4", waiting={"type": "等待授權", "question": "push?", "recommended": "允許"}),
@@ -36,7 +37,13 @@ class RowsTest(unittest.TestCase):
         slugs = [r["card"]["slug"] for r in rows if r["kind"] == "card"]
         self.assertEqual(slugs, ["ask1", "ask2", "run1", "ready1"], "待處理在最上，已完成收起")
         headers = [r["section"] for r in rows if r["kind"] == "header"]
-        self.assertEqual(headers, ["待處理", "進行中", "待指派", "已完成"])
+        self.assertEqual(headers, ["待處理", "進行中", "待指派", "收件匣", "已完成"])
+        collapsed = {r["section"]: r["collapsed"] for r in rows if r["kind"] == "header"}
+        self.assertTrue(collapsed["收件匣"] and collapsed["已完成"], "收件匣與已完成預設收起")
+
+    def test_inbox_open_lists_inbox_before_done(self):
+        slugs = [r["card"]["slug"] for r in tm.rows(DATA, done_open=True, inbox_open=True) if r["kind"] == "card"]
+        self.assertEqual(slugs[-2:], ["inbox1", "done1"])
 
     def test_done_open_lists_done_cards(self):
         slugs = [r["card"]["slug"] for r in tm.rows(DATA, done_open=True) if r["kind"] == "card"]
