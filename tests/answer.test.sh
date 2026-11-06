@@ -41,7 +41,7 @@ out="$(opsx answer x --gate g2 "選 檔案" 2>&1)"; assert_eq "$?" 0 "answer g2:
 awk '/^## g2/{f=1} /^## g3/{f=0} f' "$C/gates.md" > "$FX/g2.txt"
 assert_grep '^status: answered' "$FX/g2.txt"; assert_grep '^answer: 選 檔案' "$FX/g2.txt"; assert_grep '^answered_at: 20' "$FX/g2.txt"
 awk '/^## g1/{f=1} /^## g2/{f=0} f' "$C/gates.md" | grep -q '^status: open' || fail "g1 不該被動到"
-assert_grep $'\tyou\tanswer\tg2\t選 檔案' "$C/decisions.tsv"
+assert_eq "$(tail -1 "$C/decisions.tsv" | cut -f2-5)" $'你\t已決定\t選 檔案\tg2'
 assert_grep '^agent prompt x 選 檔案$' "$OPSX_FAKE_LOG"
 
 # --- 不存在的 gate：退出非零，什麼都不動 ---
@@ -62,7 +62,7 @@ assert_eq "$(jq -c '."Agentory-AI/x".grants' "$OPSX_STATE_DIR/dispatch.json")" '
 assert_grep '^# grants' "$OPSX_STATE_DIR/grants.toml"   # 原有的註解留著
 awk '/^## g1/{f=1} /^## g2/{f=0} f' "$C/gates.md" | grep -q '^status: answered' || fail "g1 要 answered"
 assert_grep '^agent prompt x 允許$' "$OPSX_FAKE_LOG"
-assert_grep $'\tyou\tanswer\tg1\t允許\trepo$' "$C/decisions.tsv"   # grant 獨立一欄
+assert_eq "$(tail -1 "$C/decisions.tsv" | cut -f2-5)" $'你\t已允許\t允許\tg1 · repo'
 
 # --- 授權：這張卡 ---
 gates; printf '# grants\n' > "$OPSX_STATE_DIR/grants.toml"

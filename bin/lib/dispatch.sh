@@ -161,7 +161,7 @@ PY
   local first; first="$(stage_name "$top" "$slug")"
   case "$first" in explore|grill|propose|apply|review|pr|babysit) ;; *) first=explore ;; esac
   herdr agent prompt "$slug" "/$first $slug" >/dev/null
-  printf '%s\t%s\t%s\n' "$(now_iso)" "指派給 ${agent}（${mode} · ${model}），第一句 /${first}" "dispatched" >> "$d/decisions.tsv"
+  log_row "$d" 你 已指派 "指派給 ${agent}，第一句 /${first}" "${agent} · ${mode} · ${model}"
   say "dispatch: $repo/$slug → $agent $model · $mode · kind $kind · $ws $pane · 第一句 /$first"
 
   if [ "$mode" = drive ]; then
