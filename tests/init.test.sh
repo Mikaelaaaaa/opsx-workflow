@@ -80,7 +80,8 @@ cd "$FX/wt"; out="$(opsx init 2>&1)" || fail "init in worktree: $out"
 assert_eq "$(grep -c '^openspec/$' "$R/.git/info/exclude")" 1 "exclude duplicated or missing via worktree"
 
 # --- --global ---
-cd "$FX"; use_fakes herdr; export OPSX_FAKE_LOG="$FX/herdr.log"; : > "$OPSX_FAKE_LOG"
+cd "$FX"; use_fakes herdr launchctl; export OPSX_FAKE_LOG="$FX/herdr.log"; : > "$OPSX_FAKE_LOG"
+export OPSX_LAUNCHCTL=launchctl   # lib.sh 預設沒有 launchctl；這裡用 fake 測安裝
 outg="$(opsx init --global 2>&1)"; assert_eq "$?" 0 "global rc: $outg"
 case "$outg" in *"herdr plugin link"*) ;; *) fail "should say plugin linked: $outg" ;; esac
 case "$outg" in *'"linked"'*) fail "herdr JSON leaked into output: $outg" ;; esac
@@ -92,4 +93,31 @@ assert_eq "$(readlink "$OPSX_BIN_DIR/opsx")" "$OPSX_ROOT/bin/opsx"
 echo 'x = 1' >> "$OPSX_STATE_DIR/grants.toml"
 opsx init --global >/dev/null 2>&1 || fail "global rerun"
 assert_grep "x = 1" "$OPSX_STATE_DIR/grants.toml"
+
+# --- 每日同步 launchd：第一次安裝 ---
+PL="$OPSX_LAUNCH_AGENTS_DIR/com.opsx.sync.plist"
+assert_file "$PL"
+case "$outg" in *每日同步*) ;; *) fail "輸出要有每日同步那行：$outg" ;; esac
+pl() { python3 -I -c 'import json,plistlib,sys
+d=plistlib.load(open(sys.argv[1],"rb"))
+for k in sys.argv[2].split("."): d=d[k]
+print(d if isinstance(d,str) else json.dumps(d))' "$PL" "$1"; }
+assert_eq "$(pl ProgramArguments)" "[\"$OPSX_BIN_DIR/opsx\", \"sync\"]"
+assert_eq "$(pl StartCalendarInterval)" '{"Hour": 9, "Minute": 0}'
+assert_eq "$(pl StandardOutPath)" "$OPSX_STATE_DIR/sync.out"; assert_eq "$(pl StandardErrorPath)" "$OPSX_STATE_DIR/sync.out"
+assert_eq "$(pl EnvironmentVariables.OPSX_STATE_DIR)" "$OPSX_STATE_DIR"
+P="$(pl EnvironmentVariables.PATH)"
+for d in "$OPSX_BIN_DIR" /opt/homebrew/bin "$(dirname "$(command -v python3)")" "$(dirname "$(command -v openspec)")"; do
+  case ":$P:" in *":$d:"*) ;; *) fail "plist 的 PATH 少了 $d：$P" ;; esac
+done
+assert_grep "^bootstrap gui/$(id -u) $PL\$" "$OPSX_FAKE_LOG"
+
+# --- 已經裝過：launchctl print 成功就不重載 ---
+: > "$OPSX_FAKE_LOG"
+OPSX_TEST_LAUNCHCTL_LOADED=1 opsx init --global >/dev/null 2>&1 || fail "global with loaded job"
+assert_grep '^print gui/' "$OPSX_FAKE_LOG"; assert_not_grep '^bootstrap' "$OPSX_FAKE_LOG"
+
+# --- 沒有 launchctl：印一行略過，退出 0 ---
+outn="$(OPSX_LAUNCHCTL="$FX/no-such-launchctl" opsx init --global 2>&1)"; assert_eq "$?" 0 "no launchctl rc: $outn"
+case "$outn" in *略過*) ;; *) fail "沒有 launchctl 要說略過：$outn" ;; esac
 echo ok

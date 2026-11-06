@@ -42,3 +42,24 @@ append_line_once() { # <file> <line>
 }
 
 interactive() { [ -z "${OPSX_NONINTERACTIVE:-}" ] && [ -t 0 ]; }
+
+# 一句話：只准單行、去掉空白後非空（會寫進 inbox.md 的 ## 一句話）
+single_line() { # <text>，不合格就 die
+  case "$1" in *$'\n'*|*$'\r'*) die "一句話不能有換行" ;; esac
+  [ -n "${1//[[:space:]]/}" ] || die "一句話是空的"
+}
+
+# repo 根：有 openspec/changes/ 的目錄，印實體路徑
+opsx_repo_top() { # <path>
+  [ -d "$1/openspec/changes" ] || die "不是 opsx repo（沒有 openspec/changes/）：$1"
+  ( cd "$1" && pwd -P )
+}
+
+# 在 <top> 用 openspec 建殼，inbox.md 寫成 <內容檔>；slug 已存在就依序加 -2、-3。印實際的 slug。
+new_shell() { # <top> <slug> <inbox 內容檔>
+  local top="$1" slug="$2" n=1
+  while [ -e "$top/openspec/changes/$slug" ]; do n=$((n+1)); slug="$2-$n"; done
+  ( cd "$top" && openspec new change "$slug" --schema opsx >/dev/null ) || die "openspec new change $slug 失敗（${top}）"
+  cp "$3" "$top/openspec/changes/$slug/inbox.md"
+  printf '%s\n' "$slug"
+}

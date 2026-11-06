@@ -7,5 +7,15 @@ case "$1 $2" in
   "mr view")
     case " $* " in *" -R "*) ;; *) echo "fake glab: 沒帶 -R" >&2; exit 1 ;; esac
     if [ -n "${OPSX_TEST_GLAB_JSON_BY_IID:-}" ] && [ -f "${OPSX_TEST_GLAB_JSON_BY_IID}$3.json" ]; then cat "${OPSX_TEST_GLAB_JSON_BY_IID}$3.json"; else cat "${OPSX_TEST_GLAB_JSON:?}"; fi ;;
+  # issue：在 sources.toml 的 path 下跑。$OPSX_TEST_ISSUES/<cwd 目錄名>.json 是 list 的輸出，有 <名>.fail 就像沒登入一樣失敗；
+  # view 回 $OPSX_TEST_ISSUES/view-<iid>.json。欄位照 glab 文件（iid/title/description/state/updated_at/web_url/labels），
+  # 真樣本見 glab-samples/（board-inbox 1.1）。
+  "issue list")
+    name="$(basename "$PWD")"
+    if [ -f "${OPSX_TEST_ISSUES:?}/$name.fail" ]; then echo "glab: 401 Unauthorized (not logged in)" >&2; exit 1; fi
+    cat "$OPSX_TEST_ISSUES/$name.json" 2>/dev/null || echo '[]' ;;
+  "issue view")
+    case " $* " in *" -R "*) ;; *) echo "fake glab: 沒帶 -R" >&2; exit 1 ;; esac
+    cat "${OPSX_TEST_ISSUES:?}/view-$3.json" ;;
   *) echo '{}' ;;
 esac

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """opsx 看板的 herdr pane（最小 TUI，herdr-board D4）：同一份 `opsx collect`，一行一卡。
-按鍵：↑↓ / j k 選、Enter 跳到該卡的 pane（herdr pane focus）、r 重拉、d 展開/收起已完成、q 關。
+按鍵：↑↓ / j k 選、Enter 跳到該卡的 pane（herdr pane focus）、r 重拉、i 展開/收起收件匣、d 展開/收起已完成、q 關。
 不回 gate、不派工、不合併：那些在網頁（open-board）。排序與游標在 tui_model.py，這裡只畫。
 collect 在背景 thread 跑，畫面迴圈只讀最新一份，所以 collect 慢的時候按鍵照樣有反應。
 """
@@ -72,7 +72,7 @@ def draw(scr, rows, cur: tm.Cursor, data: dict, note: str) -> None:
             scr.addstr(y, 2, tm.fit("%s %s" % (r["mark"], r["text"]), w - 3), attr)
         y += 1
     errs = "；".join("%s：%s" % (e.get("source"), e.get("message")) for e in data.get("errors") or [])
-    foot = note or errs or "↑↓ 選  ↵ 跳 pane  r 重拉  d 已完成  q 關  （回 gate / 指派 / 合併在網頁）"
+    foot = note or errs or "↑↓ 選  ↵ 跳 pane  r 重拉  i 收件匣  d 已完成  q 關  （回 gate / 指派 / 合併在網頁）"
     scr.addstr(h - 1, 0, tm.fit(foot, w - 1), curses.A_DIM)
     scr.refresh()
 
@@ -81,16 +81,16 @@ def main(scr) -> None:
     curses.curs_set(0)
     scr.timeout(250)
     feed = Feed(); feed.start()
-    done_open = False
+    done_open = inbox_open = False
     data: dict = dict(EMPTY)
     seen = 0
-    rows = tm.rows(data, done_open)
+    rows = tm.rows(data, done_open, inbox_open)
     cur = tm.Cursor(rows)
     note = "載入中…"
     while True:
         if feed.latest is not None and feed.seq != seen:
             data = feed.latest; seen = feed.seq
-            rows = tm.rows(data, done_open); cur.rebind(rows)
+            rows = tm.rows(data, done_open, inbox_open); cur.rebind(rows)
             if note == "載入中…" or note == "重拉了": note = ""
         draw(scr, rows, cur, data, note)
         k = scr.getch()
@@ -105,7 +105,9 @@ def main(scr) -> None:
         elif k == ord("r"):
             feed.wake.set(); note = "重拉了"
         elif k == ord("d"):
-            done_open = not done_open; rows = tm.rows(data, done_open); cur.rebind(rows)
+            done_open = not done_open; rows = tm.rows(data, done_open, inbox_open); cur.rebind(rows)
+        elif k == ord("i"):
+            inbox_open = not inbox_open; rows = tm.rows(data, done_open, inbox_open); cur.rebind(rows)
         elif k in (curses.KEY_ENTER, 10, 13) and cur.index is not None:
             argv = tm.enter(rows[cur.index])
             if argv is None:

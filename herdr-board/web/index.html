@@ -74,6 +74,10 @@ input::placeholder{color:var(--fg-3)}
 
 main{flex:1;min-width:0;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:0 48px;max-width:1200px;width:100%;margin:0 auto}
 .errors{margin-top:12px;font-family:var(--font-mono);font-size:11px;color:var(--fg-3);display:flex;flex-direction:column;gap:2px}
+.row.gone{opacity:.5}
+.syncline{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px;font-size:12px;color:var(--fg-2);font-family:var(--font-mono)}
+.newbar{display:flex;align-items:center;gap:10px;margin-top:14px}
+.newbar input{flex:1;min-width:0}
 .repo-grants{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:14px;padding:8px 12px;border:1px solid var(--border-soft);border-radius:var(--r);font-size:13px;color:var(--fg-2);background:var(--surface)}
 .repo-grants .h2{font-size:11px}
 .repo-grants .on{color:var(--fg)}
@@ -190,10 +194,10 @@ main{flex:1;min-width:0;padding-left:max(16px,env(safe-area-inset-left,0px));pad
     <div class="brand"><svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true"><path d="M9 1.5l6.5 3.75v7.5L9 16.5 2.5 12.75v-7.5z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><circle cx="9" cy="9" r="2" fill="currentColor"/><path d="M9 7V4.2M9 14v-3M4.9 6.6l2.4 1.4M10.7 10l2.4 1.4M4.9 11.4l2.4-1.4M10.7 8l2.4-1.4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>OPSX</div>
     <nav class="tabs" role="tablist" aria-label="頁面">
       <button role="tab" id="tab-home" aria-selected="true">首頁<span class="n" id="home-n"></span></button>
-      <button role="tab" disabled title="board-inbox 那張卡">收件匣</button>
+      <button role="tab" id="tab-inbox" aria-selected="false">收件匣<span class="n" id="inbox-n"></span></button>
       <button role="tab" disabled title="board-log 那張卡">紀錄</button>
     </nav>
-    <div class="right"><span class="stamp" id="stamp"></span></div>
+    <div class="right"><button class="sm" id="new-open">＋ 新增</button><span class="stamp" id="stamp"></span></div>
   </header>
   <div class="subbar">
     <span class="h2" style="font-size:10px">範圍</span>
@@ -205,6 +209,7 @@ main{flex:1;min-width:0;padding-left:max(16px,env(safe-area-inset-left,0px));pad
   </div>
   <main>
     <div id="errors" class="errors" hidden></div>
+    <div id="newbar" class="newbar" hidden><input type="text" id="new-text" aria-label="新增一件事" placeholder="一句話，Enter 送出，Esc 取消"><span class="faint mono" id="new-where" style="font-size:11px"></span></div>
     <div id="repo-grants" class="repo-grants" hidden></div>
     <div id="view"><div class="empty">載入中…</div></div>
   </main>
@@ -229,7 +234,7 @@ const api={
   async post(action,body){const r=await fetch('/api/'+action,{method:'POST',headers:{'X-Opsx-Token':token(),'Content-Type':'application/json'},body:JSON.stringify(body)});const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(action+' '+r.status+'：'+(j.error||''));if(!j.ok)throw new Error((j.stderr||j.stdout||'opsx '+action+' 失敗').trim());return j;}
 };
 let data={generated_at:null,scopes:[],cards:[],unmatched_agents:[],errors:[],legacy:{},worktrees_skipped:[]};let lastRaw='';
-const ui={scope:'all',ws:null,repo:null,sel:null,open:null,doneOpen:false,busy:false};
+const ui={drop:null,dropText:'',tab:location.hash==='#inbox'?'inbox':'home',scope:'all',ws:null,repo:null,sel:null,open:null,doneOpen:false,busy:false};
 const REFRESH_MS=5000;
 
 /* ---------- 標籤 ---------- */
@@ -332,17 +337,57 @@ function renderHome(){
   const leg=Object.entries(data.legacy||{}).filter(([r])=>ui.scope!=='ws'||(ui.repo?r===ui.repo:wsOf(r)===ui.ws));
   let h=panel('待處理',A.length,'只有你能做的：授權、決定、合併、終端機卡住',A.length?A.map(rowAttn).join(''):'<div class="empty">沒有等你的事</div>');
   h+=panel('進行中',R.length+un.length,'進度 status.json · 狀態 herdr',(R.map(rowRunning).join('')+un.map(rowUnmatched).join(''))||'<div class="empty">沒有執行中的工作</div>');
-  h+=panel(ui.scope==='ws'?`待指派 · ${esc(scopeLabel())}`:'待指派',Y.length,'有殼、還沒派出去的（收件、explore、propose 完的都在這）',(Y.length?Y.map(rowReady).join(''):'<div class="empty">沒有待指派的工作</div>')+(leg.length?`<div class="empty">舊 schema 的 change 不列（沒有 inbox.md、不是 schema: opsx）：${leg.map(([r,n])=>`${esc(r)} ${n}`).join(' · ')}</div>`:''));
+  h+=panel(ui.scope==='ws'?`待指派 · ${esc(scopeLabel())}`:'待指派',Y.length,'explore 過、還沒派出去的（剛收進來的在收件匣）',(Y.length?Y.map(rowReady).join(''):'<div class="empty">沒有待指派的工作</div>')+(leg.length?`<div class="empty">舊 schema 的 change 不列（沒有 inbox.md、不是 schema: opsx）：${leg.map(([r,n])=>`${esc(r)} ${n}`).join(' · ')}</div>`:''));
   h+=`<section class="panel"><div class="panel-h"><button class="tg h2" data-act="done-toggle" aria-expanded="${ui.doneOpen}"><span class="chev"></span>已完成</button><span class="n">${D.length}</span></div>${ui.doneOpen?(D.length?D.map(rowDone).join(''):'<div class="empty">還沒有</div>'):''}</section>`;
   return h;
+}
+/* 收件匣：沒派出、還沒 explore 的卡，依 inbox.md 的 source 分組 */
+const INBOX_GROUPS=[
+  ['agent 回報','agent、audit、deepen 寫的卡',s=>/^(agent|audit|deepen):/.test(s)],
+  ['我新增','＋新增或貼上的',s=>s==='me'||s==='paste'],
+  ['同步來源','GitLab · GitHub 指派給你的 issue',s=>/^(gitlab|github):/.test(s)],
+  ['技術債','code 裡的 shortcut: 註解',s=>/^shortcut:/.test(s)],
+];
+function inboxGroup(c){const g=INBOX_GROUPS.find(g=>c.source&&g[2](c.source));return g?g[0]:'其他';}
+function rowInbox(c){
+  const gone=c.upstream==='closed'?'上游已關閉':c.stale?'註解已刪':'';
+  return `<div class="row${gone?' gone':''}" data-key="${esc(key(c))}" role="button" tabindex="0" aria-selected="${ui.sel===key(c)}">
+    <div class="avatar plain">NEW</div>
+    <div class="main"><div class="l1"><span class="badge line">${esc(KIND[c.kind]||c.kind)}</span>${gone?`<span class="badge line">${gone}</span>`:''}<span class="title">${esc(c.title)}</span><span class="meta">${esc(c.repo)} · ${esc(c.source||'沒有 source')} · ${esc(since(c))}</span></div></div>
+    <div class="act"><button class="primary sm" data-act="dispatch">指派</button><button class="sm" data-act="explore">先 explore</button>${dropCtl(key(c))}</div></div>`;
+}
+/* 捨棄就地要一行理由：Enter 送出、Esc 取消；打到一半的字存在 ui.dropText，重畫不丟 */
+function dropCtl(id){
+  if(ui.drop!==id)return `<button class="sm ghost danger" data-act="drop-open" data-drop="${esc(id)}">捨棄</button>`;
+  return `<input type="text" class="drop-reason" data-drop="${esc(id)}" aria-label="捨棄理由" placeholder="理由（必填），Enter 捨棄" value="${esc(ui.dropText)}">`;
+}
+/* 待分類：沒有 repo，不受範圍篩選；只能選 repo 建卡或捨棄，不能指派（board-inbox D6） */
+function rowUnfiled(u){
+  const opts=Object.keys(data.repo_paths||{}).sort().map(r=>`<option value="${esc(r)}">${esc(r)}</option>`).join('');
+  return `<div class="row" data-unfiled="${esc(u.slug)}">
+    <div class="avatar plain">?</div>
+    <div class="main"><div class="l1"><span class="title">${esc(u.title)}</span><span class="meta">${esc(u.source||'')} · ${esc(u.found||'')}</span></div></div>
+    <div class="act"><select aria-label="選 repo"><option value="">選 repo…</option>${opts}</select><button class="primary sm" data-act="file">建卡</button>${dropCtl('unfiled:'+u.slug)}</div></div>`;
+}
+function renderInbox(){
+  const I=sect('收件匣'),U=data.unfiled||[];
+  const ls=data.last_sync;
+  const sl=`<div class="syncline"><span>上次同步 ${ls?esc(ago(ls.at))+'前 · 新建 '+ls.created+' · 更新 '+ls.updated+(ls.errors?` · <span style="color:var(--danger)">錯誤 ${ls.errors}：${esc(ls.first_error)}</span>`:''):'還沒跑過'}</span><span class="faint">GitLab · GitHub · shortcut</span><button class="sm" data-act="sync">立即同步</button></div>`;
+  const pre=sl+panel('待分類',U.length,'沒有 repo 的：選一個 repo 才建殼',U.length?U.map(rowUnfiled).join(''):'<div class="empty">沒有</div>');
+  const groups=[...INBOX_GROUPS.map(g=>[g[0],g[1]]),['其他','inbox.md 沒有認得的 source']];
+  return groups.map(([name,sub])=>{const cs=I.filter(c=>inboxGroup(c)===name);
+    if(name==='其他'&&!cs.length)return '';
+    return panel(name,cs.length,sub,cs.length?cs.map(rowInbox).join(''):'<div class="empty">沒有</div>');}).reduce((h,x)=>h+x,pre);
 }
 function render(){
   const A=sect('待處理');
   $('#counter').innerHTML=A.length?`待處理 <b>${A.length}</b>`:'<span class="faint">無待處理</span>';
   $('#home-n').textContent=A.length||'';
+  $('#inbox-n').textContent=sect('收件匣').length+(data.unfiled||[]).length||'';
+  $('#tab-home').setAttribute('aria-selected',ui.tab==='home');$('#tab-inbox').setAttribute('aria-selected',ui.tab==='inbox');
   $('#stamp').textContent=data.generated_at?'collect '+ago(data.generated_at):'';
   const y=window.scrollY;
-  $('#view').innerHTML=renderHome();
+  $('#view').innerHTML=ui.tab==='inbox'?renderInbox():renderHome();
   window.scrollTo(0,y);
   const er0=data.worktrees_skipped&&data.worktrees_skipped.length?[{source:'collect',message:'跳過 worktree 目錄：'+data.worktrees_skipped.join('、')}]:[];
   data.errors=(data.errors||[]).filter(e=>e.source!=='collect').concat(er0);
@@ -415,6 +460,43 @@ function focusPane(pane){
   act(`herdr pane focus ${pane}`,()=>api.post('focus',{pane}));
 }
 
+/* ＋新增：範圍選到單一 repo 就建在那個 repo，否則進待分類（board-inbox D6） */
+const newRepo=()=>ui.scope==='ws'&&ui.repo?(data.repo_paths||{})[ui.repo]||null:null;
+function openNew(){$('#newbar').hidden=false;$('#new-where').textContent=newRepo()?'建在 '+ui.repo:'進待分類（範圍選到單一 repo 才直接建殼）';$('#new-text').focus();}
+function closeNew(){$('#newbar').hidden=true;$('#new-text').value='';}
+function submitNew(){
+  const text=$('#new-text').value.trim();if(!text)return;
+  const repo=newRepo();closeNew();
+  act(`opsx new${repo?' --repo '+repo:''} -- ${text}`,()=>api.post('new',repo?{text,repo}:{text}));
+}
+
+/* 先 explore：互動模式派出，第一句由 dispatch 從 stage 推，收件卡一定是 /explore（board-inbox D5） */
+function exploreFirst(c){act(`opsx dispatch ${c.slug} --mode interactive --kind ${c.kind}`,()=>api.post('dispatch',{slug:c.slug,mode:'interactive',kind:c.kind,repo:repoTop(c)}));}
+function submitDrop(id,text){
+  ui.drop=null;ui.dropText='';
+  if(id.startsWith('unfiled:')){const slug=id.slice(8);act(`opsx drop ${slug} -- ${text}`,()=>api.post('drop',{slug,text}));return;}
+  const c=byKey(id);if(!c){render();return;}
+  act(`opsx drop ${c.slug} --repo ${repoTop(c)} -- ${text}`,()=>api.post('drop',{slug:c.slug,repo:repoTop(c),text}));
+}
+/* 立即同步：409 是另一支同步還在跑（launchd 或另一個分頁），不是錯誤 */
+async function syncNow(){
+  if(ui.busy)return;ui.busy=true;toast('opsx sync 跑中…');
+  try{
+    const r=await fetch('/api/sync',{method:'POST',headers:{'X-Opsx-Token':token(),'Content-Type':'application/json'},body:'{}'});
+    const j=await r.json().catch(()=>({}));
+    if(r.status===409)toast('同步進行中');
+    else if(!r.ok||!j.ok)toast('opsx sync 失敗：'+(j.error||j.stderr||r.status),true);
+    else{toast((j.stdout||'').trim());await refresh(true);}
+  }catch(e){toast('opsx sync 失敗：'+e.message,true);}
+  finally{ui.busy=false;}
+}
+function fileUnfiled(rowEl){
+  const slug=rowEl.dataset.unfiled,r=rowEl.querySelector('select').value;
+  if(!r){toast('先選 repo',true);return;}
+  const repo=data.repo_paths[r];
+  act(`opsx file ${slug} --repo ${repo}`,()=>api.post('file',{slug,repo}));
+}
+
 /* ---------- 指派對話框 ---------- */
 let dlgFor=null;
 function openDispatch(c){
@@ -456,6 +538,7 @@ document.addEventListener('click',e=>{
   const k=(btn&&btn.closest('[data-key]')||rowEl)?.dataset.key||ui.open;
   const c=k?byKey(k):null;
   if(e.target.closest('a[href]'))return;
+  if(e.target.matches('input,select'))return;
   if(btn){
     e.stopPropagation();const a=btn.dataset.act;
     if(a==='done-toggle'){ui.doneOpen=!ui.doneOpen;render();return;}
@@ -463,6 +546,9 @@ document.addEventListener('click',e=>{
     if(a==='dlg-cancel'){closeDispatch();return;}
     if(a==='dlg-go'){doDispatch();return;}
     if(a==='pane-id'){focusPane(btn.dataset.pane);return;}
+    if(a==='sync'){syncNow();return;}
+    if(a==='file'){fileUnfiled(btn.closest('[data-unfiled]'));return;}
+    if(a==='drop-open'){ui.drop=btn.dataset.drop;ui.dropText='';render();const i=$('.drop-reason');if(i)i.focus();return;}
     if(!c)return;
     if(a==='open'){openDrawer(k);return;}
     if(a==='answer'){answer(c,btn.dataset.text,btn.dataset.grant);return;}
@@ -470,6 +556,7 @@ document.addEventListener('click',e=>{
     if(a==='stop'){stop(c);return;}
     if(a==='pane'){focusPane(c.dispatch&&c.dispatch.pane);return;}
     if(a==='dispatch'){openDispatch(c);return;}
+    if(a==='explore'){exploreFirst(c);return;}
     return;
   }
   const kb=e.target.closest('#dialog .kinds button');
@@ -482,8 +569,14 @@ document.addEventListener('click',e=>{
   if(e.target.id==='scrim'){if(!$('#dialog').hidden)closeDispatch();else closeDrawer();return;}
   if(!e.target.closest('#menu'))closeMenu();
 });
+document.addEventListener('input',e=>{if(e.target.classList.contains('drop-reason'))ui.dropText=e.target.value;});
 document.addEventListener('keydown',e=>{
   if(e.target.matches('input,select')){
+    if(e.target.classList.contains('drop-reason')){
+      if(e.key==='Escape'){ui.drop=null;ui.dropText='';render();}
+      else if(e.key==='Enter'&&e.target.value.trim())submitDrop(e.target.dataset.drop,e.target.value.trim());
+      return;}
+    if(e.target.id==='new-text'){if(e.key==='Enter')submitNew();else if(e.key==='Escape')closeNew();return;}
     if(e.key==='Enter'&&e.target.id==='reply'){const c=byKey(ui.open);const v=e.target.value.trim();if(c&&v)answer(c,v,null);}
     return;
   }
@@ -498,6 +591,10 @@ function move(d){
   const i=ks.indexOf(ui.sel);ui.sel=ks[Math.max(0,Math.min(ks.length-1,i+d))];render();
   const el=document.querySelector(`#view .row[data-key="${CSS.escape(ui.sel)}"]`);if(el)el.scrollIntoView({block:'nearest'});
 }
+function showTab(t){ui.tab=t;ui.sel=null;history.replaceState(null,'','#'+t);render();}
+$('#new-open').onclick=openNew;
+$('#tab-home').onclick=()=>showTab('home');
+$('#tab-inbox').onclick=()=>showTab('inbox');
 $('#scope-all').onclick=()=>{ui.scope='all';ui.repo=null;closeMenu();render();};
 $('#scope-ws').onclick=e=>{e.stopPropagation();if($('#menu').hidden)openMenu(e.currentTarget);else closeMenu();};
 
@@ -517,7 +614,7 @@ async function refresh(force){
 }
 function schedule(){clearTimeout(timer);timer=setTimeout(()=>{if(document.hidden){schedule();return;}refresh(false);},REFRESH_MS);}
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)refresh(false);});
-if(location.hash!=='#home')history.replaceState(null,'','#home');
+if(location.hash!=='#'+ui.tab)history.replaceState(null,'','#'+ui.tab);
 refresh(true);
 </script>
 </body>

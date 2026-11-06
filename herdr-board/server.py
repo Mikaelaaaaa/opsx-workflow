@@ -7,11 +7,12 @@ GET /            回 web/index.html。
 GET /healthz     回 {"ok": true, "app": "opsx-board"}，不用 token，給 open-board.sh 探活，app 欄讓它認得是我們的。
 GET /api/collect 回 `opsx collect` 的輸出；--collect 給了檔就回那個檔（測試用）。同一時間只跑一支 collect，其他請求等它，
                  結果快取 CACHE_S 秒；頁面每 5 秒拉而 ThreadingHTTPServer 每個請求一個 thread，沒有這個會疊成十幾支 collect。
-POST /api/{answer,dispatch,merge,stop} 轉呼叫對應的 `opsx` 子命令，POST /api/focus 跑 herdr pane focus；都回 {ok, stdout, stderr}。
+POST /api/{answer,dispatch,merge,stop,new,file,drop,sync} 轉呼叫對應的 `opsx` 子命令，POST /api/focus 跑 herdr pane focus；都回 {ok, stdout, stderr}。
 
 /api/* 要 header X-Opsx-Token 等於 <state>/board-token（第一次啟動時產生，之後重用）。只聽 127.0.0.1。
 opsx 用 plugin 自己的 bin/opsx（不靠 PATH），並把 --state 透過 OPSX_STATE_DIR 傳下去，兩邊讀同一份狀態。
-動作本身在 bin/lib/{answer,merge,dispatch,stop}.sh，這裡只做參數對應與驗證。
+動作本身在 bin/lib/{answer,merge,dispatch,stop,new,file,drop,sync}.sh；
+sync 以退出碼 3 結束（另一支同步還在跑）回 409，這裡只做參數對應與驗證。
 """
 from __future__ import annotations
 
@@ -38,12 +39,16 @@ ACTION_TIMEOUT = 120
 CACHE_S = 3
 MAX_BODY = 64 * 1024
 
-# 每個動作：必填欄位、選填 flag、尾端文字。slug 永遠第一個位置參數。
+# 每個動作：有沒有 slug（有就是第一個位置參數）、必填欄位、選填 flag、尾端文字。
 ACTIONS = {
-    "answer": {"required": ("slug", "gate", "text"), "flags": ("gate", "grant", "repo"), "trailing": "text"},
-    "merge": {"required": ("slug",), "flags": ("repo",), "trailing": None},
-    "stop": {"required": ("slug",), "flags": ("repo",), "trailing": None},
-    "dispatch": {"required": ("slug",), "flags": ("agent", "model", "mode", "kind", "repo"), "trailing": None},
+    "answer": {"slug": True, "required": ("gate", "text"), "flags": ("gate", "grant", "repo"), "trailing": "text"},
+    "merge": {"slug": True, "required": (), "flags": ("repo",), "trailing": None},
+    "stop": {"slug": True, "required": (), "flags": ("repo",), "trailing": None},
+    "dispatch": {"slug": True, "required": (), "flags": ("agent", "model", "mode", "kind", "repo"), "trailing": None},
+    "new": {"slug": False, "required": ("text",), "flags": ("repo",), "trailing": "text"},
+    "file": {"slug": True, "required": ("repo",), "flags": ("repo",), "trailing": None},
+    "drop": {"slug": True, "required": ("text",), "flags": ("repo",), "trailing": "text"},
+    "sync": {"slug": False, "required": (), "flags": ("source",), "trailing": None},
 }
 FLAG_RE = {
     "gate": re.compile(r"^[A-Za-z0-9_.-]{1,64}$"),
@@ -53,6 +58,7 @@ FLAG_RE = {
     "mode": re.compile(r"^(interactive|autopilot|drive)$"),
     "kind": re.compile(r"^(dev|bug-fix|refactoring|perf|experiment|ops|chore)$"),
     "repo": re.compile(r"^/[^\0]{1,1024}$"),
+    "source": re.compile(r"^(gitlab|github|debt)$"),
 }
 PANE_RE = re.compile(r"^[A-Za-z0-9:_-]{1,32}$")
 
@@ -92,13 +98,14 @@ def repo_ok(path: str) -> bool:
 def build_args(action: str, body: dict) -> list[str]:
     """把 POST body 對成 opsx 的參數。欄位不合格就 raise ValueError，呼叫端回 400。"""
     spec = ACTIONS[action]
-    for k in spec["required"]:
+    for k in (("slug",) if spec["slug"] else ()) + spec["required"]:
         if not isinstance(body.get(k), str) or not body[k].strip():
             raise ValueError("缺 %s" % k)
-    slug = body["slug"]
-    if not SLUG_RE.match(slug):
-        raise ValueError("slug 不合格：%r" % slug)
-    args = [action, slug]
+    args = [action]
+    if spec["slug"]:
+        if not SLUG_RE.match(body["slug"]):
+            raise ValueError("slug 不合格：%r" % body["slug"])
+        args.append(body["slug"])
     for flag in spec["flags"]:
         v = body.get(flag)
         if v is None or v == "":
@@ -225,7 +232,8 @@ class Handler(BaseHTTPRequestHandler):
             args = build_args(action, body)
         except (ValueError, json.JSONDecodeError) as e:
             self.send_json(400, {"error": str(e)}); return
-        self.send_json(200, run(["bash", str(OPSX), *args], ACTION_TIMEOUT, self.opsx_env()))
+        r = run(["bash", str(OPSX), *args], ACTION_TIMEOUT, self.opsx_env())
+        self.send_json(409 if action == "sync" and r["rc"] == 3 else 200, r)
 
 
 def serve(port: int, state: pathlib.Path, collect_file: pathlib.Path | None) -> None:

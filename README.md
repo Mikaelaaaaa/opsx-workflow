@@ -17,8 +17,8 @@ Unified development workflow plugin for Claude Code. Covers the full cycle: thin
 資料全是投影（`opsx collect`：`openspec/changes/*/`、`~/.local/state/opsx/`、`herdr agent list`、`glab mr view`），看板自己不存狀態。
 
 - 網頁：herdr 裡叫 action `open-board`（`opsx init --global` 已 `herdr plugin link`），或 `bash herdr-board/scripts/open-board.sh`。
-  首頁四段 待處理 / 進行中 / 待指派 / 已完成；按鈕背後是 `opsx answer`（回 gate、三種授權答案）、`opsx dispatch`、`opsx merge`（寫一次性核准，叫 agent `/babysit merge`，閘門只放行那一次）、`opsx stop`。
-- 右側 pane：herdr 裡叫 action `open-pane`（overlay 開 pane `board`，`python3 herdr-board/tui.py`），同一份清單，↑↓ 選、Enter 跳 pane、q 關；不回 gate、不派工。
+  首頁四段 待處理 / 進行中 / 待指派 / 已完成，另有收件匣 tab（見下）；按鈕背後是 `opsx answer`（回 gate、三種授權答案）、`opsx dispatch`、`opsx merge`（寫一次性核准，叫 agent `/babysit merge`，閘門只放行那一次）、`opsx stop`。
+- 右側 pane：herdr 裡叫 action `open-pane`（overlay 開 pane `board`，`python3 herdr-board/tui.py`），同一份清單，↑↓ 選、Enter 跳 pane、i / d 展開收件匣 / 已完成、q 關；不回 gate、不派工。
 - 快捷鍵：herdr 的鍵綁 action，在 `~/.config/herdr/config.toml` 加兩段（prefix 是你 herdr 的前綴鍵）：
   ```toml
   [[keys.command]]
@@ -32,7 +32,13 @@ Unified development workflow plugin for Claude Code. Covers the full cycle: thin
   command = "opsx-board.open-pane"
   ```
 - 對原型看畫面：`python3 herdr-board/server.py --collect herdr-board/tests/fixtures/collect-sample.json`，開 `http://127.0.0.1:8791/#token=$(cat ~/.local/state/opsx/board-token)`。
-- 收件匣 tab、同步腳本、紀錄 tab 在 `board-inbox`、`board-log` 兩張卡（`openspec/workplan.yaml`）。
+- 收件匣 tab：沒派出、還沒 explore 的卡（explore 過才到首頁待指派），依 inbox.md 的 `source` 分組，加上沒有 repo 的「待分類」。每個按鈕都有對應的子命令，終端機做得到同一件事：
+  - `opsx new [--repo <path>] -- <一句話>`：＋新增。範圍選到單一 repo 時建在那裡（slug `me-<YYYYMMDD-HHMM>`），否則寫進 `~/.local/state/opsx/unfiled/` 待分類。
+  - `opsx file <slug> --repo <path>`：待分類選 repo 建卡。
+  - `opsx drop <slug> [--repo <path>] -- <理由>`：捨棄，理由必填；收件卡歸檔並標 `outcome: declined`，待分類移到 `unfiled/dropped/`。
+  - `opsx sync [--source gitlab|github|debt]`：撈 `sources.toml` 登記的 repo 裡指派給你的 issue，和 code 裡的 `shortcut:` 註解，以 inbox.md 的 `source` 去重（含 archive），建殼或更新。上游關閉、註解刪掉只標記（列灰色），卡由你捨棄。每次跑完在 `~/.local/state/opsx/sync.log` 記一行（時間、新建、更新、沒變、錯誤數、第一個錯誤）；同一時間只跑一支，另一支退出碼 3。
+  - 每日同步：`opsx init --global` 裝 launchd job `com.opsx.sync`（`~/Library/LaunchAgents/com.opsx.sync.plist`），每天 09:00 跑 `opsx sync`，輸出在 `~/.local/state/opsx/sync.out`。
+- 紀錄 tab 在 `board-log` 那張卡（`openspec/workplan.yaml`）。
 
 ## Skills
 

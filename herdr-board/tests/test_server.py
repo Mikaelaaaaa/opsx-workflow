@@ -27,6 +27,7 @@ class ServerTest(unittest.TestCase):
         cls.state.mkdir()
         cls.log = cls.tmp / "opsx.log"
         cls.fail_flag = cls.tmp / "opsx.fail"
+        cls.rc_file = cls.tmp / "opsx.rc"   # 有這個檔就以檔裡的數字退出（測 sync 的退出碼 3）
         shim_dir = cls.tmp / "bin"
         shim_dir.mkdir()
         cls.env_log = cls.tmp / "env.log"
@@ -38,6 +39,7 @@ class ServerTest(unittest.TestCase):
             f'printf "%s\\n" "$*" >> "{cls.log}"\n'
             f'printf "OPSX_STATE_DIR=%s\\n" "${{OPSX_STATE_DIR:-}}" >> "{cls.env_log}"\n'
             f'if [ -f "{cls.fail_flag}" ]; then echo "opsx: 假的失敗" >&2; exit 2; fi\n'
+            f'if [ -f "{cls.rc_file}" ]; then echo "opsx: 假的退出碼" >&2; exit "$(cat "{cls.rc_file}")"; fi\n'
             'echo "ok: $1"\n'
         )
         shim.chmod(0o755)
@@ -89,6 +91,8 @@ class ServerTest(unittest.TestCase):
         self.log.write_text("")
         if self.fail_flag.exists():
             self.fail_flag.unlink()
+        if self.rc_file.exists():
+            self.rc_file.unlink()
 
     def test_binds_loopback_only(self):
         self.assertEqual(self.host, "127.0.0.1")
@@ -131,6 +135,60 @@ class ServerTest(unittest.TestCase):
         self.assertEqual(lines[0], "merge x --repo %s" % r)
         self.assertEqual(lines[1], "stop x")
         self.assertEqual(lines[2], "dispatch x --agent claude --model claude-opus-5-5 --mode autopilot --kind dev --repo %s" % r)
+
+    def test_new_without_and_with_repo(self):
+        r = str(self.repo)
+        status, _, body = self.req("/api/new", {"text": "試試看"}, token=self.token)
+        self.assertEqual(status, 200, body)
+        status, _, body = self.req("/api/new", {"text": "試試看", "repo": r}, token=self.token)
+        self.assertEqual(status, 200, body)
+        self.assertEqual(self.log.read_text().strip().split("\n"), ["new -- 試試看", "new --repo %s -- 試試看" % r])
+
+    def test_new_rejects_empty_or_multiline_text(self):
+        for text in ("", "a\nb"):
+            status, _, body = self.req("/api/new", {"text": text}, token=self.token)
+            self.assertEqual(status, 400, body)
+        self.assertEqual(self.log.read_text(), "")
+
+    def test_file_needs_slug_and_repo(self):
+        r = str(self.repo)
+        status, _, body = self.req("/api/file", {"slug": "me-1", "repo": r}, token=self.token)
+        self.assertEqual(status, 200, body)
+        self.assertEqual(self.log.read_text().strip(), "file me-1 --repo %s" % r)
+        status, _, body = self.req("/api/file", {"slug": "me-1"}, token=self.token)
+        self.assertEqual(status, 400, body)
+
+    def test_file_then_drop(self):
+        r = str(self.repo)
+        self.req("/api/file", {"slug": "me-1", "repo": r}, token=self.token)
+        status, _, body = self.req("/api/drop", {"slug": "x", "repo": r, "text": "重複"}, token=self.token)
+        self.assertEqual(status, 200, body)
+        status, _, body = self.req("/api/drop", {"slug": "me-2", "text": "不需要"}, token=self.token)
+        self.assertEqual(status, 200, body)
+        self.assertEqual(self.log.read_text().strip().split("\n"),
+                         ["file me-1 --repo %s" % r, "drop x --repo %s -- 重複" % r, "drop me-2 -- 不需要"])
+        status, _, body = self.req("/api/drop", {"slug": "x", "repo": r}, token=self.token)
+        self.assertEqual(status, 400, "理由必填：%s" % body)
+
+    def test_sync_with_and_without_source(self):
+        status, _, body = self.req("/api/sync", {}, token=self.token)
+        self.assertEqual(status, 200, body)
+        status, _, body = self.req("/api/sync", {"source": "debt"}, token=self.token)
+        self.assertEqual(status, 200, body)
+        self.assertEqual(self.log.read_text().strip().split("\n"), ["sync", "sync --source debt"])
+
+    def test_sync_rejects_unknown_source(self):
+        status, _, body = self.req("/api/sync", {"source": "obsidian"}, token=self.token)
+        self.assertEqual(status, 400, body)
+        self.assertEqual(self.log.read_text(), "")
+
+    def test_sync_in_progress_is_409(self):
+        self.rc_file.write_text("3")
+        status, _, body = self.req("/api/sync", {}, token=self.token)
+        self.assertEqual(status, 409, body)
+        self.rc_file.write_text("3")
+        status, _, body = self.req("/api/merge", {"slug": "x"}, token=self.token)
+        self.assertEqual(status, 200, "只有 sync 的退出碼 3 是 409：%s" % body)
 
     def test_repo_must_be_an_opsx_root_and_text_single_line(self):
         status, _, body = self.req("/api/merge", {"slug": "x", "repo": "/tmp"}, token=self.token)

@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+# opsx drop <slug> [--repo <path>] -- <理由>：捨棄一張卡，理由必填單行。
+# 給 repo：.openspec.yaml 寫 outcome: declined、inbox.md 尾端加 ## 捨棄理由、decisions.tsv 記一行，再 openspec archive。
+#   收件卡沒有 explore.md，所以 archive 要的「不做」就寫在 ## 捨棄理由。還派著（dispatch.json 有、不是 stopped）的卡要先停止。
+# 不給 repo：對象是待分類 <state>/unfiled/<slug>.md，移到 unfiled/dropped/，不刪，誤按還找得回來。
+# specs/board-actions「捨棄」。
+
+opsx_drop() {
+  local slug="" top="" reason=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --repo) top="$2"; shift 2 ;;
+      --) shift; reason="$*"; break ;;
+      -*) die "drop: 不認得的選項 $1" ;;
+      *) [ -z "$slug" ] || die "drop: 用法 opsx drop <slug> [--repo <path>] -- <理由>"; slug="$1"; shift ;;
+    esac
+  done
+  [ -n "$slug" ] || die "drop: 用法 opsx drop <slug> [--repo <path>] -- <理由>"
+  [[ "$slug" =~ ^[a-z][a-z0-9_-]{0,31}$ ]] || die "drop: slug 不合格：$slug"
+  single_line "$reason"
+  reason="$(printf '%s' "$reason" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')"
+
+  if [ -z "$top" ]; then
+    local src="$OPSX_STATE_DIR/unfiled/$slug.md"
+    [ -f "$src" ] || die "drop: 待分類裡沒有 ${slug}（${src}）"
+    mkdir -p "$OPSX_STATE_DIR/unfiled/dropped"
+    printf '\n## 捨棄理由\n\n%s\n' "$reason" >> "$src"
+    mv "$src" "$OPSX_STATE_DIR/unfiled/dropped/"
+    say "drop: 待分類 $slug 移到 unfiled/dropped/"
+    return
+  fi
+
+  top="$(opsx_repo_top "$top")"
+  local repo d; repo="$(basename "$top")"; d="$top/openspec/changes/$slug"
+  [ -d "$d" ] || die "drop: 沒有這張卡：$d"
+  local f="$OPSX_STATE_DIR/dispatch.json" mode=""
+  [ -f "$f" ] && mode="$(OPSX_KEY="$repo/$slug" python3 -I -c 'import json,os,sys;e=json.load(open(sys.argv[1])).get(os.environ["OPSX_KEY"]);print("" if e is None else e.get("mode") or "running")' "$f")"
+  [ -z "$mode" ] || [ "$mode" = stopped ] || die "drop: $repo/$slug 還派著（${mode}），先在板上按停止或 opsx stop $slug"
+
+  printf 'outcome: declined\n' >> "$d/.openspec.yaml"
+  printf '\n## 捨棄理由\n\n%s\n' "$reason" >> "$d/inbox.md"
+  printf '%s\t%s\t%s\n' "$(now_iso)" "你：捨棄：${reason//$'\t'/ }" "declined" >> "$d/decisions.tsv"
+  ( cd "$top" && openspec archive "$slug" --yes --skip-specs >/dev/null ) || die "drop: openspec archive $slug 失敗；outcome 與理由已寫進 $d"
+  say "drop: $repo/$slug 已捨棄並歸檔"
+}
