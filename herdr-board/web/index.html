@@ -189,6 +189,8 @@ main{flex:1;min-width:0;padding-left:max(16px,env(safe-area-inset-left,0px));pad
 .ev .who{font-size:12px;color:var(--fg-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .ev .who.you{color:var(--data)}
 .ev .what{min-width:0;color:var(--fg);overflow-wrap:anywhere}
+.drawer .ev{grid-template-columns:44px 70px minmax(0,1fr) auto;padding:8px 10px}
+.drawer .ev .card{display:none}
 .ev .what .ev-src{display:block;font-family:var(--font-mono);font-size:11px;color:var(--fg-3)}
 @media (prefers-reduced-motion:reduce){.bot,.bot *,.dot{animation:none!important}}
 
@@ -443,13 +445,15 @@ function renderDrawer(){
   const prog=s?`<section><h3>進度 <span class="src">status.json · ${esc(s.at||'')}</span></h3><div style="font-size:14px"><span class="bar" style="width:120px"><i style="width:${s.total?Math.round(Number(s.step)/Number(s.total)*100):0}%"></i></span><b class="mono" style="font-weight:700;color:var(--data)">${esc(PHASE_LABEL[s.phase]||s.phase)} ${esc(s.step)}/${esc(s.total)}</b> · ${esc(s.label)}${s.tests?` · tests <span class="${s.tests==='green'?'checks yes':'checks no'}" style="display:inline">${esc(s.tests)}</span>`:''}</div></section>`:'';
   const out=c.last_output?`<section><h3>最後輸出 <span class="src">herdr agent read</span></h3><pre class="term">${esc(c.last_output)}</pre></section>`:'';
   const mr=c.mr&&c.mr.url?`<section><h3>合併請求 <span class="src">${esc(c.mr.url)}</span></h3>${c.mr.conditions?`<ul class="checks">${COND.map(([k,l])=>`<li><span class="${c.mr.conditions[k]?'yes':'no'}">${c.mr.conditions[k]?'✓':'✗'}</span>${l}</li>`).join('')}</ul>`:'<div class="faint">glab 讀不到</div>'}<div class="foot" style="padding-top:12px">${c.mr.state==='ready'?`<button class="primary" data-act="merge">合併</button>`:`<span class="faint" style="font-size:12px">卡在 ${esc(c.mr.state)}，agent 的 /babysit 會處理</span>`}<a href="${esc(c.mr.url)}" target="_blank" rel="noopener"><button class="ghost">開啟 MR</button></a></div></section>`:'';
+  const mine=tl?tl.events.filter(e=>e.repo===c.repo&&e.slug===c.slug):[];
+  const logSec=`<section><h3>紀錄 <span class="src">decisions.tsv</span></h3>${tlErr?`<div class="faint" style="color:var(--danger)">${esc(tlErr)}</div>`:!tl?'<div class="faint">載入中…</div>':mine.length?`<div class="panel" style="margin-top:0">${mine.map(evRow).join('')}</div>`:'<div class="faint">這張卡還沒有紀錄</div>'}</section>`;
   const foot=`<div class="foot">${d.pane?`<button class="ghost sm" data-act="pane">開啟 pane ${esc(d.pane)}</button><button class="ghost sm" data-act="stop">停止</button>`:''}${c.section!=='已完成'?`<button class="ghost sm" data-act="dispatch">${d.pane?'重新指派':'指派'}</button>`:''}<span class="path">${esc(c.path||'')}</span></div>`;
   const headBadge=w?`<span class="badge ${WAIT_BADGE[w.type]}">${esc(w.type)}</span>`:c.agent_status==='working'?'<span class="badge ok"><span class="dot live"></span>執行中</span>':'';
-  $('#drawer').innerHTML=`<header><div style="padding-top:2px">${bot(c,40)}</div><div class="ttl"><h2>${esc(c.title)}${headBadge}</h2><div class="flow">${flowLine(c)}</div></div><button class="x" data-act="close" aria-label="關閉">×</button></header><div class="body">${ask}${facts}${prog}${out}${mr}${foot}</div>`;
+  $('#drawer').innerHTML=`<header><div style="padding-top:2px">${bot(c,40)}</div><div class="ttl"><h2>${esc(c.title)}${headBadge}</h2><div class="flow">${flowLine(c)}</div></div><button class="x" data-act="close" aria-label="關閉">×</button></header><div class="body">${ask}${facts}${prog}${out}${mr}${logSec}${foot}</div>`;
   $('#drawer').hidden=false;$('#scrim').hidden=false;
   const nr=$('#reply');if(nr&&keep){nr.value=keep.v;if(keep.focus){nr.focus();try{nr.setSelectionRange(keep.s,keep.s);}catch(e){}}}
 }
-function openDrawer(k){ui.open=k;ui.sel=k;render();const x=$('#drawer .x');if(x)x.focus();}
+function openDrawer(k){ui.open=k;ui.sel=k;render();if(!tl)loadLog();const x=$('#drawer .x');if(x)x.focus();}
 function closeDrawer(){ui.open=null;$('#drawer').hidden=true;$('#scrim').hidden=$('#dialog').hidden;render();}
 
 /* ---------- 動作（全部打 server，server 再叫 opsx）---------- */
