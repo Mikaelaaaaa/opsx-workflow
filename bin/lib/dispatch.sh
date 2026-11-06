@@ -33,6 +33,9 @@ opsx_dispatch() {
 import os, sys
 sys.path.insert(0, os.environ["OPSX_LIB"]); import jsonfile
 d = jsonfile.load(sys.argv[1]); me = os.environ["OPSX_KEY"]; slug = os.environ["OPSX_SLUG"]
+mine = d.get(me)
+if mine and mine.get("mode") != "stopped":
+    sys.exit("dispatch: %s 已經派出去了，在 %s · %s · %s（%s 起）。要換人先 opsx stop %s" % (me, mine.get("workspace"), mine.get("tab"), mine.get("pane"), mine.get("started_at"), slug))
 clash = [k for k, v in d.items() if k != me and k.endswith("/" + slug) and v.get("mode") != "stopped"]
 if clash:
     sys.exit("dispatch: herdr agent 名字就是 slug，而 %s 已經派出同名的卡，herdr agent prompt 會送錯 agent。先 opsx stop 那張，或把這張卡改名" % "、".join(clash))
@@ -119,6 +122,9 @@ PY
   until out="$(herdr agent start "$slug" --kind "$agent" --pane "$pane" -- "${aargs[@]}" 2>&1)"; do
     case "$out" in
       *agent_pane_busy*) if [ "$try" -lt 6 ]; then try=$((try + 1)); sleep "${OPSX_DISPATCH_RETRY_SLEEP:-1}"; continue; fi ;;
+      *agent_name_taken*)
+        # dispatch.json 沒記著（手動開的、或 stop 時 pane 沒關成）但 herdr 還有同名 agent：指出它在哪
+        out="herdr 已經有叫 ${slug} 的 agent，dispatch.json 沒記：$(printf '%s' "$out" | grep -oE '(workspace_id|tab_id|pane_id|status)=[^ "]*' | tr '\n' ' ')。關掉那個 pane 再派" ;;
       *agent_not_ready*)
         # Claude Code 在沒信任過的目錄（每棵新 worktree）先問 trust，herdr 判成 blocked；名字已記下，按 Yes 等到 idle 就等於 start 成功
         if herdr pane wait-output --match "trust this folder" --timeout 3000 "$pane" >/dev/null 2>&1; then
