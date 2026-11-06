@@ -148,6 +148,34 @@ out="$(mg 'gh pr create --title t --body "## Changes
 out="$(mg 'gh pr create --title t --body "just text"')"; assert_eq "$(decision "$out")" deny "mr: body 不合格"
 out="$(mg 'glab mr list')"; assert_eq "$out" "" "mr: 其他 glab 指令不出聲"
 
+# ---------- security guard：AI 署名只看 commit message ----------
+sd() { run_hook security-guard.sh "$(j "$R" Bash "$(cmdj "$1")")"; }
+out="$(sd 'cd /private/tmp/claude-502/x && git commit -m "fix: clean"')"; assert_eq "$(decision "$out")" allow "guard: 路徑含 claude、message 乾淨"
+out="$(sd 'git commit -m "feat: x" -m "Co-Authored-By: Claude <noreply@anthropic.com>"')"; assert_eq "$(decision "$out")" deny "guard: message 含署名"
+reason "$out" | grep -q Claude || fail "guard: 理由要提到 Claude"
+out="$(sd 'cd /x/claude-502 && git commit -m clean && git push origin feat/x')"; assert_eq "$(decision "$out")" allow "guard: 串接指令只取 commit 段"
+sd_heredoc() { sd "$(printf 'git commit -m "$(cat <<'"'"'EOF'"'"'\nfeat: x\n\n%s\nEOF\n)"' "$1")"; }
+out="$(sd_heredoc 'Co-Authored-By: Claude <noreply@anthropic.com>')"; assert_eq "$(decision "$out")" deny "guard: heredoc 含署名"
+out="$(sd_heredoc 'Refs: #12')"; assert_eq "$(decision "$out")" allow "guard: heredoc 乾淨"
+out="$(sd 'git commit -am "ok"')"; assert_eq "$(decision "$out")" allow "guard: -am 乾淨"
+out="$(sd 'git commit -am "Generated with Claude"')"; assert_eq "$(decision "$out")" deny "guard: -am 含署名"
+out="$(sd 'git commit --message=ok')"; assert_eq "$(decision "$out")" allow "guard: --message= 乾淨"
+out="$(sd 'git commit --message "Generated with Claude Code"')"; assert_eq "$(decision "$out")" deny "guard: --message 含署名"
+out="$(sd 'git commit -m ";" -m "Co-Authored-By: Claude"')"; assert_eq "$(decision "$out")" deny "guard: 值是分隔字元不截斷後面的 -m"
+out="$(sd 'git commit -m a && git commit -m "Co-Authored-By: Claude"')"; assert_eq "$(decision "$out")" deny "guard: 第二個 commit 也掃"
+printf 'fix: clean\n' > "$R/msg-ok.txt"; printf 'feat: x\n\nCo-Authored-By: Claude\n' > "$R/msg-bad.txt"
+out="$(sd 'git commit -F msg-ok.txt')"; assert_eq "$(decision "$out")" allow "guard: -F 乾淨"
+out="$(sd 'git commit -F msg-bad.txt')"; assert_eq "$(decision "$out")" deny "guard: -F 含署名"
+out="$(sd 'git commit -F nope.txt')"; assert_eq "$(decision "$out")" deny "guard: -F 檔案不存在"
+reason "$out" | grep -q -- '-F' && reason "$out" | grep -q 'nope.txt' || fail "guard: 理由要有旗標和值"
+out="$(sd 'git commit -F -')"; assert_eq "$(decision "$out")" deny "guard: -F - 讀不到"
+reason "$out" | grep -q -- '-F' || fail "guard: -F - 理由要有旗標"
+out="$(sd 'git commit -m "oops')"; assert_eq "$(decision "$out")" deny "guard: 引號不平衡"
+reason "$out" | grep -q 'cannot parse command' || fail "guard: 要說 cannot parse command"
+out="$(OPSX_STATE_DIR="$FX/no-such-state" sd 'git commit -m clean')"; assert_eq "$(decision "$out")" deny "guard: 沒有 python 路徑檔"
+reason "$out" | grep -q 'opsx init --global' || fail "guard: 要說跑 opsx init --global"
+out="$(OPSX_STATE_DIR="$FX/no-such-state" sd 'git status')"; assert_eq "$(decision "$out")" allow "guard: 不是 commit 就不載入 python"
+
 # ---------- stop gate ----------
 sg() { printf '{"cwd":"%s","stop_hook_active":%s}' "$R" "${1:-false}" | bash "$H/openspec-stop-gate.sh" 2>/dev/null; true; }
 printf '## 1. x\n\n- [x] 1.1 a\n- [ ] 1.2 b\n' > "$C/tasks.md"
