@@ -6,18 +6,22 @@
       "name": "small-fix-skips-grill",
       "prompt": "看一下 slug-trailing-dash 這張卡，想清楚怎麼修、下一步要做什麼。這個專案的工作流程 skill 在 .claude/skills/，照適用的那支做。我這段時間不在，要問我的話把問題和選項寫進 repo 根目錄的 questions.md。",
       "expected_output": "Finds the cause in src/slug.mjs (no trimming of leading/trailing dashes) with the file path, records nothing for the user to decide, says grill is not needed, and names /propose slug-trailing-dash as the next step. Writes no code, no grill.md, no questions.md.",
-      "files": ["fixtures/slug-trailing-dash"],
+      "files": [
+        "fixtures/slug-trailing-dash"
+      ],
       "assertions": [
         "Final reply or explore.md names src/slug.mjs and the cause: slugify never trims leading or trailing dashes",
-        "Final reply says there is nothing for the user to decide, so the grill step is skipped or not needed",
+        "Final reply says there is nothing for the user to decide (it does not need to name any workflow step to pass)",
         "Final reply names propose (e.g. /propose slug-trailing-dash) as the next step",
+        "The proposed fix strips dashes from both ends after the existing replace, and the run showed (by executing it) that Hello World! gives hello-world, (Draft) Notes gives draft-notes, and the two existing test cases are unchanged",
+        "Every verification the final reply or explore.md says was run matches a command that actually ran in the transcript (same expression, same inputs)"
+      ],
+      "baseline": [
         "No grill.md exists under openspec/changes/slug-trailing-dash/",
         "No questions.md exists in the repo root",
         "If openspec/changes/slug-trailing-dash/explore.md was written, its 待決 section is empty",
         "No file under src/ was modified (git diff --stat -- src is empty)",
-        "The proposed fix strips dashes from both ends after the existing replace, and the run showed (by executing it) that Hello World! gives hello-world, (Draft) Notes gives draft-notes, and the two existing test cases are unchanged",
-        "The run stopped at explore: no proposal.md, design.md or tasks.md was written under openspec/changes/slug-trailing-dash/, and no commit was made",
-        "Every verification the final reply or explore.md says was run matches a command that actually ran in the transcript (same expression, same inputs)"
+        "The run stopped at explore: no proposal.md, design.md or tasks.md was written under openspec/changes/slug-trailing-dash/, and no commit was made"
       ]
     }
   ]
