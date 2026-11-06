@@ -33,6 +33,9 @@ case "$1 $2" in
   "pane list") cat "$(dirname "${BASH_SOURCE[0]}")/herdr-samples/pane-list.json" ;;
   "agent prompt") [ -n "${OPSX_TEST_ON_PROMPT:-}" ] && bash "$OPSX_TEST_ON_PROMPT" "$4"; echo '{"result":{"submitted":true}}' ;;
   "agent wait") [ -n "${OPSX_TEST_ON_WAIT:-}" ] && bash "$OPSX_TEST_ON_WAIT"; echo '{"result":{"status":"idle"}}' ;;
+  # OPSX_TEST_RENAME_FAIL 設了就回 herdr 的錯誤（auto-dispatch 的佇列 hook 用）
+  "agent rename") if [ -n "${OPSX_TEST_RENAME_FAIL:-}" ]; then echo '{"error":{"code":"agent_not_found","message":"no agent named '"$3"'"},"id":"cli:agent:rename"}' >&2; exit 1; fi
+                  echo '{"result":{"renamed":true}}' ;;
   "pane close") echo '{"result":{"closed":true}}' ;;
   "pane focus") echo '{"result":{"focused":true}}' ;;
   "plugin list") cat "${OPSX_TEST_HERDR_PLUGINS:-/dev/null}"; echo ;;
