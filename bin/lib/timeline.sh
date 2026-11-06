@@ -17,7 +17,7 @@ opsx_timeline() {
     esac
   done
   [ -d "$root" ] || die "timeline: --root 不是目錄：$root"
-  OPSX_T_ROOT="$root" OPSX_T_STATE="$state" OPSX_T_SINCE="$since" OPSX_T_NOW="$(now_iso)" python3 -I - <<'PY'
+  OPSX_T_ROOT="$root" OPSX_T_STATE="$state" OPSX_T_SINCE="$since" OPSX_T_NOW="$(now_iso)" "$OPSX_PY" -I - <<'PY'
 import datetime, json, operator, os, pathlib, re, sys
 
 env = os.environ

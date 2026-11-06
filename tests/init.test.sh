@@ -81,7 +81,12 @@ assert_eq "$(grep -c '^openspec/$' "$R/.git/info/exclude")" 1 "exclude duplicate
 
 # --- --global ---
 cd "$FX"; use_fakes herdr; export OPSX_FAKE_LOG="$FX/herdr.log"; : > "$OPSX_FAKE_LOG"
+rm -f "$OPSX_STATE_DIR/python"
 outg="$(opsx init --global 2>&1)"; assert_eq "$?" 0 "global rc: $outg"
+PY="$(python3 -I -c 'import sys;print(sys.executable)')"
+assert_eq "$(cat "$OPSX_STATE_DIR/python")" "$PY" "init --global 要記下 python3 的 sys.executable"
+[ -x "$(cat "$OPSX_STATE_DIR/python")" ] || fail "記下的 python 不能執行"
+case "$outg" in *"$PY"*) ;; *) fail "輸出要說寫了哪個 python：$outg" ;; esac
 case "$outg" in *"herdr plugin link"*) ;; *) fail "should say plugin linked: $outg" ;; esac
 case "$outg" in *'"linked"'*) fail "herdr JSON leaked into output: $outg" ;; esac
 assert_file "$OPSX_STATE_DIR/grants.toml"
@@ -92,4 +97,10 @@ assert_eq "$(readlink "$OPSX_BIN_DIR/opsx")" "$OPSX_ROOT/bin/opsx"
 echo 'x = 1' >> "$OPSX_STATE_DIR/grants.toml"
 opsx init --global >/dev/null 2>&1 || fail "global rerun"
 assert_grep "x = 1" "$OPSX_STATE_DIR/grants.toml"
+# python 路徑：相同就不動，不同就覆寫並印新舊
+outg="$(opsx init --global 2>&1)"; case "$outg" in *"python 已有"*) ;; *) fail "路徑相同要說已有：$outg" ;; esac
+printf '/nonexistent/python3\n' > "$OPSX_STATE_DIR/python"
+outg="$(opsx init --global 2>&1)"; assert_eq "$?" 0 "global with stale python: $outg"
+assert_eq "$(cat "$OPSX_STATE_DIR/python")" "$PY" "路徑變了要覆寫"
+case "$outg" in *"/nonexistent/python3"*"$PY"*) ;; *) fail "覆寫要印舊路徑與新路徑：$outg" ;; esac
 echo ok

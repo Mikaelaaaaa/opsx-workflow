@@ -3,11 +3,31 @@
 # agent prompt / agent wait 會呼叫 $OPSX_TEST_ON_PROMPT / $OPSX_TEST_ON_WAIT（若設定），讓測試推進 fixture 的狀態。
 printf '%s\n' "$*" >> "${OPSX_FAKE_LOG:?}"
 case "$1 $2" in
-  # workspace create 的真格式還沒看過：照 tab create 的形狀猜（result.workspace.workspace_id）
+  # 真格式見 herdr-samples/workspace-create.json（2026-11-06 實跑）：result.workspace.workspace_id；這裡只回用到的欄位
   "workspace create") echo '{"id":"cli:workspace:create","result":{"workspace":{"workspace_id":"w9","label":"'"${4:-}"'"},"type":"workspace_created"}}' ;;
   "workspace list") cat "$(dirname "${BASH_SOURCE[0]}")/herdr-samples/workspace-list.json" ;;
   "tab create") cat "$(dirname "${BASH_SOURCE[0]}")/herdr-samples/tab-create.json" ;;   # 真格式：result.root_pane.pane_id / result.tab.tab_id
-  "agent start") echo '{"result":{"ok":true}}' ;;
+  # OPSX_TEST_BUSY_LEFT 指到一個計數檔：>0 時回 herdr 的 agent_pane_busy（真格式）並遞減，模擬 shell 還沒到 prompt
+  "agent start")
+    if [ -n "${OPSX_TEST_BUSY_LEFT:-}" ] && [ "$(cat "$OPSX_TEST_BUSY_LEFT")" -gt 0 ]; then
+      echo "$(( $(cat "$OPSX_TEST_BUSY_LEFT") - 1 ))" > "$OPSX_TEST_BUSY_LEFT"
+      echo '{"error":{"code":"agent_pane_busy","message":"agent target pane '"$7"' is not an available shell"},"id":"cli:agent:start"}' >&2; exit 1
+    fi
+    if [ -n "${OPSX_TEST_START_FAIL:-}" ]; then
+      msg=nope; [ "$OPSX_TEST_START_FAIL" = agent_name_taken ] && msg="agent name $3 is already used; candidates: terminal_id=term_1 pane_id=w9:p1 workspace_id=w9 tab_id=w9:t1 cwd=/x status=Working"
+      echo '{"error":{"code":"'"$OPSX_TEST_START_FAIL"'","message":"'"$msg"'"},"id":"cli:agent:start"}' >&2; exit 1
+    fi
+    # OPSX_TEST_NOT_READY_ONCE 指到一個檔：存在就回一次 agent_not_ready（Claude 啟動停在對話框）並刪掉它
+    if [ -n "${OPSX_TEST_NOT_READY_ONCE:-}" ] && [ -f "$OPSX_TEST_NOT_READY_ONCE" ]; then
+      rm -f "$OPSX_TEST_NOT_READY_ONCE"
+      echo '{"error":{"code":"agent_not_ready","message":"agent '"$3"' is blocked during startup and is not ready for prompts"},"id":"cli:agent:start"}' >&2; exit 1
+    fi
+    echo '{"result":{"ok":true}}' ;;
+  "tab close") echo '{"id":"cli:tab:close","result":{"type":"ok"}}' ;;
+  # pane 畫面用 OPSX_TEST_PANE_TEXT 當內容：wait-output 找得到 --match 的字就成功，否則 rc 1
+  "pane wait-output") case "${OPSX_TEST_PANE_TEXT:-}" in *"$4"*) echo '{"result":{"matched":true}}' ;; *) echo '{"error":{"code":"timeout"}}' >&2; exit 1 ;; esac ;;
+  "pane read") printf '%s\n' "${OPSX_TEST_PANE_TEXT:-}" ;;
+  "pane send-keys") echo '{"result":{"type":"ok"}}' ;;
   # 真格式（2026-11-06 在 pane 裡實跑存下來）：{"id":"cli:agent:list","result":{"agents":[{pane_id:"w1:p2",agent_status,…}],"type":"agent_list"}}
   "agent list") cat "${OPSX_TEST_HERDR_AGENTS:-$(dirname "${BASH_SOURCE[0]}")/herdr-samples/agent-list.json}" ;;
   "pane list") cat "$(dirname "${BASH_SOURCE[0]}")/herdr-samples/pane-list.json" ;;

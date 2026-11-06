@@ -9,6 +9,10 @@ export HERDR_ENV=""          # 測試裡永遠不碰 herdr
 export OPSX_NONINTERACTIVE=1 # init 不問問題
 export TZ=Asia/Taipei
 trap 'rm -rf "$FX"' EXIT
+# opsx init --global 會寫的 python 路徑；opsx 和 hooks 沒有它就不跑
+mkdir -p "$OPSX_STATE_DIR"; python3 -I -c 'import sys; print(sys.executable)' > "$OPSX_STATE_DIR/python"
+# 測試 helper 自己叫的 python3 也走那一支，不經 pyenv shim（每次多 250 ms 左右，一個檔幾十次）
+PATH="$(dirname "$(cat "$OPSX_STATE_DIR/python")"):$PATH"; export PATH
 
 fail() { echo "ASSERT FAIL: $*" >&2; exit 1; }
 assert_eq() { [ "$1" = "$2" ] || fail "expected [$2] got [$1]${3:+ — $3}"; }

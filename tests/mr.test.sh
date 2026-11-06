@@ -4,7 +4,7 @@
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 use_fakes herdr glab gh
 export OPSX_FAKE_LOG="$FX/glab.log"; : > "$OPSX_FAKE_LOG"
-source "$OPSX_ROOT/bin/lib/common.sh"; source "$OPSX_ROOT/bin/lib/stage.sh"; source "$OPSX_ROOT/bin/lib/mr.sh"
+source "$OPSX_ROOT/bin/lib/common.sh"; source "$OPSX_ROOT/bin/lib/stage.sh"; source "$OPSX_ROOT/bin/lib/mr.sh"; source "$OPSX_ROOT/bin/lib/python.sh"; opsx_python_load || fail "$OPSX_PY_ERR"
 
 field() { printf '%s' "$1" | python3 -I -c 'import json,sys;d=json.load(sys.stdin)
 for k in sys.argv[1].split("."): d=d[k]

@@ -16,6 +16,19 @@
 # shellcheck source=/dev/null
 source "$OPSX_ROOT/bin/lib/mr.sh"
 
+# 舊 spec-driven 的 change：.openspec.yaml 沒有 schema: opsx，inbox.md 不存在或只有空白。只計數，不當卡。
+# 只用 builtin：真 repo 裡有幾百張舊卡，每張 fork 一次 stage 判斷就是十幾秒。
+collect_is_legacy() { # <change dir>
+  local line
+  if [ -f "$1/.openspec.yaml" ]; then
+    while IFS= read -r line || [ -n "$line" ]; do
+      [[ $line =~ ^schema:[[:space:]]*opsx[[:space:]]*$ ]] && return 1
+    done < "$1/.openspec.yaml"
+  fi
+  [ -f "$1/inbox.md" ] && [[ $(<"$1/inbox.md") =~ [^[:space:]] ]] && return 1
+  return 0
+}
+
 opsx_collect() {
   local root="$HOME/code" state="$OPSX_STATE_DIR"
   while [ $# -gt 0 ]; do
@@ -33,22 +46,32 @@ opsx_collect() {
   # stage 用 stage_of，MR 用 mr_json，不另算；這裡不 fork python，1000 張卡就是 1000 次啟動。mr_json 只對有 MR 的卡跑。
   # repo 的判準：<root>/<name>/openspec/changes 存在，而且 <name>/.git 是目錄。linked worktree 的 .git 是檔案，跳過，
   # 不然 Agentory-AI-langflow、*-wt-* 會被當成別的 repo。archive 只取最新 N 張，已完成不能無限長。
-  local repo_dir repo d slug archived stage mrfile n=0 archive_cap="${OPSX_COLLECT_ARCHIVE_CAP:-30}" seen_archive
-  : > "$work/cards.tsv"; mkdir -p "$work/mr"
-  for repo_dir in "$root"/*/; do
+  local repo_dir repo d slug archived stage mrfile n=0 archive_cap="${OPSX_COLLECT_ARCHIVE_CAP:-30}" seen_archive real
+  : > "$work/cards.tsv"; : > "$work/legacy"; : > "$work/seen"; mkdir -p "$work/mr"
+  # repo 清單（D1）：<root>/*/ 加上 sources.toml 登記的 path，init 過的 repo 不在 root 底下也算（opsx-workflow 在 ~/code/sandbox/）
+  local -a repo_dirs=()
+  for repo_dir in "$root"/*/; do repo_dirs+=("${repo_dir%/}"); done
+  if [ -f "$state/sources.toml" ]; then
+    while IFS= read -r repo_dir; do repo_dirs+=("$repo_dir"); done < <(sed -nE 's/^path = "(.*)"$/\1/p' "$state/sources.toml")
+  fi
+  for repo_dir in "${repo_dirs[@]}"; do
     [ -d "$repo_dir/openspec/changes" ] || continue
+    real="$(cd "$repo_dir" && pwd -P)"
+    if grep -qxF "$real" "$work/seen"; then continue; fi
+    printf '%s\n' "$real" >> "$work/seen"; repo_dir="$real/"
     if [ -f "$repo_dir/.git" ]; then printf '%s\n' "$(basename "$repo_dir")" >> "$work/worktrees"; continue; fi
     repo="$(basename "$repo_dir")"
     printf '%s\n' "$repo" >> "$work/repos"
     seen_archive=0
     for d in "$repo_dir"openspec/changes/*/ $(ls -1dt "$repo_dir"openspec/changes/archive/*/ 2>/dev/null); do
       [ -d "$d" ] || continue
-      d="${d%/}"; slug="$(basename "$d")"
+      d="${d%/}"; slug="${d##*/}"
       case "$d" in
         */changes/archive) continue ;;
         */changes/archive/*) seen_archive=$((seen_archive+1)); [ "$seen_archive" -le "$archive_cap" ] || continue
            archived=true; slug="${slug#[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]-}"; stage=archive ;;
-        *) archived=false; stage="$(stage_name "${repo_dir%/}" "$slug")" ;;
+        *) if collect_is_legacy "$d"; then printf '%s\n' "$repo" >> "$work/legacy"; continue; fi
+           archived=false; stage="$(stage_name "${repo_dir%/}" "$slug")" ;;
       esac
       mrfile=""
       if [ "$archived" = false ] && st_mr_in_report "$d"; then n=$((n+1)); mrfile="$work/mr/$n.json"; mr_json "$d" > "$mrfile"; fi
@@ -66,7 +89,7 @@ opsx_collect() {
   fi
 
   # 讀卡的檔與全域狀態，組 JSON
-  OPSX_C_WORK="$work" OPSX_C_STATE="$state" OPSX_C_HERDR_ERR="$herdr_err" python3 -I - <<'PY'
+  OPSX_C_WORK="$work" OPSX_C_STATE="$state" OPSX_C_HERDR_ERR="$herdr_err" "$OPSX_PY" -I - <<'PY'
 import datetime, json, os, re, sys, tomllib
 
 work, state = os.environ["OPSX_C_WORK"], os.environ["OPSX_C_STATE"]
@@ -175,6 +198,8 @@ def waiting_of(card, gates, agent_status):
     return None
 
 cards, matched_panes, legacy = [], set(), {}
+for r in read(os.path.join(work, "legacy")).split("\n"):
+    if r: legacy[r] = legacy.get(r, 0) + 1
 now = datetime.datetime.now().astimezone().isoformat(timespec="seconds")
 for line in read(os.path.join(work, "cards.tsv")).split("\n"):
     if not line: continue
@@ -184,12 +209,7 @@ for line in read(os.path.join(work, "cards.tsv")).split("\n"):
     d = c["dir"]
     if c["mr"] and c["mr"].get("error"):
         errors.append({"source": "glab" if "glab" in c["mr"]["error"] else "gh", "message": "%s/%s：%s" % (repo_, slug_, c["mr"]["error"])})
-    spec_yaml = read(os.path.join(d, ".openspec.yaml"))
     inbox = read(os.path.join(d, "inbox.md"))
-    # 卡的資格：schema: opsx 或有 inbox.md。舊 spec-driven 的 change 只計數，不當卡（真 repo 裡有幾百張，會灌爆待指派）
-    if not c["archived"] and not re.search(r"^schema:\s*opsx\s*$", spec_yaml, re.M) and not inbox.strip():
-        legacy[repo_] = legacy.get(repo_, 0) + 1
-        continue
     key = "%s/%s" % (c["repo"], c["slug"])
     disp = dispatch.get(key)
     if disp and disp.get("mode") == "stopped": disp = None

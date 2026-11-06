@@ -19,10 +19,18 @@ m = tomllib.load(open(os.path.join(root, "herdr-plugin.toml"), "rb"))
 assert m["id"] == "opsx-board", m["id"]
 a = [x for x in m["actions"] if x["id"] == "open-board"]; assert a, m["actions"]
 assert os.path.exists(os.path.join(root, a[0]["command"][-1])), a[0]["command"]
+b = [x for x in m["actions"] if x["id"] == "open-pane"]; assert b, m["actions"]
+assert os.path.exists(os.path.join(root, b[0]["command"][-1])), b[0]["command"]
 p = [x for x in m["panes"] if x["id"] == "board"]; assert p, m["panes"]
 assert p[0]["placement"] == "overlay", p[0]
 assert os.path.exists(os.path.join(root, p[0]["command"][-1])), p[0]["command"]
 PY
+
+# --- open-pane.sh：只叫 herdr 開 overlay pane，用 HERDR_BIN_PATH 給的 herdr ---
+: > "$OPSX_FAKE_LOG"
+out="$(HERDR_BIN_PATH="$FX/fakebin/herdr" bash "$OPSX_ROOT/herdr-board/scripts/open-pane.sh" 2>&1)"; assert_eq "$?" 0 "open-pane: $out"
+assert_eq "$(cat "$OPSX_FAKE_LOG")" "plugin pane open --plugin opsx-board --entrypoint board --placement overlay --focus" "open-pane 的 herdr 呼叫"
+: > "$OPSX_FAKE_LOG"
 
 # --- open-board.sh：第一次起 server + 開瀏覽器；第二次只開瀏覽器 ---
 port=$(python3 -I -c 'import socket;s=socket.socket();s.bind(("127.0.0.1",0));print(s.getsockname()[1]);s.close()')

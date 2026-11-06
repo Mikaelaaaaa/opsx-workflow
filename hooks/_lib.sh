@@ -8,6 +8,9 @@ OPSX_ROOT="${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd
 OPSX_STATE_DIR="${OPSX_STATE_DIR:-$HOME/.local/state/opsx}"
 # shellcheck source=/dev/null
 source "$OPSX_ROOT/bin/lib/stage.sh"
+# shellcheck source=/dev/null
+source "$OPSX_ROOT/bin/lib/python.sh"
+opsx_python_load || true   # 沒有 python 的 hook（router 等）照跑；grant-gate 自己處理 OPSX_PY 為空
 
 jqr() { printf '%s' "$HOOK_INPUT" | jq -r "$1 // empty" 2>/dev/null || true; }
 hook_cmd()  { jqr '.tool_input.command'; }
@@ -46,7 +49,7 @@ stop_block() { jq -n --arg reason "$1" '{decision:"block",reason:$reason}'; exit
 # 或 dispatch.json 這張卡的 once 含 action（這次：用掉就刪；不記的話 agent 重試還是被 deny，等於沒答）。
 # grants.toml 壞掉時當成沒授權，不放行。
 has_grant() { # <repo> <slug> <action>
-  OPSX_REPO="$1" OPSX_SLUG="$2" OPSX_ACTION="$3" OPSX_SD="$OPSX_STATE_DIR" OPSX_LIB="$OPSX_ROOT/bin/lib" python3 -I - <<'PY'
+  OPSX_REPO="$1" OPSX_SLUG="$2" OPSX_ACTION="$3" OPSX_SD="$OPSX_STATE_DIR" OPSX_LIB="$OPSX_ROOT/bin/lib" "$OPSX_PY" -I - <<'PY'
 import os, sys, tomllib
 sys.path.insert(0, os.environ["OPSX_LIB"]); import jsonfile
 sd = os.environ["OPSX_SD"]; repo = os.environ["OPSX_REPO"]; slug = os.environ["OPSX_SLUG"]; act = os.environ["OPSX_ACTION"]
@@ -72,7 +75,7 @@ sys.exit(0 if consumed["ok"] else 1)
 PY
 }
 card_mode() { # <repo> <slug>：印 interactive、autopilot、drive、stopped，沒派過就空
-  OPSX_REPO="$1" OPSX_SLUG="$2" OPSX_SD="$OPSX_STATE_DIR" OPSX_LIB="$OPSX_ROOT/bin/lib" python3 -I - <<'PY'
+  OPSX_REPO="$1" OPSX_SLUG="$2" OPSX_SD="$OPSX_STATE_DIR" OPSX_LIB="$OPSX_ROOT/bin/lib" "$OPSX_PY" -I - <<'PY'
 import os, sys
 sys.path.insert(0, os.environ["OPSX_LIB"]); import jsonfile
 print(jsonfile.load(os.path.join(os.environ["OPSX_SD"], "dispatch.json")).get("%s/%s" % (os.environ["OPSX_REPO"], os.environ["OPSX_SLUG"]), {}).get("mode", ""))

@@ -31,6 +31,8 @@ assert_eq "$(git -C "$R/.claude/worktrees/retry-backoff" rev-parse --abbrev-ref 
 assert_grep '^tab create --workspace w1 --cwd .*retry-backoff --label retry-backoff' "$OPSX_FAKE_LOG"
 assert_grep '^workspace list$' "$OPSX_FAKE_LOG"
 assert_grep '^agent start retry-backoff --kind claude --pane w1:pE -- --model claude-sonnet-5-5 --permission-mode acceptEdits --settings ' "$OPSX_FAKE_LOG"
+# 沙盒只准寫 working directories：卡的檔在主 repo 的 openspec/、hook 與 status 寫 state dir，兩個都要 --add-dir
+assert_grep "^agent start retry-backoff .* --add-dir $R/openspec --add-dir $OPSX_STATE_DIR\$" "$OPSX_FAKE_LOG"
 assert_grep '^agent prompt retry-backoff /propose retry-backoff$' "$OPSX_FAKE_LOG"
 assert_not_grep '^workspace create' "$OPSX_FAKE_LOG"
 # settings：repo 永遠 push 進 allow；merge 在 allow 不在 deny（deny 會蓋過 grant-gate 的放行，merge 由 gate 單獨把關）
@@ -50,11 +52,80 @@ last_row() { tail -1 "$R/openspec/changes/retry-backoff/decisions.tsv" | cut -f2
 assert_eq "$(last_row)" "你$(printf '\t')已指派"
 assert_eq "$(tail -1 "$R/openspec/changes/retry-backoff/decisions.tsv" | awk -F'\t' '{print NF}')" 5
 
-# --- 重派同一張卡：worktree 已在就重用，不報錯 ---
+# --- 同一張卡還在跑就再派：拒絕，說它在哪（herdr 本來就會回 agent_name_taken；板上「指派」按到舊畫面就是這條） ---
+: > "$OPSX_FAKE_LOG"
+out="$(opsx dispatch retry-backoff --agent claude --mode autopilot 2>&1)"; [ $? -eq 2 ] || fail "active card must be refused: $out"
+echo "$out" | grep -q 'agnetory-ai · w1:tB · w1:pE' || fail "要說它在哪: $out"
+echo "$out" | grep -q 'opsx stop retry-backoff' || fail "要說怎麼換人: $out"
+assert_eq "$(cat "$OPSX_FAKE_LOG")" "" "拒絕時不碰 herdr"
+
+# --- agent start 回 agent_pane_busy（shell 還沒到 prompt）：同一個 pane 重試；一直 busy 就關 tab ---
+export OPSX_DISPATCH_RETRY_SLEEP=0
+mkdir -p "$R/openspec/changes/busy-card"; printf 'schema: opsx\n' > "$R/openspec/changes/busy-card/.openspec.yaml"
+export OPSX_TEST_BUSY_LEFT="$FX/busy-left"
+: > "$OPSX_FAKE_LOG"; echo 2 > "$OPSX_TEST_BUSY_LEFT"
+out="$(opsx dispatch busy-card --agent claude --mode interactive --kind dev 2>&1)" || fail "busy twice should still dispatch: $out"
+assert_eq "$(grep -c '^agent start busy-card ' "$OPSX_FAKE_LOG")" 3 "two busy then ok = three starts"
+assert_not_grep '^tab close' "$OPSX_FAKE_LOG"
+python3 -I -c 'import json,sys;assert "Agentory-CS/busy-card" in json.load(open(sys.argv[1]))' "$OPSX_STATE_DIR/dispatch.json"
+# 一直 busy：六次後放棄，關掉剛開的 tab，什麼都不記
+mkdir -p "$R/openspec/changes/stuck-card"; printf 'schema: opsx\n' > "$R/openspec/changes/stuck-card/.openspec.yaml"
+: > "$OPSX_FAKE_LOG"; echo 99 > "$OPSX_TEST_BUSY_LEFT"
+out="$(opsx dispatch stuck-card --agent claude --mode interactive --kind dev 2>&1)"; [ $? -ne 0 ] || fail "persistent busy must fail"
+assert_eq "$(grep -c '^agent start stuck-card ' "$OPSX_FAKE_LOG")" 6 "six attempts then give up"
+assert_grep '^tab close w1:tB$' "$OPSX_FAKE_LOG"
+echo "$out" | grep -q 'agent_pane_busy' || fail "should print herdr error: $out"
+python3 -I -c 'import json,sys;assert "Agentory-CS/stuck-card" not in json.load(open(sys.argv[1]))' "$OPSX_STATE_DIR/dispatch.json"
+[ -f "$R/openspec/changes/stuck-card/decisions.tsv" ] && grep -q dispatched "$R/openspec/changes/stuck-card/decisions.tsv" && fail "must not record dispatched"
+# 別的錯：不重試，一樣關 tab
+: > "$OPSX_FAKE_LOG"; echo 0 > "$OPSX_TEST_BUSY_LEFT"
+out="$(OPSX_TEST_START_FAIL=agent_kind_unsupported opsx dispatch stuck-card --agent claude --mode interactive --kind dev 2>&1)"; [ $? -ne 0 ] || fail "other error must fail"
+assert_eq "$(grep -c '^agent start stuck-card ' "$OPSX_FAKE_LOG")" 1 "non-busy error is not retried"
+assert_grep '^tab close w1:tB$' "$OPSX_FAKE_LOG"
+# herdr 還留著同名 agent 而 dispatch.json 沒記（手動開的 / stop 沒關成）：關 tab，錯誤裡印它的 workspace · tab · pane
+: > "$OPSX_FAKE_LOG"
+out="$(OPSX_TEST_START_FAIL=agent_name_taken opsx dispatch stuck-card --agent claude --mode interactive --kind dev 2>&1)"; [ $? -ne 0 ] || fail "name taken must fail"
+echo "$out" | grep -q 'workspace_id=w9 tab_id=w9:t1' && echo "$out" | grep -q 'pane_id=w9:p1' || fail "要印出同名 agent 在哪: $out"
+assert_grep '^tab close w1:tB$' "$OPSX_FAKE_LOG"
+python3 -I -c 'import json,sys;assert "Agentory-CS/stuck-card" not in json.load(open(sys.argv[1]))' "$OPSX_STATE_DIR/dispatch.json"
+unset OPSX_TEST_BUSY_LEFT
+
+# --- Claude 在新 worktree 停在 trust 對話框（agent_not_ready）：dispatch 替人按 Yes，再等 idle ---
+mkdir -p "$R/openspec/changes/trust-card"; printf 'schema: opsx\n' > "$R/openspec/changes/trust-card/.openspec.yaml"
+export OPSX_TEST_NOT_READY_ONCE="$FX/not-ready-once"; : > "$OPSX_TEST_NOT_READY_ONCE"
+export OPSX_TEST_PANE_TEXT='Quick safety check: Is this a project you created or one you trust?
+ ❯ No, exit
+   Yes, I trust this folder'
+: > "$OPSX_FAKE_LOG"
+out="$(opsx dispatch trust-card --agent claude --mode interactive --kind dev 2>&1)" || fail "trust dialog should be answered: $out"
+assert_eq "$(grep -c '^agent start trust-card ' "$OPSX_FAKE_LOG")" 1 "no second start after the dialog"
+assert_grep '^pane wait-output --match trust this folder .*w1:pE$' "$OPSX_FAKE_LOG"
+assert_grep '^pane send-keys w1:pE down enter$' "$OPSX_FAKE_LOG"
+assert_grep '^agent wait trust-card --until idle' "$OPSX_FAKE_LOG"
+assert_grep '^agent prompt trust-card /explore trust-card$' "$OPSX_FAKE_LOG"
+assert_not_grep '^tab close' "$OPSX_FAKE_LOG"
+python3 -I -c 'import json,sys;assert "Agentory-CS/trust-card" in json.load(open(sys.argv[1]))' "$OPSX_STATE_DIR/dispatch.json"
+# 不是 trust 對話框（例如要登入）：不按鍵，關 tab，把畫面印給人看
+mkdir -p "$R/openspec/changes/login-card"; printf 'schema: opsx\n' > "$R/openspec/changes/login-card/.openspec.yaml"
+: > "$OPSX_TEST_NOT_READY_ONCE"; export OPSX_TEST_PANE_TEXT='Please log in to continue'
+: > "$OPSX_FAKE_LOG"
+out="$(opsx dispatch login-card --agent claude --mode interactive --kind dev 2>&1)"; [ $? -ne 0 ] || fail "unknown startup screen must fail"
+assert_not_grep '^pane send-keys' "$OPSX_FAKE_LOG"
+assert_grep '^tab close w1:tB$' "$OPSX_FAKE_LOG"
+echo "$out" | grep -q 'Please log in' || fail "error should show the pane: $out"
+unset OPSX_TEST_NOT_READY_ONCE OPSX_TEST_PANE_TEXT
+
+# --- stop 過的卡重派：worktree 已在就重用，不報錯 ---
+opsx stop retry-backoff >/dev/null 2>&1 || fail "stop before redispatch"
 : > "$OPSX_FAKE_LOG"
 out="$(opsx dispatch retry-backoff --agent codex --mode interactive 2>&1)" || fail "redispatch: $out"
 assert_grep '^agent start retry-backoff --kind codex --pane w1:pE -- -a on-request -s workspace-write$' "$OPSX_FAKE_LOG"
-python3 -I -c 'import json,sys;d=json.load(open(sys.argv[1]))["Agentory-CS/retry-backoff"];assert d["agent"]=="codex" and d["model"]=="gpt-5" and d["mode"]=="interactive",d' "$OPSX_STATE_DIR/dispatch.json"
+python3 -I -c 'import json,sys;d=json.load(open(sys.argv[1]))["Agentory-CS/retry-backoff"];assert d["agent"]=="codex" and d["model"]=="gpt-5" and d["mode"]=="interactive",d' "$OPSX_STATE_DIR/dispatch.json" || fail "redispatch must rewrite the entry"
+# interactive 的 claude 也要 --add-dir（互動模式一樣在沙盒裡）
+opsx stop retry-backoff >/dev/null 2>&1 || fail "stop before redispatch"
+: > "$OPSX_FAKE_LOG"
+opsx dispatch retry-backoff --agent claude --mode interactive >/dev/null 2>&1 || fail "redispatch interactive claude"
+assert_grep "^agent start retry-backoff --kind claude --pane w1:pE -- --model claude-sonnet-5-5 --add-dir $R/openspec --add-dir $OPSX_STATE_DIR\$" "$OPSX_FAKE_LOG"   # kind 已是 bug-fix → sonnet
 
 # --- 沒掛 workspace 的 repo → 開新 workspace 並記下來 ---
 R2="$(mk_repo scam-guard https://github.com/Mikaelaaaaa/scam-guard.git)"
@@ -78,6 +149,19 @@ printf 'features:\n  - name: eval\n    prs:\n      - name: eval-core\n        br
 printf '"Agentory-AI" = "w1"\n' >> "$OPSX_STATE_DIR/workspaces.toml"
 cd "$R3"; opsx dispatch eval-core --agent claude --mode autopilot >/dev/null 2>&1 || fail "dispatch with workplan"
 assert_eq "$(git -C "$R3/.claude/worktrees/eval-core" rev-parse --abbrev-ref HEAD)" "feat/eval-core-v2/mikaela" "workplan branch"
+
+# --- 分支尾巴：OPSX_USER 沒設就用 git user.name；是 git 的占位字「Your Name」或空的就拒絕，不開 worktree 不碰 herdr ---
+mkdir -p "$R3/openspec/changes/noname-card"; printf 'schema: opsx\nkind: dev\n' > "$R3/openspec/changes/noname-card/.openspec.yaml"
+: > "$OPSX_FAKE_LOG"
+out="$(OPSX_USER= opsx dispatch noname-card --agent claude --mode autopilot 2>&1)" || fail "git user.name t should name the branch: $out"
+assert_eq "$(git -C "$R3/.claude/worktrees/noname-card" rev-parse --abbrev-ref HEAD)" "feat/noname-card/t" "branch from git user.name"
+opsx stop noname-card >/dev/null 2>&1; rm -rf "$R3/.claude/worktrees/noname-card"; git -C "$R3" worktree prune; git -C "$R3" branch -D feat/noname-card/t >/dev/null 2>&1
+git -C "$R3" config user.name "Your Name"; : > "$OPSX_FAKE_LOG"
+out="$(OPSX_USER= opsx dispatch noname-card --agent claude --mode autopilot 2>&1)"; [ $? -eq 2 ] || fail "placeholder name must be refused: $out"
+echo "$out" | grep -q 'OPSX_USER' && echo "$out" | grep -q 'Your Name' || fail "要說怎麼設名字: $out"
+[ ! -d "$R3/.claude/worktrees/noname-card" ] || fail "refused dispatch must not open a worktree"
+assert_eq "$(cat "$OPSX_FAKE_LOG")" "" "refused dispatch must not touch herdr"
+git -C "$R3" config user.name t
 
 # --- stop ---
 : > "$OPSX_FAKE_LOG"; cd "$R"

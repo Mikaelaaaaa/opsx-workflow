@@ -12,14 +12,29 @@ Unified development workflow plugin for Claude Code. Covers the full cycle: thin
 需要 Python 3.11 以上（macOS 內建的 3.9 不夠，pyenv 或 brew 裝一個）。裝完跑一次 `bash <plugin root>/bin/opsx init --global`（裝 `~/.local/bin/opsx`、建 `~/.local/state/opsx/`、掛 herdr 看板 plugin），
 再到每個要用的 repo 根目錄跑 `opsx init`。
 
+`init --global` 會把 PATH 上 `python3` 背後真正的執行檔記在 `~/.local/state/opsx/python`，opsx 和 hooks 只用它（繞過 pyenv shim，每次省 250 ms 左右）。
+升級到有這個檔的版本後、或 pyenv 換了 python 版本後，要再跑一次 `opsx init --global`；沒跑的話 opsx 會報錯，卡的 branch 上的授權閘門會擋下 Bash 呼叫。
+
 ## 看板
 
 資料全是投影（`opsx collect`：`openspec/changes/*/`、`~/.local/state/opsx/`、`herdr agent list`、`glab mr view`），看板自己不存狀態。
 
 - 網頁：herdr 裡叫 action `open-board`（`opsx init --global` 已 `herdr plugin link`），或 `bash herdr-board/scripts/open-board.sh`。
   首頁四段 待處理 / 進行中 / 待指派 / 已完成；按鈕背後是 `opsx answer`（回 gate、三種授權答案）、`opsx dispatch`、`opsx merge`（寫一次性核准，叫 agent `/babysit merge`，閘門只放行那一次）、`opsx stop`。
-- 右側 pane：herdr pane `board`（`python3 herdr-board/tui.py`），同一份清單，↑↓ 選、Enter 跳 pane、q 關；不回 gate、不派工。
-- 對原型看畫面：`python3 herdr-board/server.py --collect herdr-board/tests/fixtures/collect-sample.json`，開 `http://127.0.0.1:8791/?token=$(cat ~/.local/state/opsx/board-token)`。
+- 右側 pane：herdr 裡叫 action `open-pane`（overlay 開 pane `board`，`python3 herdr-board/tui.py`），同一份清單，↑↓ 選、Enter 跳 pane、q 關；不回 gate、不派工。
+- 快捷鍵：herdr 的鍵綁 action，在 `~/.config/herdr/config.toml` 加兩段（prefix 是你 herdr 的前綴鍵）：
+  ```toml
+  [[keys.command]]
+  key = "prefix+o"
+  type = "plugin_action"
+  command = "opsx-board.open-board"
+
+  [[keys.command]]
+  key = "prefix+shift+o"
+  type = "plugin_action"
+  command = "opsx-board.open-pane"
+  ```
+- 對原型看畫面：`python3 herdr-board/server.py --collect herdr-board/tests/fixtures/collect-sample.json`，開 `http://127.0.0.1:8791/#token=$(cat ~/.local/state/opsx/board-token)`。
 - 收件匣 tab、同步腳本、紀錄 tab 在 `board-inbox`、`board-log` 兩張卡（`openspec/workplan.yaml`）。
 
 ## Skills
