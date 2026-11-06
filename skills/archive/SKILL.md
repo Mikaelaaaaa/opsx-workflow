@@ -101,6 +101,13 @@ If `openspec/workplan.yaml` exists:
 - If all changes in this PR group are `done`, set the PR status to `merged`
 - If all PRs in the workplan are `merged`, set the feature status to `complete`
 
+### 6b. Continue the chain
+
+Run `opsx chain <change-name>`. It decides from the workplan and `dispatch.json` whether this pane goes on to a child card, and it exits 0 with one line of reason when there is none (no workplan, the card was not dispatched, no child is ready). Report that line and stop.
+
+- One child: `opsx chain` switches this worktree to the child's branch and the child's first command arrives as the next prompt. Do nothing more in this turn.
+- Several children (`chain: fan out …` lines): this pane becomes their coordinator. Follow `../../references/fan-out.md`: spawn one worktree-isolated subagent per line, then relay.
+
 ### 7. Display summary
 
 Show archive completion summary including:
