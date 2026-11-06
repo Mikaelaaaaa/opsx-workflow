@@ -6,6 +6,16 @@ banned='eval|test|judge|experiment|rubric|score|compare|benchmark|candidate|aren
 # 題目 repo 自己的單元測試檔可以帶 test
 own_tests='(\.test\.|_test\.|(^|/)tests?/)'
 
+# npm test 要真的跑到測試：Node 沒剝 TS 型別時 node --test 找到 0 個也是 rc 0
+green_tests() { # green_tests <repo> <label>
+  (cd "$1" && npm test --silent >"$FX/$2-test.log" 2>&1) || fail "$2 repo tests not green: $(cat "$FX/$2-test.log")"
+  [ "$(sed -n 's/^# tests \([0-9]*\)$/\1/p' "$FX/$2-test.log")" -ge 1 ] 2>/dev/null || fail "$2 repo ran no tests: $(cat "$FX/$2-test.log")"
+}
+assertion_has() { # assertion_has <evals.json> <text>：只看 assertions 陣列，不看 prompt / expected_output
+  python3 -I -c 'import json,sys; sys.exit(0 if any(sys.argv[2] in a for e in json.load(open(sys.argv[1]))["evals"] for a in e["assertions"]) else 1)' "$1" "$2" \
+    || fail "no assertion in $1 contains: $2"
+}
+
 n=0
 for s in "$OPSX_ROOT"/skills/*/evals/fixtures/*/setup.sh; do
   [ -f "$s" ] || continue
@@ -33,7 +43,7 @@ c="$d/openspec/changes/slug-trailing-dash"
 assert_file "$c/inbox.md"
 assert_no_file "$c/explore.md"
 assert_no_file "$c/grill.md"
-(cd "$d" && npm test --silent >"$FX/s2-test.log" 2>&1) || fail "scenario 2 repo tests not green: $(cat "$FX/s2-test.log")"
+green_tests "$d" s2
 
 # 情境 1 grill 段：至少三個原始檔，待決恰好三題，有 answers.md 代替人回答
 d="$FX/built/grill-retry-backoff"
@@ -58,8 +68,13 @@ c="$d/openspec/changes/retry-backoff"
 for f in proposal.md design.md tasks.md; do assert_file "$c/$f"; done
 assert_eq "$(git -C "$d" rev-list --count main..HEAD)" "1" "review segment branch needs exactly one commit beyond main"
 assert_eq "$(grep -c -- '- \[ \]' "$c/tasks.md")" "0" "review segment tasks must all be checked"
-(cd "$d" && npm test --silent >"$FX/s1r-test.log" 2>&1) || fail "review segment tests not green: $(cat "$FX/s1r-test.log")"
-assert_grep "violates D2" "$OPSX_ROOT/skills/review/evals/evals.json"
+green_tests "$d" s1r
+assert_eq "$(cd "$d" && node --input-type=module -e '
+const { getJson } = await import("./src/client.ts");
+let n = 0;
+await getJson("http://u/x", { fetchImpl: async () => { n++; return new Response("{}", { status: 404 }); }, sleep: async () => {} }).catch(() => {});
+console.log(n);' 2>/dev/null)" "6" "review segment commit must violate D2: a 404 is retried 5 times"
+assertion_has "$OPSX_ROOT/skills/review/evals/evals.json" "violates D2"
 # 走完 apply 的卡會有 status.json tests=green，少了它新版 review 開工前就擋下，題目測不到 D-id
 assert_file "$c/status.json"
 assert_grep '"tests": "green"' "$c/status.json"
@@ -76,9 +91,9 @@ c="$d/openspec/changes/price-cents-padding"
 for f in inbox.md proposal.md design.md tasks.md; do assert_file "$c/$f"; done
 assert_grep "kind: bug-fix" "$c/.openspec.yaml"
 assert_file "$d/openspec/schemas/opsx/schema.yaml"
-(cd "$d" && npm test --silent >"$FX/s3-test.log" 2>&1) || fail "scenario 3 repo tests not green: $(cat "$FX/s3-test.log")"
+green_tests "$d" s3
 assert_eq "$(cd "$d" && node -e 'import("./src/money.mjs").then(m=>console.log(m.formatPrice(1005)))')" '$10.5' "bug must reproduce"
-assert_grep "exactly one" "$OPSX_ROOT/skills/apply/evals/evals.json"
+assertion_has "$OPSX_ROOT/skills/apply/evals/evals.json" "git rev-list --count main..HEAD prints 1"
 
 # 兩組工作 repo：同一題、新舊兩版 skill，.claude/ 以外逐檔相同
 mkdir -p "$FX/old/skills/explore" "$FX/old/grill-me"
@@ -101,7 +116,7 @@ assert_eq "$(git -C "$b" status --short)" "" "old variant repo not clean"
 r="$OPSX_ROOT/docs/verify-scenarios.md"
 assert_file "$r"
 for e in small-fix-skips-grill bug-fix-reproduce-first three-bucket-pending decisions-carried-verbatim finding-cites-violated-decision; do
-  grep -E "^\| *$e *\|" "$r" | grep -Eq '\| *[0-9]+% *\| *[0-9]+% *\| *[+-]?[0-9]+ *\|' || fail "results row for $e missing or has no numbers"
+  grep -E "^\| *$e *\|" "$r" | grep -Eq '\| *[0-9]+% *\| *[0-9]+% *\| *[+-]?[0-9]+ *\| *[0-9]+ / [0-9]+ *\|' || fail "results row for $e missing or lacks pass rates, delta, runs per group"
 done
 assert_grep "^## 結論" "$r"
 assert_grep "^## 開的卡" "$r"
