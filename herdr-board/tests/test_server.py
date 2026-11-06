@@ -19,6 +19,25 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 SERVER = ROOT / "herdr-board" / "server.py"
 
 
+def start_server(env: dict, fixture: pathlib.Path) -> tuple[subprocess.Popen, str, int]:
+    """起一支 server（--port 0），回 (proc, host, port)；等到 /healthz 回應。"""
+    proc = subprocess.Popen(
+        [sys.executable, "-I", str(SERVER), "--port", "0", "--collect", str(fixture)],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env, text=True,
+    )
+    line = proc.stdout.readline()
+    m = re.search(r"http://(127\.0\.0\.1):(\d+)/", line)
+    if not m:
+        proc.kill()
+        raise AssertionError("server 沒印出監聽位址：%r %s" % (line, proc.stderr.read()))
+    for _ in range(50):
+        try:
+            urllib.request.urlopen("http://127.0.0.1:%s/healthz" % m.group(2), timeout=1); break
+        except (urllib.error.URLError, ConnectionError):
+            time.sleep(0.05)
+    return proc, m.group(1), int(m.group(2))
+
+
 class ServerTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -38,33 +57,23 @@ class ServerTest(unittest.TestCase):
             f'printf "%s\\n" "$*" >> "{cls.log}"\n'
             f'printf "OPSX_STATE_DIR=%s\\n" "${{OPSX_STATE_DIR:-}}" >> "{cls.env_log}"\n'
             f'if [ -f "{cls.fail_flag}" ]; then echo "opsx: 假的失敗" >&2; exit 2; fi\n'
+            'if [ "$1" = timeline ]; then echo \'{"generated_at": "g", "last_seen": null, "events": [], "errors": []}\'; exit 0; fi\n'
             'echo "ok: $1"\n'
         )
         shim.chmod(0o755)
         herdr = shim_dir / "herdr"
-        herdr.write_text("#!/usr/bin/env bash\n" f'printf "%s\\n" "$*" >> "{cls.herdr_log}"\n' 'echo "{}"\n')
+        herdr.write_text("#!/usr/bin/env bash\n" f'printf "%s\\n" "$*" >> "{cls.herdr_log}"\n'
+                         'if [ "$3" = "w9:p9" ]; then echo "pane not found" >&2; exit 1; fi\n'
+                         'if [ "$1 $2" = "agent read" ]; then printf "line 1\\nline 2\\n"; exit 0; fi\n'
+                         'echo "{}"\n')
         herdr.chmod(0o755)
         cls.repo = cls.tmp / "repo"
         (cls.repo / "openspec" / "changes").mkdir(parents=True)   # --repo 只收真的 opsx repo 根
         cls.fixture = cls.tmp / "collect.json"
         cls.fixture.write_text(json.dumps({"generated_at": "t", "scopes": [], "cards": [{"slug": "x"}], "unmatched_agents": [], "errors": []}))
-        env = dict(os.environ, OPSX_STATE_DIR=str(cls.state), OPSX_TEST_OPSX=str(shim), PATH=f"{shim_dir}:{os.environ['PATH']}")
-        cls.proc = subprocess.Popen(
-            [sys.executable, "-I", str(SERVER), "--port", "0", "--collect", str(cls.fixture)],
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env, text=True,
-        )
-        line = cls.proc.stdout.readline()
-        m = re.search(r"http://(127\.0\.0\.1):(\d+)/", line)
-        if not m:
-            cls.proc.kill()
-            raise AssertionError("server 沒印出監聽位址：%r %s" % (line, cls.proc.stderr.read()))
-        cls.host, cls.port = m.group(1), int(m.group(2))
+        env = dict(os.environ, HERDR_ENV="1", OPSX_STATE_DIR=str(cls.state), OPSX_TEST_OPSX=str(shim), PATH=f"{shim_dir}:{os.environ['PATH']}")
+        cls.proc, cls.host, cls.port = start_server(env, cls.fixture)
         cls.base = "http://127.0.0.1:%d" % cls.port
-        for _ in range(50):
-            try:
-                urllib.request.urlopen(cls.base + "/healthz", timeout=1); break
-            except (urllib.error.URLError, ConnectionError):
-                time.sleep(0.05)
         cls.token = (cls.state / "board-token").read_text().strip()
 
     @classmethod
@@ -149,6 +158,62 @@ class ServerTest(unittest.TestCase):
             self.assertEqual(status, 200)
         self.assertEqual(self.log.read_text(), "", "--collect 固定檔時不叫 opsx")
 
+    def test_log_forwards_to_timeline(self):
+        status, _, body = self.req("/api/log", token=self.token)
+        self.assertEqual(status, 200, body)
+        self.assertEqual(json.loads(body)["events"], [])
+        self.assertEqual(self.log.read_text().strip(), "timeline")
+        self.log.write_text("")
+        status, _, body = self.req("/api/log?since=2026-11-06T09%3A00%3A00%2B08%3A00", token=self.token)
+        self.assertEqual(status, 200, body)
+        self.assertEqual(self.log.read_text().strip(), "timeline --since 2026-11-06T09:00:00+08:00")
+
+    def test_log_needs_token_and_a_real_since(self):
+        status, _, _ = self.req("/api/log")
+        self.assertEqual(status, 401)
+        status, _, body = self.req("/api/log?since=%E6%98%A8%E5%A4%A9", token=self.token)
+        self.assertEqual(status, 400, body)
+        status, _, body = self.req("/api/log?since=2026-11-06T09:00:00", token=self.token)
+        self.assertEqual(status, 400, "沒有時區的時間要拒絕：%s" % body)
+        self.assertEqual(self.log.read_text(), "")
+
+    def test_seen_writes_last_seen(self):
+        status, _, body = self.req("/api/seen", {"at": "2026-11-06T13:00:00+08:00"}, token=self.token)
+        self.assertEqual(status, 200, body)
+        self.assertTrue(json.loads(body)["ok"])
+        self.assertEqual((self.state / "last-seen").read_text().strip(), "2026-11-06T13:00:00+08:00")
+
+    def test_seen_rejects_bad_time_and_needs_token(self):
+        (self.state / "last-seen").write_text("2026-11-06T09:00:00+08:00\n")
+        for bad in ("昨天", "2026-11-06T13:00:00", "", None):
+            status, _, body = self.req("/api/seen", {"at": bad}, token=self.token)
+            self.assertEqual(status, 400, "%r: %s" % (bad, body))
+        status, _, _ = self.req("/api/seen", {"at": "2026-11-06T13:00:00+08:00"})
+        self.assertEqual(status, 401)
+        self.assertEqual((self.state / "last-seen").read_text().strip(), "2026-11-06T09:00:00+08:00")
+
+    def test_output_reads_agent_terminal(self):
+        self.herdr_log.write_text("")
+        status, _, body = self.req("/api/output?pane=w5%3ApH", token=self.token)
+        self.assertEqual(status, 200, body)
+        out = json.loads(body)
+        self.assertEqual((out["ok"], out["text"]), (True, "line 1\nline 2\n"), out)
+        self.assertEqual(self.herdr_log.read_text().strip(), "agent read w5:pH --lines 10 --format text")
+
+    def test_output_rejects_bad_pane_and_reports_herdr_failure(self):
+        self.herdr_log.write_text("")
+        for bad in ("w1;rm", "", "w1:p2%20--lines%201000", "--help", "-x"):
+            status, _, body = self.req("/api/output?pane=" + bad, token=self.token)
+            self.assertEqual(status, 400, "%r: %s" % (bad, body))
+        status, _, _ = self.req("/api/output")
+        self.assertEqual(status, 401)
+        self.assertEqual(self.herdr_log.read_text(), "", "壞參數不能叫到 herdr")
+        status, _, body = self.req("/api/output?pane=w9%3Ap9", token=self.token)
+        self.assertEqual(status, 200, body)
+        out = json.loads(body)
+        self.assertFalse(out["ok"])
+        self.assertIn("pane not found", out["error"])
+
     def test_focus_runs_herdr(self):
         status, _, body = self.req("/api/focus", {"pane": "w1:p4"}, token=self.token)
         self.assertEqual(status, 200, body)
@@ -183,6 +248,44 @@ class ServerTest(unittest.TestCase):
         status, _, body = self.req("/healthz")
         self.assertEqual(status, 200)
         self.assertEqual(json.loads(body)["ok"], True)
+
+
+class NoHerdrTest(unittest.TestCase):
+    """server 不在 herdr 裡（HERDR_ENV 沒設）：最後輸出回 ok false，不叫 herdr（specs/board-log「herdr 不可用」）。"""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = pathlib.Path(tempfile.mkdtemp(prefix="opsx-server-noherdr."))
+        state = cls.tmp / "state"
+        state.mkdir()
+        shim_dir = cls.tmp / "bin"
+        shim_dir.mkdir()
+        cls.herdr_log = cls.tmp / "herdr.log"
+        herdr = shim_dir / "herdr"
+        herdr.write_text("#!/usr/bin/env bash\n" f'printf "%s\\n" "$*" >> "{cls.herdr_log}"\n' 'printf "line\\n"\n')
+        herdr.chmod(0o755)
+        fixture = cls.tmp / "collect.json"
+        fixture.write_text(json.dumps({"generated_at": "t", "scopes": [], "cards": [], "unmatched_agents": [], "errors": []}))
+        env = {k: v for k, v in os.environ.items() if k != "HERDR_ENV"}
+        env.update(OPSX_STATE_DIR=str(state), PATH=f"{shim_dir}:{os.environ['PATH']}")
+        cls.proc, _, port = start_server(env, fixture)
+        cls.base = "http://127.0.0.1:%d" % port
+        cls.token = (state / "board-token").read_text().strip()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.proc.kill()
+        cls.proc.wait()
+
+    def test_output_outside_herdr(self):
+        r = urllib.request.Request(self.base + "/api/output?pane=w5%3ApH")
+        r.add_header("X-Opsx-Token", self.token)
+        with urllib.request.urlopen(r, timeout=5) as resp:
+            self.assertEqual(resp.status, 200)
+            out = json.loads(resp.read().decode())
+        self.assertFalse(out["ok"])
+        self.assertIn("HERDR_ENV", out["error"])
+        self.assertFalse(self.herdr_log.exists(), "不在 herdr 裡就不該叫 herdr")
 
 
 if __name__ == "__main__":

@@ -4,12 +4,12 @@
 # herdr agent list（只在 HERDR_ENV 設定時）與 glab / gh（經 mr_json）。specs/board-collect/spec.md。
 #
 # 輸出：{generated_at, scopes[{workspace, repos[]}], cards[], unmatched_agents[], errors[{source,message}]}
-# 每張卡：{repo, slug, title, kind, stage, section, since, waiting, dispatch, status, agent_status, mr, last_output}
+# 每張卡：{repo, slug, title, kind, stage, section, since, waiting, open_gates[{id, opened_at}], dispatch, status, agent_status, mr, last_output}
 #   section ∈ 待處理 | 進行中 | 待指派 | 已完成；waiting.type ∈ 等待授權 | 等待決定 | 可以合併 | 終端機等待輸入
 #
 # gates.md 的格式（apply 步 5 寫、answer 改）：每個 gate 一段
 #   ## <gate id>
-#   type: approval | decision      action: push|mr|migrate|…（approval 才有）      status: open | answered
+#   type: approval | decision      action: push|mr|migrate|…（approval 才有）      status: open | answered      opened_at: <ISO>
 #   問題: …   建議: …   選項: a | b (Recommended) | c（decision 才有）   證據: …   風險: …   預設: …
 #   已確認: …（可多行，到下一個欄位為止）   answer: …（answered 時）
 
@@ -19,13 +19,17 @@ source "$OPSX_ROOT/bin/lib/mr.sh"
 # 舊 spec-driven 的 change：.openspec.yaml 沒有 schema: opsx，inbox.md 不存在或只有空白。只計數，不當卡。
 # 只用 builtin：真 repo 裡有幾百張舊卡，每張 fork 一次 stage 判斷就是十幾秒。
 collect_is_legacy() { # <change dir>
-  local line
+  local line inbox
   if [ -f "$1/.openspec.yaml" ]; then
     while IFS= read -r line || [ -n "$line" ]; do
       [[ $line =~ ^schema:[[:space:]]*opsx[[:space:]]*$ ]] && return 1
     done < "$1/.openspec.yaml"
   fi
-  [ -f "$1/inbox.md" ] && [[ $(<"$1/inbox.md") =~ [^[:space:]] ]] && return 1
+  if [ -f "$1/inbox.md" ]; then
+    # [:space:] 依 locale：先刪掉全形空白 U+3000 與 NBSP 的位元組，沒有 LANG 的啟動方式（launchd、nohup）下也算空白
+    inbox=$(<"$1/inbox.md"); inbox=${inbox//$'\xe3\x80\x80'/}; inbox=${inbox//$'\xc2\xa0'/}
+    [[ $inbox =~ [^[:space:]] ]] && return 1
+  fi
   return 0
 }
 
@@ -143,7 +147,7 @@ if os.path.exists(agents_path) and not os.environ["OPSX_C_HERDR_ERR"]:
         agents = None
         errors.append({"source": "herdr", "message": "agent list 讀不懂（要 result.agents）：%s" % e})
 
-FIELD = re.compile(r"^(type|action|status|問題|建議|選項|證據|風險|預設|已確認|answer):\s*(.*)$")
+FIELD = re.compile(r"^(type|action|status|opened_at|問題|建議|選項|證據|風險|預設|已確認|answer):\s*(.*)$")
 
 def parse_gates(text):
     gates, cur, key = [], None, None
@@ -228,7 +232,8 @@ for line in read(os.path.join(work, "cards.tsv")).split("\n"):
         "repo": c["repo"], "slug": c["slug"], "title": one_liner(inbox) or c["slug"], "kind": kind_of(d),
         "stage": c["stage"], "section": section,
         "since": frontmatter(inbox, "found") or (re.search(r"^created:\s*(\S+)", read(os.path.join(d, ".openspec.yaml")), re.M) or [None, None])[1],
-        "waiting": waiting, "dispatch": disp, "status": load_json(os.path.join(d, "status.json"), None),
+        "waiting": waiting, "open_gates": [{"id": g["id"], "opened_at": g.get("opened_at")} for g in gates if g.get("status") == "open"],
+        "dispatch": disp, "status": load_json(os.path.join(d, "status.json"), None),
         "agent_status": agent_status, "mr": c["mr"], "last_output": None,
         "grants_repo": grants.get(c["repo"]), "path": d,
     })

@@ -49,8 +49,9 @@ assert_no_file "$RI/openspec"
 
 # ---------- python 在但跑不起來：授權閘門要 deny，不能因為 hook 非 0 結束而放行 ----------
 printf '/usr/bin/false\n' > "$P"
-out="$(bash_hook "$R" 'pnpm test')"; assert_eq "$(decision "$out")" deny "python 跑不起來時派出去的卡要 deny"
-reason "$out" | grep -q 'python 執行失敗' || fail "deny 理由要說 python 執行失敗：$(reason "$out")"
+out="$(bash_hook "$R" 'glab mr create -F d.md')"; assert_eq "$(decision "$out")" deny "python 跑不起來時要授權的指令要 deny"
+reason "$out" | grep -q 'python 執行失敗' || fail "deny 理由要說 python 執行失敗，不是要授權：$(reason "$out")"
+out="$(bash_hook "$R" 'pnpm test')"; assert_eq "$(decision "$out")" allow "python 跑不起來時不需授權的指令跟 python 正常時一樣"
 
 # ---------- 授權閘門遇到缺檔就擋，不放行 ----------
 rm -f "$P"
@@ -58,12 +59,31 @@ out="$(bash_hook "$R" 'pnpm test')"; assert_eq "$(decision "$out")" deny "缺 py
 reason "$out" | grep -q 'opsx init --global' || fail "deny 理由要給修法：$(reason "$out")"
 out="$(bash_hook "$FX" 'pnpm test')"; assert_eq "$(decision "$out")" allow "不在卡上不管"
 out="$(bash_hook "$R" 'opsx init --global')"; assert_eq "$(decision "$out")" allow "修法那一條要放行"
+for m in interactive stopped; do
+  printf '{"r/c1":{"mode":"%s","grants":[]}}' "$m" > "$OPSX_STATE_DIR/dispatch.json"
+  out="$(bash_hook "$R" 'git push')"; assert_eq "$(decision "$out")" allow "缺 python 檔時 $m 卡不歸閘門管"
+done
+printf '{"r/c1":{"mode":"drive","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"
+out="$(bash_hook "$R" 'pnpm test')"; assert_eq "$(decision "$out")" deny "缺 python 檔時 drive 卡要 deny"
+printf '{"r/c1":{"mode":"autopilot","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"
 R2="$(mk_repo r2)"; git -C "$R2" checkout -q -b feat/foo/mikaela
 out="$(bash_hook "$R2" 'pnpm test')"; assert_eq "$(decision "$out")" allow "三段式 branch 但沒有卡：不管"
 mk_change "$R" c2
 out="$(bash_hook "$R" 'pnpm test')"; assert_eq "$(decision "$out")" allow "有卡但沒派出去：不管"
 git -C "$R" checkout -q feat/c1/mikaela
 printf '%s\n' "$REAL" > "$P"
+
+# ---------- dispatch.json 壞掉：檔案裡有這張卡就擋，沒有就不管 ----------
+printf '{"r/c1":{"mode":"autopilot",' > "$OPSX_STATE_DIR/dispatch.json"
+out="$(bash_hook "$R" 'pnpm test')"; assert_eq "$(decision "$out")" deny "dispatch.json 壞掉時派出去的卡要 deny"
+reason "$out" | grep -qF "$OPSX_STATE_DIR/dispatch.json" || fail "deny 理由要寫出 dispatch.json 的路徑：$(reason "$out")"
+printf '{"r/other":{"mode":"autopilot",' > "$OPSX_STATE_DIR/dispatch.json"
+out="$(bash_hook "$R" 'git push')"; assert_eq "$(decision "$out")" allow "dispatch.json 壞掉、裡面沒有這張卡：不管"
+printf '{"r/c1":{"mode":"autopilot","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"
+chmod 000 "$OPSX_STATE_DIR/dispatch.json"
+out="$(bash_hook "$R" 'git push')"; chmod 644 "$OPSX_STATE_DIR/dispatch.json"
+assert_eq "$(decision "$out")" deny "dispatch.json 讀不了時要 deny，不能因為比對不到 key 就放行"
+reason "$out" | grep -qF "$OPSX_STATE_DIR/dispatch.json" || fail "deny 理由要寫出 dispatch.json 的路徑：$(reason "$out")"
 
 # ---------- 產品碼裡不能再有直接叫 python3 的地方（上面的假 python3 只走得到幾條路） ----------
 hits="$(grep -rnwa 'python3' "$OPSX_ROOT/bin" "$OPSX_ROOT/hooks" | grep -avE ':[0-9]+:[[:space:]]*#' | grep -avF 'Bash(python3:*)' \
