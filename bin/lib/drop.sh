@@ -23,10 +23,12 @@ opsx_drop() {
   if [ -z "$top" ]; then
     local src="$OPSX_STATE_DIR/unfiled/$slug.md"
     [ -f "$src" ] || die "drop: 待分類裡沒有 ${slug}（${src}）"
-    mkdir -p "$OPSX_STATE_DIR/unfiled/dropped"
+    local dropped="$OPSX_STATE_DIR/unfiled/dropped" dest="$slug" n=1
+    mkdir -p "$dropped"
+    while [ -e "$dropped/$dest.md" ]; do n=$((n+1)); dest="$slug-$n"; done
     printf '\n## 捨棄理由\n\n%s\n' "$reason" >> "$src"
-    mv "$src" "$OPSX_STATE_DIR/unfiled/dropped/"
-    say "drop: 待分類 $slug 移到 unfiled/dropped/"
+    mv -n "$src" "$dropped/$dest.md"
+    say "drop: 待分類 $slug 移到 unfiled/dropped/$dest.md"
     return
   fi
 

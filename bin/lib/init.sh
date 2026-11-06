@@ -94,9 +94,14 @@ install_sync_job() { # <state> <bindir>
 </dict>
 </plist>
 EOF
-  if cmp -s "$plist.tmp" "$plist"; then rm "$plist.tmp"; say "init --global: $plist 已有"
+  local changed=1
+  if cmp -s "$plist.tmp" "$plist"; then changed=0; rm "$plist.tmp"; say "init --global: $plist 已有"
   else mv "$plist.tmp" "$plist"; say "init --global: 寫 ${plist}（每日同步 09:00）"; fi
-  if "$lc" print "$domain/$label" >/dev/null 2>&1; then
+  # launchd 只在 bootstrap 時讀 plist：已載入而內容變了，要先 bootout 才會用新的 PATH
+  if "$lc" print "$domain/$label" >/dev/null 2>&1 && [ "$changed" = 1 ]; then
+    "$lc" bootout "$domain/$label" || die "init --global: launchctl bootout $domain/$label 失敗"
+  fi
+  if "$lc" print "$domain/$label" >/dev/null 2>&1 && [ "$changed" = 0 ]; then
     say "init --global: 每日同步 $label 已載入"
   elif "$lc" bootstrap "$domain" "$plist"; then
     say "init --global: 每日同步 $label 載入了，每天 09:00 跑 opsx sync，輸出在 $state/sync.out"

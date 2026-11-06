@@ -99,6 +99,20 @@ def source_paths(state: pathlib.Path) -> list[pathlib.Path]:
     return [pathlib.Path(s["path"]) for s in tomllib.loads(f.read_text(encoding="utf-8")).get("source", []) if "path" in s]
 
 
+def opsx_repos(root: pathlib.Path, state: pathlib.Path) -> dict[str, pathlib.Path]:
+    """跟 opsx collect 同一份 repo 清單：root 下的 repo，加上 sources.toml 登記的 path 本身（不含它的兄弟目錄）。"""
+    repos = repos_under(root)
+    for p in source_paths(state):
+        if (p / "openspec" / "changes").is_dir() and (p / ".git").is_dir():
+            repos.setdefault(p.name, p.resolve())
+    return repos
+
+
+def demote_headings(body: str) -> str:
+    """issue 內文的 Markdown 標題降兩級：卡的段落靠 `## ` 切，內文裡的 `## Steps` 不能被當成下一段。"""
+    return re.sub(r"(?m)^(#{1,6})(?=\s)", r"##\1", body)
+
+
 def build_index(repos: dict[str, pathlib.Path], state: pathlib.Path) -> dict[str, dict]:
     files: list[tuple[pathlib.Path, bool]] = []
     for top in repos.values():
@@ -115,20 +129,20 @@ def build_index(repos: dict[str, pathlib.Path], state: pathlib.Path) -> dict[str
     return index
 
 
-def debt_items(opsx_root: pathlib.Path, scan_roots: list[pathlib.Path], tally: Tally) -> tuple[list[dict], set[str]]:
-    """跑 herdr-board/sync/debt.sh，轉成統一的 item；也回這次真的掃過的 repo 名（stale 只標在掃過的 repo）。"""
+def debt_items(opsx_root: pathlib.Path, repos: dict[str, pathlib.Path], tally: Tally) -> tuple[list[dict], set[str]]:
+    """對 repos 所在的每個上層目錄跑一次 herdr-board/sync/debt.sh（它一次掃一層），只留 repos 裡的 hit。
+    也回這次真的掃過的 repo 名（stale 只標在掃過的 repo）。"""
     items, scanned = [], set()
-    for root in scan_roots:
+    for root in sorted({top.parent for top in repos.values()}):
         p = subprocess.run(["bash", str(opsx_root / "herdr-board" / "sync" / "debt.sh"), str(root)], capture_output=True, text=True)
         if p.returncode != 0:
             tally.error("debt", p.stderr.strip() or "debt.sh 退出 %d" % p.returncode)
             continue
-        repos = repos_under(root)
-        scanned |= set(repos)
+        here = {name for name, top in repos.items() if top.parent == root}
+        scanned |= here
         for raw in p.stdout.splitlines():
             hit = json.loads(raw)
-            if hit["repo"] not in repos:
-                tally.error("debt", "%s 有 openspec/ 但沒有 openspec/changes/，不能建殼" % hit["repo"])
+            if hit["repo"] not in here:
                 continue
             fields = {"line": str(hit["line"]), "limit": hit["limit"], "trigger": hit["trigger"], "no-trigger": "true" if hit["no_trigger"] else "false"}
             items.append({
@@ -140,8 +154,10 @@ def debt_items(opsx_root: pathlib.Path, scan_roots: list[pathlib.Path], tally: T
     return items, scanned
 
 
-def issue_items(opsx_root: pathlib.Path, kind: str, state: pathlib.Path, tally: Tally) -> tuple[list[dict], dict[str, str]]:
-    """跑 herdr-board/sync/<kind>.sh list；回 item 與撈成功的 {repo: project}（只有撈成功的 repo 才查關閉）。"""
+def issue_items(opsx_root: pathlib.Path, kind: str, state: pathlib.Path, repos: dict[str, pathlib.Path], tally: Tally) -> tuple[list[dict], dict[str, str]]:
+    """跑 herdr-board/sync/<kind>.sh list；回 item 與撈成功的 {repo: project}（只有撈成功的 repo 才查關閉）。
+    path 不在 repos（例如 linked worktree）的不建殼：去重索引掃不到那裡，建了每次都會多一張。"""
+    roots = set(repos.values())
     toml = state / "sources.toml"
     if not toml.exists():
         return [], {}
@@ -156,8 +172,10 @@ def issue_items(opsx_root: pathlib.Path, kind: str, state: pathlib.Path, tally: 
             tally.error("%s:%s" % (kind, row["repo"]), row["error"])
         elif "listed" in row:
             listed[row["listed"]] = row["project"]
+        elif pathlib.Path(row["path"]).resolve() not in roots:
+            tally.error(row["source"], "%s 不是 opsx repo 的根目錄（要有 openspec/changes 與 .git 目錄）" % row["path"])
         else:
-            items.append(dict(row, path=pathlib.Path(row["path"]), evidence="- %s" % row["url"],
+            items.append(dict(row, path=pathlib.Path(row["path"]), body=demote_headings(row["body"]), evidence="- %s" % row["url"],
                               extra={"upstream_url": row["url"], "upstream_updated": row["updated_at"]}))
     return items, listed
 
@@ -266,11 +284,7 @@ def main() -> int:
     now = datetime.datetime.now().astimezone()
     today = now.date().isoformat()
     tally = Tally()
-    extra_roots = {p.parent.resolve() for p in source_paths(a.state) if p.is_dir()}
-    scan_roots = [a.root.resolve()] + sorted(extra_roots - {a.root.resolve()})
-    repos: dict[str, pathlib.Path] = {}
-    for root in scan_roots:
-        repos.update(repos_under(root))
+    repos = opsx_repos(a.root.resolve(), a.state)
     index = build_index(repos, a.state)
 
     wanted = (a.source,) if a.source else SOURCES
@@ -279,10 +293,10 @@ def main() -> int:
     listed: dict[str, dict[str, str]] = {}
     for kind in ("gitlab", "github"):
         if kind in wanted:
-            got, listed[kind] = issue_items(a.opsx_root, kind, a.state, tally)
+            got, listed[kind] = issue_items(a.opsx_root, kind, a.state, repos, tally)
             items += got
     if "debt" in wanted:
-        got, scanned = debt_items(a.opsx_root, scan_roots, tally)
+        got, scanned = debt_items(a.opsx_root, repos, tally)
         items += got
 
     seen: set[str] = set()

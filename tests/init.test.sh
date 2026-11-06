@@ -117,6 +117,11 @@ assert_grep "^bootstrap gui/$(id -u) $PL\$" "$OPSX_FAKE_LOG"
 OPSX_TEST_LAUNCHCTL_LOADED=1 opsx init --global >/dev/null 2>&1 || fail "global with loaded job"
 assert_grep '^print gui/' "$OPSX_FAKE_LOG"; assert_not_grep '^bootstrap' "$OPSX_FAKE_LOG"
 
+# --- 已載入但 plist 內容變了（例如 nvm / pyenv 升級後重跑）：先 bootout 再 bootstrap，launchd 才會讀新的 ---
+printf '<!-- 舊的 -->\n' > "$PL"; : > "$OPSX_FAKE_LOG"
+OPSX_TEST_LAUNCHCTL_LOADED=1 opsx init --global >/dev/null 2>&1 || fail "global with changed plist"
+assert_grep "^bootout gui/$(id -u)/com.opsx.sync\$" "$OPSX_FAKE_LOG"; assert_grep '^bootstrap' "$OPSX_FAKE_LOG"
+
 # --- 沒有 launchctl：印一行略過，退出 0 ---
 outn="$(OPSX_LAUNCHCTL="$FX/no-such-launchctl" opsx init --global 2>&1)"; assert_eq "$?" 0 "no launchctl rc: $outn"
 case "$outn" in *略過*) ;; *) fail "沒有 launchctl 要說略過：$outn" ;; esac

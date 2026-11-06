@@ -42,4 +42,10 @@ assert_rc 0 opsx drop "$U" -- 不需要
 assert_no_file "$OPSX_STATE_DIR/unfiled/$U.md"
 assert_file "$OPSX_STATE_DIR/unfiled/dropped/$U.md"; assert_grep '^不需要$' "$OPSX_STATE_DIR/unfiled/dropped/$U.md"
 assert_rc 2 opsx drop nope -- 理由
+
+# --- 同一分鐘再新增、再捨棄：dropped/ 裡已有同名檔，不能蓋掉 ---
+U2="$(opsx new -- 第二個不需要的)"; assert_eq "$U2" "$U"
+assert_rc 0 opsx drop "$U2" -- 也不需要
+assert_grep '^不需要的$' "$OPSX_STATE_DIR/unfiled/dropped/$U.md"
+assert_grep '^第二個不需要的$' "$OPSX_STATE_DIR/unfiled/dropped/$U-2.md"
 echo ok

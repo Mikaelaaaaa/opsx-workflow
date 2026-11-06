@@ -161,10 +161,57 @@ assert_not_grep '^upstream:' "$I"
 
 # --- 一個來源失敗：其他照建，sync.log 記錯，退出 0 ---
 touch "$OPSX_TEST_ISSUES/a.fail"
+NEW_DEBT='第二個 worker, 量大再拆'; echo "# shortcut: $NEW_DEBT" > "$A/y.py"
+ND="$CH/debt-$(printf '%s' "$NEW_DEBT" | shasum -a 1 | cut -c1-8)"
 printf '[{"number":4,"title":"新的","body":"","state":"OPEN","updatedAt":"2026-11-06T08:00:00Z","url":"https://github.com/me/z/issues/4","labels":[]}]' > "$OPSX_TEST_ISSUES/gh-z.json"
 out="$(opsx sync --root "$ROOT" 2>&1)"; assert_eq "$?" 0 "一個來源失敗仍退出 0：$out"
 assert_file "$Z/openspec/changes/gh-z-4/inbox.md"
+assert_file "$ND/inbox.md"
+rm "$OPSX_TEST_ISSUES/a.fail"
 [ "$(tail -1 "$LOG" | cut -f5)" -ge 1 ] || fail "errors 要 >= 1：$(tail -1 "$LOG")"
 tail -1 "$LOG" | cut -f6 | grep -q '401' || fail "first_error 要含 glab 的 stderr：$(tail -1 "$LOG")"
+
+# ========== review 修正 ==========
+# --- slug：repo 名的底線、連續符號換成單一 -，截斷不留 --；openspec 收得下 ---
+python3 -I -c 'import re,sys;sys.path.insert(0,sys.argv[1]);import sources as s
+ok=re.compile(r"^[a-z][a-z0-9-]{0,31}$")
+for got in (s.slug_for("gl","tg_spam",3), s.slug_for("gh","my.-repo",1), s.slug_for("gl","a"*20+"-"+"b"*20,12345)):
+    assert ok.match(got) and "--" not in got and "_" not in got, got
+assert s.slug_for("gl","tg_spam",3)=="gl-tg-spam-3"' "$OPSX_ROOT/herdr-board/sync" || fail "slug_for 產出 openspec 不收的 slug"
+
+# --- 撞名加 -N 不能超過 32 字 ---
+LONG="gl-$(printf 'x%.0s' $(seq 26))-9"   # 32 字
+printf -- '---\nsource: me\n---\n\n## 一句話\n\nx\n' > "$FX/long.md"
+s1="$( source "$OPSX_ROOT/bin/lib/common.sh"; new_shell "$A" "$LONG" "$FX/long.md" )"
+s2="$( source "$OPSX_ROOT/bin/lib/common.sh"; new_shell "$A" "$LONG" "$FX/long.md" )"
+assert_eq "$s1" "$LONG"
+[[ "$s2" =~ ^[a-z][a-z0-9_-]{0,31}$ ]] && [ "$s2" != "$s1" ] || fail "撞名後的 slug 超過 32 字或沒換：$s2"
+assert_dir "$CH/$s2"
+
+# --- issue 內文有 ## 標題：更新後不殘留舊段，證據段不被擾亂 ---
+python3 -I -c 'import json,sys;print(json.dumps([{"iid":600,"title":"有標題的","description":"intro\n\n## Steps\n1. old","state":"opened","updated_at":"2026-11-06T08:00:00Z","web_url":"u600","labels":[]}]))' > "$OPSX_TEST_ISSUES/a.json"
+opsx sync --root "$ROOT" --source gitlab >/dev/null 2>&1
+H600="$CH/gl-a-600/inbox.md"; assert_file "$H600"
+python3 -I -c 'import json,sys;print(json.dumps([{"iid":600,"title":"有標題的","description":"intro2\n\n## Steps\n1. new","state":"opened","updated_at":"2026-11-06T09:00:00Z","web_url":"u600","labels":[]}]))' > "$OPSX_TEST_ISSUES/a.json"
+opsx sync --root "$ROOT" --source gitlab >/dev/null 2>&1
+assert_grep '^1. new$' "$H600"; assert_not_grep '^1. old$' "$H600"
+assert_eq "$(grep -c '^## ' "$H600")" 3 "只有 一句話 / 內文 / 證據 三個二級標題：$(cat "$H600")"
+assert_grep '^- u600$' "$H600"
+
+# --- repo 範圍跟 collect 一樣：~/code/* 加上 sources.toml 的 path 本身，不掃 path 的兄弟 ---
+SIB="$(mk_opsx_repo sib)"; mv "$SIB" "$FX/elsewhere/sib"; SIB="$(cd "$FX/elsewhere/sib" && pwd -P)"
+echo "# shortcut: 兄弟 repo 的, 不該建" > "$SIB/s.py"
+echo "# shortcut: z 自己的, 要建" > "$Z/z.py"
+opsx sync --root "$ROOT" --source debt >/dev/null 2>&1
+assert_eq "$(find "$SIB/openspec/changes" -mindepth 1 -maxdepth 1 ! -name archive | wc -l | tr -d ' ')" 0 "沒登記的兄弟 repo 不建卡"
+assert_file "$Z/openspec/changes/debt-$(printf '%s' 'z 自己的, 要建' | shasum -a 1 | cut -c1-8)/inbox.md"
+
+# --- sources.toml 的 path 不是 repo 根（linked worktree）：不建殼、記錯，不會每次多一張 ---
+WT="$FX/elsewhere/wt"; mkdir -p "$WT/openspec/changes"; printf 'gitdir: /nowhere\n' > "$WT/.git"
+printf '\n[[source]]\nkind = "gitlab"\nrepo = "wt"\nproject = "g/wt"\npath = "%s"\n' "$WT" >> "$OPSX_STATE_DIR/sources.toml"
+printf '[%s]' "$(gl 7 worktree 的 2026-11-06T08:00:00Z)" > "$OPSX_TEST_ISSUES/wt.json"
+opsx sync --root "$ROOT" --source gitlab >/dev/null 2>&1
+assert_eq "$(find "$WT/openspec/changes" -mindepth 1 -maxdepth 1 | wc -l | tr -d ' ')" 0 "worktree 不建殼"
+[ "$(tail -1 "$LOG" | cut -f5)" -ge 1 ] || fail "要記錯：$(tail -1 "$LOG")"
 
 echo ok

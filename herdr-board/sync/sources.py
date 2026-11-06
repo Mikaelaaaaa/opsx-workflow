@@ -19,10 +19,10 @@ FIELDS = {
 
 
 def slug_for(prefix: str, repo: str, n: int) -> str:
-    """<prefix>-<repo 小寫>-<n>；repo 裡 slug 不收的字元換成 -，太長就截 repo 那段，讓整個 slug 不超過 32 字。"""
+    """<prefix>-<repo 小寫>-<n>，不超過 32 字。openspec 不收底線與連續的 -，所以非英數一律併成一個 -，截斷後去掉結尾的 -。"""
     tail = "-%d" % n
-    name = re.sub(r"[^a-z0-9_-]", "-", repo.lower())
-    return ("%s-%s" % (prefix, name))[: SLUG_MAX - len(tail)] + tail
+    name = re.sub(r"[^a-z0-9]+", "-", repo.lower()).strip("-")
+    return ("%s-%s" % (prefix, name))[: SLUG_MAX - len(tail)].rstrip("-") + tail
 
 
 def label_names(labels: list) -> list[str]:
