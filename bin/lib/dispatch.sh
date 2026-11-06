@@ -117,6 +117,17 @@ PY
   until out="$(herdr agent start "$slug" --kind "$agent" --pane "$pane" -- "${aargs[@]}" 2>&1)"; do
     case "$out" in
       *agent_pane_busy*) if [ "$try" -lt 6 ]; then try=$((try + 1)); sleep "${OPSX_DISPATCH_RETRY_SLEEP:-1}"; continue; fi ;;
+      *agent_not_ready*)
+        # Claude Code 在沒信任過的目錄（每棵新 worktree）先問 trust，herdr 判成 blocked；名字已記下，按 Yes 等到 idle 就等於 start 成功
+        if herdr pane wait-output --match "trust this folder" --timeout 3000 "$pane" >/dev/null 2>&1; then
+          herdr pane send-keys "$pane" down enter >/dev/null
+          if herdr agent wait "$slug" --until idle --timeout 60000 >/dev/null 2>&1; then break; fi
+          out="trust 按了但 agent 沒到 idle"
+        else
+          out="${out}
+pane 畫面：
+$(herdr pane read "$pane" 2>/dev/null | tail -20)"
+        fi ;;
     esac
     herdr tab close "$tab" >/dev/null 2>&1 || true
     die "dispatch: herdr agent start 失敗（第 ${try} 次）：${out}"

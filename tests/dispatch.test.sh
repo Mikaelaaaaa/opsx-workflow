@@ -73,6 +73,31 @@ assert_eq "$(grep -c '^agent start stuck-card ' "$OPSX_FAKE_LOG")" 1 "non-busy e
 assert_grep '^tab close w1:tB$' "$OPSX_FAKE_LOG"
 unset OPSX_TEST_BUSY_LEFT
 
+# --- Claude 在新 worktree 停在 trust 對話框（agent_not_ready）：dispatch 替人按 Yes，再等 idle ---
+mkdir -p "$R/openspec/changes/trust-card"; printf 'schema: opsx\n' > "$R/openspec/changes/trust-card/.openspec.yaml"
+export OPSX_TEST_NOT_READY_ONCE="$FX/not-ready-once"; : > "$OPSX_TEST_NOT_READY_ONCE"
+export OPSX_TEST_PANE_TEXT='Quick safety check: Is this a project you created or one you trust?
+ ❯ No, exit
+   Yes, I trust this folder'
+: > "$OPSX_FAKE_LOG"
+out="$(opsx dispatch trust-card --agent claude --mode interactive --kind dev 2>&1)" || fail "trust dialog should be answered: $out"
+assert_eq "$(grep -c '^agent start trust-card ' "$OPSX_FAKE_LOG")" 1 "no second start after the dialog"
+assert_grep '^pane wait-output --match trust this folder .*w1:pE$' "$OPSX_FAKE_LOG"
+assert_grep '^pane send-keys w1:pE down enter$' "$OPSX_FAKE_LOG"
+assert_grep '^agent wait trust-card --until idle' "$OPSX_FAKE_LOG"
+assert_grep '^agent prompt trust-card /explore trust-card$' "$OPSX_FAKE_LOG"
+assert_not_grep '^tab close' "$OPSX_FAKE_LOG"
+python3 -I -c 'import json,sys;assert "Agentory-CS/trust-card" in json.load(open(sys.argv[1]))' "$OPSX_STATE_DIR/dispatch.json"
+# 不是 trust 對話框（例如要登入）：不按鍵，關 tab，把畫面印給人看
+mkdir -p "$R/openspec/changes/login-card"; printf 'schema: opsx\n' > "$R/openspec/changes/login-card/.openspec.yaml"
+: > "$OPSX_TEST_NOT_READY_ONCE"; export OPSX_TEST_PANE_TEXT='Please log in to continue'
+: > "$OPSX_FAKE_LOG"
+out="$(opsx dispatch login-card --agent claude --mode interactive --kind dev 2>&1)"; [ $? -ne 0 ] || fail "unknown startup screen must fail"
+assert_not_grep '^pane send-keys' "$OPSX_FAKE_LOG"
+assert_grep '^tab close w1:tB$' "$OPSX_FAKE_LOG"
+echo "$out" | grep -q 'Please log in' || fail "error should show the pane: $out"
+unset OPSX_TEST_NOT_READY_ONCE OPSX_TEST_PANE_TEXT
+
 # --- 重派同一張卡：worktree 已在就重用，不報錯 ---
 : > "$OPSX_FAKE_LOG"
 out="$(opsx dispatch retry-backoff --agent codex --mode interactive 2>&1)" || fail "redispatch: $out"
