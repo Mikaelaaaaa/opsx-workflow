@@ -252,4 +252,17 @@ opsx sync --root "$ROOT" --source gitlab >/dev/null 2>&1
 assert_eq "$(find "$WT/openspec/changes" -mindepth 1 -maxdepth 1 | wc -l | tr -d ' ')" 0 "worktree 不建殼"
 [ "$(tail -1 "$LOG" | cut -f5)" -ge 1 ] || fail "要記錯：$(tail -1 "$LOG")"
 
+# ========== 真實樣本（board-inbox 1.1，tests/fakes/gh-samples/，cli/cli 公開 issue 2026-11-06 實抓）==========
+GS="$OPSX_ROOT/tests/fakes/gh-samples"
+cp "$GS/issue-list.json" "$OPSX_TEST_ISSUES/gh-z.json"
+N="$(python3 -I -c 'import json,sys;print(json.load(open(sys.argv[1]))[0]["number"])' "$GS/issue-list.json")"
+opsx sync --root "$ROOT" --source github >/dev/null 2>&1
+SI="$Z/openspec/changes/gh-z-$N/inbox.md"
+assert_file "$SI"; assert_grep "^source: github:z#$N\$" "$SI"; assert_grep "^upstream_url: https://github.com/cli/cli/issues/$N\$" "$SI"
+grep -qE '^upstream_updated: 20[0-9]{2}-[0-9]{2}-[0-9]{2}T' "$SI" || fail "upstream_updated 要是 updatedAt：$(cat "$SI")"
+# list 裡少了它、真樣本的 view 回 CLOSED：標 upstream: closed
+printf '[]' > "$OPSX_TEST_ISSUES/gh-z.json"; cp "$GS/issue-view-closed.json" "$OPSX_TEST_ISSUES/gh-view-$N.json"
+opsx sync --root "$ROOT" --source github >/dev/null 2>&1
+assert_grep '^upstream: closed$' "$SI"
+
 echo ok

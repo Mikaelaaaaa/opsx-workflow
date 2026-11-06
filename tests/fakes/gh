@@ -13,7 +13,7 @@ case "$1 $2" in
     for f in "${arr[@]}"; do case "$KNOWN" in *" $f "*) ;; *) echo "Unknown JSON field: \"$f\"" >&2; exit 1 ;; esac; done
     cat "${OPSX_TEST_GH_JSON:?}" ;;
   # issue：同 glab 的規則，檔名加 gh- 前綴（$OPSX_TEST_ISSUES/gh-<cwd 目錄名>.json、gh-view-<n>.json）。
-  # 欄位照 gh 文件（number/title/body/state/updatedAt/url/labels[].name），真樣本見 gh-samples/。
+  # 欄位對過真樣本 gh-samples/（cli/cli 公開 issue）：number/title/body/state OPEN|CLOSED/updatedAt/url/labels[{name}]。
   "issue list")
     name="$(basename "$PWD")"
     if [ -f "${OPSX_TEST_ISSUES:?}/gh-$name.fail" ]; then echo "gh: To get started with GitHub CLI, please run: gh auth login" >&2; exit 1; fi
