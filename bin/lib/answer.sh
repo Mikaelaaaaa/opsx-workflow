@@ -29,7 +29,7 @@ opsx_answer() {
   # 一段 python 做完驗證與所有檔案改動：失敗在哪一步就印哪一步，退出 2；成功印 "dispatched" 或 "undispatched"
   local result
   result="$(OPSX_A_DIR="$d" OPSX_A_GATE="$gate" OPSX_A_GRANT="$grant" OPSX_A_TEXT="$answer" OPSX_A_REPO="$repo" OPSX_A_SLUG="$slug" \
-            OPSX_A_SD="$OPSX_STATE_DIR" OPSX_A_NOW="$(now_iso)" OPSX_LIB="$OPSX_ROOT/bin/lib" python3 -I - <<'PY'
+            OPSX_A_SD="$OPSX_STATE_DIR" OPSX_A_NOW="$(now_iso)" OPSX_LIB="$OPSX_ROOT/bin/lib" "$OPSX_PY" -I - <<'PY'
 import os, re, sys, tomllib
 sys.path.insert(0, os.environ["OPSX_LIB"]); import jsonfile
 e = os.environ

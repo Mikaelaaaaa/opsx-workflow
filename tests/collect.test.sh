@@ -137,8 +137,8 @@ assert_eq "$(q "$J" unmatched_agents)" '[{"agent_status": "idle", "cwd": "/Users
 # 真樣本也讀得懂（兩個 agent 都沒對到卡）
 J2="$(OPSX_TEST_HERDR_AGENTS= opsx collect --root "$ROOT")"; assert_eq "$(q "$J2" unmatched_agents.0.pane)" "w1:p2"; assert_eq "$(q "$J2" unmatched_agents.1.name)" "Worktree cleanup"
 assert_eq "$(q "$J" errors)" '[]'
-# 不寫檔（cache/ 除外）
-[ "$(find "$OPSX_STATE_DIR" -type f ! -path '*/cache/*' ! -name '*.lock' | wc -l | tr -d ' ')" = 3 ] || fail "collect 不該在 state 寫檔：$(find "$OPSX_STATE_DIR" -type f)"
+# 不寫檔（cache/ 與 fixture 的 python 除外）
+[ "$(find "$OPSX_STATE_DIR" -type f ! -path '*/cache/*' ! -name '*.lock' ! -name python | wc -l | tr -d ' ')" = 3 ] || fail "collect 不該在 state 寫檔：$(find "$OPSX_STATE_DIR" -type f)"
 [ -z "$(find "$ROOT" -newer "$OPSX_STATE_DIR/dispatch.json" -type f)" ] || fail "collect 不該動卡的檔"
 
 # ---------- glab 讀不到：卡還在、errors 記 glab、exit 0 ----------
@@ -171,4 +171,21 @@ assert_eq "$(printf '%s' "$J" | python3 -I -c 'import json,sys;print(sorted(r fo
 assert_eq "$(q "$(card "$J" z z1)" section)" 待指派
 assert_eq "$(printf '%s' "$J" | python3 -I -c 'import json,sys;print(sum(1 for c in json.load(sys.stdin)["cards"] if c["repo"]=="a" and c["slug"]=="x1"))')" 1 "a 兩邊都有，卡不能重複"
 assert_eq "$(q "$J" errors.0.source)" herdr; assert_eq "$(printf '%s' "$J" | python3 -I -c 'import json,sys;print(len(json.load(sys.stdin)["errors"]))')" 1 "不存在的 path 不該進 errors"
+# ---------- 舊卡在算 stage 之前就濾掉，只計數（collect-perf） ----------
+R2="$FX/code2"; mkdir -p "$R2/r/.git" "$R2/r/openspec/changes"
+for o in old-1 old-2 old-ws sd-inbox; do mkdir -p "$R2/r/openspec/changes/$o"; printf 'schema: spec-driven\n' > "$R2/r/openspec/changes/$o/.openspec.yaml"; done
+printf '\n  \n\t\n' > "$R2/r/openspec/changes/old-ws/inbox.md"
+printf '## 一句話\n\n有 inbox 的舊 schema\n' > "$R2/r/openspec/changes/sd-inbox/inbox.md"
+mkdir -p "$R2/r/openspec/changes/new-1"; printf 'schema: opsx\n' > "$R2/r/openspec/changes/new-1/.openspec.yaml"
+rm -f "$OPSX_STATE_DIR/sources.toml"; : > "$FX/stage.log"
+J="$(
+  # shellcheck source=/dev/null
+  source "$OPSX_ROOT/bin/lib/common.sh"; source "$OPSX_ROOT/bin/lib/stage.sh"; source "$OPSX_ROOT/bin/lib/collect.sh"; source "$OPSX_ROOT/bin/lib/python.sh"; opsx_python_load
+  stage_name() { printf '%s\n' "$2" >> "$FX/stage.log"; printf 'explore'; }
+  opsx_collect --root "$R2" --state "$OPSX_STATE_DIR"
+)"
+assert_eq "$(sort "$FX/stage.log" | tr '\n' ' ')" "new-1 sd-inbox " "只有 opsx 卡和有 inbox 的卡算 stage"
+assert_eq "$(q "$J" legacy)" '{"r": 3}'
+assert_eq "$(card "$J" r old-ws)" null "只有空白的 inbox 仍是舊卡"
+assert_eq "$(q "$(card "$J" r sd-inbox)" stage)" explore
 echo ok

@@ -18,6 +18,16 @@ init_global() {
     || die "init --global: PATH 上的 python3 要 3.11 以上（有 tomllib），現在是 $(python3 --version 2>&1)。pyenv 或 brew 裝一個再跑"
   ensure_dir "$state"; ensure_dir "$bindir"
 
+  # 記下 python3 背後真正的執行檔，opsx 和 hooks 只叫它（bin/lib/python.sh）。路徑不同就覆寫：
+  # pyenv 換版本後舊路徑會失效，重跑這裡是唯一的修法。
+  local py old=""; py="$(python3 -I -c 'import sys; print(sys.executable)')"
+  [ -f "$state/python" ] && IFS= read -r old < "$state/python" || true
+  if [ "$old" = "$py" ]; then say "init --global: python 已有（${py}）"
+  else
+    printf '%s\n' "$py" > "$state/python"
+    if [ -n "$old" ]; then say "init --global: python 從 $old 換成 $py"; else say "init --global: python 記為 $py"; fi
+  fi
+
   write_if_missing "$state/sources.toml" '# opsx 同步來源。opsx init 在每個 repo 跑時會自動補 gitlab / github；obsidian、customer 在這裡填。
 # [obsidian]
 # vault = "/path/to/vault"
@@ -153,7 +163,7 @@ patch_schema() { # <schema.yaml> <head.yaml>
     { print }
   ' "$f" > "$tmp"
   # proposal 改成 requires explore
-  python3 -I - "$tmp" <<'PY'
+  "$OPSX_PY" -I - "$tmp" <<'PY'
 import re,sys
 p=sys.argv[1]; s=open(p,encoding='utf-8').read()
 m=re.search(r'(  - id: proposal\n(?:(?!  - id: ).*\n)*?)    requires: \[\]\n', s)

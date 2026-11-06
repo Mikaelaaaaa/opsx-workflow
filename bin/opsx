@@ -44,5 +44,9 @@ source "$OPSX_ROOT/bin/lib/common.sh"
 # shellcheck source=/dev/null
 source "$OPSX_ROOT/bin/lib/stage.sh"
 # shellcheck source=/dev/null
+source "$OPSX_ROOT/bin/lib/python.sh"
+# init --global 是寫這個檔的人，只有它可以在沒有檔的時候跑
+if [ "$cmd" != init ] || [ "${1:-}" != --global ]; then opsx_python_load || die "$OPSX_PY_ERR"; fi
+# shellcheck source=/dev/null
 source "$lib"
 "opsx_$cmd" "$@"
