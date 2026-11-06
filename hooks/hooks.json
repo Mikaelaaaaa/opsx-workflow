@@ -38,6 +38,12 @@
           { "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/secret-mask.sh\"", "timeout": 3 },
           { "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/conventional-commit.sh\"", "timeout": 3 }
         ]
+      },
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          { "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/gate-timestamp.sh\"", "timeout": 3 }
+        ]
       }
     ],
     "Stop": [

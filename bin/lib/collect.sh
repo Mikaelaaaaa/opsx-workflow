@@ -165,6 +165,23 @@ def parse_gates(text):
             cur[key] = (cur[key] + "\n" + line.strip()).strip()
     return gates
 
+OPENED_AT_SLACK = datetime.timedelta(seconds=60)   # 同一秒寫入與時鐘誤差
+
+def opened_at_of(g, path, now_dt):
+    """不合格的 opened_at 給 None 並記 errors：沒時區比不出先後，晚於現在會讓 banner 每次都列它。"""
+    raw = g.get("opened_at")
+    if not raw: return None
+    try:
+        t = datetime.datetime.fromisoformat(raw)
+    except ValueError:
+        why = "解析不了"
+    else:
+        if t.tzinfo is None: why = "沒有時區"
+        elif t > now_dt + OPENED_AT_SLACK: why = "晚於現在"
+        else: return raw
+    errors.append({"source": path, "message": "gate %s 的 opened_at 不合格（%s）：%s" % (g["id"], why, raw)})
+    return None
+
 def one_liner(inbox):
     m = re.search(r"^## 一句話\s*\n+(.+?)$", inbox, re.M)
     return m.group(1).strip() if m else None
@@ -207,7 +224,8 @@ def waiting_of(card, gates, agent_status):
 cards, matched_panes, legacy = [], set(), {}
 for r in read(os.path.join(work, "legacy")).split("\n"):
     if r: legacy[r] = legacy.get(r, 0) + 1
-now = datetime.datetime.now().astimezone().isoformat(timespec="seconds")
+now_dt = datetime.datetime.now().astimezone()
+now = now_dt.isoformat(timespec="seconds")
 for line in read(os.path.join(work, "cards.tsv")).split("\n"):
     if not line: continue
     repo_, slug_, dir_, archived_, stage_, mrfile = line.split("\t")
@@ -225,7 +243,8 @@ for line in read(os.path.join(work, "cards.tsv")).split("\n"):
         hit = [a for a in agents if str(a.get("pane_id")) == str(disp.get("pane"))]
         agent_status = (hit[0].get("agent_status") or "unknown") if hit else "unknown"
         if hit: matched_panes.add(str(hit[0].get("pane_id")))
-    gates = parse_gates(read(os.path.join(d, "gates.md"))) if not c["archived"] else []
+    gates_path = os.path.join(d, "gates.md")
+    gates = parse_gates(read(gates_path)) if not c["archived"] else []
     waiting = None if c["archived"] else waiting_of(c, gates, agent_status)
     if c["archived"] or c["stage"] == "archive": section = "已完成"
     elif waiting: section = "待處理"
@@ -236,7 +255,7 @@ for line in read(os.path.join(work, "cards.tsv")).split("\n"):
         "repo": c["repo"], "slug": c["slug"], "title": one_liner(inbox) or c["slug"], "kind": kind_of(d),
         "stage": c["stage"], "section": section,
         "since": frontmatter(inbox, "found") or (re.search(r"^created:\s*(\S+)", read(os.path.join(d, ".openspec.yaml")), re.M) or [None, None])[1],
-        "waiting": waiting, "open_gates": [{"id": g["id"], "opened_at": g.get("opened_at")} for g in gates if g.get("status") == "open"],
+        "waiting": waiting, "open_gates": [{"id": g["id"], "opened_at": opened_at_of(g, gates_path, now_dt)} for g in gates if g.get("status") == "open"],
         "dispatch": disp, "status": load_json(os.path.join(d, "status.json"), None),
         "agent_status": agent_status, "mr": c["mr"], "last_output": None,
         "grants_repo": grants.get(c["repo"]), "path": d,

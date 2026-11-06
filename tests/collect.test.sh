@@ -247,4 +247,17 @@ J="$(OPSX_TEST_GLAB_JSON="$FX/glab-empty.json" OPSX_TEST_GLAB_JSON_BY_IID= opsx 
 assert_eq "$(q "$J" legacy)" '{"r3": 1}'
 E="$(q "$J" errors)" || fail "errors 讀不到：$J"
 case "$E" in *legacy-mr*|*glab*) fail "errors 不該指名舊卡：$E" ;; esac
+# ---------- 壞的 opened_at：改 null 並記 errors；寬限內照收（specs/board-collect「gate 與 MR 的時間」） ----------
+R4="$FX/code4"; D="$R4/r4/openspec/changes/bad-ts"; mkdir -p "$R4/r4/.git" "$D"
+printf 'schema: opsx\ncreated: 2026-11-05\nkind: dev\n' > "$D/.openspec.yaml"; printf '## 一句話\n\n壞時間\n' > "$D/inbox.md"
+FUT="$(date -u -v+8H +%Y-%m-%dT%H:%M:%SZ)"; SOON="$(date -v+30S +%Y-%m-%dT%H:%M:%S%z | sed -E 's/([0-9]{2})([0-9]{2})$/\1:\2/')"
+printf '## g1\nstatus: open\nopened_at: %s\n\n## g2\nstatus: open\nopened_at: 2026-11-06 14:05\n\n## g3\nstatus: open\nopened_at: 昨天\n\n## g4\nstatus: open\nopened_at: %s\n\n## g5\nstatus: answered\nopened_at: 昨天\n' "$FUT" "$SOON" > "$D/gates.md"
+J="$(opsx collect --root "$R4")"; assert_eq "$?" 0 "壞時間 collect rc"
+assert_eq "$(q "$(card "$J" r4 bad-ts)" open_gates)" "[{\"id\": \"g1\", \"opened_at\": null}, {\"id\": \"g2\", \"opened_at\": null}, {\"id\": \"g3\", \"opened_at\": null}, {\"id\": \"g4\", \"opened_at\": \"$SOON\"}]"
+E="$(q "$J" errors)"
+GE="$(printf '%s' "$J" | python3 -I -c 'import json,sys;print(json.dumps([e for e in json.load(sys.stdin)["errors"] if e["source"].endswith("/r4/openspec/changes/bad-ts/gates.md")],ensure_ascii=False))')"
+assert_eq "$(printf '%s' "$GE" | python3 -I -c 'import json,sys;print(len(json.load(sys.stdin)))')" 3 "三個壞值各一筆 error：$E"
+for want in "g1.*$FUT" "g2.*2026-11-06 14:05" "g3.*昨天"; do printf '%s' "$GE" | grep -Eq "$want" || fail "errors 要有 gate id 與原值（$want）：$E"; done
+case "$E" in *g4*|*g5*) fail "寬限內與 answered 的 gate 不該進 errors：$E" ;; esac
+
 echo ok
