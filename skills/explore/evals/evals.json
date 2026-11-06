@@ -5,7 +5,7 @@
       "id": 0,
       "name": "small-fix-skips-grill",
       "prompt": "看一下 slug-trailing-dash 這張卡，想清楚怎麼修、下一步要做什麼。這個專案的工作流程 skill 在 .claude/skills/，照適用的那支做。我這段時間不在，要問我的話把問題和選項寫進 repo 根目錄的 questions.md。",
-      "expected_output": "Finds the cause in src/slug.mjs (no trimming of leading/trailing dashes) with the file path, records nothing for the user to decide, says grill is not needed, and names /propose slug-trailing-dash as the next step. Writes no code, no grill.md, no questions.md.",
+      "expected_output": "Finds the cause in src/slug.mjs (no trimming of leading/trailing dashes) with the file path, records nothing for the user to decide, says so, and names /propose slug-trailing-dash as the next step. Writes no code, no grill.md, no questions.md.",
       "files": [
         "fixtures/slug-trailing-dash"
       ],

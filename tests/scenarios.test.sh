@@ -50,8 +50,11 @@ import json, sys
 e = json.load(open(sys.argv[1]))["evals"][0]
 assert len(e["baseline"]) == 5
 assert not set(e["baseline"]) & set(e["assertions"])
+for key in ("No grill.md exists", "No questions.md exists", "its 待決 section is empty", "No file under src/ was modified", "The run stopped at explore"):
+    assert sum(key in b for b in e["baseline"]) == 1, key
 nothing = [a for a in e["assertions"] if "nothing for the user to decide" in a]
 assert len(nothing) == 1 and "grill" not in nothing[0].lower()
+assert "grill is not needed" not in e["expected_output"]
 PY
 
 # 情境 1 grill 段：至少三個原始檔，待決恰好三題；答案不在工作 repo 裡，第二輪才當使用者回覆傳過去
@@ -70,6 +73,7 @@ PY
 assertion_has "$OPSX_ROOT/skills/grill/evals/evals.json" "first turn ended"
 assertion_has "$OPSX_ROOT/skills/grill/evals/evals.json" "no longer lists the user-only item"
 assertion_has "$OPSX_ROOT/skills/grill/evals/evals.json" "by executing src/backoff.ts"
+assertion_has "$OPSX_ROOT/skills/grill/evals/evals.json" "turn 1 wrote no decision"
 
 # 情境 1 propose 段：寫好的 grill.md 至少 D1、D2，各帶 理由、否決；explore 待決為空
 d="$FX/built/propose-retry-backoff"
@@ -105,7 +109,7 @@ const stalled = async (_url, init) => new Response(new ReadableStream({
 }), { status: 200 });
 const hung = new Promise((r) => setTimeout(() => r("hung"), 2000));
 const call = getJson("http://u/x", { timeoutMs: 50, retries: 0, fetchImpl: stalled, sleep: async () => {} })
-  .then(() => "resolved", () => "rejected");
+  .then(() => "resolved", (e) => e.message.includes("last status 0") ? "rejected" : e.message);
 console.log(await Promise.race([call, hung]));
 process.exit(0);' 2>&1)" "rejected" "review segment: a stalled body read must be cut off by the request timeout"
 # body 不是 JSON 是回應本身的錯，不能被當成網路錯誤重試
@@ -136,6 +140,7 @@ assert_eq "$(cd "$d" && node -e 'import("./src/money.mjs").then(m=>console.log(m
 assertion_has "$OPSX_ROOT/skills/apply/evals/evals.json" "git rev-list --count main..HEAD prints 1"
 assertion_has "$OPSX_ROOT/skills/apply/evals/evals.json" "fails whenever the run evaded a hook"
 assertion_has "$OPSX_ROOT/skills/apply/evals/evals.json" "these three claims"
+assertion_has "$OPSX_ROOT/skills/apply/evals/evals.json" "a missing claim fails"
 ! grep -q 'Every factual claim in the final reply' "$OPSX_ROOT/skills/apply/evals/evals.json" || fail "scenario 3 evidence assertion must check three claims, not every claim"
 
 # 兩組工作 repo：同一題、新舊兩版 skill，.claude/ 以外逐檔相同

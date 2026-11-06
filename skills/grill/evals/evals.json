@@ -21,7 +21,8 @@
         "When the first turn ended, questions.md existed with the question for the user, and the first turn's transcript never reads or quotes the answer text (it only arrives as the second turn's message)",
         "grill.md contains no decision the user did not choose: facts found in code or by running something, and numbers derived from them, are not numbered as D's",
         "After the second turn, explore.md 待決 no longer lists the user-only item (the backoff strategy) that the reply answered; it may only keep a new question the reply did not cover",
-        "The expDelays(5) total in explore.md 已知 was obtained by executing src/backoff.ts from the repo (the transcript shows a command that imports or runs that file), not by re-implementing the formula elsewhere or computing it by hand"
+        "The expDelays(5) total in explore.md 已知 was obtained by executing src/backoff.ts from the repo (the transcript shows a command that imports or runs that file), not by re-implementing the formula elsewhere or computing it by hand",
+        "In turn 1 wrote no decision for the user-only item (the backoff strategy): the turn-1 transcript shows no write to grill.md that records it, and explore.md 已知 does not state a chosen strategy before the second turn arrives"
       ],
       "second_turn": "Exponential, but don't let a single wait go past 30 seconds. The sync job has to finish its page inside a minute."
     },
