@@ -76,6 +76,10 @@ reason "$out" | grep -qF "$OPSX_STATE_DIR/dispatch.json" || fail "deny 理由要
 printf '{"r/other":{"mode":"autopilot",' > "$OPSX_STATE_DIR/dispatch.json"
 out="$(bash_hook "$R" 'git push')"; assert_eq "$(decision "$out")" allow "dispatch.json 壞掉、裡面沒有這張卡：不管"
 printf '{"r/c1":{"mode":"autopilot","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"
+chmod 000 "$OPSX_STATE_DIR/dispatch.json"
+out="$(bash_hook "$R" 'git push')"; chmod 644 "$OPSX_STATE_DIR/dispatch.json"
+assert_eq "$(decision "$out")" deny "dispatch.json 讀不了時要 deny，不能因為比對不到 key 就放行"
+reason "$out" | grep -qF "$OPSX_STATE_DIR/dispatch.json" || fail "deny 理由要寫出 dispatch.json 的路徑：$(reason "$out")"
 
 # ---------- 產品碼裡不能再有直接叫 python3 的地方（上面的假 python3 只走得到幾條路） ----------
 hits="$(grep -rnwa 'python3' "$OPSX_ROOT/bin" "$OPSX_ROOT/hooks" | grep -avE ':[0-9]+:[[:space:]]*#' | grep -avF 'Bash(python3:*)' \
