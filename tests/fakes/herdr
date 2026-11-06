@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # 假 herdr：把每個呼叫記到 $OPSX_FAKE_LOG，回合理的 JSON。測試用。
-# agent prompt / agent wait 會呼叫 $OPSX_TEST_ON_PROMPT / $OPSX_TEST_ON_WAIT（若設定），讓測試推進 fixture 的狀態。
+# agent prompt / agent wait 會呼叫 $OPSX_TEST_ON_PROMPT / $OPSX_TEST_ON_WAIT（若設定；wait 的拿到整串參數），讓測試推進 fixture 的狀態。
 printf '%s\n' "$*" >> "${OPSX_FAKE_LOG:?}"
 pop_err() { # <file>：印第一行並刪掉它；ok 或沒檔印空
   [ -n "$1" ] && [ -s "$1" ] || return 0
@@ -41,7 +41,7 @@ case "$1 $2" in
   "agent prompt") code="$(pop_err "${OPSX_TEST_PROMPT_ERR:-}")"; [ -n "$code" ] && herdr_err "$code" prompt
     [ -n "${OPSX_TEST_ON_PROMPT:-}" ] && bash "$OPSX_TEST_ON_PROMPT" "$4"; echo '{"result":{"submitted":true}}' ;;
   "agent wait") code="$(pop_err "${OPSX_TEST_WAIT_ERR:-}")"; [ -n "$code" ] && herdr_err "$code" wait
-    [ -n "${OPSX_TEST_ON_WAIT:-}" ] && bash "$OPSX_TEST_ON_WAIT"; echo '{"result":{"status":"idle"}}' ;;
+    [ -n "${OPSX_TEST_ON_WAIT:-}" ] && bash "$OPSX_TEST_ON_WAIT" "$@"; echo '{"result":{"status":"idle"}}' ;;
   "pane close") echo '{"result":{"closed":true}}' ;;
   "pane focus") echo '{"result":{"focused":true}}' ;;
   "plugin list") cat "${OPSX_TEST_HERDR_PLUGINS:-/dev/null}"; echo ;;

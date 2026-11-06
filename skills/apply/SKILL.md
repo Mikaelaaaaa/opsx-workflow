@@ -96,7 +96,7 @@ Autopilot never touches `main`, never force-pushes, never merges. Those are leve
 
 1. Update the workplan: changes → `done`; the PR → `in-progress` when all its changes are done.
 2. `opsx status apply <total>/<total> "全部 task 完成" --tests green` (only if the last run really was green).
-3. Reply with the table: change · tasks · tests · commit. Say the next step is `/review <slug>`; the router will inject it on the next prompt, and in drive mode `drive.sh` sends it. Do not run the review yourself from here; it is a separate node with its own three agents.
+3. Reply with the table: change · tasks · tests · commit. Say the next step is `/review <slug>`; the router will inject it on the next prompt, and in autopilot `drive.sh` sends it. Do not run the review yourself from here; it is a separate node with its own three agents.
 
 ## Guardrails
 

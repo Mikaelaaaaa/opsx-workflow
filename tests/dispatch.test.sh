@@ -9,7 +9,7 @@ export OPSX_USER=mikaela
 export OPSX_DRIVE_MAX=0   # autopilot 會在背景起 drive；0 輪讓它登記完就結束，不在 fixture 上跑迴圈
 wait_drive() { # <repo> <slug>：等背景 drive 跑完（log 出現結束那行），最多 5 秒
   local f="$OPSX_STATE_DIR/drive-$1-$2.log" n=0
-  until grep -q '跑滿 0 輪' "$f" 2>/dev/null; do n=$((n+1)); [ $n -lt 50 ] || fail "drive 沒在背景起來：$f"; sleep 0.1; done
+  until grep -q '跑滿 [01] 輪' "$f" 2>/dev/null; do n=$((n+1)); [ $n -lt 50 ] || fail "drive 沒在背景起來：$f"; sleep 0.1; done
 }
 
 R="$(mk_repo Agentory-CS git@gitlab.tsg-navigator.com:agentory/Agentory-CS.git)"
@@ -27,9 +27,12 @@ assert_rc 2 opsx dispatch retry-backoff --mode yolo
 assert_eq "$(cat "$OPSX_FAKE_LOG")" "" "沒派出去不該碰 herdr"
 
 # --- 正常：autopilot，kind 從對話框給，model 照 kind ---
-out="$(opsx dispatch retry-backoff --agent claude --mode autopilot --kind bug-fix 2>&1)"; rc=$?
+# 背景 drive 起來第一件事是 herdr agent wait：在那時候抓 dispatch.json，看 drive 有沒有用 dispatch 寫的 key 登記自己
+printf 'cp "%s" "%s"\n' "$OPSX_STATE_DIR/dispatch.json" "$FX/drive-snap.json" > "$FX/snap-wait.sh"
+out="$(OPSX_DRIVE_MAX=1 OPSX_TEST_ON_WAIT="$FX/snap-wait.sh" opsx dispatch retry-backoff --agent claude --mode autopilot --kind bug-fix 2>&1)"; rc=$?
 assert_eq "$rc" 0 "dispatch rc: $out"
 wait_drive Agentory-CS retry-backoff   # autopilot 一律起 drive
+assert_eq "$(jq -r '."Agentory-CS/retry-backoff".drive_pid | type' "$FX/drive-snap.json")" number "drive 跑的時候 drive_pid 要登記在 dispatch 寫的 key 下"
 assert_grep '^kind: bug-fix$' "$R/openspec/changes/retry-backoff/.openspec.yaml"
 [ -d "$R/.claude/worktrees/retry-backoff" ] || fail "worktree 沒開"
 assert_eq "$(git -C "$R/.claude/worktrees/retry-backoff" rev-parse --abbrev-ref HEAD)" "fix/retry-backoff/mikaela" "branch 命名"
@@ -45,7 +48,7 @@ assert_not_grep '^workspace create' "$OPSX_FAKE_LOG"
 S="$OPSX_STATE_DIR/settings/Agentory-CS-retry-backoff.json"; assert_file "$S"
 python3 -I -c 'import json,sys;d=json.load(open(sys.argv[1]))["permissions"];assert "Bash(git push:*)" in d["allow"],d;assert "Bash(glab mr merge:*)" in d["allow"] and "Bash(gh pr merge:*)" in d["allow"],d;assert not any("merge" in x for x in d["deny"]),d;assert not any("glab mr create" in a for a in d["allow"]),d' "$S"
 # dontAsk 下不在 allow 的指令直接被拒：常用唯讀與測試指令要在 allow 裡，不然 agent 連跑測試都不行
-python3 -I -c 'import json,sys;a=json.load(open(sys.argv[1]))["permissions"]["allow"];miss=[x for x in ["Bash(jq:*)","Bash(head:*)","Bash(tail:*)","Bash(wc:*)","Bash(sed -n:*)","Bash(bash tests/:*)","Bash(herdr agent:*)"] if x not in a];assert not miss,miss' "$S" || fail "allow 少了常用指令"
+python3 -I -c 'import json,sys;a=json.load(open(sys.argv[1]))["permissions"]["allow"];miss=[x for x in ["Bash(jq:*)","Bash(head:*)","Bash(tail:*)","Bash(wc:*)","Bash(sed -n:*)","Bash(bash tests/:*)","Bash(herdr agent:*)","Bash(glab mr view:*)","Bash(glab ci:*)","Bash(gh pr view:*)","Bash(git merge-base:*)","Bash(git remote:*)"] if x not in a];assert not miss,miss' "$S" || fail "allow 少了常用指令"
 # dispatch.json
 python3 -I -c '
 import json,sys;d=json.load(open(sys.argv[1]))["Agentory-CS/retry-backoff"]

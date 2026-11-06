@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# PreToolUse(Bash / Edit / Write)：自動 / 開到可合併 模式下的授權閘門。要求檔 §3.6 授權三級、§8.5。
+# PreToolUse(Bash / Edit / Write)：autopilot 模式下的授權閘門。要求檔 §3.6 授權三級、§8.5。
 #   第三級（永遠要人）一律 deny；第二級查 grants.toml（repo 永遠）與 dispatch.json（這張卡）；
 #   互動模式或不在卡上就不管。deny 訊息要 worker 寫 gates.md 然後做能做的。
 source "$(dirname "${BASH_SOURCE[0]}")/_lib.sh"
@@ -51,8 +51,13 @@ PY
   fi
   return 0
 }
+# autopilot 用 dontAsk 起，不在 settings allow 的指令 Claude 直接拒；所以有授權的動作要由這裡明說 allow，
+# 板上事後給的「這次 / 這張卡」授權才生效。等整條指令所有檢查都過了才 allow，一段有授權不能替後面那段放行。
+GRANTED=0
+allow() { jq -n '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"allow",permissionDecisionReason:"opsx 授權閘門：有授權"}}'; exit 0; }
+
 level2() { # <action> <label>
-  if has_grant "$repo" "$slug" "$1"; then exit 0; fi
+  if has_grant "$repo" "$slug" "$1"; then GRANTED=1; return 0; fi
   deny "opsx 授權閘門：「$2」要授權（第二級），$repo 沒有長期授權、這張卡也沒有。$GATE_MSG"
 }
 
@@ -60,7 +65,7 @@ if [ "$tool" = "Bash" ]; then
   [ -n "$cmd" ] || exit 0
   c="$(printf '%s' "$cmd" | tr '\n' ' ')"
   # 第三級（merge 放行後不 exit，其餘檢查照跑）
-  printf '%s' "$c" | grep -qE '(glab mr merge|gh pr merge)' && merge_gate
+  printf '%s' "$c" | grep -qE '(glab mr merge|gh pr merge)' && merge_gate && GRANTED=1
   printf '%s' "$c" | grep -qE 'git\s+push.*(--force|-f\b|\+[a-zA-Z])' && level3 "force-push"
   printf '%s' "$c" | grep -qE 'git\s+push.*\b(main|master)\b' && level3 "push main"
   printf '%s' "$c" | grep -qiE '(^|\s|/)deploy(\.sh)?(\s|$)' && level3 "deploy"
@@ -74,6 +79,7 @@ if [ "$tool" = "Bash" ]; then
   printf '%s' "$c" | grep -qE '(pnpm (add|install|i)\b|npm (install|i|ci)\b|uv (add|sync)|pip install|yarn add|brew install)' && level2 install "裝套件"
   printf '%s' "$c" | grep -qE '(^|\s|&&|;)git\s+rebase(\s|$)' && level2 rebase "git rebase"
   printf '%s' "$c" | grep -qE '(curl|wget|http)\s+' && ! printf '%s' "$c" | grep -qE 'localhost|127\.0\.0\.1|litellm\.agentory\.cc' && level2 external "呼叫外部 API"
+  [ "$GRANTED" = 1 ] && allow
   exit 0
 fi
 
@@ -82,7 +88,7 @@ if [ "$tool" = "Edit" ] || [ "$tool" = "Write" ]; then
   case "$file" in
     *.gitlab-ci.yml|*/.github/workflows/*|*secrets*|*.sops.*|*/sops/*) level3 "改 CI / secrets（${file}）" ;;
     *.env.example) exit 0 ;;
-    *.env|*.env.*) level2 env "寫 $file" ;;
+    *.env|*.env.*) level2 env "寫 $file"; allow ;;
   esac
 fi
 exit 0
