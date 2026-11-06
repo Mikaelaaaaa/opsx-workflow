@@ -11,7 +11,7 @@ R="$(mk_repo Agentory-CS git@gitlab.tsg-navigator.com:agentory/Agentory-CS.git)"
 mkdir -p "$R/openspec/changes/retry-backoff" "$OPSX_STATE_DIR"
 printf 'schema: opsx\ncreated: 2026-11-05\n' > "$R/openspec/changes/retry-backoff/.openspec.yaml"
 printf '## 已知\n- x\n\n## 待決\n\n## 不做\n' > "$R/openspec/changes/retry-backoff/explore.md"
-printf '[repos]\n"Agentory-CS" = "w1"\n' > "$OPSX_STATE_DIR/workspaces.toml"
+printf '[repos]\n"Agentory-CS" = "agnetory-ai"\n' > "$OPSX_STATE_DIR/workspaces.toml"   # label，dispatch 用 workspace list 換成 w1
 printf '[repos."Agentory-CS"]\npush = true\nmr = false\nmigrate = false\n' > "$OPSX_STATE_DIR/grants.toml"
 
 # --- 邊界：slug 不合法 / 卡不存在 / mode 不對 → rc 2，不碰 herdr ---
@@ -29,23 +29,29 @@ assert_grep '^kind: bug-fix$' "$R/openspec/changes/retry-backoff/.openspec.yaml"
 assert_eq "$(git -C "$R/.claude/worktrees/retry-backoff" rev-parse --abbrev-ref HEAD)" "fix/retry-backoff/mikaela" "branch 命名"
 # herdr 呼叫順序：tab create（在 w1）→ agent start（帶 model + settings）→ agent prompt /propose（explore 待決空 → propose）
 assert_grep '^tab create --workspace w1 --cwd .*retry-backoff --label retry-backoff' "$OPSX_FAKE_LOG"
-assert_grep '^agent start retry-backoff --kind claude --pane p42 -- --model claude-sonnet-5-5 --permission-mode acceptEdits --settings ' "$OPSX_FAKE_LOG"
+assert_grep '^workspace list$' "$OPSX_FAKE_LOG"
+assert_grep '^agent start retry-backoff --kind claude --pane w1:pE -- --model claude-sonnet-5-5 --permission-mode acceptEdits --settings ' "$OPSX_FAKE_LOG"
 assert_grep '^agent prompt retry-backoff /propose retry-backoff$' "$OPSX_FAKE_LOG"
 assert_not_grep '^workspace create' "$OPSX_FAKE_LOG"
-# settings：repo 永遠 push 進 allow，merge 在 deny
+# settings：repo 永遠 push 進 allow；merge 在 allow 不在 deny（deny 會蓋過 grant-gate 的放行，merge 由 gate 單獨把關）
 S="$OPSX_STATE_DIR/settings/Agentory-CS-retry-backoff.json"; assert_file "$S"
-python3 -I -c 'import json,sys;d=json.load(open(sys.argv[1]))["permissions"];assert "Bash(git push:*)" in d["allow"],d;assert "Bash(glab mr merge:*)" in d["deny"],d;assert not any("glab mr create" in a for a in d["allow"]),d' "$S"
+python3 -I -c 'import json,sys;d=json.load(open(sys.argv[1]))["permissions"];assert "Bash(git push:*)" in d["allow"],d;assert "Bash(glab mr merge:*)" in d["allow"] and "Bash(gh pr merge:*)" in d["allow"],d;assert not any("merge" in x for x in d["deny"]),d;assert not any("glab mr create" in a for a in d["allow"]),d' "$S"
 # dispatch.json
 python3 -I -c '
 import json,sys;d=json.load(open(sys.argv[1]))["Agentory-CS/retry-backoff"]
-assert d["pane"]=="p42" and d["workspace"]=="w1" and d["mode"]=="autopilot" and d["kind"]=="bug-fix" and d["model"]=="claude-sonnet-5-5" and d["agent"]=="claude", d
-assert d["branch"]=="fix/retry-backoff/mikaela" and d["grants"]==[] and d["drive_pid"] is None, d' "$OPSX_STATE_DIR/dispatch.json"
+assert d["pane"]=="w1:pE" and d["tab"]=="w1:tB" and d["workspace"]=="agnetory-ai" and d["workspace_id"]=="w1" and d["mode"]=="autopilot" and d["kind"]=="bug-fix" and d["model"]=="claude-sonnet-5-5" and d["agent"]=="claude", d
+assert d["branch"]=="fix/retry-backoff/mikaela" and d["grants"]==[] and d["once"]==[] and d["drive_pid"] is None, d' "$OPSX_STATE_DIR/dispatch.json"
+# 另一個 repo 派出同名 slug：herdr 只認名字，會送錯 agent，要拒絕
+R4="$(mk_repo Agentory-X)"; mkdir -p "$R4/openspec/changes/retry-backoff"; printf 'schema: opsx\n' > "$R4/openspec/changes/retry-backoff/.openspec.yaml"
+printf '"Agentory-X" = "agnetory-ai"\n' >> "$OPSX_STATE_DIR/workspaces.toml"
+out="$(cd "$R4" && opsx dispatch retry-backoff --agent claude --mode autopilot --kind dev 2>&1)"; [ $? -ne 0 ] || fail "同名 slug 要拒絕"
+echo "$out" | grep -q 'Agentory-CS/retry-backoff' || fail "要指名撞到哪張: $out"
 assert_grep 'dispatched' "$R/openspec/changes/retry-backoff/decisions.tsv"
 
 # --- 重派同一張卡：worktree 已在就重用，不報錯 ---
 : > "$OPSX_FAKE_LOG"
-opsx dispatch retry-backoff --agent codex --mode interactive >/dev/null 2>&1 || fail "redispatch"
-assert_grep '^agent start retry-backoff --kind codex --pane p42 -- -a on-request -s workspace-write$' "$OPSX_FAKE_LOG"
+out="$(opsx dispatch retry-backoff --agent codex --mode interactive 2>&1)" || fail "redispatch: $out"
+assert_grep '^agent start retry-backoff --kind codex --pane w1:pE -- -a on-request -s workspace-write$' "$OPSX_FAKE_LOG"
 python3 -I -c 'import json,sys;d=json.load(open(sys.argv[1]))["Agentory-CS/retry-backoff"];assert d["agent"]=="codex" and d["model"]=="gpt-5" and d["mode"]=="interactive",d' "$OPSX_STATE_DIR/dispatch.json"
 
 # --- 沒掛 workspace 的 repo → 開新 workspace 並記下來 ---
@@ -54,8 +60,14 @@ mkdir -p "$R2/openspec/changes/rdap-timeout"; printf 'schema: opsx\n' > "$R2/ope
 : > "$OPSX_FAKE_LOG"; cd "$R2"
 opsx dispatch rdap-timeout --agent claude --mode autopilot --kind dev >/dev/null 2>&1 || fail "dispatch unmapped repo"
 assert_grep '^workspace create --label scam-guard' "$OPSX_FAKE_LOG"
-assert_grep '^"scam-guard" = "w9"$' "$OPSX_STATE_DIR/workspaces.toml"
-assert_grep '^agent start rdap-timeout --kind claude --pane p42 -- --model claude-opus-5-5 ' "$OPSX_FAKE_LOG"   # dev → opus
+assert_grep '^"scam-guard" = "scam-guard"$' "$OPSX_STATE_DIR/workspaces.toml"   # 記 label，id 在 dispatch.json
+assert_grep '^tab create --workspace w9 ' "$OPSX_FAKE_LOG"
+assert_grep '^agent start rdap-timeout --kind claude --pane w1:pE -- --model claude-opus-5-5 ' "$OPSX_FAKE_LOG"   # dev → opus
+# --- workspaces.toml 寫了 herdr 沒有的 label → 明講，不猜 ---
+R3="$(mk_repo gmtc-rag)"; mkdir -p "$R3/openspec/changes/z"; printf 'schema: opsx\n' > "$R3/openspec/changes/z/.openspec.yaml"
+printf '"gmtc-rag" = "develop"\n' >> "$OPSX_STATE_DIR/workspaces.toml"
+out="$(cd "$R3" && opsx dispatch z --agent claude --mode autopilot --kind dev 2>&1)"; [ $? -ne 0 ] || fail "沒有的 workspace 要失敗"
+echo "$out" | grep -q 'develop' && echo "$out" | grep -q 'agnetory-ai' || fail "要列出現有 label: $out"
 assert_grep '^agent prompt rdap-timeout /explore rdap-timeout$' "$OPSX_FAKE_LOG"                       # 沒 explore.md → explore
 
 # --- workplan 有 branch 就用它 ---
@@ -68,7 +80,7 @@ assert_eq "$(git -C "$R3/.claude/worktrees/eval-core" rev-parse --abbrev-ref HEA
 # --- stop ---
 : > "$OPSX_FAKE_LOG"; cd "$R"
 opsx stop retry-backoff >/dev/null 2>&1 || fail "stop"
-assert_grep '^pane close p42$' "$OPSX_FAKE_LOG"
+assert_grep '^pane close w1:pE$' "$OPSX_FAKE_LOG"
 python3 -I -c 'import json,sys;d=json.load(open(sys.argv[1]))["Agentory-CS/retry-backoff"];assert d["mode"]=="stopped" and d["stopped_at"],d' "$OPSX_STATE_DIR/dispatch.json"
 assert_grep 'stopped' "$R/openspec/changes/retry-backoff/decisions.tsv"
 assert_rc 2 opsx stop nope

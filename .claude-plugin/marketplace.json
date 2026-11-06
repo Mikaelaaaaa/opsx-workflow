@@ -1,5 +1,6 @@
 {
   "name": "opsx-workflow",
+  "description": "Mikaela 的開發流程 plugin：收 → explore → grill → propose → apply → review → pr → archive",
   "owner": {
     "name": "Mikaela Lin"
   },

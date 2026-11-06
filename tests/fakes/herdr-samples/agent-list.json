@@ -1,0 +1,40 @@
+{
+  "id": "cli:agent:list",
+  "result": {
+    "agents": [
+      {
+        "agent": "claude",
+        "agent_session": {"agent": "claude", "kind": "id", "source": "herdr:claude", "value": "329c1d2a-42f9-4e58-a57d-c55ea78ac173"},
+        "agent_status": "idle",
+        "cwd": "/Users/mikaela_lin",
+        "focused": false,
+        "foreground_cwd": "/Users/mikaela_lin",
+        "pane_id": "w1:p2",
+        "revision": 1,
+        "state_change_seq": 18,
+        "tab_id": "w1:t2",
+        "terminal_id": "term_65f4140503b412",
+        "terminal_title": "✳ 列出未實作的變更",
+        "terminal_title_stripped": "列出未實作的變更",
+        "workspace_id": "w1"
+      },
+      {
+        "agent": "claude",
+        "agent_session": {"agent": "claude", "kind": "id", "source": "herdr:claude", "value": "b1839494-43ea-41ca-954d-67295c83f11d"},
+        "agent_status": "working",
+        "cwd": "/Users/mikaela_lin/code/gmtc-rag",
+        "focused": false,
+        "foreground_cwd": "/Users/mikaela_lin/code/gmtc-rag",
+        "pane_id": "w2:p1",
+        "revision": 1,
+        "state_change_seq": 285,
+        "tab_id": "w2:t1",
+        "terminal_id": "term_65f41405047a79",
+        "terminal_title": "✳ Worktree cleanup",
+        "terminal_title_stripped": "Worktree cleanup",
+        "workspace_id": "w2"
+      }
+    ],
+    "type": "agent_list"
+  }
+}

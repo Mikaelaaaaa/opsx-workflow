@@ -18,6 +18,12 @@ assert_grep() { grep -q -- "$1" "$2" || fail "'$1' not in $2:
 $(cat "$2")"; }
 assert_not_grep() { ! grep -q -- "$1" "$2" || fail "'$1' should not be in $2"; }
 assert_rc() { local want=$1; shift; "$@" >/dev/null 2>&1; local got=$?; [ $got -eq $want ] || fail "rc $got != $want: $*"; }
+# 把 tests/fakes/<name> 放上 PATH（透過可執行的 shim，沙盒不准 chmod plugin 目錄）：use_fakes herdr glab gh
+use_fakes() {
+  mkdir -p "$FX/fakebin"
+  local f; for f in "$@"; do printf '#!/usr/bin/env bash\nexec bash "%s/tests/fakes/%s" "$@"\n' "$OPSX_ROOT" "$f" > "$FX/fakebin/$f"; chmod +x "$FX/fakebin/$f"; done
+  export PATH="$FX/fakebin:$PATH"
+}
 
 # 建一個有 .git 的 fixture repo，可選 remote
 mk_repo() { # mk_repo <name> [remote-url]
@@ -25,6 +31,7 @@ mk_repo() { # mk_repo <name> [remote-url]
   git -C "$d" config user.email t@t; git -C "$d" config user.name t
   git -C "$d" commit -q --allow-empty -m init
   [ -n "${2:-}" ] && git -C "$d" remote add origin "$2"
+  true
   ( cd "$d" && pwd -P )   # /tmp 在 macOS 是 /private/tmp 的 symlink，統一用實體路徑比
 }
 assert_dir() { [ -d "$1" ] || fail "missing dir $1"; }

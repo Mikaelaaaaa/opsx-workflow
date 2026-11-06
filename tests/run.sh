@@ -18,5 +18,14 @@ for t in "$HERE"/*.test.sh; do
   if [ $rc -eq 0 ]; then pass=$((pass+1)); echo "PASS $name"
   else fail=$((fail+1)); failed+=("$name"); echo "FAIL $name"; echo "$out" | sed 's/^/    /'; fi
 done
+# python 側（herdr-board/tests/test_*.py，unittest，直接跑檔案：目錄名有連字號不能當模組）
+for t in "$OPSX_ROOT"/herdr-board/tests/test_*.py; do
+  [ -f "$t" ] || continue
+  case "$(basename "$t")" in *"${1:-}"*) ;; *) continue;; esac
+  name="$(basename "$t" .py)"
+  out="$(cd "$OPSX_ROOT" && python3 -I "$t" 2>&1)"; rc=$?
+  if [ $rc -eq 0 ]; then pass=$((pass+1)); echo "PASS $name"
+  else fail=$((fail+1)); failed+=("$name"); echo "FAIL $name"; echo "$out" | sed 's/^/    /'; fi
+done
 echo "----"; echo "pass=$pass fail=$fail"
 [ $fail -eq 0 ]

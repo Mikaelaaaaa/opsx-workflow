@@ -13,6 +13,9 @@ opsx_init() {
 # ---------- 全域 ----------
 init_global() {
   local state="$OPSX_STATE_DIR" bindir="${OPSX_BIN_DIR:-$HOME/.local/bin}"
+  # collect / answer / hooks 用 tomllib，要 3.11+；macOS 內建 /usr/bin/python3 是 3.9。現在不講，第二台機器會 502 到底。
+  python3 -I -c 'import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)' 2>/dev/null \
+    || die "init --global: PATH 上的 python3 要 3.11 以上（有 tomllib），現在是 $(python3 --version 2>&1)。pyenv 或 brew 裝一個再跑"
   ensure_dir "$state"; ensure_dir "$bindir"
 
   write_if_missing "$state/sources.toml" '# opsx 同步來源。opsx init 在每個 repo 跑時會自動補 gitlab / github；obsidian、customer 在這裡填。
@@ -49,7 +52,18 @@ init_global() {
   else
     say "init --global: 非互動，obsidian / customer 來源略過（之後改 $state/sources.toml）"
   fi
-  say "init --global: launchd 每日同步與 herdr 看板在 sync / board 階段才裝，略過"
+  # herdr 看板：把這個 plugin 根目錄掛進 herdr（herdr-plugin.toml 在根目錄）。沒裝 herdr 就跳過。
+  if command -v herdr >/dev/null 2>&1; then
+    local plist
+    if ! plist="$(herdr plugin list 2>&1)"; then
+      warn "herdr 在但叫不到（${plist}）；看板 plugin 沒掛，herdr 起來後再跑一次 opsx init --global"
+    elif printf '%s' "$plist" | grep -q 'opsx-board'; then say "init --global: herdr plugin opsx-board 已掛"
+    elif herdr plugin link "$OPSX_ROOT"; then say "init --global: herdr plugin link ${OPSX_ROOT}（看板 action open-board、pane board）"
+    else die "init --global: herdr plugin link 失敗（上面是 herdr 的錯誤）"; fi
+  else
+    say "init --global: 沒有 herdr，看板 plugin 略過（裝了 herdr 再跑一次）"
+  fi
+  say "init --global: launchd 每日同步在 board-inbox 那張卡才裝，略過"
   say "init --global: 設定在 $state"
 }
 
@@ -84,7 +98,7 @@ write_if_missing() { # <file> <content>
 init_repo() {
   local top; top="$(git_toplevel)"
   [ -n "$top" ] || die "這裡不是 git repo（沒有 .git）。到 repo 根目錄再跑。"
-  [ "$top" = "$(pwd -P)" ] || die "請在 repo 根目錄跑：$top"
+  [ "$(git_worktree_top)" = "$(pwd -P)" ] || die "請在 repo 根目錄跑（linked worktree 的根也可以，openspec/ 會放在主 repo）：$top"
   command -v openspec >/dev/null || die "找不到 openspec CLI（npm i -g @fission-ai/openspec）"
   ensure_dir "$OPSX_STATE_DIR"
   [ -f "$OPSX_STATE_DIR/sources.toml" ] || printf '# opsx 同步來源\n' > "$OPSX_STATE_DIR/sources.toml"
@@ -92,7 +106,6 @@ init_repo() {
 
   local name; name="$(basename "$top")"
 
-  # 1. openspec/
   if [ -d "$top/openspec" ]; then
     say "init: openspec/ 已有"
   else
@@ -100,10 +113,9 @@ init_repo() {
     say "init: openspec init 完成（--tools none，skill 由 opsx plugin 提供）"
   fi
 
-  # 2. opsx schema
   install_schema "$top"
 
-  # 3. openspec/ 不進 git：寫共用的 .git/info/exclude，不動 .gitignore
+  # openspec/ 不進 git：寫共用的 .git/info/exclude，不動 .gitignore
   local common; common="$(git_common_dir)"
   ensure_dir "$common/info"
   if grep -qxF 'openspec/' "$common/info/exclude" 2>/dev/null; then
@@ -113,10 +125,7 @@ init_repo() {
     say "init: openspec/ 寫進 $common/info/exclude"
   fi
 
-  # 4. 登記來源
   register_source "$top" "$name"
-
-  # 5. 掛 workspace
   register_workspace "$name"
 }
 
@@ -143,7 +152,7 @@ patch_schema() { # <schema.yaml> <head.yaml>
     /^artifacts:/ && !done { print; while ((getline line < head) > 0) print line; done=1; next }
     { print }
   ' "$f" > "$tmp"
-  # proposal 的 requires: [] → requires: [explore]
+  # proposal 改成 requires explore
   python3 -I - "$tmp" <<'PY'
 import re,sys
 p=sys.argv[1]; s=open(p,encoding='utf-8').read()
@@ -177,7 +186,7 @@ register_workspace() { # <name>
   grep -q '^\[repos\]' "$f" || printf '\n[repos]\n' >> "$f"
   if grep -qE "^\"?$name\"? *=" "$f"; then say "init: workspaces.toml 已有 $name"; return; fi
   if interactive; then
-    printf 'repo %s 掛哪個 herdr workspace？（例 develop，直接 Enter 跳過）：' "$name"
+    printf 'repo %s 掛哪個 herdr workspace？（填 herdr 的 workspace label，`herdr workspace list` 看得到；直接 Enter 跳過）：' "$name"
     read -r ans
     if [ -n "$ans" ]; then
       printf '"%s" = "%s"\n' "$name" "$ans" >> "$f"

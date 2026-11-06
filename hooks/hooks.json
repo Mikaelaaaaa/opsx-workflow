@@ -3,14 +3,14 @@
     "SessionStart": [
       {
         "hooks": [
-          { "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hooks/openspec-router.sh", "timeout": 10 }
+          { "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/openspec-router.sh\"", "timeout": 10 }
         ]
       }
     ],
     "UserPromptSubmit": [
       {
         "hooks": [
-          { "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hooks/openspec-router.sh", "timeout": 10 }
+          { "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/openspec-router.sh\"", "timeout": 10 }
         ]
       }
     ],
@@ -18,16 +18,16 @@
       {
         "matcher": "Bash",
         "hooks": [
-          { "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hooks/security-guard.sh", "timeout": 10 },
-          { "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hooks/openspec-commit-gate.sh", "timeout": 10 },
-          { "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hooks/mr-format-gate.sh", "timeout": 10 },
-          { "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hooks/opsx-grant-gate.sh", "timeout": 10 }
+          { "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/security-guard.sh\"", "timeout": 10 },
+          { "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/openspec-commit-gate.sh\"", "timeout": 10 },
+          { "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/mr-format-gate.sh\"", "timeout": 10 },
+          { "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/opsx-grant-gate.sh\"", "timeout": 10 }
         ]
       },
       {
         "matcher": "Edit|Write",
         "hooks": [
-          { "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hooks/opsx-grant-gate.sh", "timeout": 10 }
+          { "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/opsx-grant-gate.sh\"", "timeout": 10 }
         ]
       }
     ],
@@ -35,15 +35,15 @@
       {
         "matcher": "Bash",
         "hooks": [
-          { "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hooks/secret-mask.sh", "timeout": 3 },
-          { "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hooks/conventional-commit.sh", "timeout": 3 }
+          { "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/secret-mask.sh\"", "timeout": 3 },
+          { "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/conventional-commit.sh\"", "timeout": 3 }
         ]
       }
     ],
     "Stop": [
       {
         "hooks": [
-          { "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hooks/openspec-stop-gate.sh", "timeout": 10 }
+          { "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/openspec-stop-gate.sh\"", "timeout": 10 }
         ]
       }
     ]

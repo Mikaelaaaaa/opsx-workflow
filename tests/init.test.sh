@@ -61,7 +61,7 @@ echo "$out3" | grep -q "remote" || fail "should mention no remote: $out3"
 
 # --- 邊界：在 worktree 裡跑 → exclude 寫到共用的 .git/info/exclude，不是 worktree 自己的 ---
 cd "$R"; git -C "$R" worktree add -q "$FX/wt" -b feat/x/mikaela
-cd "$FX/wt"; opsx init >/dev/null 2>&1 || fail "init in worktree"
+cd "$FX/wt"; out="$(opsx init 2>&1)" || fail "init in worktree: $out"
 assert_eq "$(grep -c '^openspec/$' "$R/.git/info/exclude")" 1 "exclude duplicated or missing via worktree"
 
 # --- --global ---

@@ -1,7 +1,11 @@
 #!/usr/bin/env bash
-# 假 glab：`glab mr view <iid> -F json` 回 $OPSX_TEST_GLAB_JSON 檔的內容。
+# 假 glab：`glab mr view <iid> -R <host/group/proj> -F json` 回 $OPSX_TEST_GLAB_JSON 檔的內容；
+# 設了 $OPSX_TEST_GLAB_JSON_BY_IID 就回 ${OPSX_TEST_GLAB_JSON_BY_IID}<iid>.json（多條 MR 的測試）。
+# 沒帶 -R 就失敗：mr.sh 不准靠 cwd 解析 project（review C）。
 printf '%s\n' "$*" >> "${OPSX_FAKE_LOG:?}"
 case "$1 $2" in
-  "mr view") cat "${OPSX_TEST_GLAB_JSON:?}" ;;
+  "mr view")
+    case " $* " in *" -R "*) ;; *) echo "fake glab: 沒帶 -R" >&2; exit 1 ;; esac
+    if [ -n "${OPSX_TEST_GLAB_JSON_BY_IID:-}" ] && [ -f "${OPSX_TEST_GLAB_JSON_BY_IID}$3.json" ]; then cat "${OPSX_TEST_GLAB_JSON_BY_IID}$3.json"; else cat "${OPSX_TEST_GLAB_JSON:?}"; fi ;;
   *) echo '{}' ;;
 esac

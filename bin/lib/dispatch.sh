@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # opsx dispatch <slug> --agent claude|codex --model <id> --mode interactive|autopilot|drive --kind <kind> [--repo <path>]
-# 把一張卡派出去：worktree → herdr tab（在 repo 掛的 workspace）→ agent start → 第一句 prompt → dispatch.json。
+# 把一張卡派出去：開 worktree，在 repo 掛的 workspace 開 herdr tab，agent start，送第一句 prompt，記進 dispatch.json。
 # 要求檔 §3.6「派」、§3.6 自主程度表、§3.1。herdr 的每個呼叫都可以被 PATH 上的假 herdr 取代（tests/fakes）。
 
 opsx_dispatch() {
@@ -28,7 +28,17 @@ opsx_dispatch() {
   command -v herdr >/dev/null || die "dispatch: 找不到 herdr"
   ensure_dir "$OPSX_STATE_DIR"
 
-  # kind：沒給就從 .openspec.yaml 讀，再沒有 → dev；寫回 .openspec.yaml
+  # herdr agent 只認名字（agent start <name>），名字 = slug；另一個 repo 已派出同名 slug 的卡時，prompt 會送錯人，所以拒絕
+  OPSX_KEY="$repo/$slug" OPSX_SLUG="$slug" OPSX_LIB="$OPSX_ROOT/bin/lib" python3 -I - "$OPSX_STATE_DIR/dispatch.json" <<'PY' || exit 2
+import os, sys
+sys.path.insert(0, os.environ["OPSX_LIB"]); import jsonfile
+d = jsonfile.load(sys.argv[1]); me = os.environ["OPSX_KEY"]; slug = os.environ["OPSX_SLUG"]
+clash = [k for k, v in d.items() if k != me and k.endswith("/" + slug) and v.get("mode") != "stopped"]
+if clash:
+    sys.exit("dispatch: herdr agent 名字就是 slug，而 %s 已經派出同名的卡，herdr agent prompt 會送錯 agent。先 opsx stop 那張，或把這張卡改名" % "、".join(clash))
+PY
+
+  # kind：沒給就從 .openspec.yaml 讀，再沒有就是 dev；寫回 .openspec.yaml
   if [ -z "$kind" ]; then kind="$(st_card_kind "$d")"; kind="${kind:-dev}"; fi
   case "$kind" in dev|bug-fix|refactoring|perf|experiment|ops|chore) ;; *) die "dispatch: kind 不在七種裡：$kind" ;; esac
   if grep -q '^kind:' "$d/.openspec.yaml" 2>/dev/null; then
@@ -56,20 +66,38 @@ opsx_dispatch() {
     else git -C "$top" worktree add -q "$wt" -b "$branch"; fi
   fi
 
-  # workspace：workspaces.toml 有就用，沒有就開一個以 repo 命名並記下來
-  local ws; ws="$(workspace_for "$repo")"
-  if [ -z "$ws" ]; then
-    ws="$(herdr workspace create --label "$repo" --cwd "$top" --no-focus 2>/dev/null | jq -r '.result.workspace // empty' 2>/dev/null || true)"
-    [ -n "$ws" ] || die "dispatch: herdr workspace create 沒回 workspace id"
+  # workspace：workspaces.toml 記的是 label（人看的，例 agnetory-ai），herdr 的 tab create 只吃 id（w1），
+  # 所以用 `herdr workspace list`（result.workspaces[].{label,workspace_id}，2026-11-06 實跑）換；沒掛就開一個以 repo 為 label 的
+  local ws ws_id; ws="$(workspace_for "$repo")"
+  if [ -n "$ws" ]; then
+    ws_id="$(OPSX_WSJSON="$(herdr workspace list 2>/dev/null || true)" OPSX_WS="$ws" python3 -I - <<'PY'
+import json, os, sys
+want = os.environ["OPSX_WS"]
+try:
+    wss = json.loads(os.environ["OPSX_WSJSON"] or "null")["result"]["workspaces"]   # heredoc 占了 stdin，JSON 走環境變數
+except (json.JSONDecodeError, KeyError, TypeError) as e:
+    sys.exit("dispatch: herdr workspace list 讀不懂（%s）；在 herdr pane 裡跑嗎？" % e)
+hit = [w for w in wss if w.get("workspace_id") == want or w.get("label") == want]
+if not hit:
+    sys.exit("dispatch: herdr 沒有 workspace「%s」（現有：%s）。改 workspaces.toml 成其中一個 label，或先在 herdr 建一個叫 %s 的 workspace"
+             % (want, "、".join(str(w.get("label")) for w in wss) or "無", want))
+print(hit[0]["workspace_id"])
+PY
+)" || exit 2
+  else
+    ws="$repo"
+    ws_id="$(herdr workspace create --label "$repo" --cwd "$top" --no-focus 2>/dev/null | jq -r '.result.workspace.workspace_id // .result.workspace_id // .result.workspace // empty' 2>/dev/null || true)"
+    [ -n "$ws_id" ] || die "dispatch: herdr workspace create 沒回 workspace id"
+    grep -q '^\[repos\]' "$OPSX_STATE_DIR/workspaces.toml" 2>/dev/null || printf '\n[repos]\n' >> "$OPSX_STATE_DIR/workspaces.toml"   # 第二台機器沒跑過 init 時檔案是空的
     printf '"%s" = "%s"\n' "$repo" "$ws" >> "$OPSX_STATE_DIR/workspaces.toml"
-    say "dispatch: 新 workspace ${ws}（${repo}）記進 workspaces.toml"
+    say "dispatch: 新 workspace ${ws}（${ws_id}）記進 workspaces.toml"
   fi
 
-  # pane：在那個 workspace 開一個 tab
+  # pane：在那個 workspace 開一個 tab。真格式：result.root_pane.pane_id（w1:pE）、result.tab.tab_id（w1:tB）
   local tabjson pane tab
-  tabjson="$(herdr tab create --workspace "$ws" --cwd "$wt" --label "$slug" --no-focus)"
-  pane="$(printf '%s' "$tabjson" | jq -r '.result.root_pane // empty' 2>/dev/null || true)"
-  tab="$(printf '%s' "$tabjson" | jq -r '.result.tab // empty' 2>/dev/null || true)"
+  tabjson="$(herdr tab create --workspace "$ws_id" --cwd "$wt" --label "$slug" --no-focus)"
+  pane="$(printf '%s' "$tabjson" | jq -r '.result.root_pane.pane_id // empty' 2>/dev/null || true)"
+  tab="$(printf '%s' "$tabjson" | jq -r '.result.tab.tab_id // empty' 2>/dev/null || true)"
   [ -n "$pane" ] || die "dispatch: herdr tab create 沒回 root_pane：$tabjson"
 
   # agent 啟動參數（自動 / 開到可合併 才帶 permission 設定）
@@ -87,16 +115,16 @@ opsx_dispatch() {
   herdr agent start "$slug" --kind "$agent" --pane "$pane" -- "${aargs[@]}" >/dev/null
 
   # dispatch.json
-  OPSX_KEY="$repo/$slug" OPSX_WS="$ws" OPSX_TAB="$tab" OPSX_PANE="$pane" OPSX_AGENT="$agent" OPSX_MODEL="$model" OPSX_MODE="$mode" OPSX_KIND="$kind" OPSX_WT="$wt" OPSX_BR="$branch" OPSX_AT="$(now_iso)" \
+  OPSX_KEY="$repo/$slug" OPSX_WS="$ws" OPSX_WSID="$ws_id" OPSX_TAB="$tab" OPSX_PANE="$pane" OPSX_AGENT="$agent" OPSX_MODEL="$model" OPSX_MODE="$mode" OPSX_KIND="$kind" OPSX_WT="$wt" OPSX_BR="$branch" OPSX_AT="$(now_iso)" OPSX_LIB="$OPSX_ROOT/bin/lib" \
   python3 -I - "$OPSX_STATE_DIR/dispatch.json" <<'PY'
-import json,os,sys
-p=sys.argv[1]
-try: d=json.load(open(p))
-except (FileNotFoundError,json.JSONDecodeError): d={}
-e=os.environ
-d[e["OPSX_KEY"]]={"workspace":e["OPSX_WS"],"tab":e["OPSX_TAB"],"pane":e["OPSX_PANE"],"agent":e["OPSX_AGENT"],"model":e["OPSX_MODEL"],
-  "mode":e["OPSX_MODE"],"kind":e["OPSX_KIND"],"worktree":e["OPSX_WT"],"branch":e["OPSX_BR"],"grants":[],"started_at":e["OPSX_AT"],"drive_pid":None}
-json.dump(d,open(p,"w"),ensure_ascii=False,indent=2)
+import os, sys
+sys.path.insert(0, os.environ["OPSX_LIB"]); import jsonfile
+e = os.environ
+def put(d):
+    d[e["OPSX_KEY"]] = {"workspace": e["OPSX_WS"], "workspace_id": e["OPSX_WSID"], "tab": e["OPSX_TAB"], "pane": e["OPSX_PANE"], "agent": e["OPSX_AGENT"],
+                        "model": e["OPSX_MODEL"], "mode": e["OPSX_MODE"], "kind": e["OPSX_KIND"], "worktree": e["OPSX_WT"], "branch": e["OPSX_BR"],
+                        "grants": [], "once": [], "started_at": e["OPSX_AT"], "drive_pid": None}
+jsonfile.update(sys.argv[1], put)
 PY
 
   # 第一句：照狀態
@@ -109,24 +137,28 @@ PY
   if [ "$mode" = drive ]; then
     nohup bash "$OPSX_ROOT/bin/opsx" drive "$slug" --repo "$top" >> "$OPSX_STATE_DIR/drive-$repo-$slug.log" 2>&1 &
     local pid=$!
-    OPSX_KEY="$repo/$slug" OPSX_PID="$pid" python3 -I - "$OPSX_STATE_DIR/dispatch.json" <<'PY'
-import json,os,sys
-p=sys.argv[1]; d=json.load(open(p)); d[os.environ["OPSX_KEY"]]["drive_pid"]=int(os.environ["OPSX_PID"]); json.dump(d,open(p,"w"),ensure_ascii=False,indent=2)
+    OPSX_KEY="$repo/$slug" OPSX_PID="$pid" OPSX_LIB="$OPSX_ROOT/bin/lib" python3 -I - "$OPSX_STATE_DIR/dispatch.json" <<'PY'
+import os, sys
+sys.path.insert(0, os.environ["OPSX_LIB"]); import jsonfile
+def put(d): d[os.environ["OPSX_KEY"]]["drive_pid"] = int(os.environ["OPSX_PID"])
+jsonfile.update(sys.argv[1], put)
 PY
     say "dispatch: drive.sh 跑起來了（pid ${pid}），log 在 $OPSX_STATE_DIR/drive-$repo-$slug.log"
   fi
 }
 
-workplan_branch() { # <top> <slug> → branch 或空
+workplan_branch() { # <top> <slug>：印 workplan 裡這張卡的 branch，沒有就空
   [ -f "$1/openspec/workplan.yaml" ] || return 0
   awk -v s="$2" '$0 ~ "name: *"s"$"{f=1;next} f && /branch:/{sub(/.*branch: */,""); print; exit} f && /^ *- name:/{exit}' "$1/openspec/workplan.yaml"
 }
-workspace_for() { # <repo> → workspace id 或空
+workspace_for() { # <repo>：印 workspaces.toml 記的 label（或 id），沒有就空
   [ -f "$OPSX_STATE_DIR/workspaces.toml" ] || return 0
   OPSX_REPO="$1" python3 -I - "$OPSX_STATE_DIR/workspaces.toml" <<'PY'
-import os,sys,tomllib
-try: print(tomllib.load(open(sys.argv[1],"rb")).get("repos",{}).get(os.environ["OPSX_REPO"],""))
-except Exception: print("")
+import os, sys, tomllib
+try:
+    print(tomllib.load(open(sys.argv[1], "rb")).get("repos", {}).get(os.environ["OPSX_REPO"], ""))
+except tomllib.TOMLDecodeError as e:
+    sys.exit("dispatch: workspaces.toml 壞了：%s" % e)
 PY
 }
 write_settings() { # <file> <repo>：直接做那級 allow，永遠要人那級 deny；repo 永遠的授權也進 allow
@@ -136,7 +168,10 @@ sd=os.environ["OPSX_SD"]; repo=os.environ["OPSX_REPO"]
 allow=["Read","Edit","Write","Glob","Grep","Bash(git status:*)","Bash(git diff:*)","Bash(git log:*)","Bash(git add:*)","Bash(git commit:*)","Bash(git checkout:*)","Bash(git worktree:*)",
        "Bash(pnpm test:*)","Bash(pnpm vitest:*)","Bash(pnpm build:*)","Bash(pnpm lint:*)","Bash(pnpm typecheck:*)","Bash(npx vitest:*)","Bash(pytest:*)","Bash(uv run:*)","Bash(ruff:*)","Bash(go test:*)",
        "Bash(openspec:*)","Bash(opsx:*)","Bash(ls:*)","Bash(cat:*)","Bash(grep:*)","Bash(rg:*)","Bash(find:*)","Bash(node:*)","Bash(python3:*)"]
-deny=["Bash(git push --force:*)","Bash(git push -f:*)","Bash(glab mr merge:*)","Bash(gh pr merge:*)","Bash(deploy.sh:*)","Bash(sops:*)","Bash(rm -rf /:*)"]
+# merge 不在 deny：settings 的 deny 蓋得過 hook 的放行，所以 merge 交給 opsx-grant-gate.sh 的 merge_gate 單獨把關；
+# 放進 allow 是為了閘門放行那一次不再跳 Claude Code 自己的權限框。
+allow += ["Bash(glab mr merge:*)", "Bash(gh pr merge:*)"]
+deny=["Bash(git push --force:*)","Bash(git push -f:*)","Bash(deploy.sh:*)","Bash(sops:*)","Bash(rm -rf /:*)"]
 try:
     g=tomllib.load(open(os.path.join(sd,"grants.toml"),"rb")).get("repos",{}).get(repo,{})
     if g.get("push"): allow.append("Bash(git push:*)")

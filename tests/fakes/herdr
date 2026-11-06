@@ -3,12 +3,20 @@
 # agent prompt / agent wait 會呼叫 $OPSX_TEST_ON_PROMPT / $OPSX_TEST_ON_WAIT（若設定），讓測試推進 fixture 的狀態。
 printf '%s\n' "$*" >> "${OPSX_FAKE_LOG:?}"
 case "$1 $2" in
-  "workspace create") echo '{"result":{"workspace":"w9","tab":"t1","root_pane":"p1"}}' ;;
-  "tab create") echo '{"result":{"tab":"t7","root_pane":"p42"}}' ;;
+  # workspace create 的真格式還沒看過：照 tab create 的形狀猜（result.workspace.workspace_id）
+  "workspace create") echo '{"id":"cli:workspace:create","result":{"workspace":{"workspace_id":"w9","label":"'"${4:-}"'"},"type":"workspace_created"}}' ;;
+  "workspace list") cat "$(dirname "${BASH_SOURCE[0]}")/herdr-samples/workspace-list.json" ;;
+  "tab create") cat "$(dirname "${BASH_SOURCE[0]}")/herdr-samples/tab-create.json" ;;   # 真格式：result.root_pane.pane_id / result.tab.tab_id
   "agent start") echo '{"result":{"ok":true}}' ;;
+  # 真格式（2026-11-06 在 pane 裡實跑存下來）：{"id":"cli:agent:list","result":{"agents":[{pane_id:"w1:p2",agent_status,…}],"type":"agent_list"}}
+  "agent list") cat "${OPSX_TEST_HERDR_AGENTS:-$(dirname "${BASH_SOURCE[0]}")/herdr-samples/agent-list.json}" ;;
+  "pane list") cat "$(dirname "${BASH_SOURCE[0]}")/herdr-samples/pane-list.json" ;;
   "agent prompt") [ -n "${OPSX_TEST_ON_PROMPT:-}" ] && bash "$OPSX_TEST_ON_PROMPT" "$4"; echo '{"result":{"submitted":true}}' ;;
   "agent wait") [ -n "${OPSX_TEST_ON_WAIT:-}" ] && bash "$OPSX_TEST_ON_WAIT"; echo '{"result":{"status":"idle"}}' ;;
   "pane close") echo '{"result":{"closed":true}}' ;;
+  "pane focus") echo '{"result":{"focused":true}}' ;;
+  "plugin list") cat "${OPSX_TEST_HERDR_PLUGINS:-/dev/null}"; echo ;;
+  "plugin link") echo '{"result":{"linked":true}}' ;;
   "pane current") echo '{"result":{"pane_id":"p42"}}' ;;
   "pane report-metadata") echo '{"result":{"ok":true}}' ;;
   *) echo '{"result":{}}' ;;
