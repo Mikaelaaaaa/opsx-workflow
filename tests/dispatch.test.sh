@@ -31,6 +31,8 @@ assert_eq "$(git -C "$R/.claude/worktrees/retry-backoff" rev-parse --abbrev-ref 
 assert_grep '^tab create --workspace w1 --cwd .*retry-backoff --label retry-backoff' "$OPSX_FAKE_LOG"
 assert_grep '^workspace list$' "$OPSX_FAKE_LOG"
 assert_grep '^agent start retry-backoff --kind claude --pane w1:pE -- --model claude-sonnet-5-5 --permission-mode acceptEdits --settings ' "$OPSX_FAKE_LOG"
+# 沙盒只准寫 working directories：卡的檔在主 repo 的 openspec/、hook 與 status 寫 state dir，兩個都要 --add-dir
+assert_grep "^agent start retry-backoff .* --add-dir $R/openspec --add-dir $OPSX_STATE_DIR\$" "$OPSX_FAKE_LOG"
 assert_grep '^agent prompt retry-backoff /propose retry-backoff$' "$OPSX_FAKE_LOG"
 assert_not_grep '^workspace create' "$OPSX_FAKE_LOG"
 # settings：repo 永遠 push 進 allow；merge 在 allow 不在 deny（deny 會蓋過 grant-gate 的放行，merge 由 gate 單獨把關）
@@ -102,6 +104,10 @@ unset OPSX_TEST_NOT_READY_ONCE OPSX_TEST_PANE_TEXT
 : > "$OPSX_FAKE_LOG"
 out="$(opsx dispatch retry-backoff --agent codex --mode interactive 2>&1)" || fail "redispatch: $out"
 assert_grep '^agent start retry-backoff --kind codex --pane w1:pE -- -a on-request -s workspace-write$' "$OPSX_FAKE_LOG"
+# interactive 的 claude 也要 --add-dir（互動模式一樣在沙盒裡）
+: > "$OPSX_FAKE_LOG"
+opsx dispatch retry-backoff --agent claude --mode interactive >/dev/null 2>&1 || fail "redispatch interactive claude"
+assert_grep "^agent start retry-backoff --kind claude --pane w1:pE -- --model claude-sonnet-5-5 --add-dir $R/openspec --add-dir $OPSX_STATE_DIR\$" "$OPSX_FAKE_LOG"   # kind 已是 bug-fix → sonnet
 python3 -I -c 'import json,sys;d=json.load(open(sys.argv[1]))["Agentory-CS/retry-backoff"];assert d["agent"]=="codex" and d["model"]=="gpt-5" and d["mode"]=="interactive",d' "$OPSX_STATE_DIR/dispatch.json"
 
 # --- 沒掛 workspace 的 repo → 開新 workspace 並記下來 ---

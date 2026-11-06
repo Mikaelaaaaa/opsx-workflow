@@ -109,6 +109,8 @@ PY
       write_settings "$settings" "$repo"
       aargs+=(--permission-mode acceptEdits --settings "$settings")
     fi
+    # Claude Code 的沙盒只准寫 working directories；卡的檔在主 repo 的 openspec/（worktree 裡沒有），hook 消耗 once 與 status 鏡像寫 state dir
+    aargs+=(--add-dir "$top/openspec" --add-dir "$OPSX_STATE_DIR")
   else
     if [ "$mode" = interactive ]; then aargs+=(-a on-request -s workspace-write); else aargs+=(-a never -s workspace-write); fi
   fi
