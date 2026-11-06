@@ -69,6 +69,14 @@ out="$(bash_hook "$R" 'pnpm test')"; assert_eq "$(decision "$out")" allow "有�
 git -C "$R" checkout -q feat/c1/mikaela
 printf '%s\n' "$REAL" > "$P"
 
+# ---------- dispatch.json 壞掉：檔案裡有這張卡就擋，沒有就不管 ----------
+printf '{"r/c1":{"mode":"autopilot",' > "$OPSX_STATE_DIR/dispatch.json"
+out="$(bash_hook "$R" 'pnpm test')"; assert_eq "$(decision "$out")" deny "dispatch.json 壞掉時派出去的卡要 deny"
+reason "$out" | grep -qF "$OPSX_STATE_DIR/dispatch.json" || fail "deny 理由要寫出 dispatch.json 的路徑：$(reason "$out")"
+printf '{"r/other":{"mode":"autopilot",' > "$OPSX_STATE_DIR/dispatch.json"
+out="$(bash_hook "$R" 'git push')"; assert_eq "$(decision "$out")" allow "dispatch.json 壞掉、裡面沒有這張卡：不管"
+printf '{"r/c1":{"mode":"autopilot","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"
+
 # ---------- 產品碼裡不能再有直接叫 python3 的地方（上面的假 python3 只走得到幾條路） ----------
 hits="$(grep -rnwa 'python3' "$OPSX_ROOT/bin" "$OPSX_ROOT/hooks" | grep -avE ':[0-9]+:[[:space:]]*#' | grep -avF 'Bash(python3:*)' \
   | grep -avE 'bin/lib/init\.sh:[0-9]+:.*(sys\.version_info|python3 --version|print\(sys\.executable\))')"
