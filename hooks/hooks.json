@@ -36,7 +36,8 @@
         "matcher": "Bash",
         "hooks": [
           { "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/secret-mask.sh\"", "timeout": 3 },
-          { "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/conventional-commit.sh\"", "timeout": 3 }
+          { "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/conventional-commit.sh\"", "timeout": 3 },
+          { "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/opsx-herdr-queue.sh\"", "timeout": 20 }
         ]
       }
     ],
