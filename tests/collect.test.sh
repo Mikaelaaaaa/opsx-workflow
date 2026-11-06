@@ -188,4 +188,14 @@ assert_eq "$(sort "$FX/stage.log" | tr '\n' ' ')" "new-1 sd-inbox " "只有 opsx
 assert_eq "$(q "$J" legacy)" '{"r": 3}'
 assert_eq "$(card "$J" r old-ws)" null "只有空白的 inbox 仍是舊卡"
 assert_eq "$(q "$(card "$J" r sd-inbox)" stage)" explore
+# ---------- 舊卡不查 MR：glab / gh 不被叫，errors 不記它（collect-legacy-mr-errors） ----------
+R3="$FX/code3"; D="$R3/r3/openspec/changes/legacy-mr"; mkdir -p "$R3/r3/.git" "$D"
+printf 'schema: spec-driven\n' > "$D/.openspec.yaml"
+printf '# report\n\n## MR\nhttps://gitlab.tsg-navigator.com/agentory/r3/-/merge_requests/4242\n' > "$D/report.md"
+: > "$FX/glab-empty.json"; : > "$OPSX_FAKE_LOG"
+J="$(OPSX_TEST_GLAB_JSON="$FX/glab-empty.json" OPSX_TEST_GLAB_JSON_BY_IID= opsx collect --root "$R3")"; assert_eq "$?" 0
+[ ! -s "$OPSX_FAKE_LOG" ] || fail "只有舊卡的 repo 不該叫 glab / gh：$(cat "$OPSX_FAKE_LOG")"
+assert_eq "$(q "$J" legacy)" '{"r3": 1}'
+E="$(q "$J" errors)" || fail "errors 讀不到：$J"
+case "$E" in *legacy-mr*|*glab*) fail "errors 不該指名舊卡：$E" ;; esac
 echo ok
