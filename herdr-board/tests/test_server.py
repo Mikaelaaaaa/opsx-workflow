@@ -169,6 +169,21 @@ class ServerTest(unittest.TestCase):
         self.assertEqual(status, 400, "沒有時區的時間要拒絕：%s" % body)
         self.assertEqual(self.log.read_text(), "")
 
+    def test_seen_writes_last_seen(self):
+        status, _, body = self.req("/api/seen", {"at": "2026-11-06T13:00:00+08:00"}, token=self.token)
+        self.assertEqual(status, 200, body)
+        self.assertTrue(json.loads(body)["ok"])
+        self.assertEqual((self.state / "last-seen").read_text().strip(), "2026-11-06T13:00:00+08:00")
+
+    def test_seen_rejects_bad_time_and_needs_token(self):
+        (self.state / "last-seen").write_text("2026-11-06T09:00:00+08:00\n")
+        for bad in ("昨天", "2026-11-06T13:00:00", "", None):
+            status, _, body = self.req("/api/seen", {"at": bad}, token=self.token)
+            self.assertEqual(status, 400, "%r: %s" % (bad, body))
+        status, _, _ = self.req("/api/seen", {"at": "2026-11-06T13:00:00+08:00"})
+        self.assertEqual(status, 401)
+        self.assertEqual((self.state / "last-seen").read_text().strip(), "2026-11-06T09:00:00+08:00")
+
     def test_focus_runs_herdr(self):
         status, _, body = self.req("/api/focus", {"pane": "w1:p4"}, token=self.token)
         self.assertEqual(status, 200, body)

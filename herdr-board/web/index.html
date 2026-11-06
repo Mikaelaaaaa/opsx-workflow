@@ -175,6 +175,13 @@ main{flex:1;min-width:0;padding-left:max(16px,env(safe-area-inset-left,0px));pad
 .bot.ask .ring{animation:ringfade 1.4s ease-in-out infinite}
 .bot.sleep{opacity:.55}
 @keyframes ringfade{0%,100%{opacity:.25}50%{opacity:1}}
+.notice{display:flex;align-items:flex-start;gap:12px;background:var(--surface);border:1px solid var(--border);border-left:3px solid var(--data);border-radius:var(--r);padding:10px 14px;margin-top:16px;font-size:13px;color:var(--fg-2)}
+.notice .t{font-family:var(--font-mono);font-size:11px;font-weight:600;letter-spacing:.06em;color:var(--data);white-space:nowrap;padding-top:3px}
+.notice ul{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:2px}
+.notice li .now{font-family:var(--font-mono);font-size:11px;color:var(--warn);margin-right:6px}
+.notice button{margin-left:auto}
+.notice .link{border:0;background:none;padding:0;min-height:0;margin:0;color:var(--accent);font:inherit;text-align:left}
+.notice .link:hover{text-decoration:underline;background:none}
 .filters{display:flex;gap:6px;margin-top:16px;flex-wrap:wrap;align-items:center}
 .filters button{min-height:28px;font-size:12px;padding:0 10px}
 .filters button[aria-pressed=true]{background:var(--surface-active);border-color:var(--accent);color:var(--fg)}
@@ -252,7 +259,7 @@ const api={
 };
 let data={generated_at:null,scopes:[],cards:[],unmatched_agents:[],errors:[],legacy:{},worktrees_skipped:[]};let lastRaw='';
 const ui={tab:'home',scope:'all',ws:null,repo:null,sel:null,open:null,doneOpen:false,busy:false,logFilter:'all'};
-let tl=null;let tlErr='';
+let tl=null;let tlErr='';let bannerClosed=false;
 const REFRESH_MS=5000;
 
 /* ---------- 標籤 ---------- */
@@ -353,7 +360,7 @@ function renderHome(){
   const A=sect('待處理'),R=sect('進行中'),Y=sect('待指派'),D=sect('已完成');
   const un=ui.scope==='all'?data.unmatched_agents:[];
   const leg=Object.entries(data.legacy||{}).filter(([r])=>ui.scope!=='ws'||(ui.repo?r===ui.repo:wsOf(r)===ui.ws));
-  let h=panel('待處理',A.length,'只有你能做的：授權、決定、合併、終端機卡住',A.length?A.map(rowAttn).join(''):'<div class="empty">沒有等你的事</div>');
+  let h=renderBanner()+panel('待處理',A.length,'只有你能做的：授權、決定、合併、終端機卡住',A.length?A.map(rowAttn).join(''):'<div class="empty">沒有等你的事</div>');
   h+=panel('進行中',R.length+un.length,'進度 status.json · 狀態 herdr',(R.map(rowRunning).join('')+un.map(rowUnmatched).join(''))||'<div class="empty">沒有執行中的工作</div>');
   h+=panel(ui.scope==='ws'?`待指派 · ${esc(scopeLabel())}`:'待指派',Y.length,'有殼、還沒派出去的（收件、explore、propose 完的都在這）',(Y.length?Y.map(rowReady).join(''):'<div class="empty">沒有待指派的工作</div>')+(leg.length?`<div class="empty">舊 schema 的 change 不列（沒有 inbox.md、不是 schema: opsx）：${leg.map(([r,n])=>`${esc(r)} ${n}`).join(' · ')}</div>`:''));
   h+=`<section class="panel"><div class="panel-h"><button class="tg h2" data-act="done-toggle" aria-expanded="${ui.doneOpen}"><span class="chev"></span>已完成</button><span class="n">${D.length}</span></div>${ui.doneOpen?(D.length?D.map(rowDone).join(''):'<div class="empty">還沒有</div>'):''}</section>`;
@@ -388,6 +395,46 @@ function renderLog(){
   if(tl.errors&&tl.errors.length)h+=`<div class="empty">讀不了的檔：${tl.errors.map(x=>esc(x.source)).join('、')}</div>`;
   return h;
 }
+/* ---------- 離開期間 banner：只列 last_seen 之後有時間戳的事，加上「現在」的狀態 ---------- */
+const after=(ts,ls)=>!!ts&&Date.parse(ts)>Date.parse(ls);
+function bannerItems(events,cards,lastSeen){
+  const items=[];const merged=new Set();
+  for(const e of events){
+    if(!after(e.ts,lastSeen))continue;
+    const k=e.repo+'/'+e.slug;
+    if(e.source==='sync'){if(e.new>0)items.push({text:`同步 ${e.evidence}：${e.new} 張新卡`});continue;}
+    if(e.who==='你')continue;
+    if(e.tag==='替你決定')items.push({key:k,text:`${e.slug}：${e.who} 替你決定「${e.text}」`});
+    else if(e.tag==='已合併'){merged.add(k);items.push({key:k,text:`${e.slug} 已合併`});}
+    else if(e.tag==='已指派'&&e.who==='系統')items.push({key:k,text:`${e.slug} 自動派出：${e.text}`});
+  }
+  for(const c of cards){
+    const k=c.repo+'/'+c.slug;
+    for(const g of c.open_gates||[])if(after(g.opened_at,lastSeen))items.push({key:k,text:`${c.slug} 開了 gate ${g.id}`});
+    if(c.mr&&after(c.mr.created_at,lastSeen))items.push({key:k,text:`${c.slug} 開了 MR`});
+    if(c.mr&&after(c.mr.merged_at,lastSeen)&&!merged.has(k)){merged.add(k);items.push({key:k,text:`${c.slug} 已合併`});}
+  }
+  for(const c of cards){
+    const k=c.repo+'/'+c.slug;
+    if(c.agent_status==='blocked')items.push({key:k,now:true,text:`${c.slug} 的 agent 卡在終端機`});
+    else if(c.dispatch&&c.agent_status==='unknown')items.push({key:k,now:true,text:`${c.slug} 的 agent 不在 herdr 裡（停了或掛了）`});
+  }
+  return items;
+}
+function renderBanner(){
+  if(bannerClosed||!tl)return '';
+  const close=`<button class="ghost sm" data-act="banner-close">關閉</button>`;
+  if(!tl.last_seen)return `<div class="notice" role="status"><span class="t">第一次開板</span><span>之後離開期間的變化會列在這裡</span>${close}</div>`;
+  const items=bannerItems(tl.events,data.cards.filter(inScope),tl.last_seen);
+  if(!items.length)return '';
+  const li=i=>`<li>${i.now?'<span class="now">現在</span>':''}${i.key?`<button class="link" data-act="open" data-key="${esc(i.key)}">${esc(i.text)}</button>`:esc(i.text)}</li>`;
+  return `<div class="notice" role="status"><span class="t">離開期間 ${esc(ago(tl.last_seen))}</span><ul>${items.map(li).join('')}</ul>${close}</div>`;
+}
+async function closeBanner(){
+  try{await api.post('seen',{at:tl.generated_at});bannerClosed=true;render();}
+  catch(e){toast('關閉 banner 失敗：'+e.message,true);}
+}
+
 async function loadLog(){
   try{tl=await api.log();tlErr='';}catch(e){tlErr=e.message;}
   render();
@@ -524,6 +571,7 @@ document.addEventListener('click',e=>{
     if(a==='dlg-cancel'){closeDispatch();return;}
     if(a==='dlg-go'){doDispatch();return;}
     if(a==='pane-id'){focusPane(btn.dataset.pane);return;}
+    if(a==='banner-close'){closeBanner();return;}
     if(a==='logf'){ui.logFilter=btn.dataset.f;render();return;}
     if(a==='ev-open'){if(!byKey(btn.dataset.key)){toast(btn.dataset.key+' 不在首頁（archive 只列最新的幾張）',true);return;}showTab('home');openDrawer(btn.dataset.key);return;}
     if(!c)return;
@@ -582,7 +630,7 @@ async function refresh(force){
 }
 function schedule(){clearTimeout(timer);timer=setTimeout(()=>{if(document.hidden){schedule();return;}refresh(false);},REFRESH_MS);}
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)refresh(false);});
-if(location.hash==='#log')showTab('log');else if(location.hash!=='#home')history.replaceState(null,'','#home');
+if(location.hash==='#log')showTab('log');else{if(location.hash!=='#home')history.replaceState(null,'','#home');loadLog();}
 refresh(true);
 </script>
 </body>
