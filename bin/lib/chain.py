@@ -1,8 +1,8 @@
 """opsx chain 的判斷：父卡合併後，workplan 裡哪幾張子卡可以接著做。
 
-用法：python3 -I chain.py children <top> <repo> <父卡 slug> <dispatch.json>
+用法：$OPSX_PY -I chain.py children <top> <repo> <父卡 slug> <dispatch.json>
 印一行 `skip\t<原因>`（不接），或每張可接的子卡一行 `child\t<slug>\t<branch>\t<kind>`。
-python3 -I chain.py fan-out <dispatch.json>：寫代管條目（register_fan_out），印父卡原本的 mode。
+$OPSX_PY -I chain.py fan-out <dispatch.json>：寫代管條目（register_fan_out），印父卡原本的 mode。
 specs/opsx-chain/spec.md「找出可以續接的子卡」。
 """
 from __future__ import annotations

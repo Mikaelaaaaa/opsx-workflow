@@ -112,7 +112,7 @@ features:
           - c
         changes: []
 EOF
-got="$(python3 -I -c 'import sys; sys.path.insert(0, sys.argv[1]); import chain, json
+got="$(python3 -I -B -c 'import sys; sys.path.insert(0, sys.argv[1]); import chain, json
 w = chain.load_workplan(sys.argv[2]); prs = w["features"][0]["prs"]
 print(json.dumps([prs[0]["branch"], prs[0]["status"], prs[0]["depends-on"], prs[0]["description"], prs[1]["depends-on"], prs[1]["changes"]], ensure_ascii=False))' "$OPSX_ROOT/bin/lib" "$FX/wp.yaml")"
 assert_eq "$got" '["feat/a/m", "merged", [], "有 # 號的描述", ["a", "c"], []]' "workplan 解析"
