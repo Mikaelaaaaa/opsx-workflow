@@ -106,16 +106,17 @@ PY
   tab="$(printf '%s' "$tabjson" | jq -r '.result.tab.tab_id // empty' 2>/dev/null || true)"
   [ -n "$pane" ] || die "dispatch: herdr tab create 沒回 root_pane：$tabjson"
 
-  # agent 啟動參數（自動 / 開到可合併 才帶 permission 設定）
+  # agent 啟動參數：claude 兩種模式都帶 --settings；--permission-mode 與 allow / deny 只有自動 / 開到可合併才有。
+  # settings 檔按模式分名，重派不會蓋掉 pane 還沒關的另一個模式那份
   local -a aargs=()
   if [ "$agent" = claude ]; then
     aargs+=(--model "$model")
-    local settings="$OPSX_STATE_DIR/settings/$repo-$slug.json"; ensure_dir "$(dirname "$settings")"
+    local settings="$OPSX_STATE_DIR/settings/$repo-$slug-$mode.json"; ensure_dir "$(dirname "$settings")"
     write_settings "$settings" "$repo" "$top/openspec" "$mode"
     if [ "$mode" != interactive ]; then aargs+=(--permission-mode acceptEdits); fi
     aargs+=(--settings "$settings")
     # Claude Code 的沙盒只准寫 working directories；卡的檔在主 repo 的 openspec/（worktree 裡沒有），hook 消耗 once 與 status 鏡像寫 state dir。
-    # 旗標只活在這個行程，settings 的 additionalDirectories 讓重啟後還在
+    # 旗標只活在這個行程；重啟後 --settings 有沒有被帶回、additionalDirectories 還在不在，尚未實測（add-dir-lost 1.1）
     aargs+=(--add-dir "$top/openspec" --add-dir "$OPSX_STATE_DIR")
   else
     if [ "$mode" = interactive ]; then aargs+=(-a on-request -s workspace-write); else aargs+=(-a never -s workspace-write); fi
