@@ -31,15 +31,20 @@ continue_one() { # <top> <repo> <父卡> <chain.py 的 child 行>
   if [ -n "$(git -C "$wt" status --porcelain)" ]; then chain_skip "$d" "父卡 worktree $wt 有未 commit 的改動，換 branch 會把它們帶過去"; return 0; fi
   used="$(git -C "$wt" worktree list --porcelain | awk -v b="branch refs/heads/$branch" '/^worktree /{w=substr($0, 10)} $0 == b {print w}')"
   if [ -n "$used" ]; then chain_skip "$d" "子卡 branch $branch 已經 checkout 在 $used"; return 0; fi
-  git -C "$wt" fetch -q origin || die "chain: $wt 的 git fetch origin 失敗"
+  if git -C "$wt" show-ref --verify --quiet "refs/heads/$branch"; then
+    chain_skip "$d" "子卡 branch $branch 本地已存在，可能是舊的；要從最新的 main 開就先刪掉它再派"; return 0
+  fi
+  local remote; remote="$(primary_remote "$wt")"
+  git -C "$wt" fetch -q "$remote" || die "chain: $wt 的 git fetch $remote 失敗"
   # 不帶 tracking：派工 session 的沙盒寫不進 .git/config，帶 tracking 會停在半套（branch 建了、HEAD 沒換）
-  if git -C "$wt" show-ref --verify --quiet "refs/heads/$branch"; then git -C "$wt" switch -q "$branch" || die "chain: 切不到 $branch"
-  else git -C "$wt" switch -q --no-track -c "$branch" origin/main || die "chain: 從 origin/main 開 $branch 失敗"; fi
+  git -C "$wt" switch -q --no-track -c "$branch" "$remote/main" || die "chain: 從 $remote/main 開 $branch 失敗"
 
   local agent now old_name mode stage
   now="$(now_iso)"; agent="$(jq -r --arg k "$repo/$parent" '.[$k].agent // "claude"' "$OPSX_STATE_DIR/dispatch.json")"
-  read -r old_name mode < <(OPSX_KEY="$repo/$parent" OPSX_PARENT="$parent" OPSX_PLAN="$child"$'\t'"$branch"$'\t'"$kind"$'\t'"$(default_model "$agent" "$kind")" OPSX_AT="$now" OPSX_WT="$wt" \
-    "$OPSX_PY" -I "$OPSX_ROOT/bin/lib/chain.py" continue "$OPSX_STATE_DIR/dispatch.json") || die "chain: 寫 dispatch.json 失敗"
+  local out
+  out="$(OPSX_KEY="$repo/$parent" OPSX_PARENT="$parent" OPSX_PLAN="$child"$'\t'"$branch"$'\t'"$kind"$'\t'"$(default_model "$agent" "$kind")" OPSX_AT="$now" OPSX_WT="$wt" \
+    "$OPSX_PY" -I "$OPSX_ROOT/bin/lib/chain.py" continue "$OPSX_STATE_DIR/dispatch.json")" || die "chain: 寫 dispatch.json 失敗；$wt 已切到 ${branch}，pane 沒改名"
+  read -r old_name mode <<< "$out"
   stage="$(stage_name "$top" "$child")"
   local q="$OPSX_STATE_DIR/herdr-queue/$repo-$child.tsv"; ensure_dir "$(dirname "$q")"
   { printf 'rename\t%s\t%s\n' "$old_name" "$child"; printf 'prompt\t%s\t/%s %s\n' "$child" "$stage" "$child"
@@ -58,7 +63,8 @@ chain_skip() { # <子卡目錄> <原因>
 fan_out() { # <top> <repo> <父卡> <chain.py 的 child 行>
   local top="$1" repo="$2" parent="$3" rows="$4" agent now; now="$(now_iso)"
   agent="$(jq -r --arg k "$repo/$parent" '.[$k].agent // "claude"' "$OPSX_STATE_DIR/dispatch.json")"
-  local plan="" _ child branch kind
+  local plan="" _ child branch kind remote
+  remote="$(primary_remote "$top")"
   while IFS=$'\t' read -r _ child branch kind; do
     plan+="$child"$'\t'"$branch"$'\t'"$kind"$'\t'"$(default_model "$agent" "$kind")"$'\n'
   done <<< "$rows"
@@ -69,6 +75,6 @@ fan_out() { # <top> <repo> <父卡> <chain.py 的 child 行>
     local d="$top/openspec/changes/$child"
     printf '%s\t%s\t%s\n' "$now" "自動派：因 ${parent} merged（fan out，由 ${parent} 的 pane 代管）" "auto-dispatched" >> "$d/decisions.tsv"
     [ "$mode" = drive ] && printf '%s\t%s\t%s\n' "$now" "父卡是 drive，drive 不支援代管卡（沒有自己的 herdr agent 可以送話），改 autopilot" "decided" >> "$d/decisions.tsv"
-    say "chain: fan out ${child} · ${branch} · ${kind} · /$(stage_name "$top" "$child")"
+    say "chain: fan out ${child} · ${branch} · ${kind} · /$(stage_name "$top" "$child") · from ${remote}/main"
   done <<< "$plan"
 }

@@ -41,6 +41,11 @@ append_line_once() { # <file> <line>
   grep -qxF -- "$2" "$1" || printf '%s\n' "$2" >> "$1"
 }
 
+# MR 所在的 remote：Agentory-AI / Infrastructure 的 origin 是 GitHub 鏡像，有 gitlab 就以它為準（同 init.sh 的 register_source）
+primary_remote() { # <git dir>
+  if git -C "$1" remote get-url gitlab >/dev/null 2>&1; then printf 'gitlab\n'; else printf 'origin\n'; fi
+}
+
 # agent 沒指定 model 時照 kind 給：要想的用 opus，照表操課的用 sonnet。dispatch 和 chain 共用
 default_model() { # <agent> <kind>
   if [ "$1" = codex ]; then printf 'gpt-5\n'; return; fi

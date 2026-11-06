@@ -112,7 +112,9 @@ def children(top: str, repo: str, parent: str, dispatch_path: str) -> list:
         entry = dispatch.get("%s/%s" % (repo, slug))
         if entry and entry.get("mode") != "stopped":
             continue
-        out.append(("child", slug, pr.get("branch") or "", _kind(card)))
+        if not pr.get("branch"):
+            sys.exit("chain: workplan 的 PR「%s」沒有 branch，續接不知道要開哪條 branch；在 workplan 補上 branch" % pr.get("name"))
+        out.append(("child", slug, pr["branch"], _kind(card)))
     return out or [("skip", "沒有可以接的子卡")]
 
 
@@ -160,8 +162,9 @@ if __name__ == "__main__":
             print("\t".join(row))
     elif len(sys.argv) == 3 and sys.argv[1] == "continue":
         me = jsonfile.load(sys.argv[2])[os.environ["OPSX_KEY"]]
-        print(me.get("herdr_name") or os.environ["OPSX_PARENT"], me.get("mode"))
+        old_name, mode = me.get("herdr_name") or os.environ["OPSX_PARENT"], me.get("mode")
         jsonfile.update(sys.argv[2], register_continue)
+        print(old_name, mode)   # 寫成功才印：chain.sh 靠退出碼判斷寫入成敗
     elif len(sys.argv) == 3 and sys.argv[1] == "fan-out":
         print(jsonfile.load(sys.argv[2])[os.environ["OPSX_KEY"]].get("mode"))
         jsonfile.update(sys.argv[2], register_fan_out)

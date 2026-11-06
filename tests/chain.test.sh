@@ -189,7 +189,7 @@ printf 'openspec/\n' >> "$R3/.git/info/exclude"    # 跟真的 repo 一樣，ope
 # 6.3：像 Agentory-AI 一樣，gitlab 是主要 remote，origin 是落後的鏡像；父卡的合併只在 gitlab 的 main 上
 git clone -q --bare "$ORIGIN" "$FX/mirror3.git"
 git -C "$R3" remote rename origin gitlab; git -C "$R3" remote add origin "$FX/mirror3.git"
-git clone -q "$ORIGIN" "$FX/pusher3"; git -C "$FX/pusher3" -c user.email=t@t -c user.name=t commit -q --allow-empty -m "merge p"; git -C "$FX/pusher3" push -q origin HEAD:main
+git clone -q -b main "$ORIGIN" "$FX/pusher3"; git -C "$FX/pusher3" -c user.email=t@t -c user.name=t commit -q --allow-empty -m "merge p"; git -C "$FX/pusher3" push -q origin HEAD:main
 mk_change "$R3" p; mkdir -p "$R3/openspec/changes/c"
 printf 'schema: opsx\nkind: dev\n' > "$R3/openspec/changes/c/.openspec.yaml"; printf -- '- [ ] 1.1 x\n' > "$R3/openspec/changes/c/tasks.md"
 cat > "$R3/openspec/workplan.yaml" <<'EOF'
@@ -248,10 +248,10 @@ cmp -s "$OPSX_STATE_DIR/dispatch.json" "$FX/disp.before" || fail "PR 沒有 bran
 cp "$FX/wp3.bak" "$R3/openspec/workplan.yaml"
 
 # 寫 dispatch.json 失敗（6.4）：chain 要失敗，不寫佇列（lock 檔換成目錄，jsonfile.update 打不開）
-mkdir "$OPSX_STATE_DIR/dispatch.json.lock"
+mv "$OPSX_STATE_DIR/dispatch.json.lock" "$FX/lock.bak"; mkdir "$OPSX_STATE_DIR/dispatch.json.lock"
 out="$(opsx chain p 2>&1)"; [ $? -ne 0 ] || fail "寫 dispatch.json 失敗要讓 chain 失敗: $out"
 assert_no_file "$Q"
-rmdir "$OPSX_STATE_DIR/dispatch.json.lock"
+rmdir "$OPSX_STATE_DIR/dispatch.json.lock"; mv "$FX/lock.bak" "$OPSX_STATE_DIR/dispatch.json.lock"
 git -C "$R3" switch -q feat/p/mikaela; git -C "$R3" branch -q -D feat/c/mikaela 2>/dev/null || true
 
 # 乾淨 tree（3.2）：切到子卡 branch（不帶 tracking）、登記、寫佇列；chain 自己不叫 herdr

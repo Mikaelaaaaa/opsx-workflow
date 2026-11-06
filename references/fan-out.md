@@ -1,6 +1,6 @@
 # Fan-out: one pane coordinating subagents
 
-When a parent card merges and more than one child card is ready, `opsx chain <parent>` registers every child in `dispatch.json` with `via: <parent>` and `herdr_name: <this pane's herdr name>`, and prints one line per child: `chain: fan out <slug> · <branch> · <kind> · /<stage>`. From then on this pane does none of the cards itself. It spawns, relays and opens gates.
+When a parent card merges and more than one child card is ready, `opsx chain <parent>` registers every child in `dispatch.json` with `via: <parent>` and `herdr_name: <this pane's herdr name>`, and prints one line per child: `chain: fan out <slug> · <branch> · <kind> · /<stage> · from <remote>/main`. `<remote>` is the repo's primary remote: `gitlab` when it exists (in Agentory-AI and Agentory-Infrastructure `origin` is only the GitHub mirror and can lag behind the merge), otherwise `origin`. From then on this pane does none of the cards itself. It spawns, relays and opens gates.
 
 ## What goes to a subagent, what stays in the pane
 
@@ -17,7 +17,7 @@ A subagent has no herdr agent name. `opsx answer` and the board cannot reach it,
 
 One Agent call per child, `isolation: "worktree"`, `run_in_background: true`. The brief must contain:
 
-- First command: `git switch --no-track -c <branch> origin/main` (from the `chain:` line). Without `--no-track` git tries to write `.git/config`, the sandbox refuses, and the worktree is left half switched.
+- First commands: `git fetch <remote>` and `git switch --no-track -c <branch> <remote>/main` (both from the `chain:` line). Without `--no-track` git tries to write `.git/config`, the sandbox refuses, and the worktree is left half switched.
 - The workflow: call the `apply` skill for `<slug>`, then `review`, then `pr`. Name the skills; a subagent that is not told invents its own process.
 - What the parent card changed: its file list (`git show --stat` of the merge) and the D-ids in its `design.md` that the child builds on. The subagent starts with none of this pane's context.
 - The report contract: finish with `DONE <slug> <MR url>`, or `NEEDS-USER <slug>` followed by the question, the options and the evidence. Commit and push before reporting, because the harness may remove the worktree once the subagent ends.
