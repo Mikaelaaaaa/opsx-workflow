@@ -148,6 +148,19 @@ printf '"Agentory-AI" = "w1"\n' >> "$OPSX_STATE_DIR/workspaces.toml"
 cd "$R3"; opsx dispatch eval-core --agent claude --mode autopilot >/dev/null 2>&1 || fail "dispatch with workplan"
 assert_eq "$(git -C "$R3/.claude/worktrees/eval-core" rev-parse --abbrev-ref HEAD)" "feat/eval-core-v2/mikaela" "workplan branch"
 
+# --- 分支尾巴：OPSX_USER 沒設就用 git user.name；是 git 的占位字「Your Name」或空的就拒絕，不開 worktree 不碰 herdr ---
+mkdir -p "$R3/openspec/changes/noname-card"; printf 'schema: opsx\nkind: dev\n' > "$R3/openspec/changes/noname-card/.openspec.yaml"
+: > "$OPSX_FAKE_LOG"
+out="$(OPSX_USER= opsx dispatch noname-card --agent claude --mode autopilot 2>&1)" || fail "git user.name t should name the branch: $out"
+assert_eq "$(git -C "$R3/.claude/worktrees/noname-card" rev-parse --abbrev-ref HEAD)" "feat/noname-card/t" "branch from git user.name"
+opsx stop noname-card >/dev/null 2>&1; rm -rf "$R3/.claude/worktrees/noname-card"; git -C "$R3" worktree prune; git -C "$R3" branch -D feat/noname-card/t >/dev/null 2>&1
+git -C "$R3" config user.name "Your Name"; : > "$OPSX_FAKE_LOG"
+out="$(OPSX_USER= opsx dispatch noname-card --agent claude --mode autopilot 2>&1)"; [ $? -eq 2 ] || fail "placeholder name must be refused: $out"
+echo "$out" | grep -q 'OPSX_USER' && echo "$out" | grep -q 'Your Name' || fail "要說怎麼設名字: $out"
+[ ! -d "$R3/.claude/worktrees/noname-card" ] || fail "refused dispatch must not open a worktree"
+assert_eq "$(cat "$OPSX_FAKE_LOG")" "" "refused dispatch must not touch herdr"
+git -C "$R3" config user.name t
+
 # --- stop ---
 : > "$OPSX_FAKE_LOG"; cd "$R"
 opsx stop retry-backoff >/dev/null 2>&1 || fail "stop"
