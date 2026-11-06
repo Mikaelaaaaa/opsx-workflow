@@ -26,11 +26,13 @@ const check = (name, events, cards, want) =>
 check('替你做的決定進 banner', [ev('claude', '替你決定', '選 B')], [],
   [{key: 'r/x', text: 'x：claude 替你決定「選 B」'}]);
 check('你自己的動作不進 banner', [ev('你', '已指派', 'claude'), ev('你', '已允許', 'push')], [], []);
+check('你自己的合併與決定不進 banner', [ev('你', '已合併', 'abc'), ev('你', '替你決定', '選 B')], [], []);
 check('空同步不進 banner', [{ts: T, source: 'sync', new: 0, evidence: 'debt'}], [], []);
 check('有新卡的同步進 banner', [{ts: T, source: 'sync', new: 2, evidence: 'debt'}], [],
   [{text: '同步 debt：2 張新卡'}]);
 check('自動派出進 banner', [ev('系統', '已指派', 'claude')], [],
   [{key: 'r/x', text: 'x 自動派出：claude'}]);
+check('不是系統的已指派不進 banner', [ev('claude', '已指派', 'codex')], [], []);
 check('last-seen 之前的事不進 banner', [{...ev('claude', '替你決定', '選 B'), ts: BEFORE}], [], []);
 check('新開的 gate',
   [], [card({open_gates: [{id: 'G0', opened_at: BEFORE}, {id: 'G1', opened_at: T}]})],
