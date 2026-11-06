@@ -168,4 +168,11 @@ assert_grep '^pane close w1:pE$' "$OPSX_FAKE_LOG"
 python3 -I -c 'import json,sys;d=json.load(open(sys.argv[1]))["Agentory-CS/retry-backoff"];assert d["mode"]=="stopped" and d["stopped_at"],d' "$OPSX_STATE_DIR/dispatch.json"
 assert_grep 'stopped' "$R/openspec/changes/retry-backoff/decisions.tsv"
 assert_rc 2 opsx stop nope
+
+# --- 停下的代管卡重派（auto-dispatch 4.2）：整筆改寫，不再帶 via / herdr_name ---
+python3 -I -c 'import json,sys;p=sys.argv[1];d=json.load(open(p));e=d["Agentory-CS/retry-backoff"];e.update(mode="stopped",via="p",herdr_name="p");json.dump(d,open(p,"w"))' "$OPSX_STATE_DIR/dispatch.json"
+: > "$OPSX_FAKE_LOG"
+out="$(opsx dispatch retry-backoff --agent claude --mode autopilot 2>&1)" || fail "redispatch 代管卡: $out"
+python3 -I -c 'import json,sys;e=json.load(open(sys.argv[1]))["Agentory-CS/retry-backoff"];assert "via" not in e and "herdr_name" not in e and e["mode"]=="autopilot",e' "$OPSX_STATE_DIR/dispatch.json" || fail "重派要整筆改寫"
+assert_grep '^agent start retry-backoff ' "$OPSX_FAKE_LOG"
 echo ok

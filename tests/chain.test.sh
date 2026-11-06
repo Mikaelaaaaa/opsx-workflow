@@ -170,4 +170,15 @@ out="$(opsx chain p 2>&1)"; assert_eq "$?" 0 "drive fan-out: $out"
 assert_eq "$(jq -r '[."fan/c1".mode, ."fan/c2".mode] | join(" ")' "$J")" "autopilot autopilot"
 for s in c1 c2; do assert_grep "drive 不支援代管卡" "$R2/openspec/changes/$s/decisions.tsv"; done
 cd "$R"
+
+# --- 停一張代管卡（4.2）：請 pane 停那個 subagent，標 stopped；不關 pane，兄弟卡不動 ---
+cd "$R2"; fanout_entry autopilot; opsx chain p >/dev/null 2>&1 || fail "fan-out 準備"
+cp "$J" "$FX/disp.before"; : > "$OPSX_FAKE_LOG"
+out="$(opsx stop c1 2>&1)"; assert_eq "$?" 0 "stop 代管卡: $out"
+assert_grep '^agent prompt p \[c1\] stop$' "$OPSX_FAKE_LOG"
+assert_not_grep '^pane close' "$OPSX_FAKE_LOG"
+assert_eq "$(jq -r '."fan/c1".mode' "$J")" stopped; jq -e '."fan/c1".stopped_at | startswith("20")' "$J" >/dev/null || fail "c1 要有 stopped_at"
+assert_eq "$(jq -c '."fan/c2"' "$J")" "$(jq -c '."fan/c2"' "$FX/disp.before")" "c2 不該被動到"
+assert_grep 'stopped' "$R2/openspec/changes/c1/decisions.tsv"
+cd "$R"
 echo ok
