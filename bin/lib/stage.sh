@@ -12,7 +12,7 @@ st_pending_nonempty() {
 }
 st_mr_url() { [ -f "$1/report.md" ] && grep -oE 'https?://[^ )]+/(merge_requests|pull)/[0-9]+' "$1/report.md" | head -1 || true; }
 st_mr_in_report() { [ -n "$(st_mr_url "$1")" ]; }
-st_open_gates() { [ -f "$1/gates.md" ] || { printf 0; return; }; grep -cE '^status: *open' "$1/gates.md" || true; }
+st_open_gates() { [ -f "$1/gates.md" ] || { printf 0; return; }; grep -cE '^status:[[:space:]]*open[[:space:]]*$' "$1/gates.md" || true; }
 st_workplan_merged() { # <top> <slug>
   [ -f "$1/openspec/workplan.yaml" ] && awk -v s="$2" '$0 ~ "name: *"s"$"{f=1;next} f && /status:/{print; exit} f && /^ *- /{exit}' "$1/openspec/workplan.yaml" | grep -q merged
 }

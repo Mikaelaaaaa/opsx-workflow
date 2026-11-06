@@ -7,15 +7,20 @@ GET /            回 web/index.html。
 GET /healthz     回 {"ok": true, "app": "opsx-board"}，不用 token，給 open-board.sh 探活，app 欄讓它認得是我們的。
 GET /api/collect 回 `opsx collect` 的輸出；--collect 給了檔就回那個檔（測試用）。同一時間只跑一支 collect，其他請求等它，
                  結果快取 CACHE_S 秒；頁面每 5 秒拉而 ThreadingHTTPServer 每個請求一個 thread，沒有這個會疊成十幾支 collect。
-POST /api/{answer,dispatch,merge,stop} 轉呼叫對應的 `opsx` 子命令，POST /api/focus 跑 herdr agent focus <slug>；都回 {ok, stdout, stderr}。
+GET /api/log[?since=<iso>] 回 `opsx timeline [--since …]` 的輸出（紀錄 tab、抽屜、banner 用，開才拉，不快取）。
+GET /api/output?pane=<id> 跑 `herdr agent read <id> --lines 10 --format text`，回 {ok, text} 或 {ok: false, error}（抽屜「最後輸出」）。
+POST /api/seen {at} 把 at 寫進 <state>/last-seen（banner 按「關閉」時送）。
+POST /api/{answer,dispatch,merge,stop,new,file,drop,sync} 轉呼叫對應的 `opsx` 子命令，POST /api/focus 跑 herdr agent focus <slug>；都回 {ok, stdout, stderr}。
 
 /api/* 要 header X-Opsx-Token 等於 <state>/board-token（第一次啟動時產生，之後重用）。只聽 127.0.0.1。
 opsx 用 plugin 自己的 bin/opsx（不靠 PATH），並把 --state 透過 OPSX_STATE_DIR 傳下去，兩邊讀同一份狀態。
-動作本身在 bin/lib/{answer,merge,dispatch,stop}.sh，這裡只做參數對應與驗證。
+動作本身在 bin/lib/{answer,merge,dispatch,stop,new,file,drop,sync}.sh；
+sync 以退出碼 3 結束（另一支同步還在跑）回 409，這裡只做參數對應與驗證。
 """
 from __future__ import annotations
 
 import argparse
+import datetime
 import json
 import os
 import pathlib
@@ -27,6 +32,7 @@ import sys
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import parse_qs
 
 HERE = pathlib.Path(__file__).resolve().parent
 OPSX = pathlib.Path(os.environ.get("OPSX_TEST_OPSX") or HERE.parent / "bin" / "opsx")   # 測試換成假的 opsx
@@ -34,16 +40,22 @@ INDEX = HERE / "web" / "index.html"
 SLUG_RE = re.compile(r"^[a-z][a-z0-9_-]{0,31}$")
 TOKEN_RE = re.compile(r"^[A-Za-z0-9_-]{32,}$")
 COLLECT_TIMEOUT = 60
+TIMELINE_TIMEOUT = 60
+OUTPUT_TIMEOUT = 10
 ACTION_TIMEOUT = 120
 CACHE_S = 3
 MAX_BODY = 64 * 1024
 
-# 每個動作：必填欄位、選填 flag、尾端文字。slug 永遠第一個位置參數。
+# 每個動作：有沒有 slug（有就是第一個位置參數）、必填欄位、選填 flag、尾端文字。
 ACTIONS = {
-    "answer": {"required": ("slug", "gate", "text"), "flags": ("gate", "grant", "repo"), "trailing": "text"},
-    "merge": {"required": ("slug",), "flags": ("repo",), "trailing": None},
-    "stop": {"required": ("slug",), "flags": ("repo",), "trailing": None},
-    "dispatch": {"required": ("slug",), "flags": ("agent", "model", "mode", "kind", "repo"), "trailing": None},
+    "answer": {"slug": True, "required": ("gate", "text"), "flags": ("gate", "grant", "repo"), "trailing": "text"},
+    "merge": {"slug": True, "required": (), "flags": ("repo",), "trailing": None},
+    "stop": {"slug": True, "required": (), "flags": ("repo",), "trailing": None},
+    "dispatch": {"slug": True, "required": (), "flags": ("agent", "model", "mode", "kind", "repo"), "trailing": None},
+    "new": {"slug": False, "required": ("text",), "flags": ("repo",), "trailing": "text"},
+    "file": {"slug": True, "required": ("repo",), "flags": ("repo",), "trailing": None},
+    "drop": {"slug": True, "required": ("text",), "flags": ("repo",), "trailing": "text"},
+    "sync": {"slug": False, "required": (), "flags": ("source",), "trailing": None},
 }
 FLAG_RE = {
     "gate": re.compile(r"^[A-Za-z0-9_.-]{1,64}$"),
@@ -53,7 +65,9 @@ FLAG_RE = {
     "mode": re.compile(r"^(interactive|autopilot|drive)$"),
     "kind": re.compile(r"^(dev|bug-fix|refactoring|perf|experiment|ops|chore)$"),
     "repo": re.compile(r"^/[^\0]{1,1024}$"),
+    "source": re.compile(r"^(gitlab|github|debt)$"),
 }
+PANE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9:_-]{0,31}$")   # 不能以 - 開頭，免得被 herdr 當成旗標
 
 
 class Config:
@@ -88,16 +102,31 @@ def repo_ok(path: str) -> bool:
     return p.is_absolute() and (p / "openspec" / "changes").is_dir()
 
 
+def write_atomic(path: pathlib.Path, text: str) -> None:
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(text, encoding="utf-8")
+    os.replace(tmp, path)
+
+
+def aware_iso(value: str) -> bool:
+    """帶時區的 ISO 8601。沒有時區的時間跟 decisions.tsv 的列比不出先後。"""
+    try:
+        return datetime.datetime.fromisoformat(value).tzinfo is not None
+    except ValueError:
+        return False
+
+
 def build_args(action: str, body: dict) -> list[str]:
     """把 POST body 對成 opsx 的參數。欄位不合格就 raise ValueError，呼叫端回 400。"""
     spec = ACTIONS[action]
-    for k in spec["required"]:
+    for k in (("slug",) if spec["slug"] else ()) + spec["required"]:
         if not isinstance(body.get(k), str) or not body[k].strip():
             raise ValueError("缺 %s" % k)
-    slug = body["slug"]
-    if not SLUG_RE.match(slug):
-        raise ValueError("slug 不合格：%r" % slug)
-    args = [action, slug]
+    args = [action]
+    if spec["slug"]:
+        if not SLUG_RE.match(body["slug"]):
+            raise ValueError("slug 不合格：%r" % body["slug"])
+        args.append(body["slug"])
     for flag in spec["flags"]:
         v = body.get(flag)
         if v is None or v == "":
@@ -194,6 +223,36 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json(401, {"error": "token"}); return
             status, payload = self.collect()
             self.send_json(status, payload); return
+        if path == "/api/output":
+            if not self.authorised():
+                self.send_json(401, {"error": "token"}); return
+            pane = parse_qs(self.path.split("?", 1)[1] if "?" in self.path else "").get("pane", [""])[0]
+            if not PANE_RE.match(pane):
+                self.send_json(400, {"error": "pane 不合格：%r" % pane}); return
+            if not os.environ.get("HERDR_ENV"):
+                self.send_json(200, {"ok": False, "error": "看板 server 不在 herdr 裡（HERDR_ENV 沒設），讀不到 agent 輸出"}); return
+            r = run(["herdr", "agent", "read", pane, "--lines", "10", "--format", "text"], OUTPUT_TIMEOUT, self.opsx_env())
+            if not r["ok"]:
+                self.send_json(200, {"ok": False, "error": (r["stderr"] or r["stdout"]).strip() or "herdr agent read 失敗"}); return
+            self.send_json(200, {"ok": True, "text": r["stdout"]}); return
+        if path == "/api/log":
+            if not self.authorised():
+                self.send_json(401, {"error": "token"}); return
+            query = parse_qs(self.path.split("?", 1)[1] if "?" in self.path else "")
+            args = ["bash", str(OPSX), "timeline"]
+            if "since" in query:
+                since = query["since"][0]
+                if not aware_iso(since):
+                    self.send_json(400, {"error": "since 要是帶時區的 ISO 8601：%r" % since}); return
+                args += ["--since", since]
+            r = run(args, TIMELINE_TIMEOUT, self.opsx_env())
+            if not r["ok"]:
+                self.send_json(502, {"error": "opsx timeline 失敗", "stderr": r["stderr"]}); return
+            try:
+                payload = json.loads(r["stdout"])
+            except json.JSONDecodeError as e:
+                self.send_json(502, {"error": "opsx timeline 回的不是 JSON：%s" % e}); return
+            self.send_json(200, payload); return
         if path.startswith("/api/"):
             self.send_json(405 if path[5:] in ACTIONS or path[5:] == "focus" else 404, {"error": path}); return
         self.send_json(404, {"error": path})
@@ -207,7 +266,7 @@ class Handler(BaseHTTPRequestHandler):
         action = path[5:]
         if action == "collect":
             self.send_json(405, {"error": "collect 是 GET"}); return
-        if action not in ACTIONS and action != "focus":
+        if action not in ACTIONS and action not in ("focus", "seen"):
             self.send_json(404, {"error": "沒有這個動作：%s" % action}); return
         try:
             n = int(self.headers.get("Content-Length") or 0)
@@ -216,6 +275,12 @@ class Handler(BaseHTTPRequestHandler):
             body = json.loads(self.rfile.read(n).decode("utf-8") or "{}")
             if not isinstance(body, dict):
                 raise ValueError("body 要是物件")
+            if action == "seen":
+                at = body.get("at")
+                if not isinstance(at, str) or not aware_iso(at):
+                    raise ValueError("at 要是帶時區的 ISO 8601：%r" % at)
+                write_atomic(self.cfg.state / "last-seen", at + "\n")
+                self.send_json(200, {"ok": True}); return
             if action == "focus":
                 # herdr pane focus 只收 --direction；跳到某個 agent 用 agent focus <name>，agent 名 = slug
                 agent = body.get("agent")
@@ -225,7 +290,8 @@ class Handler(BaseHTTPRequestHandler):
             args = build_args(action, body)
         except (ValueError, json.JSONDecodeError) as e:
             self.send_json(400, {"error": str(e)}); return
-        self.send_json(200, run(["bash", str(OPSX), *args], ACTION_TIMEOUT, self.opsx_env()))
+        r = run(["bash", str(OPSX), *args], ACTION_TIMEOUT, self.opsx_env())
+        self.send_json(409 if action == "sync" and r["rc"] == 3 else 200, r)
 
 
 def serve(port: int, state: pathlib.Path, collect_file: pathlib.Path | None) -> None:

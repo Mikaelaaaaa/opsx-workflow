@@ -5,8 +5,8 @@ from __future__ import annotations
 
 import unicodedata
 
-SECTIONS = ("待處理", "進行中", "待指派", "已完成")
-MARK = {"待處理": "▲", "進行中": "●", "待指派": "○", "已完成": "—"}
+SECTIONS = ("待處理", "進行中", "待指派", "收件匣", "已完成")
+MARK = {"待處理": "▲", "進行中": "●", "待指派": "○", "收件匣": "·", "已完成": "—"}
 
 
 def width(s: str) -> int:
@@ -37,14 +37,16 @@ def _line(card: dict) -> str:
     return "%s  %s  %s  %s" % (card.get("repo", ""), card.get("title") or card.get("slug"), detail, card.get("since") or "")
 
 
-def rows(data: dict, done_open: bool) -> list[dict]:
-    """[{kind: 'header', section, count} | {kind: 'card', card, key, text}]，待處理在最上，已完成預設收起。"""
+def rows(data: dict, done_open: bool, inbox_open: bool = False) -> list[dict]:
+    """[{kind: 'header', section, count} | {kind: 'card', card, key, text}]，待處理在最上，收件匣與已完成預設收起。"""
     cards = data.get("cards") or []
+    opened = {"收件匣": inbox_open, "已完成": done_open}
     out: list[dict] = []
     for section in SECTIONS:
         group = [c for c in cards if c.get("section") == section]
-        out.append({"kind": "header", "section": section, "count": len(group), "collapsed": section == "已完成" and not done_open})
-        if section == "已完成" and not done_open:
+        collapsed = not opened.get(section, True)
+        out.append({"kind": "header", "section": section, "count": len(group), "collapsed": collapsed})
+        if collapsed:
             continue
         for c in group:
             out.append({"kind": "card", "card": c, "key": "%s/%s" % (c.get("repo"), c.get("slug")),
