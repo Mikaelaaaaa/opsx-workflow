@@ -35,6 +35,7 @@ case "$1 $2" in
   "agent wait") [ -n "${OPSX_TEST_ON_WAIT:-}" ] && bash "$OPSX_TEST_ON_WAIT"; echo '{"result":{"status":"idle"}}' ;;
   "pane close") echo '{"result":{"closed":true}}' ;;
   "pane focus") echo '{"result":{"focused":true}}' ;;
+  "agent focus") echo '{"result":{"focused":true}}' ;;
   "plugin list") cat "${OPSX_TEST_HERDR_PLUGINS:-/dev/null}"; echo ;;
   "plugin link") echo '{"result":{"linked":true}}' ;;
   "pane current") echo '{"result":{"pane_id":"p42"}}' ;;

@@ -150,10 +150,12 @@ class ServerTest(unittest.TestCase):
         self.assertEqual(self.log.read_text(), "", "--collect 固定檔時不叫 opsx")
 
     def test_focus_runs_herdr(self):
-        status, _, body = self.req("/api/focus", {"pane": "w1:p4"}, token=self.token)
+        status, _, body = self.req("/api/focus", {"agent": "retry-backoff"}, token=self.token)
         self.assertEqual(status, 200, body)
-        self.assertEqual(self.herdr_log.read_text().strip(), "pane focus w1:p4")
-        status, _, _ = self.req("/api/focus", {"pane": "w1:p4; rm -rf /"}, token=self.token)
+        self.assertEqual(self.herdr_log.read_text().strip(), "agent focus retry-backoff")
+        status, _, _ = self.req("/api/focus", {"agent": "retry-backoff; rm -rf /"}, token=self.token)
+        self.assertEqual(status, 400)
+        status, _, _ = self.req("/api/focus", {"pane": "w1:p4"}, token=self.token)   # 舊欄位：herdr pane focus 不收 id，拒絕
         self.assertEqual(status, 400)
 
     def test_opsx_failure_is_reported_not_500(self):

@@ -7,7 +7,7 @@ GET /            回 web/index.html。
 GET /healthz     回 {"ok": true, "app": "opsx-board"}，不用 token，給 open-board.sh 探活，app 欄讓它認得是我們的。
 GET /api/collect 回 `opsx collect` 的輸出；--collect 給了檔就回那個檔（測試用）。同一時間只跑一支 collect，其他請求等它，
                  結果快取 CACHE_S 秒；頁面每 5 秒拉而 ThreadingHTTPServer 每個請求一個 thread，沒有這個會疊成十幾支 collect。
-POST /api/{answer,dispatch,merge,stop} 轉呼叫對應的 `opsx` 子命令，POST /api/focus 跑 herdr pane focus；都回 {ok, stdout, stderr}。
+POST /api/{answer,dispatch,merge,stop} 轉呼叫對應的 `opsx` 子命令，POST /api/focus 跑 herdr agent focus <slug>；都回 {ok, stdout, stderr}。
 
 /api/* 要 header X-Opsx-Token 等於 <state>/board-token（第一次啟動時產生，之後重用）。只聽 127.0.0.1。
 opsx 用 plugin 自己的 bin/opsx（不靠 PATH），並把 --state 透過 OPSX_STATE_DIR 傳下去，兩邊讀同一份狀態。
@@ -54,7 +54,6 @@ FLAG_RE = {
     "kind": re.compile(r"^(dev|bug-fix|refactoring|perf|experiment|ops|chore)$"),
     "repo": re.compile(r"^/[^\0]{1,1024}$"),
 }
-PANE_RE = re.compile(r"^[A-Za-z0-9:_-]{1,32}$")
 
 
 class Config:
@@ -218,10 +217,11 @@ class Handler(BaseHTTPRequestHandler):
             if not isinstance(body, dict):
                 raise ValueError("body 要是物件")
             if action == "focus":
-                pane = body.get("pane")
-                if not isinstance(pane, str) or not PANE_RE.match(pane):
-                    raise ValueError("pane 不合格：%r" % pane)
-                self.send_json(200, run(["herdr", "pane", "focus", pane], 10, self.opsx_env())); return
+                # herdr pane focus 只收 --direction；跳到某個 agent 用 agent focus <name>，agent 名 = slug
+                agent = body.get("agent")
+                if not isinstance(agent, str) or not SLUG_RE.match(agent):
+                    raise ValueError("agent 不合格：%r" % agent)
+                self.send_json(200, run(["herdr", "agent", "focus", agent], 10, self.opsx_env())); return
             args = build_args(action, body)
         except (ValueError, json.JSONDecodeError) as e:
             self.send_json(400, {"error": str(e)}); return
