@@ -39,6 +39,7 @@ assert_grep "$P" "$FX/err"; assert_grep "opsx init --global" "$FX/err"
 printf '/nonexistent/py3\n' > "$P"
 opsx collect --root "$FX" > /dev/null 2> "$FX/err" && fail "python 指到不存在的路徑時 collect 要失敗"
 assert_grep "/nonexistent/py3" "$FX/err"; assert_grep "opsx init --global" "$FX/err"
+assert_grep "venv" "$FX/err"   # 在 venv 裡 init 過、之後刪掉 venv 的人要看得出原因（python-venv-guard）
 printf '/usr/bin\n' > "$P"
 opsx collect --root "$FX" > /dev/null 2> "$FX/err" && fail "python 指到目錄時 collect 要失敗"
 assert_grep "/usr/bin" "$FX/err"; assert_grep "opsx init --global" "$FX/err"
