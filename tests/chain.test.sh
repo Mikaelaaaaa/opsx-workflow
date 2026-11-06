@@ -181,4 +181,69 @@ assert_eq "$(jq -r '."fan/c1".mode' "$J")" stopped; jq -e '."fan/c1".stopped_at 
 assert_eq "$(jq -c '."fan/c2"' "$J")" "$(jq -c '."fan/c2"' "$FX/disp.before")" "c2 不該被動到"
 assert_grep 'stopped' "$R2/openspec/changes/c1/decisions.tsv"
 cd "$R"
+
+# --- 單一子卡續接（3.2–3.4）：本地 bare repo 當 origin，父卡就在 R3 這棵 worktree ---
+ORIGIN="$FX/origin3.git"; git init -q --bare "$ORIGIN"
+R3="$(mk_repo solo "$ORIGIN")"; git -C "$R3" branch -M main; git -C "$R3" push -q origin main
+printf 'openspec/\n' >> "$R3/.git/info/exclude"    # 跟真的 repo 一樣，openspec/ 不進 git
+mk_change "$R3" p; mkdir -p "$R3/openspec/changes/c"
+printf 'schema: opsx\nkind: dev\n' > "$R3/openspec/changes/c/.openspec.yaml"; printf -- '- [ ] 1.1 x\n' > "$R3/openspec/changes/c/tasks.md"
+cat > "$R3/openspec/workplan.yaml" <<'EOF'
+features:
+  - name: x
+    prs:
+      - name: p
+        branch: feat/p/mikaela
+        status: merged
+        changes:
+          - name: p
+            status: done
+      - name: c
+        branch: feat/c/mikaela
+        status: pending
+        depends-on: [p]
+        changes:
+          - name: c
+            status: pending
+EOF
+solo_entry() { printf '{"solo/p":{"mode":"%s","pane":"w5:pQ","tab":"w5:tJ","workspace":"opsx","workspace_id":"w5","agent":"claude","model":"claude-opus-5-5","kind":"dev","grants":[],"worktree":"%s","branch":"feat/p/mikaela","started_at":"2026-11-06T13:00:00+08:00","drive_pid":null}}' "$1" "$R3" > "$OPSX_STATE_DIR/dispatch.json"; }
+Q="$OPSX_STATE_DIR/herdr-queue/solo-c.tsv"
+cd "$R3"
+
+# 髒 tree（3.3）：不接，branch 不動，不寫佇列，decisions 說原因
+solo_entry autopilot; echo dirty > "$R3/stray.txt"; : > "$OPSX_FAKE_LOG"
+out="$(opsx chain p 2>&1)"; assert_eq "$?" 0 "髒 tree: $out"
+assert_eq "$(git -C "$R3" branch --show-current)" "feat/p/mikaela" "髒 tree 不切 branch"
+assert_no_file "$Q"; assert_eq "$(cat "$OPSX_FAKE_LOG")" ""
+assert_grep "未 commit 的改動" "$R3/openspec/changes/c/decisions.tsv"
+assert_eq "$(jq -r '."solo/c" // "none"' "$OPSX_STATE_DIR/dispatch.json")" none "髒 tree 不登記子卡"
+mv "$R3/stray.txt" "$FX/"   # 把 tree 弄回乾淨
+
+# 子卡 branch 被別棵 worktree 佔用（3.3）
+: > "$R3/openspec/changes/c/decisions.tsv"; git -C "$R3" worktree add -q "$FX/other-wt" -b feat/c/mikaela main
+out="$(opsx chain p 2>&1)"; assert_eq "$?" 0 "branch 被佔: $out"
+assert_eq "$(git -C "$R3" branch --show-current)" "feat/p/mikaela"; assert_no_file "$Q"
+assert_grep "$FX/other-wt" "$R3/openspec/changes/c/decisions.tsv"
+git -C "$R3" worktree remove -f "$FX/other-wt"; git -C "$R3" branch -q -D feat/c/mikaela
+
+# 乾淨 tree（3.2）：切到子卡 branch（不帶 tracking）、登記、寫佇列；chain 自己不叫 herdr
+: > "$R3/openspec/changes/c/decisions.tsv"; : > "$OPSX_FAKE_LOG"
+out="$(opsx chain p 2>&1)"; assert_eq "$?" 0 "單一續接: $out"
+assert_eq "$(git -C "$R3" branch --show-current)" "feat/c/mikaela" "切到子卡 branch"
+assert_eq "$(git -C "$R3" config --get branch.feat/c/mikaela.remote || echo none)" none "不帶 upstream tracking"
+assert_eq "$(cat "$OPSX_FAKE_LOG")" "" "chain 不叫 herdr（D5）"
+assert_eq "$(cat "$Q")" "$(printf 'rename\tp\tc\nprompt\tc\t/apply c')" "佇列"
+J="$OPSX_STATE_DIR/dispatch.json"
+assert_eq "$(jq -r '."solo/c" | [.pane, .tab, .herdr_name, .mode, .agent, .kind, .branch, (.via // "none")] | join(" ")' "$J")" "w5:pQ w5:tJ c autopilot claude dev feat/c/mikaela none"
+assert_eq "$(jq -r '."solo/c".worktree' "$J")" "$R3"
+assert_eq "$(jq -r '."solo/p" | [(.handed_to | join(",")), .herdr_name] | join(" ")' "$J")" "c c" "父卡交接，herdr 名跟著改名"
+assert_grep "自動派：因 p merged" "$R3/openspec/changes/c/decisions.tsv"
+
+# drive（3.4）：子卡沿用 drive，佇列多一行 drive
+git -C "$R3" switch -q feat/p/mikaela; git -C "$R3" branch -q -D feat/c/mikaela; : > "$Q"
+solo_entry drive; : > "$R3/openspec/changes/c/decisions.tsv"
+out="$(opsx chain p 2>&1)"; assert_eq "$?" 0 "drive 續接: $out"
+assert_eq "$(jq -r '."solo/c".mode' "$J")" drive
+assert_eq "$(tail -1 "$Q")" "$(printf 'drive\tc\t%s' "$R3")" "drive 模式佇列最後一行"
+cd "$R"
 echo ok
