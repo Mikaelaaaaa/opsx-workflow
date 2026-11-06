@@ -6,10 +6,17 @@ source "$(dirname "${BASH_SOURCE[0]}")/_lib.sh"
 
 top="$(repo_top)"; slug="$(card_slug)"
 [ -n "$top" ] && [ -n "$slug" ] || exit 0
-# 讀不到授權就判斷不了模式；hook 非 0 結束 Claude Code 會當成放行，所以明確 deny
-[ -n "$OPSX_PY" ] || deny "opsx 授權閘門：讀不到授權，先擋下。$OPSX_PY_ERR"
 repo="$(repo_name)"
-mode="$(card_mode "$repo" "$slug")"
+# 沒有 python 就讀不到這張卡的模式。沒派出去的卡照原本不管；派出去的卡明確 deny，
+# 因為 hook 非 0 結束 Claude Code 會當成放行。修法那一條指令本身放行。
+if [ -z "$OPSX_PY" ]; then
+  [ -n "$(card_dir)" ] || exit 0
+  [ -f "$OPSX_STATE_DIR/dispatch.json" ] && [[ $(<"$OPSX_STATE_DIR/dispatch.json") == *"\"$repo/$slug\""* ]] || exit 0
+  [ "$(hook_cmd)" = "opsx init --global" ] && exit 0
+  deny "opsx 授權閘門：讀不到授權，先擋下。$OPSX_PY_ERR"
+fi
+PY_FAIL="opsx 授權閘門：python 執行失敗（${OPSX_PY}），讀不到授權，先擋下。跑 opsx init --global"
+mode="$(card_mode "$repo" "$slug")" || deny "$PY_FAIL"
 case "$mode" in autopilot|drive) ;; *) exit 0 ;; esac
 
 tool="$(hook_tool)"; cmd="$(hook_cmd)"; file="$(hook_file)"
@@ -31,14 +38,14 @@ import os, sys
 sys.path.insert(0, os.environ["OPSX_LIB"]); import jsonfile
 print(jsonfile.load(sys.argv[1]).get(os.environ["OPSX_KEY"], {}).get("merge_approved") or "")
 PY
-)"
+)" || deny "$PY_FAIL"
   [ -n "$approved" ] || deny "opsx 授權閘門：merge 是永遠要人的動作（第三級）。要人在看板上按「合併」（opsx merge ${slug}）才會放行；在這之前把 MR 弄到五條件全綠（/babysit），不要自己合"
   want_iid="$(st_mr_url "$d" | grep -oE '[0-9]+$' || true)"
   cmd_iid="$(printf '%s' "$c" | grep -oE '(glab mr merge|gh pr merge)[[:space:]]+[^-[:space:]][^[:space:]]*' | grep -oE '[0-9]+$' || true)"
   if [ -n "$cmd_iid" ] && [ "$cmd_iid" != "$want_iid" ]; then
     deny "opsx 授權閘門：核准的是這張卡的 MR ${want_iid:-（report.md 沒有）}，指令要合併的是 ${cmd_iid}"
   fi
-  head="$(OPSX_MR_CACHE_TTL=0 mr_json "$d" | "$OPSX_PY" -I -c 'import json,sys; print(json.load(sys.stdin).get("head_sha") or "")')"
+  head="$(OPSX_MR_CACHE_TTL=0 mr_json "$d" | "$OPSX_PY" -I -c 'import json,sys; print(json.load(sys.stdin).get("head_sha") or "")')" || deny "$PY_FAIL"
   if [ "$head" != "$approved" ]; then
     deny "opsx 授權閘門：看板核准的是 ${approved}，MR 現在的 head 是 ${head:-讀不到}（又推了 commit？）。寫 gates.md 請人在看板重新按「合併」"
   fi

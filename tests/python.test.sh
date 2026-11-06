@@ -39,11 +39,30 @@ assert_grep "$P" "$FX/err"; assert_grep "opsx init --global" "$FX/err"
 printf '/nonexistent/py3\n' > "$P"
 opsx collect --root "$FX" > /dev/null 2> "$FX/err" && fail "python 指到不存在的路徑時 collect 要失敗"
 assert_grep "/nonexistent/py3" "$FX/err"; assert_grep "opsx init --global" "$FX/err"
+printf '/usr/bin\n' > "$P"
+opsx collect --root "$FX" > /dev/null 2> "$FX/err" && fail "python 指到目錄時 collect 要失敗"
+assert_grep "/usr/bin" "$FX/err"; assert_grep "opsx init --global" "$FX/err"
+
+# ---------- python 在但跑不起來：授權閘門要 deny，不能因為 hook 非 0 結束而放行 ----------
+printf '/usr/bin/false\n' > "$P"
+out="$(bash_hook "$R" 'pnpm test')"; assert_eq "$(decision "$out")" deny "python 跑不起來時派出去的卡要 deny"
+reason "$out" | grep -q 'python 執行失敗' || fail "deny 理由要說 python 執行失敗：$(reason "$out")"
 
 # ---------- 授權閘門遇到缺檔就擋，不放行 ----------
 rm -f "$P"
 out="$(bash_hook "$R" 'pnpm test')"; assert_eq "$(decision "$out")" deny "缺 python 檔時卡上的 Bash 要 deny"
 reason "$out" | grep -q 'opsx init --global' || fail "deny 理由要給修法：$(reason "$out")"
 out="$(bash_hook "$FX" 'pnpm test')"; assert_eq "$(decision "$out")" allow "不在卡上不管"
+out="$(bash_hook "$R" 'opsx init --global')"; assert_eq "$(decision "$out")" allow "修法那一條要放行"
+R2="$(mk_repo r2)"; git -C "$R2" checkout -q -b feat/foo/mikaela
+out="$(bash_hook "$R2" 'pnpm test')"; assert_eq "$(decision "$out")" allow "三段式 branch 但沒有卡：不管"
+mk_change "$R" c2
+out="$(bash_hook "$R" 'pnpm test')"; assert_eq "$(decision "$out")" allow "有卡但沒派出去：不管"
+git -C "$R" checkout -q feat/c1/mikaela
 printf '%s\n' "$REAL" > "$P"
+
+# ---------- 產品碼裡不能再有直接叫 python3 的地方（上面的假 python3 只走得到幾條路） ----------
+hits="$(grep -rnwa 'python3' "$OPSX_ROOT/bin" "$OPSX_ROOT/hooks" | grep -avE ':[0-9]+:[[:space:]]*#' | grep -avF 'Bash(python3:*)' \
+  | grep -avE 'bin/lib/init\.sh:[0-9]+:.*(sys\.version_info|python3 --version|print\(sys\.executable\))')"
+assert_eq "$hits" "" "bin/ hooks/ 還有直接叫 python3 的地方"
 echo ok
