@@ -255,11 +255,13 @@ function token(){try{return sessionStorage.getItem('opsx-token')||'';}catch(e){r
 const api={
   async collect(){const r=await fetch('/api/collect',{headers:{'X-Opsx-Token':token()}});if(r.status===401)throw new Error('token 不對：從 herdr 的 open-board 重開一次');if(!r.ok)throw new Error('collect '+r.status+'：'+(await r.text()).slice(0,200));return r.json();},
   async log(since){const r=await fetch('/api/log'+(since?'?since='+encodeURIComponent(since):''),{headers:{'X-Opsx-Token':token()}});const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error('log '+r.status+'：'+(j.error||j.stderr||''));return j;},
+  async output(pane){const r=await fetch('/api/output?pane='+encodeURIComponent(pane),{headers:{'X-Opsx-Token':token()}});const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error('output '+r.status+'：'+(j.error||''));return j;},
   async post(action,body){const r=await fetch('/api/'+action,{method:'POST',headers:{'X-Opsx-Token':token(),'Content-Type':'application/json'},body:JSON.stringify(body)});const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(action+' '+r.status+'：'+(j.error||''));if(!j.ok)throw new Error((j.stderr||j.stdout||'opsx '+action+' 失敗').trim());return j;}
 };
 let data={generated_at:null,scopes:[],cards:[],unmatched_agents:[],errors:[],legacy:{},worktrees_skipped:[]};let lastRaw='';
 const ui={tab:'home',scope:'all',ws:null,repo:null,sel:null,open:null,doneOpen:false,busy:false,logFilter:'all'};
 let tl=null;let tlErr='';let bannerClosed=false;
+const outputs={};  /* 卡 key → {ok, text} 或 {ok:false, error}；抽屜打開時才抓 */
 const REFRESH_MS=5000;
 
 /* ---------- 標籤 ---------- */
@@ -490,7 +492,8 @@ function renderDrawer(){
   const facts=`<section><dl class="facts">${[['Repo',c.repo],['分支',d.branch],['Agent',d.agent?`${d.agent}${d.model?' · '+d.model:''}`:''],['模式',d.mode?MODE_LABEL[d.mode]||d.mode:''],['Workspace',d.workspace],['Pane',d.pane],['類型',KIND[c.kind]||c.kind],['herdr',c.agent_status]].filter(x=>x[1]).map(x=>`<div><dt>${x[0]}</dt><dd title="${esc(x[1])}">${esc(x[1])}</dd></div>`).join('')}</dl>${d.grants&&d.grants.length?`<div class="faint mono" style="font-size:11px;margin-top:10px">這張卡已允許：${d.grants.map(k=>esc(GRANT_LABEL[k]||k)).join('、')}（dispatch.json，卡結束即失效）</div>`:''}</section>`;
   const s=c.status;
   const prog=s?`<section><h3>進度 <span class="src">status.json · ${esc(s.at||'')}</span></h3><div style="font-size:14px"><span class="bar" style="width:120px"><i style="width:${s.total?Math.round(Number(s.step)/Number(s.total)*100):0}%"></i></span><b class="mono" style="font-weight:700;color:var(--data)">${esc(PHASE_LABEL[s.phase]||s.phase)} ${esc(s.step)}/${esc(s.total)}</b> · ${esc(s.label)}${s.tests?` · tests <span class="${s.tests==='green'?'checks yes':'checks no'}" style="display:inline">${esc(s.tests)}</span>`:''}</div></section>`:'';
-  const out=c.last_output?`<section><h3>最後輸出 <span class="src">herdr agent read</span></h3><pre class="term">${esc(c.last_output)}</pre></section>`:'';
+  const o=outputs[key(c)];
+  const out=d.pane?`<section><h3>最後輸出 <span class="src">herdr agent read ${esc(d.pane)}</span></h3>${!o?'<div class="faint">載入中…</div>':o.ok?`<pre class="term">${esc(o.text)}</pre>`:`<div class="faint" style="color:var(--danger)">${esc(o.error)}</div>`}</section>`:'';
   const mr=c.mr&&c.mr.url?`<section><h3>合併請求 <span class="src">${esc(c.mr.url)}</span></h3>${c.mr.conditions?`<ul class="checks">${COND.map(([k,l])=>`<li><span class="${c.mr.conditions[k]?'yes':'no'}">${c.mr.conditions[k]?'✓':'✗'}</span>${l}</li>`).join('')}</ul>`:'<div class="faint">glab 讀不到</div>'}<div class="foot" style="padding-top:12px">${c.mr.state==='ready'?`<button class="primary" data-act="merge">合併</button>`:`<span class="faint" style="font-size:12px">卡在 ${esc(c.mr.state)}，agent 的 /babysit 會處理</span>`}<a href="${esc(c.mr.url)}" target="_blank" rel="noopener"><button class="ghost">開啟 MR</button></a></div></section>`:'';
   const mine=tl?tl.events.filter(e=>e.repo===c.repo&&e.slug===c.slug):[];
   const logSec=`<section><h3>紀錄 <span class="src">decisions.tsv</span></h3>${tlErr?`<div class="faint" style="color:var(--danger)">${esc(tlErr)}</div>`:!tl?'<div class="faint">載入中…</div>':mine.length?`<div class="panel" style="margin-top:0">${mine.map(evRow).join('')}</div>`:'<div class="faint">這張卡還沒有紀錄</div>'}</section>`;
@@ -500,7 +503,12 @@ function renderDrawer(){
   $('#drawer').hidden=false;$('#scrim').hidden=false;
   const nr=$('#reply');if(nr&&keep){nr.value=keep.v;if(keep.focus){nr.focus();try{nr.setSelectionRange(keep.s,keep.s);}catch(e){}}}
 }
-function openDrawer(k){ui.open=k;ui.sel=k;render();if(!tl)loadLog();const x=$('#drawer .x');if(x)x.focus();}
+async function loadOutput(c){
+  const k=key(c);
+  try{outputs[k]=await api.output(c.dispatch.pane);}catch(e){outputs[k]={ok:false,error:e.message};}
+  if(ui.open===k)renderDrawer();
+}
+function openDrawer(k){ui.open=k;ui.sel=k;const c=byKey(k);if(c&&c.dispatch&&c.dispatch.pane){delete outputs[k];loadOutput(c);}render();if(!tl)loadLog();const x=$('#drawer .x');if(x)x.focus();}
 function closeDrawer(){ui.open=null;$('#drawer').hidden=true;$('#scrim').hidden=$('#dialog').hidden;render();}
 
 /* ---------- 動作（全部打 server，server 再叫 opsx）---------- */

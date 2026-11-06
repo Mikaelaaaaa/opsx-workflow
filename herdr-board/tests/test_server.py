@@ -43,7 +43,10 @@ class ServerTest(unittest.TestCase):
         )
         shim.chmod(0o755)
         herdr = shim_dir / "herdr"
-        herdr.write_text("#!/usr/bin/env bash\n" f'printf "%s\\n" "$*" >> "{cls.herdr_log}"\n' 'echo "{}"\n')
+        herdr.write_text("#!/usr/bin/env bash\n" f'printf "%s\\n" "$*" >> "{cls.herdr_log}"\n'
+                         'if [ "$3" = "w9:p9" ]; then echo "pane not found" >&2; exit 1; fi\n'
+                         'if [ "$1 $2" = "agent read" ]; then printf "line 1\\nline 2\\n"; exit 0; fi\n'
+                         'echo "{}"\n')
         herdr.chmod(0o755)
         cls.repo = cls.tmp / "repo"
         (cls.repo / "openspec" / "changes").mkdir(parents=True)   # --repo 只收真的 opsx repo 根
@@ -183,6 +186,28 @@ class ServerTest(unittest.TestCase):
         status, _, _ = self.req("/api/seen", {"at": "2026-11-06T13:00:00+08:00"})
         self.assertEqual(status, 401)
         self.assertEqual((self.state / "last-seen").read_text().strip(), "2026-11-06T09:00:00+08:00")
+
+    def test_output_reads_agent_terminal(self):
+        self.herdr_log.write_text("")
+        status, _, body = self.req("/api/output?pane=w5%3ApH", token=self.token)
+        self.assertEqual(status, 200, body)
+        out = json.loads(body)
+        self.assertEqual((out["ok"], out["text"]), (True, "line 1\nline 2\n"), out)
+        self.assertEqual(self.herdr_log.read_text().strip(), "agent read w5:pH --lines 10 --format text")
+
+    def test_output_rejects_bad_pane_and_reports_herdr_failure(self):
+        self.herdr_log.write_text("")
+        for bad in ("w1;rm", "", "w1:p2%20--lines%201000"):
+            status, _, body = self.req("/api/output?pane=" + bad, token=self.token)
+            self.assertEqual(status, 400, "%r: %s" % (bad, body))
+        status, _, _ = self.req("/api/output")
+        self.assertEqual(status, 401)
+        self.assertEqual(self.herdr_log.read_text(), "", "壞參數不能叫到 herdr")
+        status, _, body = self.req("/api/output?pane=w9%3Ap9", token=self.token)
+        self.assertEqual(status, 200, body)
+        out = json.loads(body)
+        self.assertFalse(out["ok"])
+        self.assertIn("pane not found", out["error"])
 
     def test_focus_runs_herdr(self):
         status, _, body = self.req("/api/focus", {"pane": "w1:p4"}, token=self.token)

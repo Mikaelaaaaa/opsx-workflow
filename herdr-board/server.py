@@ -8,6 +8,7 @@ GET /healthz     回 {"ok": true, "app": "opsx-board"}，不用 token，給 open
 GET /api/collect 回 `opsx collect` 的輸出；--collect 給了檔就回那個檔（測試用）。同一時間只跑一支 collect，其他請求等它，
                  結果快取 CACHE_S 秒；頁面每 5 秒拉而 ThreadingHTTPServer 每個請求一個 thread，沒有這個會疊成十幾支 collect。
 GET /api/log[?since=<iso>] 回 `opsx timeline [--since …]` 的輸出（紀錄 tab、抽屜、banner 用，開才拉，不快取）。
+GET /api/output?pane=<id> 跑 `herdr agent read <id> --lines 10 --format text`，回 {ok, text} 或 {ok: false, error}（抽屜「最後輸出」）。
 POST /api/seen {at} 把 at 寫進 <state>/last-seen（banner 按「關閉」時送）。
 POST /api/{answer,dispatch,merge,stop} 轉呼叫對應的 `opsx` 子命令，POST /api/focus 跑 herdr pane focus；都回 {ok, stdout, stderr}。
 
@@ -39,6 +40,7 @@ SLUG_RE = re.compile(r"^[a-z][a-z0-9_-]{0,31}$")
 TOKEN_RE = re.compile(r"^[A-Za-z0-9_-]{32,}$")
 COLLECT_TIMEOUT = 60
 TIMELINE_TIMEOUT = 60
+OUTPUT_TIMEOUT = 10
 ACTION_TIMEOUT = 120
 CACHE_S = 3
 MAX_BODY = 64 * 1024
@@ -214,6 +216,16 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json(401, {"error": "token"}); return
             status, payload = self.collect()
             self.send_json(status, payload); return
+        if path == "/api/output":
+            if not self.authorised():
+                self.send_json(401, {"error": "token"}); return
+            pane = parse_qs(self.path.split("?", 1)[1] if "?" in self.path else "").get("pane", [""])[0]
+            if not PANE_RE.match(pane):
+                self.send_json(400, {"error": "pane 不合格：%r" % pane}); return
+            r = run(["herdr", "agent", "read", pane, "--lines", "10", "--format", "text"], OUTPUT_TIMEOUT, self.opsx_env())
+            if not r["ok"]:
+                self.send_json(200, {"ok": False, "error": (r["stderr"] or r["stdout"]).strip() or "herdr agent read 失敗"}); return
+            self.send_json(200, {"ok": True, "text": r["stdout"]}); return
         if path == "/api/log":
             if not self.authorised():
                 self.send_json(401, {"error": "token"}); return
