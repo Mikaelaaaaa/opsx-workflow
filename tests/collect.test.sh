@@ -161,4 +161,14 @@ assert_eq "$(q "$J" errors.0.source)" herdr
 assert_eq "$(q "$J" unmatched_agents)" '[]'
 assert_not_grep '^agent list' "$OPSX_FAKE_LOG"
 C="$(card "$J" b y1)"; assert_eq "$(q "$C" waiting)" null "沒 herdr 就判不出 blocked"; assert_eq "$(q "$C" section)" 進行中
+
+# ---------- sources.toml 登記的 repo 不在 root 底下也要算（D1）；重複的去重；不存在的跳過 ----------
+Z="$FX/elsewhere/z"; mkdir -p "$Z/openspec/changes" "$Z/.git"
+D="$Z/openspec/changes/z1"; mkdir -p "$D"; printf 'schema: opsx\nkind: dev\n' > "$D/.openspec.yaml"; printf '## 一句話\n\n別處的\n' > "$D/inbox.md"
+printf '# 來源\n\n[[source]]\nkind = "github"\nrepo = "z"\nproject = "me/z"\npath = "%s"\n\n[[source]]\nkind = "gitlab"\nrepo = "a"\nproject = "g/a"\npath = "%s/a"\n\n[[source]]\nkind = "gitlab"\nrepo = "gone"\nproject = "g/gone"\npath = "%s/gone"\n' "$Z" "$ROOT" "$FX" > "$OPSX_STATE_DIR/sources.toml"
+J="$(opsx collect --root "$ROOT")"; assert_eq "$?" 0 "collect with sources.toml: $J"
+assert_eq "$(printf '%s' "$J" | python3 -I -c 'import json,sys;print(sorted(r for s in json.load(sys.stdin)["scopes"] for r in s["repos"]))')" "['a', 'b', 'z']"
+assert_eq "$(q "$(card "$J" z z1)" section)" 待指派
+assert_eq "$(printf '%s' "$J" | python3 -I -c 'import json,sys;print(sum(1 for c in json.load(sys.stdin)["cards"] if c["repo"]=="a" and c["slug"]=="x1"))')" 1 "a 兩邊都有，卡不能重複"
+assert_eq "$(q "$J" errors.0.source)" herdr; assert_eq "$(printf '%s' "$J" | python3 -I -c 'import json,sys;print(len(json.load(sys.stdin)["errors"]))')" 1 "不存在的 path 不該進 errors"
 echo ok
