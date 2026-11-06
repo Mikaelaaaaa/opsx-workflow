@@ -33,10 +33,19 @@ opsx_collect() {
   # stage 用 stage_of，MR 用 mr_json，不另算；這裡不 fork python，1000 張卡就是 1000 次啟動。mr_json 只對有 MR 的卡跑。
   # repo 的判準：<root>/<name>/openspec/changes 存在，而且 <name>/.git 是目錄。linked worktree 的 .git 是檔案，跳過，
   # 不然 Agentory-AI-langflow、*-wt-* 會被當成別的 repo。archive 只取最新 N 張，已完成不能無限長。
-  local repo_dir repo d slug archived stage mrfile n=0 archive_cap="${OPSX_COLLECT_ARCHIVE_CAP:-30}" seen_archive
-  : > "$work/cards.tsv"; mkdir -p "$work/mr"
-  for repo_dir in "$root"/*/; do
+  local repo_dir repo d slug archived stage mrfile n=0 archive_cap="${OPSX_COLLECT_ARCHIVE_CAP:-30}" seen_archive real
+  : > "$work/cards.tsv"; : > "$work/seen"; mkdir -p "$work/mr"
+  # repo 清單（D1）：<root>/*/ 加上 sources.toml 登記的 path，init 過的 repo 不在 root 底下也算（opsx-workflow 在 ~/code/sandbox/）
+  local -a repo_dirs=()
+  for repo_dir in "$root"/*/; do repo_dirs+=("${repo_dir%/}"); done
+  if [ -f "$state/sources.toml" ]; then
+    while IFS= read -r repo_dir; do repo_dirs+=("$repo_dir"); done < <(sed -nE 's/^path = "(.*)"$/\1/p' "$state/sources.toml")
+  fi
+  for repo_dir in "${repo_dirs[@]}"; do
     [ -d "$repo_dir/openspec/changes" ] || continue
+    real="$(cd "$repo_dir" && pwd -P)"
+    if grep -qxF "$real" "$work/seen"; then continue; fi
+    printf '%s\n' "$real" >> "$work/seen"; repo_dir="$real/"
     if [ -f "$repo_dir/.git" ]; then printf '%s\n' "$(basename "$repo_dir")" >> "$work/worktrees"; continue; fi
     repo="$(basename "$repo_dir")"
     printf '%s\n' "$repo" >> "$work/repos"
