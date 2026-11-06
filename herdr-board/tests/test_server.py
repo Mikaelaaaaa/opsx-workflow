@@ -52,7 +52,7 @@ class ServerTest(unittest.TestCase):
         (cls.repo / "openspec" / "changes").mkdir(parents=True)   # --repo 只收真的 opsx repo 根
         cls.fixture = cls.tmp / "collect.json"
         cls.fixture.write_text(json.dumps({"generated_at": "t", "scopes": [], "cards": [{"slug": "x"}], "unmatched_agents": [], "errors": []}))
-        env = dict(os.environ, OPSX_STATE_DIR=str(cls.state), OPSX_TEST_OPSX=str(shim), PATH=f"{shim_dir}:{os.environ['PATH']}")
+        env = dict(os.environ, HERDR_ENV="1", OPSX_STATE_DIR=str(cls.state), OPSX_TEST_OPSX=str(shim), PATH=f"{shim_dir}:{os.environ['PATH']}")
         cls.proc = subprocess.Popen(
             [sys.executable, "-I", str(SERVER), "--port", "0", "--collect", str(cls.fixture)],
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env, text=True,
@@ -197,7 +197,7 @@ class ServerTest(unittest.TestCase):
 
     def test_output_rejects_bad_pane_and_reports_herdr_failure(self):
         self.herdr_log.write_text("")
-        for bad in ("w1;rm", "", "w1:p2%20--lines%201000"):
+        for bad in ("w1;rm", "", "w1:p2%20--lines%201000", "--help", "-x"):
             status, _, body = self.req("/api/output?pane=" + bad, token=self.token)
             self.assertEqual(status, 400, "%r: %s" % (bad, body))
         status, _, _ = self.req("/api/output")
