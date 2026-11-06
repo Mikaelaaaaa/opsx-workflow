@@ -105,8 +105,9 @@ def opsx_repos(root: pathlib.Path, state: pathlib.Path) -> dict[str, pathlib.Pat
     """跟 opsx collect 同一份 repo 清單：root 下的 repo，加上 sources.toml 登記的 path 本身（不含它的兄弟目錄）。"""
     repos = repos_under(root)
     for p in source_paths(state):
-        if (p / "openspec" / "changes").is_dir() and (p / ".git").is_dir():
-            repos.setdefault(p.name, p.resolve())
+        real = p.resolve()
+        if (real / "openspec" / "changes").is_dir() and (real / ".git").is_dir():
+            repos.setdefault(real.name, real)
     return repos
 
 

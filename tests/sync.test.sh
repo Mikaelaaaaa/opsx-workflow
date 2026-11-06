@@ -222,6 +222,21 @@ assert_file "$LD"
 opsx sync --root "$ROOT" --source debt >/dev/null 2>&1
 assert_not_grep '^stale:' "$LD"
 
+# --- 撞名截斷的邊界：沒有 -、最後一段很長（opsx file 收得進來的 slug）也要 ≤32 字、字母開頭 ---
+for odd in abcdefghijklmnopqrstuvwxyzabcdef x-abcdefghijklmnopqrstuvwxyzabcd; do
+  o1="$( source "$OPSX_ROOT/bin/lib/common.sh"; new_shell "$A" "$odd" "$FX/long.md" )"
+  o2="$( source "$OPSX_ROOT/bin/lib/common.sh"; new_shell "$A" "$odd" "$FX/long.md" )"
+  assert_eq "$o1" "$odd"
+  [[ "$o2" =~ ^[a-z][a-z0-9-]{0,31}$ ]] && [ "$o2" != "$odd" ] || fail "$odd 撞名後不合格：$o2"
+done
+
+# --- sources.toml 的 path 本身是 symlink：一樣用實體名，debt 撈得到 ---
+mkdir -p "$FX/links"; RS="$(mk_opsx_repo source-real)"; ln -s "$RS" "$FX/links/source-link"
+printf '\n[[source]]\nkind = "github"\nrepo = "source-link"\nproject = "me/source-link"\npath = "%s"\n' "$FX/links/source-link" >> "$OPSX_STATE_DIR/sources.toml"
+echo "# shortcut: 登記的 symlink, 要建" > "$RS/r.py"
+opsx sync --root "$ROOT" --source debt >/dev/null 2>&1
+assert_file "$RS/openspec/changes/debt-$(printf '%s' '登記的 symlink, 要建' | shasum -a 1 | cut -c1-8)/inbox.md"
+
 # --- 少了 upstream_updated 的卡（手動改過）：記錯，不默默改寫 ---
 python3 -I -c 'import json,sys;print(json.dumps([{"iid":600,"title":"又改了","description":"x","state":"opened","updated_at":"2026-11-07T08:00:00Z","web_url":"u600","labels":[]}]))' > "$OPSX_TEST_ISSUES/a.json"
 grep -v '^upstream_updated:' "$H600" > "$FX/h600"; cp "$FX/h600" "$H600"

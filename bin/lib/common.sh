@@ -57,13 +57,17 @@ opsx_repo_top() { # <path>
 
 # 在 <top> 用 openspec 建殼，inbox.md 寫成 <內容檔>；slug 已存在就依序加 -2、-3。印實際的 slug。
 # 總長超過 32 時截中段、保留最後一段（issue 編號）：gh-<repo>-1 撞名要變 gh-<re>-1-2，不能變成 issue #2 的 gh-<repo>-2。
+# 沒有 - 或最後一段太長（留不下開頭至少一個字）時，改成截尾再加 -N。
 new_shell() { # <top> <slug> <inbox 內容檔>
-  local top="$1" slug="$2" n=1 head tail
+  local top="$1" slug="$2" n=1 head tail keep
   while [ -e "$top/openspec/changes/$slug" ]; do
     n=$((n+1)); slug="$2-$n"
-    if [ ${#slug} -gt 32 ]; then
-      head="${2%-*}"; tail="${2##*-}"; head="${head:0:$((32 - ${#tail} - ${#n} - 2))}"
-      slug="${head%-}-$tail-$n"
+    [ ${#slug} -gt 32 ] || continue
+    head="${2%-*}"; tail="${2##*-}"; keep=$((32 - ${#tail} - ${#n} - 2))
+    if [ "$head" != "$2" ] && [ "$keep" -ge 1 ]; then
+      head="${head:0:$keep}"; slug="${head%-}-$tail-$n"
+    else
+      slug="${2:0:$((32 - ${#n} - 1))}"; slug="${slug%-}-$n"
     fi
   done
   ( cd "$top" && openspec new change "$slug" --schema opsx >/dev/null ) || die "openspec new change $slug 失敗（${top}）"
