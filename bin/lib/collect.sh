@@ -45,6 +45,8 @@ opsx_collect() {
     esac
   done
   [ -d "$root" ] || die "collect: --root 不是目錄：$root"
+  # generated_at 在讀任何來源前取：看板拿它當 banner 看過的資料涵蓋到的時間點，不能晚於任何一次讀取
+  local now; now="$(now_iso)"
   local work; work="$(mktemp -d "${TMPDIR:-/tmp}/opsx-collect.XXXXXX")"
   trap 'rm -rf "$work"' RETURN
 
@@ -95,8 +97,8 @@ opsx_collect() {
   fi
 
   # 讀卡的檔與全域狀態，組 JSON
-  OPSX_C_WORK="$work" OPSX_C_STATE="$state" OPSX_C_HERDR_ERR="$herdr_err" "$OPSX_PY" -I - <<'PY'
-import datetime, json, os, re, sys, tomllib
+  OPSX_C_WORK="$work" OPSX_C_STATE="$state" OPSX_C_HERDR_ERR="$herdr_err" OPSX_C_NOW="$now" "$OPSX_PY" -I - <<'PY'
+import json, os, re, sys, tomllib
 
 work, state = os.environ["OPSX_C_WORK"], os.environ["OPSX_C_STATE"]
 errors = []
@@ -207,7 +209,7 @@ def waiting_of(card, gates, agent_status):
 cards, matched_panes, legacy = [], set(), {}
 for r in read(os.path.join(work, "legacy")).split("\n"):
     if r: legacy[r] = legacy.get(r, 0) + 1
-now = datetime.datetime.now().astimezone().isoformat(timespec="seconds")
+now = os.environ["OPSX_C_NOW"]
 for line in read(os.path.join(work, "cards.tsv")).split("\n"):
     if not line: continue
     repo_, slug_, dir_, archived_, stage_, mrfile = line.split("\t")
