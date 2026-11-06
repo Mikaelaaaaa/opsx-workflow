@@ -58,7 +58,7 @@ init_global() {
     if ! plist="$(herdr plugin list 2>&1)"; then
       warn "herdr 在但叫不到（${plist}）；看板 plugin 沒掛，herdr 起來後再跑一次 opsx init --global"
     elif printf '%s' "$plist" | grep -q 'opsx-board'; then say "init --global: herdr plugin opsx-board 已掛"
-    elif herdr plugin link "$OPSX_ROOT"; then say "init --global: herdr plugin link ${OPSX_ROOT}（看板 action open-board、pane board）"
+    elif herdr plugin link "$OPSX_ROOT" >/dev/null; then say "init --global: herdr plugin link ${OPSX_ROOT}（看板 action open-board、pane board）"
     else die "init --global: herdr plugin link 失敗（上面是 herdr 的錯誤）"; fi
   else
     say "init --global: 沒有 herdr，看板 plugin 略過（裝了 herdr 再跑一次）"
@@ -168,15 +168,16 @@ PY
 register_source() { # <top> <name>
   local top="$1" name="$2" f="$OPSX_STATE_DIR/sources.toml" url kind project
   if grep -qF "path = \"$top\"" "$f"; then say "init: sources.toml 已有 $name"; return; fi
-  url="$(git -C "$top" remote get-url origin 2>/dev/null || true)"
-  [ -z "$url" ] && url="$(git -C "$top" remote get-url gitlab 2>/dev/null || true)"
+  # Agentory-AI / Infrastructure 的 origin 是 GitHub 鏡像，MR 在名為 gitlab 的 remote；有它就以它為準
+  url="$(git -C "$top" remote get-url gitlab 2>/dev/null || true)"
+  [ -z "$url" ] && url="$(git -C "$top" remote get-url origin 2>/dev/null || true)"
   if [ -z "$url" ]; then say "init: 這個 repo 沒有 remote，sources.toml 不登記（之後加了 remote 再跑一次）"; return; fi
   case "$url" in
     *gitlab*) kind=gitlab ;;
     *github.com*) kind=github ;;
     *) say "init: remote 不是 gitlab / github（${url}），sources.toml 不登記"; return ;;
   esac
-  project="$(printf '%s' "$url" | sed -E 's#^(git@|https?://)[^:/]+[:/]##; s#\.git$##')"
+  project="$(printf '%s' "$url" | sed -E 's#^(git@|https?://)[^:/]+[:/]##; s#/$##; s#\.git$##')"
   printf '\n[[source]]\nkind = "%s"\nrepo = "%s"\nproject = "%s"\npath = "%s"\n' "$kind" "$name" "$project" "$top" >> "$f"
   say "init: sources.toml +$kind:$project"
 }

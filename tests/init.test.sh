@@ -53,6 +53,21 @@ assert_file "$R2/openspec/specs/marker"
 assert_grep 'kind = "github"' "$OPSX_STATE_DIR/sources.toml"
 assert_grep 'repo = "scam-guard"' "$OPSX_STATE_DIR/sources.toml"
 
+# --- origin 是 GitHub 鏡像、gitlab 才是開 MR 的 remote → 登記 gitlab ---
+R4="$(mk_repo Agentory-AI https://github.com/agentory-ai/Agentory-AI.git)"
+git -C "$R4" remote add gitlab https://gitlab.tsg-navigator.com/agentory/agentory-ai.git
+cd "$R4"; opsx init >/dev/null 2>&1 || fail "init with two remotes"
+assert_grep 'project = "agentory/agentory-ai"' "$OPSX_STATE_DIR/sources.toml"
+assert_not_grep 'project = "agentory-ai/Agentory-AI"' "$OPSX_STATE_DIR/sources.toml"
+assert_eq "$(grep -A3 'repo = "Agentory-AI"' "$OPSX_STATE_DIR/sources.toml" | grep -c 'kind = "gitlab"')" 0 "kind line is above repo line"
+assert_eq "$(grep -B1 'repo = "Agentory-AI"' "$OPSX_STATE_DIR/sources.toml" | grep -c 'kind = "gitlab"')" 1 "Agentory-AI should be gitlab"
+
+# --- 邊界：只有 origin 且 URL 帶尾斜線 → project 不帶尾斜線 ---
+R5="$(mk_repo slashy https://github.com/x/slashy/)"
+cd "$R5"; opsx init >/dev/null 2>&1 || fail "init with trailing slash"
+assert_grep 'project = "x/slashy"' "$OPSX_STATE_DIR/sources.toml"
+assert_not_grep 'project = "x/slashy/"' "$OPSX_STATE_DIR/sources.toml"
+
 # --- 邊界：沒 remote 的 repo → 仍可 init，sources 不登記，印一行說明 ---
 R3="$(mk_repo local-only)"; cd "$R3"
 out3="$(opsx init 2>&1)"; assert_eq "$?" 0 "no-remote rc"
@@ -65,8 +80,10 @@ cd "$FX/wt"; out="$(opsx init 2>&1)" || fail "init in worktree: $out"
 assert_eq "$(grep -c '^openspec/$' "$R/.git/info/exclude")" 1 "exclude duplicated or missing via worktree"
 
 # --- --global ---
-cd "$FX"
+cd "$FX"; use_fakes herdr; export OPSX_FAKE_LOG="$FX/herdr.log"; : > "$OPSX_FAKE_LOG"
 outg="$(opsx init --global 2>&1)"; assert_eq "$?" 0 "global rc: $outg"
+case "$outg" in *"herdr plugin link"*) ;; *) fail "should say plugin linked: $outg" ;; esac
+case "$outg" in *'"linked"'*) fail "herdr JSON leaked into output: $outg" ;; esac
 assert_file "$OPSX_STATE_DIR/grants.toml"
 assert_file "$OPSX_STATE_DIR/workspaces.toml"
 [ -L "$OPSX_BIN_DIR/opsx" ] || fail "symlink missing"
