@@ -7,6 +7,7 @@ GET /            回 web/index.html。
 GET /healthz     回 {"ok": true, "app": "opsx-board"}，不用 token，給 open-board.sh 探活，app 欄讓它認得是我們的。
 GET /api/collect 回 `opsx collect` 的輸出；--collect 給了檔就回那個檔（測試用）。同一時間只跑一支 collect，其他請求等它，
                  結果快取 CACHE_S 秒；頁面每 5 秒拉而 ThreadingHTTPServer 每個請求一個 thread，沒有這個會疊成十幾支 collect。
+GET /api/log[?since=<iso>] 回 `opsx timeline [--since …]` 的輸出（紀錄 tab、抽屜、banner 用，開才拉，不快取）。
 POST /api/{answer,dispatch,merge,stop} 轉呼叫對應的 `opsx` 子命令，POST /api/focus 跑 herdr pane focus；都回 {ok, stdout, stderr}。
 
 /api/* 要 header X-Opsx-Token 等於 <state>/board-token（第一次啟動時產生，之後重用）。只聽 127.0.0.1。
@@ -16,6 +17,7 @@ opsx 用 plugin 自己的 bin/opsx（不靠 PATH），並把 --state 透過 OPSX
 from __future__ import annotations
 
 import argparse
+import datetime
 import json
 import os
 import pathlib
@@ -27,6 +29,7 @@ import sys
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import parse_qs
 
 HERE = pathlib.Path(__file__).resolve().parent
 OPSX = pathlib.Path(os.environ.get("OPSX_TEST_OPSX") or HERE.parent / "bin" / "opsx")   # 測試換成假的 opsx
@@ -34,6 +37,7 @@ INDEX = HERE / "web" / "index.html"
 SLUG_RE = re.compile(r"^[a-z][a-z0-9_-]{0,31}$")
 TOKEN_RE = re.compile(r"^[A-Za-z0-9_-]{32,}$")
 COLLECT_TIMEOUT = 60
+TIMELINE_TIMEOUT = 60
 ACTION_TIMEOUT = 120
 CACHE_S = 3
 MAX_BODY = 64 * 1024
@@ -87,6 +91,14 @@ def repo_ok(path: str) -> bool:
     """repo 只接受真的 repo 根（有 openspec/changes 的目錄），不是任意絕對路徑。"""
     p = pathlib.Path(path)
     return p.is_absolute() and (p / "openspec" / "changes").is_dir()
+
+
+def aware_iso(value: str) -> bool:
+    """帶時區的 ISO 8601。沒有時區的時間跟 decisions.tsv 的列比不出先後。"""
+    try:
+        return datetime.datetime.fromisoformat(value).tzinfo is not None
+    except ValueError:
+        return False
 
 
 def build_args(action: str, body: dict) -> list[str]:
@@ -195,6 +207,24 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json(401, {"error": "token"}); return
             status, payload = self.collect()
             self.send_json(status, payload); return
+        if path == "/api/log":
+            if not self.authorised():
+                self.send_json(401, {"error": "token"}); return
+            query = parse_qs(self.path.split("?", 1)[1] if "?" in self.path else "")
+            args = ["bash", str(OPSX), "timeline"]
+            if "since" in query:
+                since = query["since"][0]
+                if not aware_iso(since):
+                    self.send_json(400, {"error": "since 要是帶時區的 ISO 8601：%r" % since}); return
+                args += ["--since", since]
+            r = run(args, TIMELINE_TIMEOUT, self.opsx_env())
+            if not r["ok"]:
+                self.send_json(502, {"error": "opsx timeline 失敗", "stderr": r["stderr"]}); return
+            try:
+                payload = json.loads(r["stdout"])
+            except json.JSONDecodeError as e:
+                self.send_json(502, {"error": "opsx timeline 回的不是 JSON：%s" % e}); return
+            self.send_json(200, payload); return
         if path.startswith("/api/"):
             self.send_json(405 if path[5:] in ACTIONS or path[5:] == "focus" else 404, {"error": path}); return
         self.send_json(404, {"error": path})

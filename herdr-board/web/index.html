@@ -7,7 +7,8 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap">
 <style>
 /* Open Design · mission-control：深色單一主題、navy 面板、amber 資料、cyan 動作、mono 讀數、圓角 ≤4px、只有警示會動。
-   這版只有首頁 tab（board-core）。每個欄位都來自 /api/collect（opsx collect）：openspec/、dispatch.json、status.json、herdr、glab。 */
+   首頁的欄位都來自 /api/collect（opsx collect）：openspec/、dispatch.json、status.json、herdr、glab。
+   紀錄 tab 來自 /api/log（opsx timeline）：每張卡的 decisions.tsv 與 sync.log，開 tab 才拉。 */
 :root{
   --bg:#0B1120;--surface:#111827;--surface-hover:#1A2535;--surface-active:#1E3A5F;
   --border:#1E3A5F;--border-soft:#162035;
@@ -174,9 +175,27 @@ main{flex:1;min-width:0;padding-left:max(16px,env(safe-area-inset-left,0px));pad
 .bot.ask .ring{animation:ringfade 1.4s ease-in-out infinite}
 .bot.sleep{opacity:.55}
 @keyframes ringfade{0%,100%{opacity:.25}50%{opacity:1}}
+.filters{display:flex;gap:6px;margin-top:16px;flex-wrap:wrap;align-items:center}
+.filters button{min-height:28px;font-size:12px;padding:0 10px}
+.filters button[aria-pressed=true]{background:var(--surface-active);border-color:var(--accent);color:var(--fg)}
+.filters .src{margin-left:auto;font-family:var(--font-mono);font-size:11px;color:var(--fg-3)}
+.day{font-family:var(--font-mono);font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--fg-2);padding:18px 0 6px}
+.ev{display:grid;grid-template-columns:44px 180px 70px minmax(0,1fr) auto;gap:12px;align-items:center;padding:8px 14px;border-top:1px solid var(--border-soft);font-size:13px}
+.ev:first-of-type{border-top:0}
+.ev .t{font-family:var(--font-mono);font-size:11px;color:var(--fg-3)}
+.ev .card{font-family:var(--font-mono);font-size:12px;color:var(--accent);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;border:0;background:transparent;min-height:0;padding:0;text-align:left}
+.ev .card:hover{background:transparent;text-decoration:underline}
+.ev .card.sys{color:var(--fg-3);cursor:default;text-decoration:none}
+.ev .who{font-size:12px;color:var(--fg-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ev .who.you{color:var(--data)}
+.ev .what{min-width:0;color:var(--fg);overflow-wrap:anywhere}
+.ev .what .ev-src{display:block;font-family:var(--font-mono);font-size:11px;color:var(--fg-3)}
 @media (prefers-reduced-motion:reduce){.bot,.bot *,.dot{animation:none!important}}
 
 @media (max-width:900px){
+  .ev{grid-template-columns:44px minmax(0,1fr) auto;row-gap:2px}
+  .ev .card,.ev .who{grid-column:2}
+  .ev .what{grid-column:2/4}
   .row{grid-template-columns:30px minmax(0,1fr)}
   .row .act{grid-column:2;justify-content:flex-start;flex-wrap:wrap;padding-top:4px}
   .checks{grid-template-columns:1fr}
@@ -191,7 +210,7 @@ main{flex:1;min-width:0;padding-left:max(16px,env(safe-area-inset-left,0px));pad
     <nav class="tabs" role="tablist" aria-label="頁面">
       <button role="tab" id="tab-home" aria-selected="true">首頁<span class="n" id="home-n"></span></button>
       <button role="tab" disabled title="board-inbox 那張卡">收件匣</button>
-      <button role="tab" disabled title="board-log 那張卡">紀錄</button>
+      <button role="tab" id="tab-log" aria-selected="false">紀錄</button>
     </nav>
     <div class="right"><span class="stamp" id="stamp"></span></div>
   </header>
@@ -226,10 +245,12 @@ main{flex:1;min-width:0;padding-left:max(16px,env(safe-area-inset-left,0px));pad
 function token(){try{return sessionStorage.getItem('opsx-token')||'';}catch(e){return '';}}
 const api={
   async collect(){const r=await fetch('/api/collect',{headers:{'X-Opsx-Token':token()}});if(r.status===401)throw new Error('token 不對：從 herdr 的 open-board 重開一次');if(!r.ok)throw new Error('collect '+r.status+'：'+(await r.text()).slice(0,200));return r.json();},
+  async log(since){const r=await fetch('/api/log'+(since?'?since='+encodeURIComponent(since):''),{headers:{'X-Opsx-Token':token()}});const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error('log '+r.status+'：'+(j.error||j.stderr||''));return j;},
   async post(action,body){const r=await fetch('/api/'+action,{method:'POST',headers:{'X-Opsx-Token':token(),'Content-Type':'application/json'},body:JSON.stringify(body)});const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(action+' '+r.status+'：'+(j.error||''));if(!j.ok)throw new Error((j.stderr||j.stdout||'opsx '+action+' 失敗').trim());return j;}
 };
 let data={generated_at:null,scopes:[],cards:[],unmatched_agents:[],errors:[],legacy:{},worktrees_skipped:[]};let lastRaw='';
-const ui={scope:'all',ws:null,repo:null,sel:null,open:null,doneOpen:false,busy:false};
+const ui={tab:'home',scope:'all',ws:null,repo:null,sel:null,open:null,doneOpen:false,busy:false,logFilter:'all'};
+let tl=null;let tlErr='';
 const REFRESH_MS=5000;
 
 /* ---------- 標籤 ---------- */
@@ -336,13 +357,49 @@ function renderHome(){
   h+=`<section class="panel"><div class="panel-h"><button class="tg h2" data-act="done-toggle" aria-expanded="${ui.doneOpen}"><span class="chev"></span>已完成</button><span class="n">${D.length}</span></div>${ui.doneOpen?(D.length?D.map(rowDone).join(''):'<div class="empty">還沒有</div>'):''}</section>`;
   return h;
 }
+/* ---------- 紀錄 tab：opsx timeline，開 tab 才拉 ---------- */
+const LOG_FILTERS=[['all','全部'],['you','你回的'],['agent','替你做的決定'],['merge','指派與合併']];
+const MERGE_TAGS=['已指派','已停止','已合併'];
+const TAG_BADGE={'已合併':'ok','已允許':'ok','已決定':'ok','替你決定':'data','已指派':'accent','已停止':'line','同步':'line','驗證':'ok','其他':'line'};
+function evInScope(e){return e.repo?inScope(e):ui.scope==='all';}
+function evKeep(e){
+  const f=ui.logFilter;
+  return f==='all'||(f==='you'&&e.who==='你')||(f==='agent'&&e.tag==='替你決定')||(f==='merge'&&MERGE_TAGS.includes(e.tag));
+}
+const dayOf=ts=>{if(!ts)return '時間不明';const d=new Date(ts);return isNaN(d)?'時間不明':d.toLocaleDateString('sv');};
+const hhmm=ts=>{if(!ts)return '';const d=new Date(ts);return isNaN(d)?'':d.toTimeString().slice(0,5);};
+function evRow(e){
+  const card=e.source==='sync'?`<span class="card sys">同步 · ${esc(e.evidence||'')}</span>`
+    :`<button class="card" data-act="ev-open" data-key="${esc(e.repo+'/'+e.slug)}" title="${esc(e.repo+'/'+e.slug)}">${esc(e.slug)}</button>`;
+  const what=e.tag==='其他'?`${esc(e.text)}<span class="ev-src">舊格式的列，照原文</span>`:esc(e.text)+(e.evidence&&e.source!=='sync'?`<span class="ev-src">${esc(e.evidence)}</span>`:'');
+  return `<div class="ev"><span class="t">${esc(hhmm(e.ts))}</span>${card}<span class="who ${e.who==='你'?'you':''}">${esc(e.who||'—')}</span><span class="what">${what}</span><span class="badge ${TAG_BADGE[e.tag]||'line'}">${esc(e.tag)}</span></div>`;
+}
+function renderLog(){
+  const fb=([k,l])=>`<button aria-pressed="${ui.logFilter===k}" data-act="logf" data-f="${k}">${l}</button>`;
+  let h=`<div class="filters">${LOG_FILTERS.map(fb).join('')}<span class="src">decisions.tsv · sync.log · archive</span></div>`;
+  if(tlErr)return h+`<div class="empty" style="color:var(--danger)">${esc(tlErr)}</div>`;
+  if(!tl)return h+'<div class="empty">載入中…</div>';
+  const keep=tl.events.filter(e=>evInScope(e)&&evKeep(e));
+  if(!keep.length)return h+'<div class="empty">沒有符合的紀錄</div>';
+  const days=[];for(const e of keep){const d=dayOf(e.ts);const g=days[days.length-1];if(g&&g.d===d)g.ev.push(e);else days.push({d,ev:[e]});}
+  h+=days.map(g=>`<div class="day">${esc(g.d)} · ${g.ev.length}</div><section class="panel" style="margin-top:0">${g.ev.map(evRow).join('')}</section>`).join('');
+  if(tl.errors&&tl.errors.length)h+=`<div class="empty">讀不了的檔：${tl.errors.map(x=>esc(x.source)).join('、')}</div>`;
+  return h;
+}
+async function loadLog(){
+  try{tl=await api.log();tlErr='';}catch(e){tlErr=e.message;}
+  render();
+}
+function showTab(t){ui.tab=t;history.replaceState(null,'','#'+t);render();if(t==='log')loadLog();}
+
 function render(){
   const A=sect('待處理');
   $('#counter').innerHTML=A.length?`待處理 <b>${A.length}</b>`:'<span class="faint">無待處理</span>';
   $('#home-n').textContent=A.length||'';
   $('#stamp').textContent=data.generated_at?'collect '+ago(data.generated_at):'';
   const y=window.scrollY;
-  $('#view').innerHTML=renderHome();
+  $('#view').innerHTML=ui.tab==='log'?renderLog():renderHome();
+  $('#tab-home').setAttribute('aria-selected',ui.tab==='home');$('#tab-log').setAttribute('aria-selected',ui.tab==='log');
   window.scrollTo(0,y);
   const er0=data.worktrees_skipped&&data.worktrees_skipped.length?[{source:'collect',message:'跳過 worktree 目錄：'+data.worktrees_skipped.join('、')}]:[];
   data.errors=(data.errors||[]).filter(e=>e.source!=='collect').concat(er0);
@@ -463,6 +520,8 @@ document.addEventListener('click',e=>{
     if(a==='dlg-cancel'){closeDispatch();return;}
     if(a==='dlg-go'){doDispatch();return;}
     if(a==='pane-id'){focusPane(btn.dataset.pane);return;}
+    if(a==='logf'){ui.logFilter=btn.dataset.f;render();return;}
+    if(a==='ev-open'){if(!byKey(btn.dataset.key)){toast(btn.dataset.key+' 不在首頁（archive 只列最新的幾張）',true);return;}showTab('home');openDrawer(btn.dataset.key);return;}
     if(!c)return;
     if(a==='open'){openDrawer(k);return;}
     if(a==='answer'){answer(c,btn.dataset.text,btn.dataset.grant);return;}
@@ -476,6 +535,8 @@ document.addEventListener('click',e=>{
   if(kb){[...kb.parentElement.children].forEach(b=>b.setAttribute('aria-pressed',b===kb));
     if(kb.dataset.kind){const m=MODEL_BY_KIND[kb.dataset.kind];document.querySelectorAll('#dialog .models button').forEach(b=>b.setAttribute('aria-pressed',b.dataset.model===m));}
     return;}
+  const tb=e.target.closest('#tab-home,#tab-log');
+  if(tb){showTab(tb.id==='tab-log'?'log':'home');return;}
   const mi=e.target.closest('#menu [data-ws]');
   if(mi){ui.scope='ws';ui.ws=mi.dataset.ws||null;ui.repo=mi.dataset.repo||null;closeMenu();render();return;}
   if(rowEl){openDrawer(rowEl.dataset.key);return;}
@@ -517,7 +578,7 @@ async function refresh(force){
 }
 function schedule(){clearTimeout(timer);timer=setTimeout(()=>{if(document.hidden){schedule();return;}refresh(false);},REFRESH_MS);}
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)refresh(false);});
-if(location.hash!=='#home')history.replaceState(null,'','#home');
+if(location.hash==='#log')showTab('log');else if(location.hash!=='#home')history.replaceState(null,'','#home');
 refresh(true);
 </script>
 </body>

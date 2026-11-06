@@ -38,6 +38,7 @@ class ServerTest(unittest.TestCase):
             f'printf "%s\\n" "$*" >> "{cls.log}"\n'
             f'printf "OPSX_STATE_DIR=%s\\n" "${{OPSX_STATE_DIR:-}}" >> "{cls.env_log}"\n'
             f'if [ -f "{cls.fail_flag}" ]; then echo "opsx: 假的失敗" >&2; exit 2; fi\n'
+            'if [ "$1" = timeline ]; then echo \'{"generated_at": "g", "last_seen": null, "events": [], "errors": []}\'; exit 0; fi\n'
             'echo "ok: $1"\n'
         )
         shim.chmod(0o755)
@@ -148,6 +149,25 @@ class ServerTest(unittest.TestCase):
             status, _, _ = self.req("/api/collect", token=self.token)
             self.assertEqual(status, 200)
         self.assertEqual(self.log.read_text(), "", "--collect 固定檔時不叫 opsx")
+
+    def test_log_forwards_to_timeline(self):
+        status, _, body = self.req("/api/log", token=self.token)
+        self.assertEqual(status, 200, body)
+        self.assertEqual(json.loads(body)["events"], [])
+        self.assertEqual(self.log.read_text().strip(), "timeline")
+        self.log.write_text("")
+        status, _, body = self.req("/api/log?since=2026-11-06T09%3A00%3A00%2B08%3A00", token=self.token)
+        self.assertEqual(status, 200, body)
+        self.assertEqual(self.log.read_text().strip(), "timeline --since 2026-11-06T09:00:00+08:00")
+
+    def test_log_needs_token_and_a_real_since(self):
+        status, _, _ = self.req("/api/log")
+        self.assertEqual(status, 401)
+        status, _, body = self.req("/api/log?since=%E6%98%A8%E5%A4%A9", token=self.token)
+        self.assertEqual(status, 400, body)
+        status, _, body = self.req("/api/log?since=2026-11-06T09:00:00", token=self.token)
+        self.assertEqual(status, 400, "沒有時區的時間要拒絕：%s" % body)
+        self.assertEqual(self.log.read_text(), "")
 
     def test_focus_runs_herdr(self):
         status, _, body = self.req("/api/focus", {"pane": "w1:p4"}, token=self.token)
