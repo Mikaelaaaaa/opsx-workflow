@@ -18,8 +18,20 @@ Unified development workflow plugin for Claude Code. Covers the full cycle: thin
 
 - 網頁：herdr 裡叫 action `open-board`（`opsx init --global` 已 `herdr plugin link`），或 `bash herdr-board/scripts/open-board.sh`。
   首頁四段 待處理 / 進行中 / 待指派 / 已完成；按鈕背後是 `opsx answer`（回 gate、三種授權答案）、`opsx dispatch`、`opsx merge`（寫一次性核准，叫 agent `/babysit merge`，閘門只放行那一次）、`opsx stop`。
-- 右側 pane：herdr pane `board`（`python3 herdr-board/tui.py`），同一份清單，↑↓ 選、Enter 跳 pane、q 關；不回 gate、不派工。
-- 對原型看畫面：`python3 herdr-board/server.py --collect herdr-board/tests/fixtures/collect-sample.json`，開 `http://127.0.0.1:8791/?token=$(cat ~/.local/state/opsx/board-token)`。
+- 右側 pane：herdr 裡叫 action `open-pane`（overlay 開 pane `board`，`python3 herdr-board/tui.py`），同一份清單，↑↓ 選、Enter 跳 pane、q 關；不回 gate、不派工。
+- 快捷鍵：herdr 的鍵綁 action，在 `~/.config/herdr/config.toml` 加兩段（prefix 是你 herdr 的前綴鍵）：
+  ```toml
+  [[keys.command]]
+  key = "prefix+o"
+  type = "plugin_action"
+  command = "opsx-board.open-board"
+
+  [[keys.command]]
+  key = "prefix+shift+o"
+  type = "plugin_action"
+  command = "opsx-board.open-pane"
+  ```
+- 對原型看畫面：`python3 herdr-board/server.py --collect herdr-board/tests/fixtures/collect-sample.json`，開 `http://127.0.0.1:8791/#token=$(cat ~/.local/state/opsx/board-token)`。
 - 收件匣 tab、同步腳本、紀錄 tab 在 `board-inbox`、`board-log` 兩張卡（`openspec/workplan.yaml`）。
 
 ## Skills

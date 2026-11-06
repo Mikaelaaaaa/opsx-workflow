@@ -14,6 +14,13 @@ title = "Open opsx board"
 description = "開 opsx 看板網頁（server 已在跑就只開瀏覽器）。"
 command = ["bash", "herdr-board/scripts/open-board.sh"]
 
+# 開下面那個 pane。鍵只綁得到 action，所以 pane 要有自己的 action 才綁得了。
+[[actions]]
+id = "open-pane"
+title = "Open opsx pane"
+description = "在目前的 workspace 以 overlay 開看板的 TUI pane。"
+command = ["bash", "herdr-board/scripts/open-pane.sh"]
+
 # 右側 pane 的最小 TUI：一行一卡，↑↓ 選、Enter 跳 pane、r 重拉、q 關。不回 gate、不派工、不合併。
 [[panes]]
 id = "board"
