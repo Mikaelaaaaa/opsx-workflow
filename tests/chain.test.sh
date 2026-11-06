@@ -91,4 +91,29 @@ assert_eq "$(cat "$OPSX_FAKE_LOG")" "" "沒有子卡可接不碰 herdr"
 cmp -s "$OPSX_STATE_DIR/dispatch.json" "$FX/disp.before" || fail "沒有子卡可接，dispatch.json 不該動"
 assert_no_file "$R/openspec/changes/e/decisions.tsv"; assert_no_file "$R/openspec/changes/d/decisions.tsv"
 assert_eq "$(git -C "$R" branch --show-current)" "feat/p/mikaela" "沒有子卡可接，branch 不動"
+
+# --- workplan 的 YAML 子集（不靠 pyyaml）：block list、[a, b]、引號、行尾註解 ---
+cat > "$FX/wp.yaml" <<'EOF'
+created: 2026-11-06
+features:
+  - name: x
+    prs:
+      - name: a
+        branch: "feat/a/m"
+        status: merged   # 已合
+        depends-on: []
+        description: "有 # 號的描述"
+        changes:
+          - name: a
+            status: done
+      - name: b
+        depends-on:
+          - a
+          - c
+        changes: []
+EOF
+got="$(python3 -I -c 'import sys; sys.path.insert(0, sys.argv[1]); import chain, json
+w = chain.load_workplan(sys.argv[2]); prs = w["features"][0]["prs"]
+print(json.dumps([prs[0]["branch"], prs[0]["status"], prs[0]["depends-on"], prs[0]["description"], prs[1]["depends-on"], prs[1]["changes"]], ensure_ascii=False))' "$OPSX_ROOT/bin/lib" "$FX/wp.yaml")"
+assert_eq "$got" '["feat/a/m", "merged", [], "有 # 號的描述", ["a", "c"], []]' "workplan 解析"
 echo ok

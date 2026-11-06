@@ -2,6 +2,9 @@
 # opsx stop <slug> [--repo <top>]：板上的「停止」。kill drive 迴圈、關掉 pane、dispatch.json 標 stopped。
 # worktree 和 branch 留著（重派會重用）。
 
+# shellcheck source=/dev/null
+source "$OPSX_ROOT/bin/lib/route.sh"
+
 opsx_stop() {
   local slug="" top="" board=""
   while [ $# -gt 0 ]; do
@@ -13,6 +16,7 @@ opsx_stop() {
   [ -n "$top" ] || die "stop: 不在 git repo 裡，或給 --repo"
   local repo; repo="$(basename "$(cd "$top" && pwd -P)")"
   local f="$OPSX_STATE_DIR/dispatch.json"
+  refuse_if_handed "$repo" "$slug" stop
   [ -f "$f" ] || die "stop: 沒有 dispatch.json"
   local entry; entry="$(OPSX_KEY="$repo/$slug" "$OPSX_PY" -I -c 'import json,os,sys;d=json.load(open(sys.argv[1]));print(json.dumps(d.get(os.environ["OPSX_KEY"],{})))' "$f")"
   [ "$entry" != "{}" ] || die "stop: $repo/$slug 沒派過"

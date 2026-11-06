@@ -5,6 +5,8 @@
 
 # shellcheck source=/dev/null
 source "$OPSX_ROOT/bin/lib/mr.sh"
+# shellcheck source=/dev/null
+source "$OPSX_ROOT/bin/lib/route.sh"
 
 opsx_merge() {
   local slug="" top=""
@@ -17,6 +19,7 @@ opsx_merge() {
   top="$(cd "$top" && pwd -P)"
   local repo d; repo="$(basename "$top")"; d="$top/openspec/changes/$slug"
   [ -d "$d" ] || die "merge: 沒有這張卡：$d"
+  refuse_if_handed "$repo" "$slug" merge
   st_mr_in_report "$d" || die "merge: $slug 的 report.md 沒有 MR 連結，還沒到合併"
 
   # 重驗五條件，一定重抓（快取是給看板每 5 秒拉的）
@@ -52,6 +55,7 @@ def put(d):
 jsonfile.update(p, put)
 PY
   printf '%s\tyou\tmerge-approved\t%s\t%s\n' "$now" "$sha" "$(st_mr_url "$d")" >> "$d/decisions.tsv"
-  herdr agent prompt "$slug" "/babysit merge ${sha}" >/dev/null || die "merge: 核准已寫進 dispatch.json，但 herdr agent prompt 失敗；在 pane 裡對 agent 說 /babysit merge ${sha}"
+  local route name via; route="$(card_route "$repo" "$slug")" || die "讀不懂 dispatch.json，不知道話要送給誰"; name="${route%%$'\t'*}"; via="${route#*$'\t'}"
+  herdr agent prompt "$name" "/babysit merge ${sha}${via:+ $slug}" >/dev/null || die "merge: 核准已寫進 dispatch.json，但 herdr agent prompt 失敗；在 pane 裡對 agent 說 /babysit merge ${sha}"
   say "merge: $slug 核准合併 ${sha}，已叫 agent /babysit merge；它跑 glab mr merge 時閘門會放行（只放這個 sha、這條 MR）"
 }
