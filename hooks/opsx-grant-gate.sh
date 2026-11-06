@@ -7,17 +7,18 @@ source "$(dirname "${BASH_SOURCE[0]}")/_lib.sh"
 top="$(repo_top)"; slug="$(card_slug)"
 [ -n "$top" ] && [ -n "$slug" ] || exit 0
 repo="$(repo_name)"
-# 沒有 python 就讀不到這張卡的模式。沒派出去的卡照原本不管；派出去的卡明確 deny，
-# 因為 hook 非 0 結束 Claude Code 會當成放行。修法那一條指令本身放行。
+# dispatch.json 壞掉時讀不到模式，就退回比對檔案原文：裡面有這張卡的 key 才擋。
+if ! mode="$(card_mode "$repo" "$slug")"; then
+  [[ $(<"$OPSX_STATE_DIR/dispatch.json") == *"\"$repo/$slug\""* ]] || exit 0
+  deny "opsx 授權閘門：$OPSX_STATE_DIR/dispatch.json 不是合法 JSON，讀不到這張卡的模式，先擋下。修好這個檔案"
+fi
+case "$mode" in autopilot|drive) ;; *) exit 0 ;; esac
+# 查授權要 python。沒有就明確 deny，因為 hook 非 0 結束 Claude Code 會當成放行。修法那一條指令本身放行。
 if [ -z "$OPSX_PY" ]; then
-  [ -n "$(card_dir)" ] || exit 0
-  [ -f "$OPSX_STATE_DIR/dispatch.json" ] && [[ $(<"$OPSX_STATE_DIR/dispatch.json") == *"\"$repo/$slug\""* ]] || exit 0
   [ "$(hook_cmd)" = "opsx init --global" ] && exit 0
   deny "opsx 授權閘門：讀不到授權，先擋下。$OPSX_PY_ERR"
 fi
 PY_FAIL="opsx 授權閘門：python 執行失敗（${OPSX_PY}），讀不到授權，先擋下。跑 opsx init --global"
-mode="$(card_mode "$repo" "$slug")" || deny "$PY_FAIL"
-case "$mode" in autopilot|drive) ;; *) exit 0 ;; esac
 
 tool="$(hook_tool)"; cmd="$(hook_cmd)"; file="$(hook_file)"
 GATE_MSG="寫 gates.md（type、問題、建議、證據、風險、沒回答的預設），然後做能做的；人在板上回了會自動繼續"
@@ -52,7 +53,9 @@ PY
   return 0
 }
 level2() { # <action> <label>
-  if has_grant "$repo" "$slug" "$1"; then exit 0; fi
+  local rc=0
+  has_grant "$repo" "$slug" "$1" || rc=$?
+  case "$rc" in 0) exit 0 ;; 3) ;; *) deny "$PY_FAIL" ;; esac
   deny "opsx 授權閘門：「$2」要授權（第二級），$repo 沒有長期授權、這張卡也沒有。$GATE_MSG"
 }
 
