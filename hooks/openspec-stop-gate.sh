@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Stop：branch 對到的卡 tasks.md 仍有 - [ ]、status.json tests 不是 green、或有 commit 但 review 沒跑 → block 並說原因。
+# Stop：branch 對到的卡 tasks.md 仍有 - [ ]（gates.md 有 open gate 時這一項放行）、status.json tests 不是 green、或有 commit 但 review 沒跑 → block 並說原因。
 # 要求檔 §8.5。stop_hook_active 為 true（已經因為這個 hook 續跑過一次）就放行，避免無限迴圈。
 source "$(dirname "${BASH_SOURCE[0]}")/_lib.sh"
 
