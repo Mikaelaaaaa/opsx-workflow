@@ -2,6 +2,7 @@
 
 用法：$OPSX_PY -I chain.py children <top> <repo> <父卡 slug> <dispatch.json>
 印一行 `skip\t<原因>`（不接），或每張可接的子卡一行 `child\t<slug>\t<branch>\t<kind>`。
+$OPSX_PY -I chain.py continue <dispatch.json>：單一子卡接手（register_continue），印父卡原本的 herdr 名和 mode。
 $OPSX_PY -I chain.py fan-out <dispatch.json>：寫代管條目（register_fan_out），印父卡原本的 mode。
 specs/opsx-chain/spec.md「找出可以續接的子卡」。
 """
@@ -115,6 +116,26 @@ def children(top: str, repo: str, parent: str, dispatch_path: str) -> list:
     return out or [("skip", "沒有可以接的子卡")]
 
 
+def _child_entry(me: dict, slug: str, branch: str, kind: str, model: str, mode: str, worktree, now: str) -> dict:
+    return {"workspace": me.get("workspace"), "workspace_id": me.get("workspace_id"), "tab": me.get("tab"), "pane": me.get("pane"),
+            "agent": me.get("agent"), "model": model, "mode": mode, "kind": kind, "worktree": worktree, "branch": branch,
+            "grants": [], "once": [], "started_at": now, "drive_pid": None}
+
+
+def register_continue(d: dict) -> None:
+    """jsonfile.update 的 mutate：單一子卡接手父卡的 pane。父卡的 herdr agent 會被改名成子卡，herdr_name 跟著改。"""
+    e = os.environ
+    me = d[e["OPSX_KEY"]]
+    repo = e["OPSX_KEY"].split("/", 1)[0]
+    slug, branch, kind, model = e["OPSX_PLAN"].split("\t")
+    entry = _child_entry(me, slug, branch, kind, model, me.get("mode"), e["OPSX_WT"], e["OPSX_AT"])
+    entry["herdr_name"] = slug
+    d["%s/%s" % (repo, slug)] = entry
+    me["handed_to"] = [slug]
+    me["handed_at"] = e["OPSX_AT"]
+    me["herdr_name"] = slug
+
+
 def register_fan_out(d: dict) -> None:
     """jsonfile.update 的 mutate：替每張子卡寫代管條目，父卡記交接。參數走環境變數（OPSX_KEY、OPSX_PARENT、OPSX_PLAN、OPSX_AT）。"""
     e = os.environ
@@ -125,11 +146,10 @@ def register_fan_out(d: dict) -> None:
     for line in e["OPSX_PLAN"].splitlines():
         slug, branch, kind, model = line.split("\t")
         kids.append(slug)
-        d["%s/%s" % (repo, slug)] = {
-            "workspace": me.get("workspace"), "workspace_id": me.get("workspace_id"), "tab": me.get("tab"), "pane": me.get("pane"),
-            "agent": me.get("agent"), "model": model, "mode": mode, "kind": kind, "worktree": None, "branch": branch,
-            "grants": [], "once": [], "started_at": e["OPSX_AT"], "drive_pid": None,
-            "via": e["OPSX_PARENT"], "herdr_name": me.get("herdr_name") or e["OPSX_PARENT"]}
+        entry = _child_entry(me, slug, branch, kind, model, mode, None, e["OPSX_AT"])
+        entry["via"] = e["OPSX_PARENT"]
+        entry["herdr_name"] = me.get("herdr_name") or e["OPSX_PARENT"]
+        d["%s/%s" % (repo, slug)] = entry
     me["handed_to"] = kids
     me["handed_at"] = e["OPSX_AT"]
 
@@ -138,6 +158,10 @@ if __name__ == "__main__":
     if len(sys.argv) == 6 and sys.argv[1] == "children":
         for row in children(*sys.argv[2:]):
             print("\t".join(row))
+    elif len(sys.argv) == 3 and sys.argv[1] == "continue":
+        me = jsonfile.load(sys.argv[2])[os.environ["OPSX_KEY"]]
+        print(me.get("herdr_name") or os.environ["OPSX_PARENT"], me.get("mode"))
+        jsonfile.update(sys.argv[2], register_continue)
     elif len(sys.argv) == 3 and sys.argv[1] == "fan-out":
         print(jsonfile.load(sys.argv[2])[os.environ["OPSX_KEY"]].get("mode"))
         jsonfile.update(sys.argv[2], register_fan_out)

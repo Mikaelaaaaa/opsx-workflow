@@ -223,7 +223,7 @@ mv "$R3/stray.txt" "$FX/"   # 把 tree 弄回乾淨
 : > "$R3/openspec/changes/c/decisions.tsv"; git -C "$R3" worktree add -q "$FX/other-wt" -b feat/c/mikaela main
 out="$(opsx chain p 2>&1)"; assert_eq "$?" 0 "branch 被佔: $out"
 assert_eq "$(git -C "$R3" branch --show-current)" "feat/p/mikaela"; assert_no_file "$Q"
-assert_grep "$FX/other-wt" "$R3/openspec/changes/c/decisions.tsv"
+assert_grep "$(cd "$FX" && pwd -P)/other-wt" "$R3/openspec/changes/c/decisions.tsv"
 git -C "$R3" worktree remove -f "$FX/other-wt"; git -C "$R3" branch -q -D feat/c/mikaela
 
 # 乾淨 tree（3.2）：切到子卡 branch（不帶 tracking）、登記、寫佇列；chain 自己不叫 herdr
