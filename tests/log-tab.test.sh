@@ -16,10 +16,20 @@ const slice = src.slice(a, b);
 const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
 function load(tl) {
-  const ui = { scope: 'all', logFilter: 'all', logLimit: 200 };
+  // 跟 index.html 的 ui 字面值一樣沒有 logLimit：初始值要由切片自己設
+  const ui = { scope: 'all', ws: null, repo: null, logFilter: 'all' };
   const f = new Function('ui', 'tl', 'tlErr', 'esc', 'inScope',
-    slice + ';return {renderLog, setView, logMore, setLogFilter, LOG_PAGE};');
+    slice + ';return {renderLog, setView, logMore, setLogFilter, setScope, LOG_PAGE};');
   return { ui, ...f(ui, tl, '', esc, () => true) };
+}
+// 切片外的接線：#view 只經 setView 寫；render() 用 setView；兩個範圍選單都走 setScope
+{
+  assert.ok(!/\$\('#view'\)\.innerHTML\s*=/.test(src), "index.html 不該直接寫 $('#view').innerHTML");
+  const r = src.indexOf('function render(){');
+  assert.ok(r >= 0, 'index.html 找不到 function render(){');
+  assert.ok(src.slice(r, src.indexOf('\n}', r)).includes("setView($('#view'),"), 'render() 要經 setView 寫 #view');
+  assert.strictEqual((src.match(/setScope\(/g) || []).length, 3, '範圍選單兩個 handler 都要呼叫 setScope（加上定義共 3 處）');
+  assert.ok(!/ui\.scope\s*=\s*'/.test(src.slice(b)), '範圍只能經 setScope 改');
 }
 // n 列，由新到舊，每天 10 列；偶數列是「你」回的
 function events(n) {
@@ -35,6 +45,7 @@ const rows = h => (h.match(/<div class="ev">/g) || []).length;
 {
   const t = load({ events: events(450), errors: [] });
   assert.strictEqual(t.LOG_PAGE, 200);
+  assert.strictEqual(t.ui.logLimit, 200, '切片要把 ui.logLimit 設成 200');
   const h = t.renderLog();
   assert.strictEqual(rows(h), 200);
   assert.ok(h.includes('row-0-end') && h.includes('row-199-end') && !h.includes('row-200-end'), '應是最新的 200 列');
@@ -71,6 +82,14 @@ for (const n of [150, 200]) {
   t.setLogFilter('you'); t.setLogFilter('all');
   assert.strictEqual(t.ui.logLimit, 200);
   assert.strictEqual(rows(t.renderLog()), 200);
+}
+// 換範圍回到 200
+{
+  const t = load({ events: events(450), errors: [] });
+  t.logMore(); t.setScope('ws', 'develop', 'a');
+  assert.deepStrictEqual([t.ui.scope, t.ui.ws, t.ui.repo, t.ui.logLimit], ['ws', 'develop', 'a', 200]);
+  t.logMore(); t.setScope('all', 'develop', null);
+  assert.strictEqual(t.ui.logLimit, 200);
 }
 // 按日分組（既有 Scenario）：11/06 三筆在前，11/05 兩筆在後
 {

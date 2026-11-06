@@ -421,6 +421,7 @@ const LOG_PAGE=200;
 ui.logLimit=LOG_PAGE;
 function logMore(){ui.logLimit+=LOG_PAGE;}
 function setLogFilter(f){ui.logFilter=f;ui.logLimit=LOG_PAGE;}
+function setScope(scope,ws,repo){ui.scope=scope;ui.ws=ws;ui.repo=repo;ui.logLimit=LOG_PAGE;}
 function evInScope(e){return e.repo?inScope(e):ui.scope==='all';}
 function evKeep(e){
   const f=ui.logFilter;
@@ -705,7 +706,7 @@ document.addEventListener('click',e=>{
   const tb=e.target.closest('#tab-home,#tab-inbox,#tab-log');
   if(tb){showTab(tb.id.slice(4));return;}
   const mi=e.target.closest('#menu [data-ws]');
-  if(mi){ui.scope='ws';ui.ws=mi.dataset.ws||null;ui.repo=mi.dataset.repo||null;ui.logLimit=LOG_PAGE;closeMenu();render();return;}
+  if(mi){setScope('ws',mi.dataset.ws||null,mi.dataset.repo||null);closeMenu();render();return;}
   if(rowEl){openDrawer(rowEl.dataset.key);return;}
   if(e.target.id==='scrim'){if(!$('#dialog').hidden)closeDispatch();else closeDrawer();return;}
   if(!e.target.closest('#menu'))closeMenu();
@@ -734,7 +735,7 @@ function move(d){
   const el=document.querySelector(`#view .row[data-key="${CSS.escape(ui.sel)}"]`);if(el)el.scrollIntoView({block:'nearest'});
 }
 $('#new-open').onclick=openNew;
-$('#scope-all').onclick=()=>{ui.scope='all';ui.repo=null;ui.logLimit=LOG_PAGE;closeMenu();render();};
+$('#scope-all').onclick=()=>{setScope('all',ui.ws,null);closeMenu();render();};
 $('#scope-ws').onclick=e=>{e.stopPropagation();if($('#menu').hidden)openMenu(e.currentTarget);else closeMenu();};
 
 /* ---------- 重新整理：上一次回來才排下一次（collect 慢時不會疊請求）；分頁藏起來就不拉；
