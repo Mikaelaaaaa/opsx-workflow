@@ -8,7 +8,9 @@ top="$(repo_top)"; slug="$(card_slug)"
 [ -n "$top" ] && [ -n "$slug" ] || exit 0
 repo="$(repo_name)"
 # dispatch.json 壞掉時讀不到模式，就退回比對檔案原文：裡面有這張卡的 key 才擋。
+# 原文也讀不到時，$(<…) 會是空字串、比對不到，所以要先擋。
 if ! mode="$(card_mode "$repo" "$slug")"; then
+  [ -r "$OPSX_STATE_DIR/dispatch.json" ] || deny "opsx 授權閘門：讀不到 $OPSX_STATE_DIR/dispatch.json，分不出這張卡的模式，先擋下。檢查這個檔案的權限"
   [[ $(<"$OPSX_STATE_DIR/dispatch.json") == *"\"$repo/$slug\""* ]] || exit 0
   deny "opsx 授權閘門：$OPSX_STATE_DIR/dispatch.json 不是合法 JSON，讀不到這張卡的模式，先擋下。修好這個檔案"
 fi
