@@ -19,6 +19,25 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 SERVER = ROOT / "herdr-board" / "server.py"
 
 
+def start_server(env: dict, fixture: pathlib.Path) -> tuple[subprocess.Popen, str, int]:
+    """起一支 server（--port 0），回 (proc, host, port)；等到 /healthz 回應。"""
+    proc = subprocess.Popen(
+        [sys.executable, "-I", str(SERVER), "--port", "0", "--collect", str(fixture)],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env, text=True,
+    )
+    line = proc.stdout.readline()
+    m = re.search(r"http://(127\.0\.0\.1):(\d+)/", line)
+    if not m:
+        proc.kill()
+        raise AssertionError("server 沒印出監聽位址：%r %s" % (line, proc.stderr.read()))
+    for _ in range(50):
+        try:
+            urllib.request.urlopen("http://127.0.0.1:%s/healthz" % m.group(2), timeout=1); break
+        except (urllib.error.URLError, ConnectionError):
+            time.sleep(0.05)
+    return proc, m.group(1), int(m.group(2))
+
+
 class ServerTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -53,22 +72,8 @@ class ServerTest(unittest.TestCase):
         cls.fixture = cls.tmp / "collect.json"
         cls.fixture.write_text(json.dumps({"generated_at": "t", "scopes": [], "cards": [{"slug": "x"}], "unmatched_agents": [], "errors": []}))
         env = dict(os.environ, HERDR_ENV="1", OPSX_STATE_DIR=str(cls.state), OPSX_TEST_OPSX=str(shim), PATH=f"{shim_dir}:{os.environ['PATH']}")
-        cls.proc = subprocess.Popen(
-            [sys.executable, "-I", str(SERVER), "--port", "0", "--collect", str(cls.fixture)],
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env, text=True,
-        )
-        line = cls.proc.stdout.readline()
-        m = re.search(r"http://(127\.0\.0\.1):(\d+)/", line)
-        if not m:
-            cls.proc.kill()
-            raise AssertionError("server 沒印出監聽位址：%r %s" % (line, cls.proc.stderr.read()))
-        cls.host, cls.port = m.group(1), int(m.group(2))
+        cls.proc, cls.host, cls.port = start_server(env, cls.fixture)
         cls.base = "http://127.0.0.1:%d" % cls.port
-        for _ in range(50):
-            try:
-                urllib.request.urlopen(cls.base + "/healthz", timeout=1); break
-            except (urllib.error.URLError, ConnectionError):
-                time.sleep(0.05)
         cls.token = (cls.state / "board-token").read_text().strip()
 
     @classmethod
@@ -243,6 +248,44 @@ class ServerTest(unittest.TestCase):
         status, _, body = self.req("/healthz")
         self.assertEqual(status, 200)
         self.assertEqual(json.loads(body)["ok"], True)
+
+
+class NoHerdrTest(unittest.TestCase):
+    """server 不在 herdr 裡（HERDR_ENV 沒設）：最後輸出回 ok false，不叫 herdr（specs/board-log「herdr 不可用」）。"""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = pathlib.Path(tempfile.mkdtemp(prefix="opsx-server-noherdr."))
+        state = cls.tmp / "state"
+        state.mkdir()
+        shim_dir = cls.tmp / "bin"
+        shim_dir.mkdir()
+        cls.herdr_log = cls.tmp / "herdr.log"
+        herdr = shim_dir / "herdr"
+        herdr.write_text("#!/usr/bin/env bash\n" f'printf "%s\\n" "$*" >> "{cls.herdr_log}"\n' 'printf "line\\n"\n')
+        herdr.chmod(0o755)
+        fixture = cls.tmp / "collect.json"
+        fixture.write_text(json.dumps({"generated_at": "t", "scopes": [], "cards": [], "unmatched_agents": [], "errors": []}))
+        env = {k: v for k, v in os.environ.items() if k != "HERDR_ENV"}
+        env.update(OPSX_STATE_DIR=str(state), PATH=f"{shim_dir}:{os.environ['PATH']}")
+        cls.proc, _, port = start_server(env, fixture)
+        cls.base = "http://127.0.0.1:%d" % port
+        cls.token = (state / "board-token").read_text().strip()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.proc.kill()
+        cls.proc.wait()
+
+    def test_output_outside_herdr(self):
+        r = urllib.request.Request(self.base + "/api/output?pane=w5%3ApH")
+        r.add_header("X-Opsx-Token", self.token)
+        with urllib.request.urlopen(r, timeout=5) as resp:
+            self.assertEqual(resp.status, 200)
+            out = json.loads(resp.read().decode())
+        self.assertFalse(out["ok"])
+        self.assertIn("HERDR_ENV", out["error"])
+        self.assertFalse(self.herdr_log.exists(), "不在 herdr 裡就不該叫 herdr")
 
 
 if __name__ == "__main__":
