@@ -2,6 +2,7 @@
 # opsx timeline [--root ~/code] [--state <dir>] [--since <iso>]：跨卡時間軸，印一份 JSON，不寫檔。
 # 輸出 {generated_at, last_seen, events[], errors[]}，events 由新到舊；同一秒的列，檔案裡後寫的在前。
 # 每個 event：{ts, repo, slug, archived, who, tag, text, evidence, source}。specs/opsx-log/spec.md「時間軸」。
+# 另讀 <state>/sync.log，一列一個 source: sync 事件（evidence 是來源名，new 是新卡數）。
 # 讀全部 archive，不套 collect 的張數上限。不是五欄新格式的列 tag 記「其他」、text 是整列原文。
 # repo 的判準跟 collect 一樣：<root>/<name>/openspec/changes 存在，而且 <name>/.git 是目錄。
 
@@ -64,6 +65,22 @@ for repo_dir in sorted(p for p in root.iterdir() if (p / "openspec" / "changes")
             card_events(repo_dir.name, f, f.parent.name, False)
     for f in sorted(changes.glob("archive/*/decisions.tsv")):
         card_events(repo_dir.name, f, re.sub(r"^\d{4}-\d{2}-\d{2}-", "", f.parent.name), True)
+
+sync_path = state / "sync.log"
+if sync_path.is_file():
+    try:
+        sync_lines = sync_path.read_text(encoding="utf-8").split("\n")
+    except (OSError, UnicodeDecodeError) as e:
+        errors.append({"source": str(sync_path), "message": str(e)}); sync_lines = []
+    for i, line in enumerate(sync_lines):
+        cols = line.split("\t")
+        t = when(cols[0])
+        if len(cols) != 4 or t is None or not cols[2].isdigit():
+            if line.strip():
+                errors.append({"source": "%s:%d" % (sync_path, i + 1), "message": "不是 ts · source · 新卡數 · 文字：%s" % line})
+            continue
+        events.append(((True, t, str(sync_path), i), {"ts": cols[0], "repo": None, "slug": None, "archived": False, "who": "系統",
+                       "tag": "同步", "text": cols[3], "evidence": cols[1], "new": int(cols[2]), "source": "sync"}))
 
 if since is not None:
     events = [e for e in events if e[0][0] and e[0][1] > since]

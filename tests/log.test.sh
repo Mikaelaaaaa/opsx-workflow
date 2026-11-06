@@ -52,4 +52,14 @@ assert e == {**e, "repo": "Agentory-AI", "slug": "eval-core", "archived": False,
              "text": "選了 SQLite", "evidence": "bench.txt", "source": "decisions"}, e
 assert d["errors"] == [] and d["last_seen"] is None, d
 PY
+
+# --sync：寫 <state>/sync.log 一列四欄；新卡數要是非負整數
+opsx log --sync gitlab 3 "Agentory-CS 三張新 issue" || fail "sync rc"
+assert_eq "$(tail -1 "$OPSX_STATE_DIR/sync.log" | cut -f2-4)" $'gitlab\t3\tAgentory-CS 三張新 issue'
+assert_eq "$(tail -1 "$OPSX_STATE_DIR/sync.log" | awk -F'\t' '{print NF}')" 4
+cp "$OPSX_STATE_DIR/sync.log" "$FX/sync-before"
+assert_rc 2 opsx log --sync gitlab many "x"
+assert_rc 2 opsx log --sync gitlab -1 "x"
+assert_rc 2 opsx log --sync "" 1 "x"
+cmp -s "$OPSX_STATE_DIR/sync.log" "$FX/sync-before" || fail "sync.log 不該變"
 echo ok

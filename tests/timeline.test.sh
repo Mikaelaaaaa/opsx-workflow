@@ -53,4 +53,16 @@ assert_rc 2 opsx timeline --root "$FX" --since 昨天
 # last-seen
 mkdir -p "$OPSX_STATE_DIR"; printf '2026-11-06T09:00:00+08:00\n' > "$OPSX_STATE_DIR/last-seen"
 assert_eq "$(opsx timeline --root "$FX" | python3 -I -c 'import json,sys;print(json.load(sys.stdin)["last_seen"])')" "2026-11-06T09:00:00+08:00"
+
+# sync.log 的列變成 source: sync 事件；範圍外（沒有 repo）
+printf '2026-11-06T13:00:00+08:00\tgitlab\t3\t三張新 issue\n2026-11-06T13:05:00+08:00\tdebt\t0\t掃到 2 處 shortcut\n' > "$OPSX_STATE_DIR/sync.log"
+opsx timeline --root "$FX" --since 2026-11-06T12:59:00+08:00 > "$FX/sync.json" || fail "sync rc"
+python3 -I - "$FX/sync.json" <<'PY' || fail "sync events"
+import json, sys
+ev = [e for e in json.load(open(sys.argv[1]))["events"] if e["source"] == "sync"]
+assert len(ev) == 2, ev
+d, g = ev
+assert (g["repo"], g["slug"], g["who"], g["tag"], g["new"], g["text"], g["evidence"]) == (None, None, "系統", "同步", 3, "三張新 issue", "gitlab"), g
+assert d["new"] == 0 and d["evidence"] == "debt", d
+PY
 echo ok

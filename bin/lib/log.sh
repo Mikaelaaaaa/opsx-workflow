@@ -17,7 +17,19 @@ log_row() { # <card dir> <who> <tag> <文字> [證據]
   printf '%s\t%s\t%s\t%s\t%s\n' "$(now_iso)" "$(log_cell "$who")" "$tag" "$(log_cell "$text")" "$(log_cell "$ev")" >> "$d/decisions.tsv"
 }
 
+sync_row() { # <source> <新卡數> <文字>
+  [ -n "$1" ] || die "log --sync: source 不能是空的"
+  case "$2" in ""|*[!0-9]*) die "log --sync: 新卡數要是非負整數，收到「${2}」" ;; esac
+  [ -n "$3" ] || die "log --sync: 文字不能是空的"
+  mkdir -p "$OPSX_STATE_DIR"
+  printf '%s\t%s\t%s\t%s\n' "$(now_iso)" "$(log_cell "$1")" "$2" "$(log_cell "$3")" >> "$OPSX_STATE_DIR/sync.log"
+}
+
 opsx_log() {
+  if [ "${1:-}" = --sync ]; then
+    [ $# -eq 4 ] || die "log: 用法 opsx log --sync <source> <新卡數> <文字>"
+    sync_row "$2" "$3" "$4"; return
+  fi
   local top="" args=()
   while [ $# -gt 0 ]; do
     case "$1" in --repo) top="$2"; shift 2 ;; *) args+=("$1"); shift ;; esac
