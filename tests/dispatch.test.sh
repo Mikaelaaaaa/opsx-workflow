@@ -175,4 +175,12 @@ python3 -I -c 'import json,sys;p=sys.argv[1];d=json.load(open(p));e=d["Agentory-
 out="$(opsx dispatch retry-backoff --agent claude --mode autopilot 2>&1)" || fail "redispatch 代管卡: $out"
 python3 -I -c 'import json,sys;e=json.load(open(sys.argv[1]))["Agentory-CS/retry-backoff"];assert "via" not in e and "herdr_name" not in e and e["mode"]=="autopilot",e' "$OPSX_STATE_DIR/dispatch.json" || fail "重派要整筆改寫"
 assert_grep '^agent start retry-backoff ' "$OPSX_FAKE_LOG"
+
+# --- herdr 名不撞（auto-dispatch 4.3）：還在跑的代管卡的 herdr_name 是 coord，就不准再派一張叫 coord 的卡 ---
+mkdir -p "$R/openspec/changes/coord"; printf 'schema: opsx\nkind: dev\n' > "$R/openspec/changes/coord/.openspec.yaml"
+python3 -I -c 'import json,sys;p=sys.argv[1];d=json.load(open(p));d["Other-Repo/kid"]={"mode":"autopilot","pane":"w9:p1","via":"coord","herdr_name":"coord"};json.dump(d,open(p,"w"))' "$OPSX_STATE_DIR/dispatch.json"
+: > "$OPSX_FAKE_LOG"
+out="$(opsx dispatch coord --agent claude --mode autopilot 2>&1)"; [ $? -eq 2 ] || fail "slug 撞到 herdr_name 要拒絕: $out"
+echo "$out" | grep -q 'Other-Repo/kid' || fail "要說撞到哪一筆: $out"
+assert_eq "$(cat "$OPSX_FAKE_LOG")" "" "拒絕時不碰 herdr"
 echo ok
