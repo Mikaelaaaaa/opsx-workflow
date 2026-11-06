@@ -186,6 +186,10 @@ cd "$R"
 ORIGIN="$FX/origin3.git"; git init -q --bare "$ORIGIN"
 R3="$(mk_repo solo "$ORIGIN")"; git -C "$R3" branch -M main; git -C "$R3" push -q origin main
 printf 'openspec/\n' >> "$R3/.git/info/exclude"    # 跟真的 repo 一樣，openspec/ 不進 git
+# 6.3：像 Agentory-AI 一樣，gitlab 是主要 remote，origin 是落後的鏡像；父卡的合併只在 gitlab 的 main 上
+git clone -q --bare "$ORIGIN" "$FX/mirror3.git"
+git -C "$R3" remote rename origin gitlab; git -C "$R3" remote add origin "$FX/mirror3.git"
+git clone -q "$ORIGIN" "$FX/pusher3"; git -C "$FX/pusher3" -c user.email=t@t -c user.name=t commit -q --allow-empty -m "merge p"; git -C "$FX/pusher3" push -q origin HEAD:main
 mk_change "$R3" p; mkdir -p "$R3/openspec/changes/c"
 printf 'schema: opsx\nkind: dev\n' > "$R3/openspec/changes/c/.openspec.yaml"; printf -- '- [ ] 1.1 x\n' > "$R3/openspec/changes/c/tasks.md"
 cat > "$R3/openspec/workplan.yaml" <<'EOF'
@@ -220,17 +224,42 @@ assert_eq "$(jq -r '."solo/c" // "none"' "$OPSX_STATE_DIR/dispatch.json")" none 
 mv "$R3/stray.txt" "$FX/"   # 把 tree 弄回乾淨
 
 # 子卡 branch 被別棵 worktree 佔用（3.3）
-: > "$R3/openspec/changes/c/decisions.tsv"; git -C "$R3" worktree add -q "$FX/other-wt" -b feat/c/mikaela main
+: > "$R3/openspec/changes/c/decisions.tsv"; git -C "$R3" worktree add -q "$FX/other-wt" -b feat/c/mikaela main; : > "$OPSX_FAKE_LOG"
 out="$(opsx chain p 2>&1)"; assert_eq "$?" 0 "branch 被佔: $out"
 assert_eq "$(git -C "$R3" branch --show-current)" "feat/p/mikaela"; assert_no_file "$Q"
+assert_eq "$(cat "$OPSX_FAKE_LOG")" "" "branch 被佔不碰 herdr"
 assert_grep "$(cd "$FX" && pwd -P)/other-wt" "$R3/openspec/changes/c/decisions.tsv"
 git -C "$R3" worktree remove -f "$FX/other-wt"; git -C "$R3" branch -q -D feat/c/mikaela
+
+# 子卡 branch 本地已存在（6.5）：不接，不切到可能過時的舊 branch
+: > "$R3/openspec/changes/c/decisions.tsv"; git -C "$R3" branch -q feat/c/mikaela main
+out="$(opsx chain p 2>&1)"; assert_eq "$?" 0 "branch 已存在: $out"
+assert_eq "$(git -C "$R3" branch --show-current)" "feat/p/mikaela" "branch 已存在不切"; assert_no_file "$Q"
+assert_grep "本地已存在" "$R3/openspec/changes/c/decisions.tsv"
+git -C "$R3" branch -q -D feat/c/mikaela
+
+# workplan 的 PR 沒有 branch（6.2）：拒絕並說出是哪個 PR，什麼都不動
+cp "$R3/openspec/workplan.yaml" "$FX/wp3.bak"; grep -v 'branch: feat/c/mikaela' "$FX/wp3.bak" > "$R3/openspec/workplan.yaml"
+cp "$OPSX_STATE_DIR/dispatch.json" "$FX/disp.before"
+out="$(opsx chain p 2>&1)"; [ $? -ne 0 ] || fail "PR 沒有 branch 要拒絕: $out"
+echo "$out" | grep -q 'branch' && echo "$out" | grep -q '「c」' || fail "要說是 PR c 沒有 branch: $out"
+assert_eq "$(git -C "$R3" branch --show-current)" "feat/p/mikaela"; assert_no_file "$Q"
+cmp -s "$OPSX_STATE_DIR/dispatch.json" "$FX/disp.before" || fail "PR 沒有 branch 不該動 dispatch.json"
+cp "$FX/wp3.bak" "$R3/openspec/workplan.yaml"
+
+# 寫 dispatch.json 失敗（6.4）：chain 要失敗，不寫佇列（lock 檔換成目錄，jsonfile.update 打不開）
+mkdir "$OPSX_STATE_DIR/dispatch.json.lock"
+out="$(opsx chain p 2>&1)"; [ $? -ne 0 ] || fail "寫 dispatch.json 失敗要讓 chain 失敗: $out"
+assert_no_file "$Q"
+rmdir "$OPSX_STATE_DIR/dispatch.json.lock"
+git -C "$R3" switch -q feat/p/mikaela; git -C "$R3" branch -q -D feat/c/mikaela 2>/dev/null || true
 
 # 乾淨 tree（3.2）：切到子卡 branch（不帶 tracking）、登記、寫佇列；chain 自己不叫 herdr
 : > "$R3/openspec/changes/c/decisions.tsv"; : > "$OPSX_FAKE_LOG"
 out="$(opsx chain p 2>&1)"; assert_eq "$?" 0 "單一續接: $out"
 assert_eq "$(git -C "$R3" branch --show-current)" "feat/c/mikaela" "切到子卡 branch"
 assert_eq "$(git -C "$R3" config --get branch.feat/c/mikaela.remote || echo none)" none "不帶 upstream tracking"
+assert_eq "$(git -C "$R3" log -1 --format=%s)" "merge p" "從主要 remote（gitlab）的 main 開，含父卡的合併（6.3）"
 assert_eq "$(cat "$OPSX_FAKE_LOG")" "" "chain 不叫 herdr（D5）"
 assert_eq "$(cat "$Q")" "$(printf 'rename\tp\tc\nprompt\tc\t/apply c')" "佇列"
 J="$OPSX_STATE_DIR/dispatch.json"

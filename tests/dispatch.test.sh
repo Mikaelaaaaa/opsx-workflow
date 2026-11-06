@@ -183,4 +183,9 @@ python3 -I -c 'import json,sys;p=sys.argv[1];d=json.load(open(p));d["Other-Repo/
 out="$(opsx dispatch coord --agent claude --mode autopilot 2>&1)"; [ $? -eq 2 ] || fail "slug 撞到 herdr_name 要拒絕: $out"
 echo "$out" | grep -q 'Other-Repo/kid' || fail "要說撞到哪一筆: $out"
 assert_eq "$(cat "$OPSX_FAKE_LOG")" "" "拒絕時不碰 herdr"
+
+# --- 已交接的條目不算撞名（auto-dispatch 6.1）：續接後父卡那筆留著 herdr_name，子卡停掉後要能重派 ---
+mkdir -p "$R/openspec/changes/coord2"; printf 'schema: opsx\nkind: dev\n' > "$R/openspec/changes/coord2/.openspec.yaml"
+python3 -I -c 'import json,sys;p=sys.argv[1];d=json.load(open(p));d["Other-Repo/old"]={"mode":"autopilot","pane":"w9:p2","herdr_name":"coord2","handed_to":["coord2"]};json.dump(d,open(p,"w"))' "$OPSX_STATE_DIR/dispatch.json"
+out="$(opsx dispatch coord2 --agent claude --mode autopilot 2>&1)" || fail "已交接的條目不該擋重派: $out"
 echo ok
