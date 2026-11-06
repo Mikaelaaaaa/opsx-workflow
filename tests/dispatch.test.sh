@@ -50,6 +50,13 @@ out="$(cd "$R4" && opsx dispatch retry-backoff --agent claude --mode autopilot -
 echo "$out" | grep -q 'Agentory-CS/retry-backoff' || fail "要指名撞到哪張: $out"
 assert_grep 'dispatched' "$R/openspec/changes/retry-backoff/decisions.tsv"
 
+# --- 同一張卡還在跑就再派：拒絕，說它在哪（herdr 本來就會回 agent_name_taken；板上「指派」按到舊畫面就是這條） ---
+: > "$OPSX_FAKE_LOG"
+out="$(opsx dispatch retry-backoff --agent claude --mode autopilot 2>&1)"; [ $? -eq 2 ] || fail "active card must be refused: $out"
+echo "$out" | grep -q 'agnetory-ai · w1:tB · w1:pE' || fail "要說它在哪: $out"
+echo "$out" | grep -q 'opsx stop retry-backoff' || fail "要說怎麼換人: $out"
+assert_eq "$(cat "$OPSX_FAKE_LOG")" "" "拒絕時不碰 herdr"
+
 # --- agent start 回 agent_pane_busy（shell 還沒到 prompt）：同一個 pane 重試；一直 busy 就關 tab ---
 export OPSX_DISPATCH_RETRY_SLEEP=0
 mkdir -p "$R/openspec/changes/busy-card"; printf 'schema: opsx\n' > "$R/openspec/changes/busy-card/.openspec.yaml"
@@ -73,6 +80,12 @@ python3 -I -c 'import json,sys;assert "Agentory-CS/stuck-card" not in json.load(
 out="$(OPSX_TEST_START_FAIL=agent_kind_unsupported opsx dispatch stuck-card --agent claude --mode interactive --kind dev 2>&1)"; [ $? -ne 0 ] || fail "other error must fail"
 assert_eq "$(grep -c '^agent start stuck-card ' "$OPSX_FAKE_LOG")" 1 "non-busy error is not retried"
 assert_grep '^tab close w1:tB$' "$OPSX_FAKE_LOG"
+# herdr 還留著同名 agent 而 dispatch.json 沒記（手動開的 / stop 沒關成）：關 tab，錯誤裡印它的 workspace · tab · pane
+: > "$OPSX_FAKE_LOG"
+out="$(OPSX_TEST_START_FAIL=agent_name_taken opsx dispatch stuck-card --agent claude --mode interactive --kind dev 2>&1)"; [ $? -ne 0 ] || fail "name taken must fail"
+echo "$out" | grep -q 'workspace_id=w9 tab_id=w9:t1' && echo "$out" | grep -q 'pane_id=w9:p1' || fail "要印出同名 agent 在哪: $out"
+assert_grep '^tab close w1:tB$' "$OPSX_FAKE_LOG"
+python3 -I -c 'import json,sys;assert "Agentory-CS/stuck-card" not in json.load(open(sys.argv[1]))' "$OPSX_STATE_DIR/dispatch.json"
 unset OPSX_TEST_BUSY_LEFT
 
 # --- Claude 在新 worktree 停在 trust 對話框（agent_not_ready）：dispatch 替人按 Yes，再等 idle ---
@@ -100,15 +113,17 @@ assert_grep '^tab close w1:tB$' "$OPSX_FAKE_LOG"
 echo "$out" | grep -q 'Please log in' || fail "error should show the pane: $out"
 unset OPSX_TEST_NOT_READY_ONCE OPSX_TEST_PANE_TEXT
 
-# --- 重派同一張卡：worktree 已在就重用，不報錯 ---
+# --- stop 過的卡重派：worktree 已在就重用，不報錯 ---
+opsx stop retry-backoff >/dev/null 2>&1 || fail "stop before redispatch"
 : > "$OPSX_FAKE_LOG"
 out="$(opsx dispatch retry-backoff --agent codex --mode interactive 2>&1)" || fail "redispatch: $out"
 assert_grep '^agent start retry-backoff --kind codex --pane w1:pE -- -a on-request -s workspace-write$' "$OPSX_FAKE_LOG"
+python3 -I -c 'import json,sys;d=json.load(open(sys.argv[1]))["Agentory-CS/retry-backoff"];assert d["agent"]=="codex" and d["model"]=="gpt-5" and d["mode"]=="interactive",d' "$OPSX_STATE_DIR/dispatch.json" || fail "redispatch must rewrite the entry"
 # interactive 的 claude 也要 --add-dir（互動模式一樣在沙盒裡）
+opsx stop retry-backoff >/dev/null 2>&1 || fail "stop before redispatch"
 : > "$OPSX_FAKE_LOG"
 opsx dispatch retry-backoff --agent claude --mode interactive >/dev/null 2>&1 || fail "redispatch interactive claude"
 assert_grep "^agent start retry-backoff --kind claude --pane w1:pE -- --model claude-sonnet-5-5 --add-dir $R/openspec --add-dir $OPSX_STATE_DIR\$" "$OPSX_FAKE_LOG"   # kind 已是 bug-fix → sonnet
-python3 -I -c 'import json,sys;d=json.load(open(sys.argv[1]))["Agentory-CS/retry-backoff"];assert d["agent"]=="codex" and d["model"]=="gpt-5" and d["mode"]=="interactive",d' "$OPSX_STATE_DIR/dispatch.json"
 
 # --- 沒掛 workspace 的 repo → 開新 workspace 並記下來 ---
 R2="$(mk_repo scam-guard https://github.com/Mikaelaaaaa/scam-guard.git)"
