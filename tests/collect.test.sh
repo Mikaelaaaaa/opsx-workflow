@@ -194,7 +194,8 @@ printf 'schema: spec-driven\n' > "$D/.openspec.yaml"
 printf '# report\n\n## MR\nhttps://gitlab.tsg-navigator.com/agentory/r3/-/merge_requests/4242\n' > "$D/report.md"
 : > "$FX/glab-empty.json"; : > "$OPSX_FAKE_LOG"
 J="$(OPSX_TEST_GLAB_JSON="$FX/glab-empty.json" OPSX_TEST_GLAB_JSON_BY_IID= opsx collect --root "$R3")"; assert_eq "$?" 0
-grep -q 4242 "$OPSX_FAKE_LOG" && fail "舊卡不該查 MR：$(cat "$OPSX_FAKE_LOG")"
+[ ! -s "$OPSX_FAKE_LOG" ] || fail "只有舊卡的 repo 不該叫 glab / gh：$(cat "$OPSX_FAKE_LOG")"
 assert_eq "$(q "$J" legacy)" '{"r3": 1}'
-q "$J" errors | grep -q 'legacy-mr' && fail "errors 不該指名舊卡：$(q "$J" errors)"
+E="$(q "$J" errors)" || fail "errors 讀不到：$J"
+case "$E" in *legacy-mr*|*glab*) fail "errors 不該指名舊卡：$E" ;; esac
 echo ok
