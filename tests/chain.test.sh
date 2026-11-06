@@ -116,4 +116,58 @@ got="$(python3 -I -c 'import sys; sys.path.insert(0, sys.argv[1]); import chain,
 w = chain.load_workplan(sys.argv[2]); prs = w["features"][0]["prs"]
 print(json.dumps([prs[0]["branch"], prs[0]["status"], prs[0]["depends-on"], prs[0]["description"], prs[1]["depends-on"], prs[1]["changes"]], ensure_ascii=False))' "$OPSX_ROOT/bin/lib" "$FX/wp.yaml")"
 assert_eq "$got" '["feat/a/m", "merged", [], "有 # 號的描述", ["a", "c"], []]' "workplan 解析"
+
+# --- 多張子卡全部 fan out（4.1）：登記代管條目，不切 branch、不改名、不碰 herdr ---
+R2="$(mk_repo fan)"; mk_change "$R2" p
+cat > "$R2/openspec/workplan.yaml" <<'EOF'
+features:
+  - name: x
+    prs:
+      - name: p
+        branch: feat/p/mikaela
+        status: merged
+        changes:
+          - name: p
+            status: done
+      - name: c1
+        branch: feat/c1/mikaela
+        status: pending
+        depends-on: [p]
+        changes:
+          - name: c1
+            status: pending
+      - name: c2
+        branch: feat/c2/mikaela
+        status: pending
+        depends-on: [p]
+        changes:
+          - name: c2
+            status: pending
+EOF
+for s in c1 c2; do mkdir -p "$R2/openspec/changes/$s"; printf -- '- [ ] 1.1 x\n' > "$R2/openspec/changes/$s/tasks.md"; done
+printf 'schema: opsx\nkind: bug-fix\n' > "$R2/openspec/changes/c1/.openspec.yaml"; printf 'schema: opsx\nkind: dev\n' > "$R2/openspec/changes/c2/.openspec.yaml"
+fanout_entry() { printf '{"fan/p":{"mode":"%s","pane":"w5:pQ","tab":"w5:tJ","workspace":"opsx","workspace_id":"w5","agent":"claude","model":"claude-opus-5-5","kind":"dev","grants":[],"worktree":"%s","branch":"feat/p/mikaela","started_at":"2026-11-06T13:00:00+08:00","drive_pid":null}}' "$1" "$R2" > "$OPSX_STATE_DIR/dispatch.json"; }
+fanout_entry autopilot; : > "$OPSX_FAKE_LOG"; cd "$R2"
+out="$(opsx chain p 2>&1)"; assert_eq "$?" 0 "fan-out: $out"
+echo "$out" | grep -q 'c1' && echo "$out" | grep -q 'c2' || fail "stdout 要列出 c1、c2: $out"
+assert_eq "$(cat "$OPSX_FAKE_LOG")" "" "fan-out 不碰 herdr（pane 不改名）"
+assert_eq "$(git -C "$R2" branch --show-current)" "feat/p/mikaela" "fan-out 不切 branch"
+J="$OPSX_STATE_DIR/dispatch.json"
+for s in c1 c2; do
+  assert_eq "$(jq -r --arg k "fan/$s" '.[$k] | [.via, .herdr_name, .pane, .tab, .workspace_id, .agent, .mode, (.worktree|tostring)] | join(" ")' "$J")" "p p w5:pQ w5:tJ w5 claude autopilot null" "$s 的代管條目"
+  assert_grep "自動派：因 p merged" "$R2/openspec/changes/$s/decisions.tsv"
+done
+assert_eq "$(jq -r '."fan/c1" | [.branch, .kind, .model] | join(" ")' "$J")" "feat/c1/mikaela bug-fix claude-sonnet-5-5" "c1 的 branch / kind / 照 kind 的 model"
+assert_eq "$(jq -r '."fan/c2" | [.branch, .kind, .model] | join(" ")' "$J")" "feat/c2/mikaela dev claude-opus-5-5"
+assert_eq "$(jq -r '."fan/p".handed_to | join(",")' "$J")" "c1,c2" "父卡要記交接給誰"
+jq -e '."fan/p".handed_at | startswith("20")' "$J" >/dev/null || fail "父卡要有 handed_at"
+cp "$J" "$FX/disp.before"; out="$(opsx chain p 2>&1)"; assert_eq "$?" 0; cmp -s "$J" "$FX/disp.before" || fail "已交接再跑不該動 dispatch.json"
+
+# 父卡是 drive：代管卡沒有自己的 agent 可以讓 drive 送話，改記 autopilot 並寫進 decisions
+for s in c1 c2; do : > "$R2/openspec/changes/$s/decisions.tsv"; done
+fanout_entry drive
+out="$(opsx chain p 2>&1)"; assert_eq "$?" 0 "drive fan-out: $out"
+assert_eq "$(jq -r '[."fan/c1".mode, ."fan/c2".mode] | join(" ")' "$J")" "autopilot autopilot"
+for s in c1 c2; do assert_grep "drive 不支援代管卡" "$R2/openspec/changes/$s/decisions.tsv"; done
+cd "$R"
 echo ok
