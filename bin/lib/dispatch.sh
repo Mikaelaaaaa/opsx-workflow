@@ -49,10 +49,7 @@ PY
   else printf 'kind: %s\n' "$kind" >> "$d/.openspec.yaml"; fi
 
   # model：沒給就照 kind
-  if [ -z "$model" ]; then
-    if [ "$agent" = codex ]; then model=gpt-5
-    else case "$kind" in dev|refactoring|perf|experiment) model=claude-opus-5-5 ;; *) model=claude-sonnet-5-5 ;; esac; fi
-  fi
+  [ -n "$model" ] || model="$(default_model "$agent" "$kind")"
 
   # branch：workplan 有就用，沒有就 {type}/{slug}/{user}
   local branch; branch="$(workplan_branch "$top" "$slug")"

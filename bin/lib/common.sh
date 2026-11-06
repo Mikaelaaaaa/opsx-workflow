@@ -41,4 +41,10 @@ append_line_once() { # <file> <line>
   grep -qxF -- "$2" "$1" || printf '%s\n' "$2" >> "$1"
 }
 
+# agent 沒指定 model 時照 kind 給：要想的用 opus，照表操課的用 sonnet。dispatch 和 chain 共用
+default_model() { # <agent> <kind>
+  if [ "$1" = codex ]; then printf 'gpt-5\n'; return; fi
+  case "$2" in dev|refactoring|perf|experiment) printf 'claude-opus-5-5\n' ;; *) printf 'claude-sonnet-5-5\n' ;; esac
+}
+
 interactive() { [ -z "${OPSX_NONINTERACTIVE:-}" ] && [ -t 0 ]; }
