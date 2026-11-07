@@ -417,6 +417,11 @@ function renderInbox(){
 const LOG_FILTERS=[['all','全部'],['you','你回的'],['agent','替你做的決定'],['merge','指派與合併']];
 const MERGE_TAGS=['已指派','已停止','已合併'];
 const TAG_BADGE={'已合併':'ok','已允許':'ok','已決定':'ok','替你決定':'data','已指派':'accent','已停止':'line','同步':'line','驗證':'ok','其他':'line'};
+const LOG_PAGE=200;
+ui.logLimit=LOG_PAGE;
+function logMore(){ui.logLimit+=LOG_PAGE;}
+function setLogFilter(f){ui.logFilter=f;ui.logLimit=LOG_PAGE;}
+function setScope(scope,ws,repo){ui.scope=scope;ui.ws=ws;ui.repo=repo;ui.logLimit=LOG_PAGE;}
 function evInScope(e){return e.repo?inScope(e):ui.scope==='all';}
 function evKeep(e){
   const f=ui.logFilter;
@@ -437,10 +442,19 @@ function renderLog(){
   if(!tl)return h+'<div class="empty">載入中…</div>';
   const keep=tl.events.filter(e=>evInScope(e)&&evKeep(e));
   if(!keep.length)return h+'<div class="empty">沒有符合的紀錄</div>';
-  const days=[];for(const e of keep){const d=dayOf(e.ts);const g=days[days.length-1];if(g&&g.d===d)g.ev.push(e);else days.push({d,ev:[e]});}
+  const shown=keep.slice(0,ui.logLimit);
+  const days=[];for(const e of shown){const d=dayOf(e.ts);const g=days[days.length-1];if(g&&g.d===d)g.ev.push(e);else days.push({d,ev:[e]});}
   h+=days.map(g=>`<div class="day">${esc(g.d)} · ${g.ev.length}</div><section class="panel" style="margin-top:0">${g.ev.map(evRow).join('')}</section>`).join('');
+  const rest=keep.length-shown.length;
+  if(rest>0)h+=`<div class="empty"><button class="ghost sm" data-act="log-more">載入更多（還有 ${rest} 列）</button></div>`;
   if(tl.errors&&tl.errors.length)h+=`<div class="empty">讀不了的檔：${tl.errors.map(x=>esc(x.source)).join('、')}</div>`;
   return h;
+}
+/* 紀錄 tab 上次寫進 #view 的 HTML。collect 每次變動都會 render()，列表一樣就不重寫，免得瀏覽器重新解析整份紀錄 */
+let viewLog=null;
+function setView(el,html,isLog){
+  if(isLog&&html===viewLog)return;
+  el.innerHTML=html;viewLog=isLog?html:null;
 }
 /* ---------- 離開期間 banner：只列 last_seen 之後有時間戳的事，加上「現在」的狀態 ---------- */
 const after=(ts,ls)=>!!ts&&Date.parse(ts)>Date.parse(ls);
@@ -499,7 +513,7 @@ function render(){
   for(const t of ['home','inbox','log'])$('#tab-'+t).setAttribute('aria-selected',ui.tab===t);
   $('#stamp').textContent=data.generated_at?'collect '+ago(data.generated_at):'';
   const y=window.scrollY;const typing=document.activeElement&&document.activeElement.classList.contains('drop-reason');
-  $('#view').innerHTML=ui.tab==='inbox'?renderInbox():ui.tab==='log'?renderLog():renderHome();
+  setView($('#view'),ui.tab==='inbox'?renderInbox():ui.tab==='log'?renderLog():renderHome(),ui.tab==='log');
   window.scrollTo(0,y);
   /* 5 秒重拉會重畫：打到一半的捨棄理由把焦點還回去 */
   if(typing){const i=$('.drop-reason');if(i){i.focus();i.setSelectionRange(i.value.length,i.value.length);}}
@@ -672,7 +686,8 @@ document.addEventListener('click',e=>{
     if(a==='file'){fileUnfiled(btn.closest('[data-unfiled]'));return;}
     if(a==='drop-open'){ui.drop=btn.dataset.drop;ui.dropText='';render();const i=$('.drop-reason');if(i)i.focus();return;}
     if(a==='banner-close'){closeBanner();return;}
-    if(a==='logf'){ui.logFilter=btn.dataset.f;render();return;}
+    if(a==='logf'){setLogFilter(btn.dataset.f);render();return;}
+    if(a==='log-more'){logMore();render();return;}
     if(a==='ev-open'){if(!byKey(btn.dataset.key)){toast(btn.dataset.key+' 不在首頁（archive 只列最新的幾張）',true);return;}showTab('home');openDrawer(btn.dataset.key);return;}
     if(!c)return;
     if(a==='open'){openDrawer(k);return;}
@@ -691,7 +706,7 @@ document.addEventListener('click',e=>{
   const tb=e.target.closest('#tab-home,#tab-inbox,#tab-log');
   if(tb){showTab(tb.id.slice(4));return;}
   const mi=e.target.closest('#menu [data-ws]');
-  if(mi){ui.scope='ws';ui.ws=mi.dataset.ws||null;ui.repo=mi.dataset.repo||null;closeMenu();render();return;}
+  if(mi){setScope('ws',mi.dataset.ws||null,mi.dataset.repo||null);closeMenu();render();return;}
   if(rowEl){openDrawer(rowEl.dataset.key);return;}
   if(e.target.id==='scrim'){if(!$('#dialog').hidden)closeDispatch();else closeDrawer();return;}
   if(!e.target.closest('#menu'))closeMenu();
@@ -720,7 +735,7 @@ function move(d){
   const el=document.querySelector(`#view .row[data-key="${CSS.escape(ui.sel)}"]`);if(el)el.scrollIntoView({block:'nearest'});
 }
 $('#new-open').onclick=openNew;
-$('#scope-all').onclick=()=>{ui.scope='all';ui.repo=null;closeMenu();render();};
+$('#scope-all').onclick=()=>{setScope('all',ui.ws,null);closeMenu();render();};
 $('#scope-ws').onclick=e=>{e.stopPropagation();if($('#menu').hidden)openMenu(e.currentTarget);else closeMenu();};
 
 /* ---------- 重新整理：上一次回來才排下一次（collect 慢時不會疊請求）；分頁藏起來就不拉；
@@ -733,7 +748,7 @@ async function refresh(force){
     if(force||raw!==lastRaw){lastRaw=raw;data=j;render();}
     else{data.generated_at=generated_at;$('#stamp').textContent='collect '+ago(generated_at);}
   }catch(e){
-    if(!lastRaw)$('#view').innerHTML=`<div class="empty" style="color:var(--danger)">${esc(e.message)}</div>`;
+    if(!lastRaw)setView($('#view'),`<div class="empty" style="color:var(--danger)">${esc(e.message)}</div>`,false);
     else{data.errors=[{source:'board',message:e.message}];render();}
   }finally{inflight=false;schedule();}
 }
