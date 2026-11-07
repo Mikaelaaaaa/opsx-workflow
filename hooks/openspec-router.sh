@@ -19,6 +19,6 @@ done
 stage="$(card_stage)"
 case " $lower " in *" tdd "*|*"/tdd"*|*"tdd "*)
   slug="$(card_slug)"
-  ctx "$ev" "opsx：tdd · ${slug:-?} · 只做 apply 骨架 3b（照 tasks.md 的 驗收 / 測試 兩行寫測試含邊界，跑一次確認紅，commit test:），寫完停，不實作 · Read skills/apply/SKILL.md · skills/tdd/SKILL.md"; exit 0 ;;
+  ctx "$ev" "opsx：tdd · ${slug:-?} · 只做 apply 骨架 3b（照 tasks.md 的 驗收 / 測試 兩行寫測試含邊界，跑一次確認紅，不單獨 commit，測試留在工作區，之後跟實作同進該 change 的一個 commit），寫完停，不實作 · Read skills/apply/SKILL.md · skills/tdd/SKILL.md"; exit 0 ;;
 esac
 ctx "$ev" "opsx：$stage"
