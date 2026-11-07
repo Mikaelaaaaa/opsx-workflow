@@ -25,7 +25,8 @@ assert_dir "$CH/$Y"
 # --- 捨棄收件卡 ---
 out="$(opsx drop "$X" --repo "$A" -- 跟 y 重複 2>&1)"; assert_eq "$?" 0 "drop: $out"
 assert_no_file "$CH/$X"
-D="$CH/archive/2026-11-06-$X"; assert_dir "$D"
+# 歸檔日期是 openspec archive 取的真實今天，假 date 管不到，所以照 slug 找
+arch=("$CH"/archive/*-"$X"); assert_eq "${#arch[@]}" 1 "archive/*-$X"; D="${arch[0]}"; assert_dir "$D"
 assert_grep '^outcome: declined$' "$D/.openspec.yaml"
 assert_grep '^## 捨棄理由$' "$D/inbox.md"; assert_grep '^跟 y 重複$' "$D/inbox.md"
 assert_grep '捨棄' "$D/decisions.tsv"; assert_grep '跟 y 重複' "$D/decisions.tsv"
@@ -33,7 +34,7 @@ assert_grep $'\t你\t已決定\t捨棄：跟 y 重複\t' "$D/decisions.tsv"
 
 printf '{"a/%s":{"mode":"stopped","pane":"p4"}}' "$Y" > "$OPSX_STATE_DIR/dispatch.json"
 assert_rc 0 opsx drop "$Y" --repo "$A" -- 停了再丟
-assert_dir "$CH/archive/2026-11-06-$Y"
+arch=("$CH"/archive/*-"$Y"); assert_eq "${#arch[@]}" 1 "archive/*-$Y"; assert_dir "${arch[0]}"
 
 # --- 捨棄待分類：移到 unfiled/dropped/，不刪 ---
 U="$(opsx new -- 不需要的)"
