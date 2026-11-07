@@ -20,8 +20,7 @@ fi
 if [ ! -f "$d/report.md" ]; then
   stop_block "opsx：$slug tasks 全勾、測試綠，但還沒 review。跑 /review $slug 產 report.md 再停。"
 fi
-top="$(repo_top)"
-last_commit="$(git -C "$top" log -1 --format=%ct 2>/dev/null || echo 0)"
+last_commit="$(git -C "$(hook_cwd)" log -1 --format=%ct 2>/dev/null || echo 0)"
 report_ts="$(stat -f %m "$d/report.md" 2>/dev/null || stat -c %Y "$d/report.md" 2>/dev/null || echo 0)"
 if [ "$last_commit" -gt "$report_ts" ]; then
   stop_block "opsx：$slug 在 report.md 之後又有新 commit，review 沒涵蓋到。再跑一次 /review $slug 再停。"

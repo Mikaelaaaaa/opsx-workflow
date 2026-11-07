@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """opsx 看板的 herdr pane（最小 TUI，herdr-board D4）：同一份 `opsx collect`，一行一卡。
-按鍵：↑↓ / j k 選、Enter 跳到該卡的 pane（herdr pane focus）、r 重拉、i 展開/收起收件匣、d 展開/收起已完成、q 關。
+按鍵：↑↓ / j k 選、Enter 跳到該卡的 agent（herdr agent focus <slug>）、r 重拉、i 展開/收起收件匣、d 展開/收起已完成、q 關。
 不回 gate、不派工、不合併：那些在網頁（open-board）。排序與游標在 tui_model.py，這裡只畫。
 collect 在背景 thread 跑，畫面迴圈只讀最新一份，所以 collect 慢的時候按鍵照樣有反應。
 """

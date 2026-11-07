@@ -55,12 +55,12 @@ def rows(data: dict, done_open: bool, inbox_open: bool = False) -> list[dict]:
 
 
 def enter(row: dict) -> list[str] | None:
-    """Enter：已派出的卡回 herdr pane focus 的 argv；其他回 None（什麼都不做）。"""
+    """Enter：已派出的卡回 herdr agent focus 的 argv（agent 名 = slug）；其他回 None（什麼都不做）。"""
     if row.get("kind") != "card":
         return None
-    d = row["card"].get("dispatch") or {}
-    pane = d.get("pane")
-    return ["herdr", "pane", "focus", str(pane)] if pane else None
+    c = row["card"]
+    d = c.get("dispatch") or {}
+    return ["herdr", "agent", "focus", str(c.get("slug"))] if d.get("pane") else None
 
 
 class Cursor:

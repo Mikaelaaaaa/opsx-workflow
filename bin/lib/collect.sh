@@ -5,7 +5,7 @@
 #
 # 輸出：{generated_at, scopes[{workspace, repos[]}], repo_paths{repo: 實體路徑}, cards[], unfiled[{slug, title, source, found}],
 #       last_sync（sync.log 最後一行，沒有檔時 null）， unmatched_agents[], errors[{source,message}]}
-# 每張卡：{repo, slug, title, kind, stage, section, since, waiting, open_gates[{id, opened_at}], dispatch, status, agent_status, mr, last_output,
+# 每張卡：{repo, slug, title, kind, stage, section, since, waiting, open_gates[{id, opened_at}], dispatch, status, agent_status, mr,
 #        source, upstream, stale}
 #   section ∈ 待處理 | 進行中 | 待指派 | 收件匣 | 已完成（收件匣＝沒派出、stage 還是 explore）；waiting.type ∈ 等待授權 | 等待決定 | 可以合併 | 終端機等待輸入
 #
@@ -45,6 +45,8 @@ opsx_collect() {
     esac
   done
   [ -d "$root" ] || die "collect: --root 不是目錄：$root"
+  # generated_at 在讀任何來源前取：看板拿它當 banner 看過的資料涵蓋到的時間點，不能晚於任何一次讀取
+  local now; now="$(now_iso)"
   local work; work="$(mktemp -d "${TMPDIR:-/tmp}/opsx-collect.XXXXXX")"
   trap 'rm -rf "$work"' RETURN
 
@@ -95,7 +97,7 @@ opsx_collect() {
   fi
 
   # 讀卡的檔與全域狀態，組 JSON
-  OPSX_C_WORK="$work" OPSX_C_STATE="$state" OPSX_C_HERDR_ERR="$herdr_err" "$OPSX_PY" -I - <<'PY'
+  OPSX_C_WORK="$work" OPSX_C_STATE="$state" OPSX_C_HERDR_ERR="$herdr_err" OPSX_C_NOW="$now" "$OPSX_PY" -I - <<'PY'
 import datetime, json, os, re, sys, tomllib
 
 work, state = os.environ["OPSX_C_WORK"], os.environ["OPSX_C_STATE"]
@@ -224,8 +226,8 @@ def waiting_of(card, gates, agent_status):
 cards, matched_panes, legacy = [], set(), {}
 for r in read(os.path.join(work, "legacy")).split("\n"):
     if r: legacy[r] = legacy.get(r, 0) + 1
-now_dt = datetime.datetime.now().astimezone()
-now = now_dt.isoformat(timespec="seconds")
+now = os.environ["OPSX_C_NOW"]
+now_dt = datetime.datetime.fromisoformat(now)
 for line in read(os.path.join(work, "cards.tsv")).split("\n"):
     if not line: continue
     repo_, slug_, dir_, archived_, stage_, mrfile = line.split("\t")
@@ -257,7 +259,7 @@ for line in read(os.path.join(work, "cards.tsv")).split("\n"):
         "since": frontmatter(inbox, "found") or (re.search(r"^created:\s*(\S+)", read(os.path.join(d, ".openspec.yaml")), re.M) or [None, None])[1],
         "waiting": waiting, "open_gates": [{"id": g["id"], "opened_at": opened_at_of(g, gates_path, now_dt)} for g in gates if g.get("status") == "open"],
         "dispatch": disp, "status": load_json(os.path.join(d, "status.json"), None),
-        "agent_status": agent_status, "mr": c["mr"], "last_output": None,
+        "agent_status": agent_status, "mr": c["mr"],
         "grants_repo": grants.get(c["repo"]), "path": d,
         "source": frontmatter(inbox, "source"), "upstream": frontmatter(inbox, "upstream"), "stale": frontmatter(inbox, "stale") == "true",
     })

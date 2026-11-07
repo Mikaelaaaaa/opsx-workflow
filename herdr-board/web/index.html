@@ -271,7 +271,7 @@ const REFRESH_MS=5000;
 
 /* ---------- 標籤 ---------- */
 const KIND={dev:'功能','bug-fix':'錯誤修正',refactoring:'重構',perf:'效能',experiment:'實驗',ops:'維運',chore:'雜務'};
-const MODE_LABEL={interactive:'互動（每步問）',autopilot:'自動（寫 gate 不停）',drive:'開到可合併'};
+const MODE_LABEL={interactive:'互動（每步問）',autopilot:'自動（開到可合併）',drive:'自動（開到可合併）'};
 const PHASES=['explore','grill','propose','apply','review','pr','babysit','archive'];
 const PHASE_LABEL={explore:'explore',grill:'grill',propose:'propose',apply:'apply',review:'review',pr:'MR',babysit:'MR',archive:'已合併'};
 const MODEL_BY_KIND={dev:'claude-opus-5-5',refactoring:'claude-opus-5-5',perf:'claude-opus-5-5',experiment:'claude-opus-5-5','bug-fix':'claude-sonnet-5-5',chore:'claude-sonnet-5-5',ops:'claude-sonnet-5-5'};
@@ -359,7 +359,7 @@ function rowDone(c){
     <div class="act"><span class="badge ok">已完成</span></div></div>`;
 }
 function rowUnmatched(a){
-  return `<div class="row unmatched"><div class="avatar plain">?</div><div class="main"><div class="l1"><span class="title">${esc(a.name||'(沒名字)')}</span><span class="meta">pane ${esc(a.pane)} · ${esc(a.agent_status||'')}</span></div><div class="l2 faint">沒對到卡：不在 dispatch.json，手動開的 agent</div></div><div class="act"><button class="sm" data-act="pane-id" data-pane="${esc(a.pane)}">開啟 pane</button></div></div>`;
+  return `<div class="row unmatched"><div class="avatar plain">?</div><div class="main"><div class="l1"><span class="title">${esc(a.name||'(沒名字)')}</span><span class="meta">pane ${esc(a.pane)} · ${esc(a.agent_status||'')}</span></div><div class="l2 faint">沒對到卡：不在 dispatch.json，手動開的 agent</div></div><div class="act"><button class="sm" data-act="pane-id" data-agent="${esc(a.name||'')}">開啟 pane</button></div></div>`;
 }
 const panel=(title,n,sub,body)=>`<section class="panel"><div class="panel-h"><span class="h2">${title}</span><span class="n">${n}</span>${sub?`<span class="sub">${sub}</span>`:''}</div>${body}</section>`;
 
@@ -417,6 +417,11 @@ function renderInbox(){
 const LOG_FILTERS=[['all','全部'],['you','你回的'],['agent','替你做的決定'],['merge','指派與合併']];
 const MERGE_TAGS=['已指派','已停止','已合併'];
 const TAG_BADGE={'已合併':'ok','已允許':'ok','已決定':'ok','替你決定':'data','已指派':'accent','已停止':'line','同步':'line','驗證':'ok','其他':'line'};
+const LOG_PAGE=200;
+ui.logLimit=LOG_PAGE;
+function logMore(){ui.logLimit+=LOG_PAGE;}
+function setLogFilter(f){ui.logFilter=f;ui.logLimit=LOG_PAGE;}
+function setScope(scope,ws,repo){ui.scope=scope;ui.ws=ws;ui.repo=repo;ui.logLimit=LOG_PAGE;}
 function evInScope(e){return e.repo?inScope(e):ui.scope==='all';}
 function evKeep(e){
   const f=ui.logFilter;
@@ -437,13 +442,22 @@ function renderLog(){
   if(!tl)return h+'<div class="empty">載入中…</div>';
   const keep=tl.events.filter(e=>evInScope(e)&&evKeep(e));
   if(!keep.length)return h+'<div class="empty">沒有符合的紀錄</div>';
-  const days=[];for(const e of keep){const d=dayOf(e.ts);const g=days[days.length-1];if(g&&g.d===d)g.ev.push(e);else days.push({d,ev:[e]});}
+  const shown=keep.slice(0,ui.logLimit);
+  const days=[];for(const e of shown){const d=dayOf(e.ts);const g=days[days.length-1];if(g&&g.d===d)g.ev.push(e);else days.push({d,ev:[e]});}
   h+=days.map(g=>`<div class="day">${esc(g.d)} · ${g.ev.length}</div><section class="panel" style="margin-top:0">${g.ev.map(evRow).join('')}</section>`).join('');
+  const rest=keep.length-shown.length;
+  if(rest>0)h+=`<div class="empty"><button class="ghost sm" data-act="log-more">載入更多（還有 ${rest} 列）</button></div>`;
   if(tl.errors&&tl.errors.length)h+=`<div class="empty">讀不了的檔：${tl.errors.map(x=>esc(x.source)).join('、')}</div>`;
   return h;
 }
+/* 紀錄 tab 上次寫進 #view 的 HTML。collect 每次變動都會 render()，列表一樣就不重寫，免得瀏覽器重新解析整份紀錄 */
+let viewLog=null;
+function setView(el,html,isLog){
+  if(isLog&&html===viewLog)return;
+  el.innerHTML=html;viewLog=isLog?html:null;
+}
 /* ---------- 離開期間 banner：只列 last_seen 之後有時間戳的事，加上「現在」的狀態 ---------- */
-const after=(ts,ls)=>!!ts&&Date.parse(ts)>Date.parse(ls);
+const after=(ts,ls)=>!!ts&&Date.parse(ts)>=Date.parse(ls);  /* 等於也算：同一秒寫入的事件寧可重複不要漏 */
 function bannerItems(events,cards,lastSeen){
   const items=[];const merged=new Set();
   for(const e of events){
@@ -473,13 +487,17 @@ function renderBanner(){
   if(bannerClosed||!tl)return '';
   const close=`<button class="ghost sm" data-act="banner-close">關閉</button>`;
   if(!tl.last_seen)return `<div class="notice" role="status"><span class="t">第一次開板</span><span>之後離開期間的變化會列在這裡</span>${close}</div>`;
-  const items=bannerItems(tl.events,data.cards.filter(inScope),tl.last_seen);
+  /* 不套首頁範圍：last-seen 是全域的，關閉會越過畫面上沒列的卡 */
+  const items=bannerItems(tl.events,data.cards,tl.last_seen);
   if(!items.length)return '';
   const li=i=>`<li>${i.now?'<span class="now">現在</span>':''}${i.key?`<button class="link" data-act="open" data-key="${esc(i.key)}">${esc(i.text)}</button>`:esc(i.text)}</li>`;
   return `<div class="notice" role="status"><span class="t">離開期間 ${esc(ago(tl.last_seen))}</span><ul>${items.map(li).join('')}</ul>${close}</div>`;
 }
 async function closeBanner(){
-  try{await api.post('seen',{at:tl.generated_at});seenAt=tl.generated_at;bannerClosed=true;render();}
+  /* last-seen 不能晚於 banner 讀過的任一份快照，否則兩份快照之間發生的事永遠不會進 banner */
+  if(!data.generated_at){toast('collect 還沒回來，卡片上的 gate 與 MR 還沒讀到，先不能關閉',true);return;}
+  const at=Date.parse(data.generated_at)<Date.parse(tl.generated_at)?data.generated_at:tl.generated_at;
+  try{await api.post('seen',{at});seenAt=at;bannerClosed=true;render();}
   catch(e){toast('關閉 banner 失敗：'+e.message,true);}
 }
 
@@ -499,7 +517,7 @@ function render(){
   for(const t of ['home','inbox','log'])$('#tab-'+t).setAttribute('aria-selected',ui.tab===t);
   $('#stamp').textContent=data.generated_at?'collect '+ago(data.generated_at):'';
   const y=window.scrollY;const typing=document.activeElement&&document.activeElement.classList.contains('drop-reason');
-  $('#view').innerHTML=ui.tab==='inbox'?renderInbox():ui.tab==='log'?renderLog():renderHome();
+  setView($('#view'),ui.tab==='inbox'?renderInbox():ui.tab==='log'?renderLog():renderHome(),ui.tab==='log');
   window.scrollTo(0,y);
   /* 5 秒重拉會重畫：打到一半的捨棄理由把焦點還回去 */
   if(typing){const i=$('.drop-reason');if(i){i.focus();i.setSelectionRange(i.value.length,i.value.length);}}
@@ -577,9 +595,9 @@ function answer(c,text,grant){
 }
 function merge(c){act(`opsx merge ${c.slug}`,()=>api.post('merge',{slug:c.slug,repo:repoTop(c)}));}
 function stop(c){act(`opsx stop ${c.slug}`,()=>api.post('stop',{slug:c.slug,repo:repoTop(c)}));}
-function focusPane(pane){
-  if(!pane){toast('這張沒有 pane',true);return;}
-  act(`herdr pane focus ${pane}`,()=>api.post('focus',{pane}));
+function focusAgent(agent){
+  if(!agent){toast('這張沒有 pane',true);return;}
+  act(`herdr agent focus ${agent}`,()=>api.post('focus',{agent}));
 }
 
 /* ＋新增：範圍選到單一 repo 就建在那個 repo，否則進待分類（board-inbox D6） */
@@ -628,7 +646,7 @@ function openDispatch(c){
     <div class="opt"><span>Agent</span><label class="radio"><input type="radio" name="ag" value="claude" checked><span><b>claude</b><small>走 opsx hook，會寫 gate</small></span></label><label class="radio"><input type="radio" name="ag" value="codex"><span><b>codex</b><small>gpt-5 · 同一套 skill，status 由 skill 顯式寫</small></span></label></div>
     <div class="opt"><span>類型（寫進 .openspec.yaml，決定 playbook）</span><div class="kinds">${Object.keys(KIND).map(k=>`<button data-kind="${k}" aria-pressed="${k===kind}">${KIND[k]}</button>`).join('')}</div></div>
     <div class="opt"><span>模型（預設照類型；codex 只有 gpt-5）</span><div class="kinds models" style="grid-template-columns:repeat(3,minmax(0,1fr))"><button data-model="claude-opus-5-5" aria-pressed="${MODEL_BY_KIND[kind]==='claude-opus-5-5'}">opus 5.5</button><button data-model="claude-sonnet-5-5" aria-pressed="${MODEL_BY_KIND[kind]==='claude-sonnet-5-5'}">sonnet 5.5</button><button data-model="gpt-5" aria-pressed="false">gpt-5（codex）</button></div></div>
-    <div class="opt"><span>自主程度</span><label class="radio"><input type="radio" name="md" value="interactive"><span><b>互動</b><small>每一步都問你</small></span></label><label class="radio"><input type="radio" name="md" value="autopilot" checked><span><b>自動</b><small>要授權的寫 gate，繼續做能做的</small></span></label><label class="radio"><input type="radio" name="md" value="drive"><span><b>開到可合併</b><small>含 review、開 MR、處理留言；合併仍是你</small></span></label></div>
+    <div class="opt"><span>自主程度</span><label class="radio"><input type="radio" name="md" value="interactive"><span><b>互動</b><small>每一步都問你</small></span></label><label class="radio"><input type="radio" name="md" value="autopilot" checked><span><b>自動</b><small>一路做到可以合併，要你決定或授權的寫 gate；合併仍是你</small></span></label></div>
     <div class="note">階段 ${esc(c.stage)}：派出後第一句是 /${esc(c.stage)} ${esc(c.slug)}<br>pane 開在 ${ws?esc(ws):`新 workspace「${esc(c.repo)}」`}<br>${esc(c.repo)} 長期授權：${granted.length?esc(granted.join('、')):'無（碰到會寫 gate）'}</div>
     <div class="go"><button data-act="dlg-cancel">取消</button><button class="primary" data-act="dlg-go">指派</button></div></div>`;
   $('#dialog').hidden=false;$('#scrim').hidden=false;
@@ -667,19 +685,20 @@ document.addEventListener('click',e=>{
     if(a==='close'){closeDrawer();return;}
     if(a==='dlg-cancel'){closeDispatch();return;}
     if(a==='dlg-go'){doDispatch();return;}
-    if(a==='pane-id'){focusPane(btn.dataset.pane);return;}
+    if(a==='pane-id'){focusAgent(btn.dataset.agent);return;}
     if(a==='sync'){syncNow();return;}
     if(a==='file'){fileUnfiled(btn.closest('[data-unfiled]'));return;}
     if(a==='drop-open'){ui.drop=btn.dataset.drop;ui.dropText='';render();const i=$('.drop-reason');if(i)i.focus();return;}
     if(a==='banner-close'){closeBanner();return;}
-    if(a==='logf'){ui.logFilter=btn.dataset.f;render();return;}
+    if(a==='logf'){setLogFilter(btn.dataset.f);render();return;}
+    if(a==='log-more'){logMore();render();return;}
     if(a==='ev-open'){if(!byKey(btn.dataset.key)){toast(btn.dataset.key+' 不在首頁（archive 只列最新的幾張）',true);return;}showTab('home');openDrawer(btn.dataset.key);return;}
     if(!c)return;
     if(a==='open'){openDrawer(k);return;}
     if(a==='answer'){answer(c,btn.dataset.text,btn.dataset.grant);return;}
     if(a==='merge'){merge(c);return;}
     if(a==='stop'){stop(c);return;}
-    if(a==='pane'){focusPane(c.dispatch&&c.dispatch.pane);return;}
+    if(a==='pane'){focusAgent(c.dispatch&&c.dispatch.pane?c.slug:'');return;}
     if(a==='dispatch'){openDispatch(c);return;}
     if(a==='explore'){exploreFirst(c);return;}
     return;
@@ -691,7 +710,7 @@ document.addEventListener('click',e=>{
   const tb=e.target.closest('#tab-home,#tab-inbox,#tab-log');
   if(tb){showTab(tb.id.slice(4));return;}
   const mi=e.target.closest('#menu [data-ws]');
-  if(mi){ui.scope='ws';ui.ws=mi.dataset.ws||null;ui.repo=mi.dataset.repo||null;closeMenu();render();return;}
+  if(mi){setScope('ws',mi.dataset.ws||null,mi.dataset.repo||null);closeMenu();render();return;}
   if(rowEl){openDrawer(rowEl.dataset.key);return;}
   if(e.target.id==='scrim'){if(!$('#dialog').hidden)closeDispatch();else closeDrawer();return;}
   if(!e.target.closest('#menu'))closeMenu();
@@ -720,7 +739,7 @@ function move(d){
   const el=document.querySelector(`#view .row[data-key="${CSS.escape(ui.sel)}"]`);if(el)el.scrollIntoView({block:'nearest'});
 }
 $('#new-open').onclick=openNew;
-$('#scope-all').onclick=()=>{ui.scope='all';ui.repo=null;closeMenu();render();};
+$('#scope-all').onclick=()=>{setScope('all',ui.ws,null);closeMenu();render();};
 $('#scope-ws').onclick=e=>{e.stopPropagation();if($('#menu').hidden)openMenu(e.currentTarget);else closeMenu();};
 
 /* ---------- 重新整理：上一次回來才排下一次（collect 慢時不會疊請求）；分頁藏起來就不拉；
@@ -733,7 +752,7 @@ async function refresh(force){
     if(force||raw!==lastRaw){lastRaw=raw;data=j;render();}
     else{data.generated_at=generated_at;$('#stamp').textContent='collect '+ago(generated_at);}
   }catch(e){
-    if(!lastRaw)$('#view').innerHTML=`<div class="empty" style="color:var(--danger)">${esc(e.message)}</div>`;
+    if(!lastRaw)setView($('#view'),`<div class="empty" style="color:var(--danger)">${esc(e.message)}</div>`,false);
     else{data.errors=[{source:'board',message:e.message}];render();}
   }finally{inflight=false;schedule();}
 }

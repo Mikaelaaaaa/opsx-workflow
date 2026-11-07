@@ -1,7 +1,13 @@
 #!/usr/bin/env bash
 # 假 herdr：把每個呼叫記到 $OPSX_FAKE_LOG，回合理的 JSON。測試用。
-# agent prompt / agent wait 會呼叫 $OPSX_TEST_ON_PROMPT / $OPSX_TEST_ON_WAIT（若設定），讓測試推進 fixture 的狀態。
+# agent prompt / agent wait 會呼叫 $OPSX_TEST_ON_PROMPT / $OPSX_TEST_ON_WAIT（若設定；wait 的拿到整串參數），讓測試推進 fixture 的狀態。
 printf '%s\n' "$*" >> "${OPSX_FAKE_LOG:?}"
+pop_err() { # <file>：印第一行並刪掉它；ok 或沒檔印空
+  [ -n "$1" ] && [ -s "$1" ] || return 0
+  local first; first="$(head -1 "$1")"; tail -n +2 "$1" > "$1.tmp"; mv "$1.tmp" "$1"
+  [ "$first" = ok ] || printf '%s' "$first"
+}
+herdr_err() { echo '{"error":{"code":"'"$1"'","message":"fake"},"id":"cli:agent:'"$2"'"}' >&2; exit 1; }
 case "$1 $2" in
   # 真格式見 herdr-samples/workspace-create.json（2026-11-06 實跑）：result.workspace.workspace_id；這裡只回用到的欄位
   "workspace create") echo '{"id":"cli:workspace:create","result":{"workspace":{"workspace_id":"w9","label":"'"${4:-}"'"},"type":"workspace_created"}}' ;;
@@ -30,16 +36,25 @@ case "$1 $2" in
   "pane send-keys") echo '{"result":{"type":"ok"}}' ;;
   # 真格式（2026-11-06 在 pane 裡實跑存下來）：{"id":"cli:agent:list","result":{"agents":[{pane_id:"w1:p2",agent_status,…}],"type":"agent_list"}}
   "agent list") cat "${OPSX_TEST_HERDR_AGENTS:-$(dirname "${BASH_SOURCE[0]}")/herdr-samples/agent-list.json}" ;;
-  "pane list") cat "$(dirname "${BASH_SOURCE[0]}")/herdr-samples/pane-list.json" ;;
+  "pane list") cat "${OPSX_TEST_HERDR_PANES:-$(dirname "${BASH_SOURCE[0]}")/herdr-samples/pane-list.json}" ;;
   # 真格式（2026-11-06 在 pane w5:pH 實跑）：TARGET 吃 dispatch.json 的 pane id，--format text 是純文字
   "agent read") cat "$(dirname "${BASH_SOURCE[0]}")/herdr-samples/agent-read.txt" ;;
-  "agent prompt") [ -n "${OPSX_TEST_ON_PROMPT:-}" ] && bash "$OPSX_TEST_ON_PROMPT" "$4"; echo '{"result":{"submitted":true}}' ;;
-  "agent wait") [ -n "${OPSX_TEST_ON_WAIT:-}" ] && bash "$OPSX_TEST_ON_WAIT"; echo '{"result":{"status":"idle"}}' ;;
+  # OPSX_TEST_PROMPT_ERR / OPSX_TEST_WAIT_ERR 指到一個檔，每行一個 herdr 錯誤碼：每次呼叫取走第一行，是 ok 或檔空了就照常成功
+  "agent prompt") code="$(pop_err "${OPSX_TEST_PROMPT_ERR:-}")"; [ -n "$code" ] && herdr_err "$code" prompt
+    [ -n "${OPSX_TEST_ON_PROMPT:-}" ] && bash "$OPSX_TEST_ON_PROMPT" "$4"; echo '{"result":{"submitted":true}}' ;;
+  "agent wait") code="$(pop_err "${OPSX_TEST_WAIT_ERR:-}")"; [ -n "$code" ] && herdr_err "$code" wait
+    [ -n "${OPSX_TEST_ON_WAIT:-}" ] && bash "$OPSX_TEST_ON_WAIT" "$@"; echo '{"result":{"status":"idle"}}' ;;
+  # OPSX_TEST_RENAME_FAIL 設了就回 herdr 的錯誤（auto-dispatch 的佇列 hook 用）
+  "agent rename") if [ -n "${OPSX_TEST_RENAME_FAIL:-}" ]; then echo '{"error":{"code":"agent_not_found","message":"no agent named '"$3"'"},"id":"cli:agent:rename"}' >&2; exit 1; fi
+                  echo '{"result":{"renamed":true}}' ;;
   "pane close") echo '{"result":{"closed":true}}' ;;
   "pane focus") echo '{"result":{"focused":true}}' ;;
+  "agent focus") echo '{"result":{"focused":true}}' ;;
   "plugin list") cat "${OPSX_TEST_HERDR_PLUGINS:-/dev/null}"; echo ;;
   "plugin link") echo '{"result":{"linked":true}}' ;;
   "pane current") echo '{"result":{"pane_id":"p42"}}' ;;
   "pane report-metadata") echo '{"result":{"ok":true}}' ;;
+  # 真 usage：herdr plugin pane focus <PANE_ID>，只收一個 positional
+  "plugin pane") if [ "$3" = focus ] && [ "$#" -ne 4 ]; then echo "usage: herdr plugin pane focus <PANE_ID>" >&2; exit 2; fi; echo '{"result":{}}' ;;
   *) echo '{"result":{}}' ;;
 esac

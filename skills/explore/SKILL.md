@@ -38,6 +38,8 @@ Your engagement intensity should match the conversation. Don't announce transiti
 > Concrete options force clarity: "Redis vs SQS vs BullMQ for this queue?" is more productive
 > than "what queue should we use?" The user can always pick "Other" if none fit.
 
+**In autopilot** (the router line carries `autopilot：`), never call AskUserQuestion. Nobody is at the pane, and herdr marks the agent blocked. Do not settle the user's choices yourself here either. Write each open choice into explore.md's 待決, with the options you would have offered, and let /grill handle it under its autopilot rules (`skills/grill/SKILL.md`, "In autopilot"). A work breakdown is written without the confirmation step, and logged in decisions.tsv.
+
 **When terms are vague** — challenge the language. "What do you mean by 'user'? Is that a Customer, a Tenant Admin, or an End User?" Every vague term in a plan becomes a bug in the implementation.
 
 ---

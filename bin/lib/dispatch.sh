@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# opsx dispatch <slug> --agent claude|codex --model <id> --mode interactive|autopilot|drive --kind <kind> [--repo <path>]
+# opsx dispatch <slug> --agent claude|codex --model <id> --mode interactive|autopilot --kind <kind> [--repo <path>]
 # 把一張卡派出去：開 worktree，在 repo 掛的 workspace 開 herdr tab，agent start，送第一句 prompt，記進 dispatch.json。
 # 要求檔 §3.6「派」、§3.6 自主程度表、§3.1。herdr 的每個呼叫都可以被 PATH 上的假 herdr 取代（tests/fakes）。
 
@@ -21,14 +21,16 @@ opsx_dispatch() {
   [ -n "$top" ] || die "dispatch: 不在 git repo 裡，或給 --repo"
   top="$(cd "$top" && pwd -P)"
   case "$agent" in claude|codex) ;; *) die "dispatch: --agent 只收 claude|codex" ;; esac
-  case "$mode" in interactive|autopilot|drive) ;; *) die "dispatch: --mode 只收 interactive|autopilot|drive" ;; esac
+  case "$mode" in interactive|autopilot) ;; drive) mode=autopilot ;; *) die "dispatch: --mode 只收 interactive|autopilot（drive 是 autopilot 的舊名）" ;; esac
   local d="$top/openspec/changes/$slug" repo; repo="$(basename "$top")"
   [ -d "$d" ] || die "dispatch: 沒有這張卡：$d"
   printf '%s' "$slug" | grep -qE '^[a-z][a-z0-9_-]{0,31}$' || die "dispatch: slug 要符合 [a-z][a-z0-9_-]{0,31}（herdr agent 名）：$slug"
   command -v herdr >/dev/null || die "dispatch: 找不到 herdr"
   ensure_dir "$OPSX_STATE_DIR"
 
-  # herdr agent 只認名字（agent start <name>），名字 = slug；另一個 repo 已派出同名 slug 的卡時，prompt 會送錯人，所以拒絕
+  # herdr agent 只認名字（agent start <name>），新卡的名字 = slug。還在跑的條目用的 herdr 名（herdr_name，沒有就是它的 slug）
+  # 跟這個 slug 一樣時，prompt 會送錯人，所以拒絕；代管卡的 herdr 名是協調它的 pane。
+  # 單一續接交出去的條目（herdr 名已改成子卡、列在 handed_to 裡）只是紀錄，不算；fan-out 的父卡 pane 還活著、名字還是父卡，照算
   OPSX_KEY="$repo/$slug" OPSX_SLUG="$slug" OPSX_LIB="$OPSX_ROOT/bin/lib" "$OPSX_PY" -I - "$OPSX_STATE_DIR/dispatch.json" <<'PY' || exit 2
 import os, sys
 sys.path.insert(0, os.environ["OPSX_LIB"]); import jsonfile
@@ -36,9 +38,9 @@ d = jsonfile.load(sys.argv[1]); me = os.environ["OPSX_KEY"]; slug = os.environ["
 mine = d.get(me)
 if mine and mine.get("mode") != "stopped":
     sys.exit("dispatch: %s 已經派出去了，在 %s · %s · %s（%s 起）。要換人先 opsx stop %s" % (me, mine.get("workspace"), mine.get("tab"), mine.get("pane"), mine.get("started_at"), slug))
-clash = [k for k, v in d.items() if k != me and k.endswith("/" + slug) and v.get("mode") != "stopped"]
+clash = [k for k, v in d.items() if k != me and v.get("mode") != "stopped" and (v.get("herdr_name") or k.split("/", 1)[1]) not in (v.get("handed_to") or []) and (v.get("herdr_name") or k.split("/", 1)[1]) == slug]
 if clash:
-    sys.exit("dispatch: herdr agent 名字就是 slug，而 %s 已經派出同名的卡，herdr agent prompt 會送錯 agent。先 opsx stop 那張，或把這張卡改名" % "、".join(clash))
+    sys.exit("dispatch: herdr agent 名字就是 slug，而 %s 還在跑、用的 herdr 名也是 %s，herdr agent prompt 會送錯 agent。先 opsx stop 那張，或把這張卡改名" % ("、".join(clash), slug))
 PY
 
   # kind：沒給就從 .openspec.yaml 讀，再沒有就是 dev；寫回 .openspec.yaml
@@ -49,10 +51,7 @@ PY
   else printf 'kind: %s\n' "$kind" >> "$d/.openspec.yaml"; fi
 
   # model：沒給就照 kind
-  if [ -z "$model" ]; then
-    if [ "$agent" = codex ]; then model=gpt-5
-    else case "$kind" in dev|refactoring|perf|experiment) model=claude-opus-5-5 ;; *) model=claude-sonnet-5-5 ;; esac; fi
-  fi
+  [ -n "$model" ] || model="$(default_model "$agent" "$kind")"
 
   # branch：workplan 有就用，沒有就 {type}/{slug}/{user}
   local branch; branch="$(workplan_branch "$top" "$slug")"
@@ -106,16 +105,17 @@ PY
   tab="$(printf '%s' "$tabjson" | jq -r '.result.tab.tab_id // empty' 2>/dev/null || true)"
   [ -n "$pane" ] || die "dispatch: herdr tab create 沒回 root_pane：$tabjson"
 
-  # agent 啟動參數（自動 / 開到可合併 才帶 permission 設定）
+  # agent 啟動參數：claude 兩種模式都帶 --settings；--permission-mode 與 allow / deny 只有 autopilot 才有。
+  # settings 檔按模式分名，重派不會蓋掉 pane 還沒關的另一個模式那份
   local -a aargs=()
   if [ "$agent" = claude ]; then
     aargs+=(--model "$model")
-    if [ "$mode" != interactive ]; then
-      local settings="$OPSX_STATE_DIR/settings/$repo-$slug.json"; ensure_dir "$(dirname "$settings")"
-      write_settings "$settings" "$repo"
-      aargs+=(--permission-mode acceptEdits --settings "$settings")
-    fi
-    # Claude Code 的沙盒只准寫 working directories；卡的檔在主 repo 的 openspec/（worktree 裡沒有），hook 消耗 once 與 status 鏡像寫 state dir
+    local settings="$OPSX_STATE_DIR/settings/$repo-$slug-$mode.json"; ensure_dir "$(dirname "$settings")"
+    write_settings "$settings" "$repo" "$top/openspec" "$mode"
+    if [ "$mode" != interactive ]; then aargs+=(--permission-mode dontAsk); fi   # dontAsk：不在 allow 的直接拒絕不跳框；跳框會讓 herdr 判 blocked，drive 送不進下一句
+    aargs+=(--settings "$settings")
+    # Claude Code 的沙盒只准寫 working directories；卡的檔在主 repo 的 openspec/（worktree 裡沒有），hook 消耗 once 與 status 鏡像寫 state dir。
+    # 旗標只活在這個行程；重啟後 --settings 有沒有被帶回、additionalDirectories 還在不在，尚未實測（add-dir-lost 1.1）
     aargs+=(--add-dir "$top/openspec" --add-dir "$OPSX_STATE_DIR")
   else
     if [ "$mode" = interactive ]; then aargs+=(-a on-request -s workspace-write); else aargs+=(-a never -s workspace-write); fi
@@ -164,16 +164,10 @@ PY
   log_row "$d" 你 已指派 "指派給 ${agent}，第一句 /${first}" "${agent} · ${mode} · ${model}"
   say "dispatch: $repo/$slug → $agent $model · $mode · kind $kind · $ws $pane · 第一句 /$first"
 
-  if [ "$mode" = drive ]; then
+  if [ "$mode" = autopilot ]; then
+    # pid 由 drive 自己寫進 dispatch.json（手動 opsx drive 也一樣），這裡只負責起
     nohup bash "$OPSX_ROOT/bin/opsx" drive "$slug" --repo "$top" >> "$OPSX_STATE_DIR/drive-$repo-$slug.log" 2>&1 &
-    local pid=$!
-    OPSX_KEY="$repo/$slug" OPSX_PID="$pid" OPSX_LIB="$OPSX_ROOT/bin/lib" "$OPSX_PY" -I - "$OPSX_STATE_DIR/dispatch.json" <<'PY'
-import os, sys
-sys.path.insert(0, os.environ["OPSX_LIB"]); import jsonfile
-def put(d): d[os.environ["OPSX_KEY"]]["drive_pid"] = int(os.environ["OPSX_PID"])
-jsonfile.update(sys.argv[1], put)
-PY
-    say "dispatch: drive.sh 跑起來了（pid ${pid}），log 在 $OPSX_STATE_DIR/drive-$repo-$slug.log"
+    say "dispatch: drive 跑起來了（pid $!），log 在 $OPSX_STATE_DIR/drive-$repo-$slug.log"
   fi
 }
 
@@ -191,13 +185,20 @@ except tomllib.TOMLDecodeError as e:
     sys.exit("dispatch: workspaces.toml 壞了：%s" % e)
 PY
 }
-write_settings() { # <file> <repo>：直接做那級 allow，永遠要人那級 deny；repo 永遠的授權也進 allow
-  OPSX_REPO="$2" OPSX_SD="$OPSX_STATE_DIR" "$OPSX_PY" -I - "$1" <<'PY'
+write_settings() { # <file> <repo> <主 repo openspec 目錄> <mode>：autopilot 直接做那級 allow，永遠要人那級 deny；repo 永遠的授權也進 allow。interactive 只寫可寫目錄
+  OPSX_REPO="$2" OPSX_SD="$OPSX_STATE_DIR" OPSX_MODE="$4" "$OPSX_PY" -I - "$1" "$3" <<'PY'
 import json,os,sys,tomllib
 sd=os.environ["OPSX_SD"]; repo=os.environ["OPSX_REPO"]
+dirs=[sys.argv[2],sd]
+if os.environ["OPSX_MODE"]=="interactive":
+    json.dump({"permissions":{"additionalDirectories":dirs}},open(sys.argv[1],"w"),indent=2)
+    sys.exit(0)
 allow=["Read","Edit","Write","Glob","Grep","Bash(git status:*)","Bash(git diff:*)","Bash(git log:*)","Bash(git add:*)","Bash(git commit:*)","Bash(git checkout:*)","Bash(git worktree:*)",
        "Bash(pnpm test:*)","Bash(pnpm vitest:*)","Bash(pnpm build:*)","Bash(pnpm lint:*)","Bash(pnpm typecheck:*)","Bash(npx vitest:*)","Bash(pytest:*)","Bash(uv run:*)","Bash(ruff:*)","Bash(go test:*)",
-       "Bash(openspec:*)","Bash(opsx:*)","Bash(ls:*)","Bash(cat:*)","Bash(grep:*)","Bash(rg:*)","Bash(find:*)","Bash(node:*)","Bash(python3:*)"]
+       "Bash(openspec:*)","Bash(opsx:*)","Bash(ls:*)","Bash(cat:*)","Bash(grep:*)","Bash(rg:*)","Bash(find:*)","Bash(node:*)","Bash(python3:*)",
+       "Bash(jq:*)","Bash(head:*)","Bash(tail:*)","Bash(wc:*)","Bash(sed -n:*)","Bash(diff:*)","Bash(sort:*)","Bash(bash tests/:*)","Bash(herdr agent:*)","Bash(herdr pane read:*)",
+       "Bash(git show:*)","Bash(git branch:*)","Bash(git rev-parse:*)","Bash(git fetch:*)","Bash(git merge-base:*)","Bash(git remote:*)","Bash(mkdir:*)",
+       "Bash(glab mr view:*)","Bash(glab mr list:*)","Bash(glab mr diff:*)","Bash(glab ci:*)","Bash(gh pr view:*)","Bash(gh pr checks:*)","Bash(gh pr list:*)"]
 # merge 不在 deny：settings 的 deny 蓋得過 hook 的放行，所以 merge 交給 opsx-grant-gate.sh 的 merge_gate 單獨把關；
 # 放進 allow 是為了閘門放行那一次不再跳 Claude Code 自己的權限框。
 allow += ["Bash(glab mr merge:*)", "Bash(gh pr merge:*)"]
@@ -208,6 +209,6 @@ try:
     if g.get("mr"): allow+=["Bash(glab mr create:*)","Bash(glab mr update:*)","Bash(gh pr create:*)","Bash(gh pr edit:*)"]
     if g.get("migrate"): allow+=["Bash(pnpm db:migrate:*)","Bash(alembic upgrade:*)"]
 except FileNotFoundError: pass
-json.dump({"permissions":{"allow":allow,"deny":deny}},open(sys.argv[1],"w"),indent=2)
+json.dump({"permissions":{"allow":allow,"deny":deny,"additionalDirectories":dirs}},open(sys.argv[1],"w"),indent=2)
 PY
 }

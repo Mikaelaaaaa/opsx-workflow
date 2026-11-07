@@ -149,6 +149,8 @@ C="$(card "$J" a x4)"; assert_eq "$(q "$C" waiting.type)" 可以合併; assert_e
 assert_eq "$(q "$C" mr.conditions)" '{"no_conflicts": true, "not_draft": true, "opened": true, "pipeline": true, "threads": true}'
 assert_eq "$(q "$C" mr.head_sha)" aaa111; assert_eq "$(q "$C" dispatch.pane)" p4; assert_eq "$(q "$C" dispatch.mode)" autopilot
 assert_eq "$(q "$C" agent_status)" working; assert_eq "$(q "$C" status.phase)" pr; assert_eq "$(q "$C" dispatch.grants)" '["push"]'
+# 最後輸出不在卡上：抽屜向 /api/output 取，collect 的卡沒有 last_output 鍵
+assert_eq "$(printf '%s' "$J" | python3 -I -c 'import json,sys;print(sorted(c["slug"] for c in json.load(sys.stdin)["cards"] if "last_output" in c))')" "[]"
 
 # 少一個條件 → 進行中
 C="$(card "$J" b y2)"; assert_eq "$(q "$C" waiting)" null; assert_eq "$(q "$C" section)" 進行中
@@ -248,16 +250,28 @@ assert_eq "$(q "$J" legacy)" '{"r3": 1}'
 E="$(q "$J" errors)" || fail "errors 讀不到：$J"
 case "$E" in *legacy-mr*|*glab*) fail "errors 不該指名舊卡：$E" ;; esac
 # ---------- 壞的 opened_at：改 null 並記 errors；寬限內照收（specs/board-collect「gate 與 MR 的時間」） ----------
-R4="$FX/code4"; D="$R4/r4/openspec/changes/bad-ts"; mkdir -p "$R4/r4/.git" "$D"
+R5="$FX/code5"; D="$R5/r5/openspec/changes/bad-ts"; mkdir -p "$R5/r5/.git" "$D"
 printf 'schema: opsx\ncreated: 2026-11-05\nkind: dev\n' > "$D/.openspec.yaml"; printf '## 一句話\n\n壞時間\n' > "$D/inbox.md"
 FUT="$(date -u -v+8H +%Y-%m-%dT%H:%M:%SZ)"; SOON="$(date -v+30S +%Y-%m-%dT%H:%M:%S%z | sed -E 's/([0-9]{2})([0-9]{2})$/\1:\2/')"
 printf '## g1\nstatus: open\nopened_at: %s\n\n## g2\nstatus: open\nopened_at: 2026-11-06 14:05\n\n## g3\nstatus: open\nopened_at: 昨天\n\n## g4\nstatus: open\nopened_at: %s\n\n## g5\nstatus: answered\nopened_at: 昨天\n' "$FUT" "$SOON" > "$D/gates.md"
-J="$(opsx collect --root "$R4")"; assert_eq "$?" 0 "壞時間 collect rc"
-assert_eq "$(q "$(card "$J" r4 bad-ts)" open_gates)" "[{\"id\": \"g1\", \"opened_at\": null}, {\"id\": \"g2\", \"opened_at\": null}, {\"id\": \"g3\", \"opened_at\": null}, {\"id\": \"g4\", \"opened_at\": \"$SOON\"}]"
+J="$(opsx collect --root "$R5")"; assert_eq "$?" 0 "壞時間 collect rc"
+assert_eq "$(q "$(card "$J" r5 bad-ts)" open_gates)" "[{\"id\": \"g1\", \"opened_at\": null}, {\"id\": \"g2\", \"opened_at\": null}, {\"id\": \"g3\", \"opened_at\": null}, {\"id\": \"g4\", \"opened_at\": \"$SOON\"}]"
 E="$(q "$J" errors)"
-GE="$(printf '%s' "$J" | python3 -I -c 'import json,sys;print(json.dumps([e for e in json.load(sys.stdin)["errors"] if e["source"].endswith("/r4/openspec/changes/bad-ts/gates.md")],ensure_ascii=False))')"
+GE="$(printf '%s' "$J" | python3 -I -c 'import json,sys;print(json.dumps([e for e in json.load(sys.stdin)["errors"] if e["source"].endswith("/r5/openspec/changes/bad-ts/gates.md")],ensure_ascii=False))')"
 assert_eq "$(printf '%s' "$GE" | python3 -I -c 'import json,sys;print(len(json.load(sys.stdin)))')" 3 "三個壞值各一筆 error：$E"
 for want in "g1.*$FUT" "g2.*2026-11-06 14:05" "g3.*昨天"; do printf '%s' "$GE" | grep -Eq "$want" || fail "errors 要有 gate id 與原值（$want）：$E"; done
 case "$E" in *g4*|*g5*) fail "寬限內與 answered 的 gate 不該進 errors：$E" ;; esac
 
+# ---------- generated_at 在讀任何來源之前取：卡片迴圈裡的 glab 慢 4 秒也不會往後（banner-same-second） ----------
+# 慢的是迴圈裡的 mr_json：它比 herdr 早讀，取時點放在迴圈之後的實作會被抓到
+R4="$FX/code4"; D="$R4/r4/openspec/changes/slow-mr"; mkdir -p "$R4/r4/.git" "$D"
+printf 'schema: opsx\ncreated: 2026-11-06\nkind: dev\n' > "$D/.openspec.yaml"; printf '## 一句話\n\n慢\n' > "$D/inbox.md"
+printf '# report\n\n## MR\nhttps://gitlab.tsg-navigator.com/agentory/r4/-/merge_requests/9\n' > "$D/report.md"
+SLOW="$FX/slow-bin"; mkdir -p "$SLOW"
+printf '#!/usr/bin/env bash\n[ "$1 $2" = "mr view" ] && sleep 4\nexec bash "%s/tests/fakes/glab" "$@"\n' "$OPSX_ROOT" > "$SLOW/glab"; chmod +x "$SLOW/glab"
+: > "$OPSX_FAKE_LOG"; S="$(date +%s)"
+J="$(PATH="$SLOW:$PATH" opsx collect --root "$R4")"; assert_eq "$?" 0
+grep -q '^mr view 9 ' "$OPSX_FAKE_LOG" || fail "glab 要真的被叫到，慢才有意義：$(cat "$OPSX_FAKE_LOG")"
+G="$(printf '%s' "$J" | python3 -I -c 'import datetime,json,sys;print(int(datetime.datetime.fromisoformat(json.load(sys.stdin)["generated_at"]).timestamp()))')"
+[ "$G" -le $((S + 2)) ] || fail "generated_at 要在讀來源前取：呼叫前 ${S}，generated_at ${G}"
 echo ok

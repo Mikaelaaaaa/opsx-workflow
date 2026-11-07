@@ -112,6 +112,10 @@ class ServerTest(unittest.TestCase):
         self.assertIn("text/html", ctype)
         self.assertIn("<title>", body)
 
+    def test_dispatch_dialog_has_two_modes(self):
+        _, _, body = self.req("/")
+        self.assertEqual(re.findall(r'name="md" value="([a-z]+)"', body), ["interactive", "autopilot"])
+
     def test_token_is_generated_and_required(self):
         self.assertGreaterEqual(len(self.token), 32)
         status, _, _ = self.req("/api/collect")
@@ -273,10 +277,12 @@ class ServerTest(unittest.TestCase):
         self.assertIn("pane not found", out["error"])
 
     def test_focus_runs_herdr(self):
-        status, _, body = self.req("/api/focus", {"pane": "w1:p4"}, token=self.token)
+        status, _, body = self.req("/api/focus", {"agent": "retry-backoff"}, token=self.token)
         self.assertEqual(status, 200, body)
-        self.assertEqual(self.herdr_log.read_text().strip(), "pane focus w1:p4")
-        status, _, _ = self.req("/api/focus", {"pane": "w1:p4; rm -rf /"}, token=self.token)
+        self.assertEqual(self.herdr_log.read_text().strip(), "agent focus retry-backoff")
+        status, _, _ = self.req("/api/focus", {"agent": "retry-backoff; rm -rf /"}, token=self.token)
+        self.assertEqual(status, 400)
+        status, _, _ = self.req("/api/focus", {"pane": "w1:p4"}, token=self.token)   # 舊欄位：herdr pane focus 不收 id，拒絕
         self.assertEqual(status, 400)
 
     def test_opsx_failure_is_reported_not_500(self):

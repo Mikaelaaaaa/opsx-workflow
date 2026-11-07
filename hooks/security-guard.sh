@@ -42,7 +42,11 @@ fi
 
 # ── Block commits with AI attribution ──
 if echo "$COMMAND" | grep -qE '(^|\s|&&|\|\||;)git\s+commit(\s|$)'; then
-  if echo "$COMMAND" | grep -iqE '(claude|anthropic|co-authored-by.*(claude|anthropic)|Generated with.*Claude)'; then
+  # Drop directory arguments (the word after `cd` / `-C`) and every word containing `/`, so a path
+  # like /private/tmp/claude-502/x is not mistaken for attribution.
+  # shortcut: a message word containing `/` (e.g. Claude/x) is not scanned; fine as an accident guard, go back to parsing -m values if it must resist deliberate evasion
+  SCANNED=$(echo "$COMMAND" | sed -E 's/(^|[[:space:]])(cd|-C)[[:space:]]+[^[:space:]]+/\1/g; s/[^[:space:]]*\/[^[:space:]]*//g')
+  if echo "$SCANNED" | grep -iqE '(claude|anthropic|co-authored-by.*(claude|anthropic)|Generated with.*Claude)'; then
     deny "Commit must not reference Claude, Anthropic, or AI model names."
   fi
 fi

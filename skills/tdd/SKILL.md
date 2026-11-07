@@ -1,6 +1,6 @@
 ---
 name: tdd
-description: "Red → green → refactor for one task at a time. In opsx every kind of change reads this at apply step 3b: write the test named in tasks.md (驗收 scenario + edges), see it fail, commit it, then implement to green. Also use when the user asks for TDD, a failing test, or a regression test."
+description: "Red → green → refactor for one task at a time. In opsx every kind of change reads this at apply step 3b: write the test named in tasks.md (驗收 scenario + edges), see it fail, then implement to green. Also use when the user asks for TDD, a failing test, or a regression test."
 disable-model-invocation: true
 ---
 

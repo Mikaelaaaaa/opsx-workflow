@@ -41,6 +41,28 @@ If you are unsure which bucket an item belongs to, try bucket 1 for a few minute
 - **Order the questions by dependency.** If question 3's options change depending on question 1's answer, ask 1 first. Walk the decision tree one branch at a time rather than jumping around.
 - After an answer, acknowledge it in one sentence, then ask the next question. No summaries mid-stream.
 
+## In autopilot
+
+When the router line carries `autopilot：`, nobody is watching the pane. AskUserQuestion there makes herdr mark the agent blocked, and the drive loop cannot send the next command. So in autopilot you never call it. Buckets 1 and 2 work the same as always. Each bucket-3 item goes one of two ways:
+
+- **It is a product choice, or the decision is hard to undo** (a data shape that gets migrated, a public interface, anything the user would have to unpick after merge). Write it as a gate in `gates.md` and leave the item in explore.md's 待決:
+  ```
+  ## <short-id>
+  type: decision
+  status: open
+  問題: <the question, one line>
+  已確認: <what is already settled on this point>
+  選項: <option> (Recommended) | <option> | <option>
+  建議: <why the recommended one>
+  證據: <files, what you ran>
+  風險: <what goes wrong with the recommendation>
+  預設: <what happens if nobody answers>
+  ```
+  The options follow the same rules as an AskUserQuestion: 2–4 real alternatives, recommended first.
+- **Anything else.** Take the option you would have marked Recommended. Write it as a D like any other, add a `  - 自動採用：autopilot，沒問使用者` line under it, and log one line in decisions.tsv. The user can overturn it at review or on the MR.
+
+If you wrote any gate, still write grill.md with the Ds you have, say which items wait on which gate, and stop. The answer comes back as a prompt. Turn it into its D, remove the item from 待決, and carry on. Once 待決 is empty, propose comes next as usual.
+
 ## Challenge the language as you go
 
 When the user uses a word that `CONTEXT.md` or the code uses differently, say so right there:「你說的 cancellation 是整張 Order 取消，還是 CONTEXT.md 寫的部分取消？」When a term is vague ("account", "user"), ask which concrete concept they mean before building a decision on it. When the user states how something works and the code disagrees, show the file and ask which one is right. A decision written on a fuzzy word turns into a bug in apply.

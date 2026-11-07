@@ -10,7 +10,7 @@ GET /api/collect 回 `opsx collect` 的輸出；--collect 給了檔就回那個�
 GET /api/log[?since=<iso>] 回 `opsx timeline [--since …]` 的輸出（紀錄 tab、抽屜、banner 用，開才拉，不快取）。
 GET /api/output?pane=<id> 跑 `herdr agent read <id> --lines 10 --format text`，回 {ok, text} 或 {ok: false, error}（抽屜「最後輸出」）。
 POST /api/seen {at} 把 at 寫進 <state>/last-seen（banner 按「關閉」時送）。
-POST /api/{answer,dispatch,merge,stop,new,file,drop,sync} 轉呼叫對應的 `opsx` 子命令，POST /api/focus 跑 herdr pane focus；都回 {ok, stdout, stderr}。
+POST /api/{answer,dispatch,merge,stop,new,file,drop,sync} 轉呼叫對應的 `opsx` 子命令，POST /api/focus 跑 herdr agent focus <slug>；都回 {ok, stdout, stderr}。
 
 /api/* 要 header X-Opsx-Token 等於 <state>/board-token（第一次啟動時產生，之後重用）。只聽 127.0.0.1。
 opsx 用 plugin 自己的 bin/opsx（不靠 PATH），並把 --state 透過 OPSX_STATE_DIR 傳下去，兩邊讀同一份狀態。
@@ -282,10 +282,11 @@ class Handler(BaseHTTPRequestHandler):
                 write_atomic(self.cfg.state / "last-seen", at + "\n")
                 self.send_json(200, {"ok": True}); return
             if action == "focus":
-                pane = body.get("pane")
-                if not isinstance(pane, str) or not PANE_RE.match(pane):
-                    raise ValueError("pane 不合格：%r" % pane)
-                self.send_json(200, run(["herdr", "pane", "focus", pane], 10, self.opsx_env())); return
+                # herdr pane focus 只收 --direction；跳到某個 agent 用 agent focus <name>，agent 名 = slug
+                agent = body.get("agent")
+                if not isinstance(agent, str) or not SLUG_RE.match(agent):
+                    raise ValueError("agent 不合格：%r" % agent)
+                self.send_json(200, run(["herdr", "agent", "focus", agent], 10, self.opsx_env())); return
             args = build_args(action, body)
         except (ValueError, json.JSONDecodeError) as e:
             self.send_json(400, {"error": str(e)}); return

@@ -95,7 +95,7 @@ class CursorTest(unittest.TestCase):
     def test_enter_focuses_pane_only_when_dispatched(self):
         rows = tm.rows(DATA, done_open=False)
         cur = tm.Cursor(rows)
-        self.assertEqual(tm.enter(rows[cur.index]), ["herdr", "pane", "focus", "p4"])
+        self.assertEqual(tm.enter(rows[cur.index]), ["herdr", "agent", "focus", "ask1"])   # agent 名 = slug，不是 pane id
         cur.move(3)
         self.assertEqual(rows[cur.index]["card"]["slug"], "ready1")
         self.assertIsNone(tm.enter(rows[cur.index]), "沒派出的卡 Enter 不做事")
