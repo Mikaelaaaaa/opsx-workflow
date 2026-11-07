@@ -52,4 +52,16 @@ check('已完成的卡不列現在',
   [], [card({section: '已完成', dispatch: {pane: 'w1:p2'}, agent_status: 'unknown'})], []);
 // collect 對 mode 是 stopped 的卡把 dispatch 設成 null
 check('沒有 dispatch 的 unknown 不算失聯', [], [card({agent_status: 'unknown'})], []);
+
+// renderBanner 組 banner 時傳哪些卡：首頁範圍篩選不能把卡擋在 banner 外（last-seen 是全域的）
+const RSTART = 'function renderBanner', REND = 'async function closeBanner';
+const rs = html.indexOf(RSTART), re = html.indexOf(REND);
+if (rs < 0) throw new Error(`index.html 找不到標記 ${RSTART}`);
+if (re < rs) throw new Error(`index.html 找不到 ${RSTART} 之後的標記 ${REND}`);
+const renderBanner = new Function('bannerClosed', 'tl', 'data', 'inScope', 'esc', 'ago', 'bannerItems',
+  html.slice(rs, re) + ';return renderBanner();');
+const outOfScope = () => false;
+const banner = renderBanner(false, {events: [], last_seen: LS}, {cards: [card({open_gates: [{id: 'G1', opened_at: T}]})]},
+  outOfScope, String, () => '', bannerItems);
+assert.ok(banner.includes('x 開了 gate G1'), `範圍外的卡也進 banner：${banner}`);
 JS
