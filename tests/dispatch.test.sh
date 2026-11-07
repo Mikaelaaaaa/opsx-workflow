@@ -6,6 +6,11 @@ for f in herdr glab; do printf '#!/usr/bin/env bash\nexec bash "%s/%s" "$@"\n' "
 export PATH="$FX/fakebin:$PATH"
 export OPSX_FAKE_LOG="$FX/herdr.log"; : > "$OPSX_FAKE_LOG"
 export OPSX_USER=mikaela
+export OPSX_DRIVE_MAX=0   # autopilot 會在背景起 drive；0 輪讓它登記完就結束，不在 fixture 上跑迴圈
+wait_drive() { # <repo> <slug>：等背景 drive 跑完（log 出現結束那行），最多 5 秒
+  local f="$OPSX_STATE_DIR/drive-$1-$2.log" n=0
+  until grep -q '跑滿 [01] 輪' "$f" 2>/dev/null; do n=$((n+1)); [ $n -lt 50 ] || fail "drive 沒在背景起來：$f"; sleep 0.1; done
+}
 
 R="$(mk_repo Agentory-CS git@gitlab.tsg-navigator.com:agentory/Agentory-CS.git)"
 mkdir -p "$R/openspec/changes/retry-backoff" "$OPSX_STATE_DIR"
@@ -22,15 +27,19 @@ assert_rc 2 opsx dispatch retry-backoff --mode yolo
 assert_eq "$(cat "$OPSX_FAKE_LOG")" "" "沒派出去不該碰 herdr"
 
 # --- 正常：autopilot，kind 從對話框給，model 照 kind ---
-out="$(opsx dispatch retry-backoff --agent claude --mode autopilot --kind bug-fix 2>&1)"; rc=$?
+# 背景 drive 起來第一件事是 herdr agent wait：在那時候抓 dispatch.json，看 drive 有沒有用 dispatch 寫的 key 登記自己
+printf 'cp "%s" "%s"\n' "$OPSX_STATE_DIR/dispatch.json" "$FX/drive-snap.json" > "$FX/snap-wait.sh"
+out="$(OPSX_DRIVE_MAX=1 OPSX_TEST_ON_WAIT="$FX/snap-wait.sh" opsx dispatch retry-backoff --agent claude --mode autopilot --kind bug-fix 2>&1)"; rc=$?
 assert_eq "$rc" 0 "dispatch rc: $out"
+wait_drive Agentory-CS retry-backoff   # autopilot 一律起 drive
+assert_eq "$(jq -r '."Agentory-CS/retry-backoff".drive_pid | type' "$FX/drive-snap.json")" number "drive 跑的時候 drive_pid 要登記在 dispatch 寫的 key 下"
 assert_grep '^kind: bug-fix$' "$R/openspec/changes/retry-backoff/.openspec.yaml"
 [ -d "$R/.claude/worktrees/retry-backoff" ] || fail "worktree 沒開"
 assert_eq "$(git -C "$R/.claude/worktrees/retry-backoff" rev-parse --abbrev-ref HEAD)" "fix/retry-backoff/mikaela" "branch 命名"
 # herdr 呼叫順序：tab create（在 w1）→ agent start（帶 model + settings）→ agent prompt /propose（explore 待決空 → propose）
 assert_grep '^tab create --workspace w1 --cwd .*retry-backoff --label retry-backoff' "$OPSX_FAKE_LOG"
 assert_grep '^workspace list$' "$OPSX_FAKE_LOG"
-assert_grep '^agent start retry-backoff --kind claude --pane w1:pE -- --model claude-sonnet-5-5 --permission-mode acceptEdits --settings '"$OPSX_STATE_DIR"'/settings/Agentory-CS-retry-backoff-autopilot.json --add-dir ' "$OPSX_FAKE_LOG"
+assert_grep '^agent start retry-backoff --kind claude --pane w1:pE -- --model claude-sonnet-5-5 --permission-mode dontAsk --settings '"$OPSX_STATE_DIR"'/settings/Agentory-CS-retry-backoff-autopilot.json --add-dir ' "$OPSX_FAKE_LOG"
 # 沙盒只准寫 working directories：卡的檔在主 repo 的 openspec/、hook 與 status 寫 state dir，兩個都要 --add-dir
 assert_grep "^agent start retry-backoff .* --add-dir $R/openspec --add-dir $OPSX_STATE_DIR\$" "$OPSX_FAKE_LOG"
 assert_grep '^agent prompt retry-backoff /propose retry-backoff$' "$OPSX_FAKE_LOG"
@@ -38,13 +47,15 @@ assert_not_grep '^workspace create' "$OPSX_FAKE_LOG"
 # settings：repo 永遠 push 進 allow；merge 在 allow 不在 deny（deny 會蓋過 grant-gate 的放行，merge 由 gate 單獨把關）
 S="$OPSX_STATE_DIR/settings/Agentory-CS-retry-backoff-autopilot.json"; assert_file "$S"
 python3 -I -c 'import json,sys;d=json.load(open(sys.argv[1]))["permissions"];assert "Bash(git push:*)" in d["allow"],d;assert "Bash(glab mr merge:*)" in d["allow"] and "Bash(gh pr merge:*)" in d["allow"],d;assert not any("merge" in x for x in d["deny"]),d;assert not any("glab mr create" in a for a in d["allow"]),d' "$S"
+# dontAsk 下不在 allow 的指令直接被拒：常用唯讀與測試指令要在 allow 裡，不然 agent 連跑測試都不行
+python3 -I -c 'import json,sys;a=json.load(open(sys.argv[1]))["permissions"]["allow"];miss=[x for x in ["Bash(jq:*)","Bash(head:*)","Bash(tail:*)","Bash(wc:*)","Bash(sed -n:*)","Bash(bash tests/:*)","Bash(herdr agent:*)","Bash(glab mr view:*)","Bash(glab ci:*)","Bash(gh pr view:*)","Bash(git merge-base:*)","Bash(git remote:*)"] if x not in a];assert not miss,miss' "$S" || fail "allow 少了常用指令"
 # 重啟 / resume 後旗標不在，可寫目錄還要由 settings 供應
 python3 -I -c 'import json,sys;d=json.load(open(sys.argv[1]))["permissions"];assert d["additionalDirectories"]==[sys.argv[2],sys.argv[3]],d' "$S" "$R/openspec" "$OPSX_STATE_DIR" || fail "autopilot settings 缺 additionalDirectories"
 # dispatch.json
 python3 -I -c '
 import json,sys;d=json.load(open(sys.argv[1]))["Agentory-CS/retry-backoff"]
 assert d["pane"]=="w1:pE" and d["tab"]=="w1:tB" and d["workspace"]=="agnetory-ai" and d["workspace_id"]=="w1" and d["mode"]=="autopilot" and d["kind"]=="bug-fix" and d["model"]=="claude-sonnet-5-5" and d["agent"]=="claude", d
-assert d["branch"]=="fix/retry-backoff/mikaela" and d["grants"]==[] and d["once"]==[] and d["drive_pid"] is None, d' "$OPSX_STATE_DIR/dispatch.json"
+assert d["branch"]=="fix/retry-backoff/mikaela" and d["grants"]==[] and d["once"]==[] and d["drive_pid"] is None, d' "$OPSX_STATE_DIR/dispatch.json"   # drive 跑完清掉自己的 pid
 # 另一個 repo 派出同名 slug：herdr 只認名字，會送錯 agent，要拒絕
 R4="$(mk_repo Agentory-X)"; mkdir -p "$R4/openspec/changes/retry-backoff"; printf 'schema: opsx\n' > "$R4/openspec/changes/retry-backoff/.openspec.yaml"
 printf '"Agentory-X" = "agnetory-ai"\n' >> "$OPSX_STATE_DIR/workspaces.toml"
@@ -68,6 +79,7 @@ export OPSX_TEST_BUSY_LEFT="$FX/busy-left"
 : > "$OPSX_FAKE_LOG"; echo 2 > "$OPSX_TEST_BUSY_LEFT"
 out="$(opsx dispatch busy-card --agent claude --mode interactive --kind dev 2>&1)" || fail "busy twice should still dispatch: $out"
 assert_eq "$(grep -c '^agent start busy-card ' "$OPSX_FAKE_LOG")" 3 "two busy then ok = three starts"
+assert_no_file "$OPSX_STATE_DIR/drive-Agentory-CS-busy-card.log"   # interactive 不起 drive
 assert_not_grep '^tab close' "$OPSX_FAKE_LOG"
 python3 -I -c 'import json,sys;assert "Agentory-CS/busy-card" in json.load(open(sys.argv[1]))' "$OPSX_STATE_DIR/dispatch.json"
 # 一直 busy：六次後放棄，關掉剛開的 tab，什麼都不記
@@ -153,7 +165,9 @@ assert_grep '^agent prompt rdap-timeout /explore rdap-timeout$' "$OPSX_FAKE_LOG"
 R3="$(mk_repo Agentory-AI)"; mkdir -p "$R3/openspec/changes/eval-core"; printf 'schema: opsx\nkind: dev\n' > "$R3/openspec/changes/eval-core/.openspec.yaml"
 printf 'features:\n  - name: eval\n    prs:\n      - name: eval-core\n        branch: feat/eval-core-v2/mikaela\n        status: pending\n' > "$R3/openspec/workplan.yaml"
 printf '"Agentory-AI" = "w1"\n' >> "$OPSX_STATE_DIR/workspaces.toml"
-cd "$R3"; opsx dispatch eval-core --agent claude --mode autopilot >/dev/null 2>&1 || fail "dispatch with workplan"
+cd "$R3"; opsx dispatch eval-core --agent claude --mode drive >/dev/null 2>&1 || fail "dispatch with workplan"
+wait_drive Agentory-AI eval-core   # --mode drive 是 autopilot 的別名：照樣起 drive，dispatch.json 寫 autopilot
+python3 -I -c 'import json,sys;d=json.load(open(sys.argv[1]))["Agentory-AI/eval-core"];assert d["mode"]=="autopilot",d' "$OPSX_STATE_DIR/dispatch.json" || fail "--mode drive 要寫成 autopilot"
 assert_eq "$(git -C "$R3/.claude/worktrees/eval-core" rev-parse --abbrev-ref HEAD)" "feat/eval-core-v2/mikaela" "workplan branch"
 
 # --- 分支尾巴：OPSX_USER 沒設就用 git user.name；是 git 的占位字「Your Name」或空的就拒絕，不開 worktree 不碰 herdr ---

@@ -271,7 +271,7 @@ const REFRESH_MS=5000;
 
 /* ---------- 標籤 ---------- */
 const KIND={dev:'功能','bug-fix':'錯誤修正',refactoring:'重構',perf:'效能',experiment:'實驗',ops:'維運',chore:'雜務'};
-const MODE_LABEL={interactive:'互動（每步問）',autopilot:'自動（寫 gate 不停）',drive:'開到可合併'};
+const MODE_LABEL={interactive:'互動（每步問）',autopilot:'自動（開到可合併）',drive:'自動（開到可合併）'};
 const PHASES=['explore','grill','propose','apply','review','pr','babysit','archive'];
 const PHASE_LABEL={explore:'explore',grill:'grill',propose:'propose',apply:'apply',review:'review',pr:'MR',babysit:'MR',archive:'已合併'};
 const MODEL_BY_KIND={dev:'claude-opus-5-5',refactoring:'claude-opus-5-5',perf:'claude-opus-5-5',experiment:'claude-opus-5-5','bug-fix':'claude-sonnet-5-5',chore:'claude-sonnet-5-5',ops:'claude-sonnet-5-5'};
@@ -645,7 +645,7 @@ function openDispatch(c){
     <div class="opt"><span>Agent</span><label class="radio"><input type="radio" name="ag" value="claude" checked><span><b>claude</b><small>走 opsx hook，會寫 gate</small></span></label><label class="radio"><input type="radio" name="ag" value="codex"><span><b>codex</b><small>gpt-5 · 同一套 skill，status 由 skill 顯式寫</small></span></label></div>
     <div class="opt"><span>類型（寫進 .openspec.yaml，決定 playbook）</span><div class="kinds">${Object.keys(KIND).map(k=>`<button data-kind="${k}" aria-pressed="${k===kind}">${KIND[k]}</button>`).join('')}</div></div>
     <div class="opt"><span>模型（預設照類型；codex 只有 gpt-5）</span><div class="kinds models" style="grid-template-columns:repeat(3,minmax(0,1fr))"><button data-model="claude-opus-5-5" aria-pressed="${MODEL_BY_KIND[kind]==='claude-opus-5-5'}">opus 5.5</button><button data-model="claude-sonnet-5-5" aria-pressed="${MODEL_BY_KIND[kind]==='claude-sonnet-5-5'}">sonnet 5.5</button><button data-model="gpt-5" aria-pressed="false">gpt-5（codex）</button></div></div>
-    <div class="opt"><span>自主程度</span><label class="radio"><input type="radio" name="md" value="interactive"><span><b>互動</b><small>每一步都問你</small></span></label><label class="radio"><input type="radio" name="md" value="autopilot" checked><span><b>自動</b><small>要授權的寫 gate，繼續做能做的</small></span></label><label class="radio"><input type="radio" name="md" value="drive"><span><b>開到可合併</b><small>含 review、開 MR、處理留言；合併仍是你</small></span></label></div>
+    <div class="opt"><span>自主程度</span><label class="radio"><input type="radio" name="md" value="interactive"><span><b>互動</b><small>每一步都問你</small></span></label><label class="radio"><input type="radio" name="md" value="autopilot" checked><span><b>自動</b><small>一路做到可以合併，要你決定或授權的寫 gate；合併仍是你</small></span></label></div>
     <div class="note">階段 ${esc(c.stage)}：派出後第一句是 /${esc(c.stage)} ${esc(c.slug)}<br>pane 開在 ${ws?esc(ws):`新 workspace「${esc(c.repo)}」`}<br>${esc(c.repo)} 長期授權：${granted.length?esc(granted.join('、')):'無（碰到會寫 gate）'}</div>
     <div class="go"><button data-act="dlg-cancel">取消</button><button class="primary" data-act="dlg-go">指派</button></div></div>`;
   $('#dialog').hidden=false;$('#scrim').hidden=false;

@@ -112,6 +112,10 @@ class ServerTest(unittest.TestCase):
         self.assertIn("text/html", ctype)
         self.assertIn("<title>", body)
 
+    def test_dispatch_dialog_has_two_modes(self):
+        _, _, body = self.req("/")
+        self.assertEqual(re.findall(r'name="md" value="([a-z]+)"', body), ["interactive", "autopilot"])
+
     def test_token_is_generated_and_required(self):
         self.assertGreaterEqual(len(self.token), 32)
         status, _, _ = self.req("/api/collect")

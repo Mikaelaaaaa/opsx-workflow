@@ -164,7 +164,11 @@ assert_eq "$(jq -r '."fan/p".handed_to | join(",")' "$J")" "c1,c2" "父卡要記
 jq -e '."fan/p".handed_at | startswith("20")' "$J" >/dev/null || fail "父卡要有 handed_at"
 cp "$J" "$FX/disp.before"; out="$(opsx chain p 2>&1)"; assert_eq "$?" 0; cmp -s "$J" "$FX/disp.before" || fail "已交接再跑不該動 dispatch.json"
 
-# 父卡是 drive：代管卡沒有自己的 agent 可以讓 drive 送話，改記 autopilot 並寫進 decisions
+# 父卡是 autopilot（或舊名 drive）：代管卡沒有自己的 agent 可以讓 drive 送話，寫進 decisions
+for s in c1 c2; do : > "$R2/openspec/changes/$s/decisions.tsv"; done
+fanout_entry autopilot
+out="$(opsx chain p 2>&1)"; assert_eq "$?" 0 "autopilot fan-out: $out"
+for s in c1 c2; do assert_grep "drive 不支援代管卡" "$R2/openspec/changes/$s/decisions.tsv"; done
 for s in c1 c2; do : > "$R2/openspec/changes/$s/decisions.tsv"; done
 fanout_entry drive
 out="$(opsx chain p 2>&1)"; assert_eq "$?" 0 "drive fan-out: $out"
@@ -262,7 +266,7 @@ assert_eq "$(git -C "$R3" branch --show-current)" "feat/c/mikaela" "切到子卡
 assert_eq "$(git -C "$R3" config --get branch.feat/c/mikaela.remote || echo none)" none "不帶 upstream tracking"
 assert_eq "$(git -C "$R3" log -1 --format=%s)" "merge p" "從主要 remote（gitlab）的 main 開，含父卡的合併（6.3）"
 assert_eq "$(cat "$OPSX_FAKE_LOG")" "" "chain 不叫 herdr（D5）"
-assert_eq "$(cat "$Q")" "$(printf 'rename\tp\tc\nprompt\tc\t/apply c')" "佇列"
+assert_eq "$(cat "$Q")" "$(printf 'rename\tp\tc\nprompt\tc\t/apply c\ndrive\tc\t%s' "$R3")" "佇列：autopilot 一律起 drive"
 J="$OPSX_STATE_DIR/dispatch.json"
 assert_eq "$(jq -r '."solo/c" | [.pane, .tab, .herdr_name, .mode, .agent, .kind, .branch, (.via // "none")] | join(" ")' "$J")" "w5:pQ w5:tJ c autopilot claude dev feat/c/mikaela none"
 assert_eq "$(jq -r '."solo/c".worktree' "$J")" "$R3"
