@@ -1,0 +1,8 @@
+{
+  "phase": "apply",
+  "step": 3,
+  "total": 3,
+  "label": "全部 task 完成",
+  "tests": "green",
+  "at": "2026-11-06T10:00:00+08:00"
+}

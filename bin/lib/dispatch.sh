@@ -106,16 +106,17 @@ PY
   tab="$(printf '%s' "$tabjson" | jq -r '.result.tab.tab_id // empty' 2>/dev/null || true)"
   [ -n "$pane" ] || die "dispatch: herdr tab create 沒回 root_pane：$tabjson"
 
-  # agent 啟動參數（自動 / 開到可合併 才帶 permission 設定）
+  # agent 啟動參數：claude 兩種模式都帶 --settings；--permission-mode 與 allow / deny 只有自動 / 開到可合併才有。
+  # settings 檔按模式分名，重派不會蓋掉 pane 還沒關的另一個模式那份
   local -a aargs=()
   if [ "$agent" = claude ]; then
     aargs+=(--model "$model")
-    if [ "$mode" != interactive ]; then
-      local settings="$OPSX_STATE_DIR/settings/$repo-$slug.json"; ensure_dir "$(dirname "$settings")"
-      write_settings "$settings" "$repo"
-      aargs+=(--permission-mode acceptEdits --settings "$settings")
-    fi
-    # Claude Code 的沙盒只准寫 working directories；卡的檔在主 repo 的 openspec/（worktree 裡沒有），hook 消耗 once 與 status 鏡像寫 state dir
+    local settings="$OPSX_STATE_DIR/settings/$repo-$slug-$mode.json"; ensure_dir "$(dirname "$settings")"
+    write_settings "$settings" "$repo" "$top/openspec" "$mode"
+    if [ "$mode" != interactive ]; then aargs+=(--permission-mode acceptEdits); fi
+    aargs+=(--settings "$settings")
+    # Claude Code 的沙盒只准寫 working directories；卡的檔在主 repo 的 openspec/（worktree 裡沒有），hook 消耗 once 與 status 鏡像寫 state dir。
+    # 旗標只活在這個行程；重啟後 --settings 有沒有被帶回、additionalDirectories 還在不在，尚未實測（add-dir-lost 1.1）
     aargs+=(--add-dir "$top/openspec" --add-dir "$OPSX_STATE_DIR")
   else
     if [ "$mode" = interactive ]; then aargs+=(-a on-request -s workspace-write); else aargs+=(-a never -s workspace-write); fi
@@ -161,7 +162,7 @@ PY
   local first; first="$(stage_name "$top" "$slug")"
   case "$first" in explore|grill|propose|apply|review|pr|babysit) ;; *) first=explore ;; esac
   herdr agent prompt "$slug" "/$first $slug" >/dev/null
-  printf '%s\t%s\t%s\n' "$(now_iso)" "指派給 ${agent}（${mode} · ${model}），第一句 /${first}" "dispatched" >> "$d/decisions.tsv"
+  log_row "$d" 你 已指派 "指派給 ${agent}，第一句 /${first}" "${agent} · ${mode} · ${model}"
   say "dispatch: $repo/$slug → $agent $model · $mode · kind $kind · $ws $pane · 第一句 /$first"
 
   if [ "$mode" = drive ]; then
@@ -191,10 +192,14 @@ except tomllib.TOMLDecodeError as e:
     sys.exit("dispatch: workspaces.toml 壞了：%s" % e)
 PY
 }
-write_settings() { # <file> <repo>：直接做那級 allow，永遠要人那級 deny；repo 永遠的授權也進 allow
-  OPSX_REPO="$2" OPSX_SD="$OPSX_STATE_DIR" "$OPSX_PY" -I - "$1" <<'PY'
+write_settings() { # <file> <repo> <主 repo openspec 目錄> <mode>：autopilot 直接做那級 allow，永遠要人那級 deny；repo 永遠的授權也進 allow。interactive 只寫可寫目錄
+  OPSX_REPO="$2" OPSX_SD="$OPSX_STATE_DIR" OPSX_MODE="$4" "$OPSX_PY" -I - "$1" "$3" <<'PY'
 import json,os,sys,tomllib
 sd=os.environ["OPSX_SD"]; repo=os.environ["OPSX_REPO"]
+dirs=[sys.argv[2],sd]
+if os.environ["OPSX_MODE"]=="interactive":
+    json.dump({"permissions":{"additionalDirectories":dirs}},open(sys.argv[1],"w"),indent=2)
+    sys.exit(0)
 allow=["Read","Edit","Write","Glob","Grep","Bash(git status:*)","Bash(git diff:*)","Bash(git log:*)","Bash(git add:*)","Bash(git commit:*)","Bash(git checkout:*)","Bash(git worktree:*)",
        "Bash(pnpm test:*)","Bash(pnpm vitest:*)","Bash(pnpm build:*)","Bash(pnpm lint:*)","Bash(pnpm typecheck:*)","Bash(npx vitest:*)","Bash(pytest:*)","Bash(uv run:*)","Bash(ruff:*)","Bash(go test:*)",
        "Bash(openspec:*)","Bash(opsx:*)","Bash(ls:*)","Bash(cat:*)","Bash(grep:*)","Bash(rg:*)","Bash(find:*)","Bash(node:*)","Bash(python3:*)"]
@@ -208,6 +213,6 @@ try:
     if g.get("mr"): allow+=["Bash(glab mr create:*)","Bash(glab mr update:*)","Bash(gh pr create:*)","Bash(gh pr edit:*)"]
     if g.get("migrate"): allow+=["Bash(pnpm db:migrate:*)","Bash(alembic upgrade:*)"]
 except FileNotFoundError: pass
-json.dump({"permissions":{"allow":allow,"deny":deny}},open(sys.argv[1],"w"),indent=2)
+json.dump({"permissions":{"allow":allow,"deny":deny,"additionalDirectories":dirs}},open(sys.argv[1],"w"),indent=2)
 PY
 }

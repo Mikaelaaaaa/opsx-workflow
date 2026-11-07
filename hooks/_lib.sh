@@ -48,7 +48,7 @@ stop_block() { jq -n --arg reason "$1" '{decision:"block",reason:$reason}'; exit
 # grants：grants.toml [repos."<repo>"] <action> = true（這個 repo 永遠）、dispatch.json 這張卡的 grants 含 action（這張卡）、
 # 或 dispatch.json 這張卡的 once 含 action（這次：用掉就刪；不記的話 agent 重試還是被 deny，等於沒答）。
 # grants.toml 壞掉時當成沒授權，不放行。
-has_grant() { # <repo> <slug> <action>
+has_grant() { # <repo> <slug> <action>：0 有授權、3 沒授權，其他值是 python 本身失敗
   OPSX_REPO="$1" OPSX_SLUG="$2" OPSX_ACTION="$3" OPSX_SD="$OPSX_STATE_DIR" OPSX_LIB="$OPSX_ROOT/bin/lib" "$OPSX_PY" -I - <<'PY'
 import os, sys, tomllib
 sys.path.insert(0, os.environ["OPSX_LIB"]); import jsonfile
@@ -64,20 +64,19 @@ except tomllib.TOMLDecodeError as e:
 p = os.path.join(sd, "dispatch.json")
 card = jsonfile.load(p).get(key, {})
 if act in card.get("grants", []): sys.exit(0)
-if act not in card.get("once", []): sys.exit(1)
+if act not in card.get("once", []): sys.exit(3)
 consumed = {"ok": False}
 def consume(d):
     once = d.get(key, {}).get("once", [])
     if act in once:
         once.remove(act); consumed["ok"] = True
 jsonfile.update(p, consume)
-sys.exit(0 if consumed["ok"] else 1)
+sys.exit(0 if consumed["ok"] else 3)
 PY
 }
-card_mode() { # <repo> <slug>：印 interactive、autopilot、drive、stopped，沒派過就空
-  OPSX_REPO="$1" OPSX_SLUG="$2" OPSX_SD="$OPSX_STATE_DIR" OPSX_LIB="$OPSX_ROOT/bin/lib" "$OPSX_PY" -I - <<'PY'
-import os, sys
-sys.path.insert(0, os.environ["OPSX_LIB"]); import jsonfile
-print(jsonfile.load(os.path.join(os.environ["OPSX_SD"], "dispatch.json")).get("%s/%s" % (os.environ["OPSX_REPO"], os.environ["OPSX_SLUG"]), {}).get("mode", ""))
-PY
+# 用 jq 不用 python：python 沒記或壞掉時，閘門仍要分得出哪些卡歸它管。
+card_mode() { # <repo> <slug>：印 interactive、autopilot、drive、stopped，沒派過就空；dispatch.json 不是合法 JSON 時回非 0
+  local f="$OPSX_STATE_DIR/dispatch.json"
+  [ -f "$f" ] || return 0
+  jq -r --arg k "$1/$2" '.[$k].mode // empty' "$f" 2>/dev/null
 }
