@@ -30,14 +30,16 @@ assert_eq "$(git -C "$R/.claude/worktrees/retry-backoff" rev-parse --abbrev-ref 
 # herdr 呼叫順序：tab create（在 w1）→ agent start（帶 model + settings）→ agent prompt /propose（explore 待決空 → propose）
 assert_grep '^tab create --workspace w1 --cwd .*retry-backoff --label retry-backoff' "$OPSX_FAKE_LOG"
 assert_grep '^workspace list$' "$OPSX_FAKE_LOG"
-assert_grep '^agent start retry-backoff --kind claude --pane w1:pE -- --model claude-sonnet-5-5 --permission-mode acceptEdits --settings ' "$OPSX_FAKE_LOG"
+assert_grep '^agent start retry-backoff --kind claude --pane w1:pE -- --model claude-sonnet-5-5 --permission-mode acceptEdits --settings '"$OPSX_STATE_DIR"'/settings/Agentory-CS-retry-backoff-autopilot.json --add-dir ' "$OPSX_FAKE_LOG"
 # 沙盒只准寫 working directories：卡的檔在主 repo 的 openspec/、hook 與 status 寫 state dir，兩個都要 --add-dir
 assert_grep "^agent start retry-backoff .* --add-dir $R/openspec --add-dir $OPSX_STATE_DIR\$" "$OPSX_FAKE_LOG"
 assert_grep '^agent prompt retry-backoff /propose retry-backoff$' "$OPSX_FAKE_LOG"
 assert_not_grep '^workspace create' "$OPSX_FAKE_LOG"
 # settings：repo 永遠 push 進 allow；merge 在 allow 不在 deny（deny 會蓋過 grant-gate 的放行，merge 由 gate 單獨把關）
-S="$OPSX_STATE_DIR/settings/Agentory-CS-retry-backoff.json"; assert_file "$S"
+S="$OPSX_STATE_DIR/settings/Agentory-CS-retry-backoff-autopilot.json"; assert_file "$S"
 python3 -I -c 'import json,sys;d=json.load(open(sys.argv[1]))["permissions"];assert "Bash(git push:*)" in d["allow"],d;assert "Bash(glab mr merge:*)" in d["allow"] and "Bash(gh pr merge:*)" in d["allow"],d;assert not any("merge" in x for x in d["deny"]),d;assert not any("glab mr create" in a for a in d["allow"]),d' "$S"
+# 重啟 / resume 後旗標不在，可寫目錄還要由 settings 供應
+python3 -I -c 'import json,sys;d=json.load(open(sys.argv[1]))["permissions"];assert d["additionalDirectories"]==[sys.argv[2],sys.argv[3]],d' "$S" "$R/openspec" "$OPSX_STATE_DIR" || fail "autopilot settings 缺 additionalDirectories"
 # dispatch.json
 python3 -I -c '
 import json,sys;d=json.load(open(sys.argv[1]))["Agentory-CS/retry-backoff"]
@@ -125,7 +127,11 @@ python3 -I -c 'import json,sys;d=json.load(open(sys.argv[1]))["Agentory-CS/retry
 opsx stop retry-backoff >/dev/null 2>&1 || fail "stop before redispatch"
 : > "$OPSX_FAKE_LOG"
 opsx dispatch retry-backoff --agent claude --mode interactive >/dev/null 2>&1 || fail "redispatch interactive claude"
-assert_grep "^agent start retry-backoff --kind claude --pane w1:pE -- --model claude-sonnet-5-5 --add-dir $R/openspec --add-dir $OPSX_STATE_DIR\$" "$OPSX_FAKE_LOG"   # kind 已是 bug-fix → sonnet
+assert_grep "^agent start retry-backoff --kind claude --pane w1:pE -- --model claude-sonnet-5-5 --settings $OPSX_STATE_DIR/settings/Agentory-CS-retry-backoff-interactive.json --add-dir $R/openspec --add-dir $OPSX_STATE_DIR\$" "$OPSX_FAKE_LOG"   # kind 已是 bug-fix → sonnet
+assert_not_grep '--permission-mode' "$OPSX_FAKE_LOG"
+python3 -I -c 'import json,sys;d=json.load(open(sys.argv[1]))["permissions"];assert d=={"additionalDirectories":[sys.argv[2],sys.argv[3]]},d' "$OPSX_STATE_DIR/settings/Agentory-CS-retry-backoff-interactive.json" "$R/openspec" "$OPSX_STATE_DIR" || fail "interactive settings 只該有 additionalDirectories"
+# interactive 重派不能蓋掉 autopilot 那份的 allow / deny
+python3 -I -c 'import json,sys;d=json.load(open(sys.argv[1]))["permissions"];assert d["allow"] and "Bash(git push --force:*)" in d["deny"],d' "$S" || fail "interactive 重派蓋掉了 autopilot 的 settings"
 
 # --- 沒掛 workspace 的 repo → 開新 workspace 並記下來 ---
 R2="$(mk_repo scam-guard https://github.com/Mikaelaaaaa/scam-guard.git)"
