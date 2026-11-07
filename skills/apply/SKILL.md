@@ -92,6 +92,10 @@ On FAIL: read the log, fix, with a scope guard (a fix that needs files outside t
 
 Autopilot never touches `main`, never force-pushes, never merges. Those are level three and the hook denies them regardless of mode.
 
+## When this pane coordinates other cards
+
+After `opsx chain` fans out (see `archive` step 6b), this pane hands each child card to a subagent and stays the only place that talks to the user. What goes to a subagent (independent cards whose tasks need nobody), what stays here (anything that needs the user, and cards that depend on each other), how prompts for a child arrive (`[<slug>] …`) and how a subagent's `NEEDS-USER` report becomes a gate in that card's `gates.md`: `../../references/fan-out.md`.
+
 ## After the last change
 
 1. Update the workplan: changes → `done`; the PR → `in-progress` when all its changes are done.

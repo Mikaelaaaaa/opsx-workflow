@@ -2,6 +2,9 @@
 # opsx stop <slug> [--repo <top>]：板上的「停止」。kill drive 迴圈、關掉 pane、dispatch.json 標 stopped。
 # worktree 和 branch 留著（重派會重用）。
 
+# shellcheck source=/dev/null
+source "$OPSX_ROOT/bin/lib/route.sh"
+
 opsx_stop() {
   local slug="" top="" board=""
   while [ $# -gt 0 ]; do
@@ -13,12 +16,20 @@ opsx_stop() {
   [ -n "$top" ] || die "stop: 不在 git repo 裡，或給 --repo"
   local repo; repo="$(basename "$(cd "$top" && pwd -P)")"
   local f="$OPSX_STATE_DIR/dispatch.json"
+  refuse_if_handed "$repo" "$slug" stop
   [ -f "$f" ] || die "stop: 沒有 dispatch.json"
   local entry; entry="$(OPSX_KEY="$repo/$slug" "$OPSX_PY" -I -c 'import json,os,sys;d=json.load(open(sys.argv[1]));print(json.dumps(d.get(os.environ["OPSX_KEY"],{})))' "$f")"
   [ "$entry" != "{}" ] || die "stop: $repo/$slug 沒派過"
   local pid pane; pid="$(printf '%s' "$entry" | jq -r '.drive_pid // empty')"; pane="$(printf '%s' "$entry" | jq -r '.pane // empty')"
-  if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then kill "$pid" 2>/dev/null || true; say "stop: drive pid $pid 已 kill"; fi
-  if [ -n "$pane" ]; then herdr pane close "$pane" >/dev/null 2>&1 && say "stop: pane $pane 關了" || say "stop: pane $pane 關不掉（可能已經不在）"; fi
+  local route name via; route="$(card_route "$repo" "$slug")" || die "stop: 讀不懂 dispatch.json"; name="${route%%$'\t'*}"; via="${route#*$'\t'}"
+  if [ -n "$via" ]; then
+    # 代管卡跟兄弟卡共用 pane，關 pane 會連兄弟一起停：只請 pane 停掉這張的 subagent（grill D4）
+    if herdr agent prompt "$name" "[$slug] stop" >/dev/null 2>&1; then say "stop: 已請 $name 的 pane 停掉 $slug 的 subagent，pane 不關"
+    else say "stop: 送不到 ${name}，$slug 照樣標 stopped；它的 subagent 可能還在跑，到 pane $pane 看"; fi
+  else
+    if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then kill "$pid" 2>/dev/null || true; say "stop: drive pid $pid 已 kill"; fi
+    if [ -n "$pane" ]; then herdr pane close "$pane" >/dev/null 2>&1 && say "stop: pane $pane 關了" || say "stop: pane $pane 關不掉（可能已經不在）"; fi
+  fi
   OPSX_KEY="$repo/$slug" OPSX_AT="$(now_iso)" OPSX_LIB="$OPSX_ROOT/bin/lib" "$OPSX_PY" -I - "$f" <<'PY'
 import os, sys
 sys.path.insert(0, os.environ["OPSX_LIB"]); import jsonfile

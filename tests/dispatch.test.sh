@@ -176,4 +176,31 @@ assert_grep '^pane close w1:pE$' "$OPSX_FAKE_LOG"
 python3 -I -c 'import json,sys;d=json.load(open(sys.argv[1]))["Agentory-CS/retry-backoff"];assert d["mode"]=="stopped" and d["stopped_at"],d' "$OPSX_STATE_DIR/dispatch.json"
 assert_eq "$(last_row)" "你$(printf '\t')已停止"
 assert_rc 2 opsx stop nope
+
+# --- 停下的代管卡重派（auto-dispatch 4.2）：整筆改寫，不再帶 via / herdr_name ---
+python3 -I -c 'import json,sys;p=sys.argv[1];d=json.load(open(p));e=d["Agentory-CS/retry-backoff"];e.update(mode="stopped",via="p",herdr_name="p");json.dump(d,open(p,"w"))' "$OPSX_STATE_DIR/dispatch.json"
+: > "$OPSX_FAKE_LOG"
+out="$(opsx dispatch retry-backoff --agent claude --mode autopilot 2>&1)" || fail "redispatch 代管卡: $out"
+python3 -I -c 'import json,sys;e=json.load(open(sys.argv[1]))["Agentory-CS/retry-backoff"];assert "via" not in e and "herdr_name" not in e and e["mode"]=="autopilot",e' "$OPSX_STATE_DIR/dispatch.json" || fail "重派要整筆改寫"
+assert_grep '^agent start retry-backoff ' "$OPSX_FAKE_LOG"
+
+# --- herdr 名不撞（auto-dispatch 4.3）：還在跑的代管卡的 herdr_name 是 coord，就不准再派一張叫 coord 的卡 ---
+mkdir -p "$R/openspec/changes/coord"; printf 'schema: opsx\nkind: dev\n' > "$R/openspec/changes/coord/.openspec.yaml"
+python3 -I -c 'import json,sys;p=sys.argv[1];d=json.load(open(p));d["Other-Repo/kid"]={"mode":"autopilot","pane":"w9:p1","via":"coord","herdr_name":"coord"};json.dump(d,open(p,"w"))' "$OPSX_STATE_DIR/dispatch.json"
+: > "$OPSX_FAKE_LOG"
+out="$(opsx dispatch coord --agent claude --mode autopilot 2>&1)"; [ $? -eq 2 ] || fail "slug 撞到 herdr_name 要拒絕: $out"
+echo "$out" | grep -q 'Other-Repo/kid' || fail "要說撞到哪一筆: $out"
+assert_eq "$(cat "$OPSX_FAKE_LOG")" "" "拒絕時不碰 herdr"
+
+# --- 已交接的條目不算撞名（auto-dispatch 6.1）：續接後父卡那筆留著 herdr_name，子卡停掉後要能重派 ---
+mkdir -p "$R/openspec/changes/coord2"; printf 'schema: opsx\nkind: dev\n' > "$R/openspec/changes/coord2/.openspec.yaml"
+python3 -I -c 'import json,sys;p=sys.argv[1];d=json.load(open(p));d["Other-Repo/old"]={"mode":"autopilot","pane":"w9:p2","herdr_name":"coord2","handed_to":["coord2"]};json.dump(d,open(p,"w"))' "$OPSX_STATE_DIR/dispatch.json"
+out="$(opsx dispatch coord2 --agent claude --mode autopilot 2>&1)" || fail "已交接的條目不該擋重派: $out"
+
+# --- fan-out 的父卡（auto-dispatch 6.7）：handed_to 列了子卡，但 pane 還活著、herdr 名還是父卡，同名的卡照樣不准派 ---
+mkdir -p "$R/openspec/changes/coord3"; printf 'schema: opsx\nkind: dev\n' > "$R/openspec/changes/coord3/.openspec.yaml"
+python3 -I -c 'import json,sys;p=sys.argv[1];d=json.load(open(p));d["Other-Repo/coord3"]={"mode":"autopilot","pane":"w9:p3","handed_to":["k1","k2"]};json.dump(d,open(p,"w"))' "$OPSX_STATE_DIR/dispatch.json"
+: > "$OPSX_FAKE_LOG"
+out="$(opsx dispatch coord3 --agent claude --mode autopilot 2>&1)"; [ $? -eq 2 ] || fail "fan-out 父卡的 pane 還活著，同名要拒絕: $out"
+assert_eq "$(cat "$OPSX_FAKE_LOG")" "" "拒絕時不碰 herdr"
 echo ok
