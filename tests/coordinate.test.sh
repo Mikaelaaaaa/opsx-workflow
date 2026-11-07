@@ -260,13 +260,14 @@ cards "[$P1]"
 round || fail "rc: $(cat "$FX/out")"
 assert_eq "$(count '^opsx dispatch')" 0 "沒東西合不重派 parked"; assert_eq "$(count '^opsx answer')" 0
 
-# --- parked：有東西合了，先答那個 gate 再重派，沿用原 agent ---
-cards "[$P1,$G]"
+# --- parked：有東西合了（被等的卡由它自己的 agent /archive，workplan 的 PR 變 merged），先答那個 gate 再重派，沿用原 agent ---
+sed -i '' '/- name: g$/,/status:/s/status: pending/status: merged/' "$R/openspec/workplan.yaml"
+cards "[$P1]"
 round || fail "rc: $(cat "$FX/out")"
 got="$(grep -E '^opsx (answer|dispatch) p1' "$OPSX_FAKE_LOG" | sed -E 's/ -- .*$//')"
 assert_eq "$got" "opsx answer p1 --gate g7 --repo $R
 opsx dispatch p1 --agent codex --mode autopilot --kind dev --repo $R" "先答 gate 再派：$(cat "$OPSX_FAKE_LOG")"
-grep '^opsx answer p1 ' "$OPSX_FAKE_LOG" | grep -q '合進 main 的卡：g。' || fail "答案要說這輪合了哪張：$(cat "$OPSX_FAKE_LOG")"
+grep '^opsx answer p1 ' "$OPSX_FAKE_LOG" | grep -q '合進 main 的 PR：g。' || fail "答案要說停下之後合了哪幾個 PR：$(cat "$OPSX_FAKE_LOG")"
 assert_eq "$(memo_get _parked demo/p1)" "" "重派後 memo 不再有 parked"
 cp "$WP0" "$R/openspec/workplan.yaml"
 rm -f "$MEMO" "$DISP"

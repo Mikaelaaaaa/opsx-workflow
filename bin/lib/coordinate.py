@@ -221,7 +221,8 @@ class Round:
             self.log("⏳ %s gate %s 在等別張卡，先停 pane，有卡合進 main 那輪再派：%s" % (key, w["gate_id"], q[:100]))
             rc, _, _ = self.act(["opsx", "stop", c["slug"], "--repo", top])
             if rc == 0:
-                self.memo["_parked"][key] = {"at": self.now.isoformat(timespec="seconds"), "gate": w["gate_id"]}
+                self.memo["_parked"][key] = {"at": self.now.isoformat(timespec="seconds"), "gate": w["gate_id"],
+                                             "merged": merged_prs(self.workplan(top))}
             return
         if not pick:
             self.log("?? %s gate %s 沒有選項也沒有建議，要人看：%s" % (key, w["gate_id"], q[:120]))
@@ -245,15 +246,18 @@ class Round:
         self.act(["opsx", "dispatch", c["slug"], "--agent", c["dispatch"]["agent"], "--mode", "autopilot", "--kind", c["kind"], "--repo", top])
         self.memo["_redispatched"][key] = self.now.isoformat(timespec="seconds")
 
-    def dispatch_new(self, cards, repo_paths, merged_slugs):
+    def dispatch_new(self, cards, repo_paths):
         n = 0
         for c in cards:
             key, top = card_key(c), repo_paths[c["repo"]]
             entry = self.dispatch_file.get(key)
             parked = self.memo["_parked"].get(key)
+            newly = []
             if parked:
-                # 等的 gate 還開著，collect 把它放在「待處理」；只在這輪有卡合進 main 時重派
-                if not merged_slugs or c["dispatch"] or c["section"] not in ("待指派", "待處理"):
+                # 等的 gate 還開著，collect 把它放在「待處理」。停下之後 workplan 多了 merged 的 PR 才重派：
+                # 不管是卡自己 /archive 標的，還是這裡收尾時標的
+                newly = [p for p in merged_prs(self.workplan(top)) if p not in parked["merged"]]
+                if not newly or c["dispatch"] or c["section"] not in ("待指派", "待處理"):
                     continue
             elif c["section"] != "待指派":
                 continue
@@ -272,7 +276,7 @@ class Round:
                 self.log("-- 這輪派滿 %d 張，%s 下輪" % (MAX_DISPATCH, key))
                 continue
             if parked:
-                text = "這輪合進 main 的卡：%s。照最新的 main 繼續；你等的那張還沒合就再開 gate。" % "、".join(merged_slugs)
+                text = "停下之後合進 main 的 PR：%s。照最新的 main 繼續；你等的那張還沒合就再開 gate。" % "、".join(newly)
                 rc, _, err = self.act(["opsx", "answer", c["slug"], "--gate", parked["gate"], "--repo", top, "--", text])
                 if rc != 0:
                     self.log("?? %s parked 的 gate %s 回不了，不重派：%s" % (key, parked["gate"], err[:200]))
@@ -307,6 +311,10 @@ def read_prs(path):
     if not os.path.exists(path):
         return []
     return [pr for f in chain.load_workplan(path).get("features") or [] for pr in f.get("prs") or []]
+
+
+def merged_prs(prs):
+    return [p.get("name") for p in prs if p.get("status") == "merged"]
 
 
 def pr_of(prs, slug):
@@ -402,7 +410,7 @@ def main():
             r.redispatch(c, repo_paths[c["repo"]], "agent 不在 herdr 裡（pane %s）" % c["dispatch"].get("pane"))
         elif drive_dead(c["dispatch"]):
             r.redispatch(c, repo_paths[c["repo"]], "drive pid %s 已經不在" % c["dispatch"]["drive_pid"])
-    r.dispatch_new(live, repo_paths, [c["slug"] for c in done])
+    r.dispatch_new(live, repo_paths)
     r.save()
     r.log("== 結束：%d 張卡，收尾 %d 張" % (len(live), len(done)))
 
