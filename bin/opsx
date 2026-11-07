@@ -24,7 +24,14 @@ opsx <command> [args]
   stop <slug> [--repo]                 停：kill drive、關 pane、dispatch.json 標 stopped
   collect [--root ~/code] [--state …]  看板的資料：掃 repo 的卡 + 全域狀態 + herdr / glab，印一份 JSON（不寫檔）
   answer <slug> --gate <id> [--grant this|card|repo] <text…>   回 gate：gates.md answered、授權落檔、decisions、herdr agent prompt
+  new [--repo <path>] -- <一句話>       ＋新增收件卡（source: me）；不給 repo 就進 <state>/unfiled/ 待分類，印 slug
+  file <slug> --repo <path>            待分類搬進 repo：unfiled/<slug>.md 原樣變成殼的 inbox.md
+  drop <slug> [--repo <path>] -- <理由>  捨棄：歸檔並標 outcome: declined；不給 repo 就把待分類移到 unfiled/dropped/
+  sync [--source gitlab|github|debt]   撈 sources.toml 的 issue 與 shortcut: 註解進收件匣，去重；每次在 <state>/sync.log 記一行
   merge <slug> [--repo]                核准合併：重驗五條件、dispatch.json 寫一次性核准、叫 agent /babysit merge（不自己 glab mr merge）
+  log <slug> <who> <tag> <文字> [證據] [--repo]   在卡的 decisions.tsv 記一列（tag：已允許 已決定 替你決定 已指派 已停止 已合併 同步 驗證）
+  log --sync <source> <新卡數> <文字>   在 <state>/sync.log 記一次同步
+  timeline [--root ~/code] [--state …] [--since <iso>]   跨卡時間軸：所有卡的 decisions.tsv，印一份 JSON（不寫檔）
 EOF
 }
 
@@ -43,6 +50,8 @@ fi
 source "$OPSX_ROOT/bin/lib/common.sh"
 # shellcheck source=/dev/null
 source "$OPSX_ROOT/bin/lib/stage.sh"
+# shellcheck source=/dev/null
+source "$OPSX_ROOT/bin/lib/log.sh"
 # shellcheck source=/dev/null
 source "$OPSX_ROOT/bin/lib/python.sh"
 # init --global 是寫這個檔的人，只有它可以在沒有檔的時候跑

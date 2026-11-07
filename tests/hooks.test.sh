@@ -171,11 +171,22 @@ out="$(mg 'glab mr list')"; assert_eq "$out" "" "mr: 其他 glab 指令不出聲
 # ---------- stop gate ----------
 sg() { printf '{"cwd":"%s","stop_hook_active":%s}' "$R" "${1:-false}" | bash "$H/openspec-stop-gate.sh" 2>/dev/null; true; }
 printf '## 1. x\n\n- [x] 1.1 a\n- [ ] 1.2 b\n' > "$C/tasks.md"
-out="$(sg)"; assert_eq "$(decision "$out")" block "stop: 有未勾"
+out="$(sg)"; assert_eq "$(decision "$out")" block "stop: 有未勾"; reason "$out" | grep -q '1 個 task 沒勾' || fail "stop: 沒 gates.md 要說幾個 task 沒勾"
 out="$(sg true)"; assert_eq "$out" "" "stop: stop_hook_active 放行"
+printf '## real-herdr\nstatus: open\n' > "$C/gates.md"
+out="$(sg)"; assert_eq "$out" "" "stop: 有未勾但有 open gate 放行"
+printf '## real-herdr\nstatus: answered\n' > "$C/gates.md"
+out="$(sg)"; assert_eq "$(decision "$out")" block "stop: gate 都 answered 仍擋未勾"; reason "$out" | grep -q '1 個 task 沒勾' || fail "stop: answered gate 要說幾個 task 沒勾"
+printf '## real-herdr\nstatus: open (等 push 授權)\n' > "$C/gates.md"
+out="$(sg)"; assert_eq "$(decision "$out")" block "stop: status 帶註記不算 open"; reason "$out" | grep -q '1 個 task 沒勾' || fail "stop: 帶註記的 gate 要說幾個 task 沒勾"
+printf '## real-herdr\nstatus:\topen\n' > "$C/gates.md"
+out="$(sg)"; assert_eq "$out" "" "stop: status 冒號後 tab 也算 open"
 printf '## 1. x\n\n- [x] 1.1 a\n- [x] 1.2 b\n' > "$C/tasks.md"
 printf '{"phase":"apply","step":8,"total":8,"label":"x","tests":"red","at":"2026-11-05T15:00:00+08:00"}' > "$C/status.json"
 out="$(sg)"; assert_eq "$(decision "$out")" block "stop: tests red"; reason "$out" | grep -q green || fail "stop: 要說要綠"
+printf '## real-herdr\nstatus: open\n' > "$C/gates.md"
+out="$(sg)"; assert_eq "$(decision "$out")" block "stop: open gate 不放行 tests red"; reason "$out" | grep -q green || fail "stop: open gate 下也要說要綠"
+rm -f "$C/gates.md"
 printf '{"phase":"apply","step":8,"total":8,"label":"x","tests":"green","at":"2026-11-05T15:00:00+08:00"}' > "$C/status.json"
 rm -f "$C/report.md"; out="$(sg)"; assert_eq "$(decision "$out")" block "stop: 沒 report"; reason "$out" | grep -q '/review' || fail "stop: 要叫跑 review"
 printf '# report\n' > "$C/report.md"; sleep 1

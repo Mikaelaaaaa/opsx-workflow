@@ -29,6 +29,12 @@ assert_eq "$(field "$j" blocked_on)" null; assert_eq "$(field "$j" error)" null
 assert_eq "$(field "$j" url)" "https://gitlab.tsg-navigator.com/agentory/Agentory-CS/-/merge_requests/431"
 assert_grep '^mr view 431 -R gitlab.tsg-navigator.com/agentory/Agentory-CS -F json$' "$OPSX_FAKE_LOG"
 assert_eq "$(mr_state "$C")" ready
+assert_eq "$(field "$j" created_at)" null "樣本沒有時間就是 null"
+# GitLab 的開啟與合併時間
+printf '{"state":"merged","draft":false,"has_conflicts":false,"sha":"abc123","head_pipeline":{"status":"success"},"unresolved_discussions_count":0,"created_at":"2026-11-05T01:00:00.000Z","merged_at":"2026-11-06T03:00:00.000Z"}' > "$OPSX_TEST_GLAB_JSON"
+j="$(mr_json "$C")"
+assert_eq "$(field "$j" created_at)" "2026-11-05T01:00:00.000Z"; assert_eq "$(field "$j" merged_at)" "2026-11-06T03:00:00.000Z"
+printf '%s' "$GREEN" > "$OPSX_TEST_GLAB_JSON"
 
 # --- pipeline 紅：state 照舊、conditions 指出哪一條、blocked_on ---
 printf '{"state":"opened","draft":false,"has_conflicts":false,"sha":"abc123","head_pipeline":{"status":"failed"},"unresolved_discussions_count":0}' > "$OPSX_TEST_GLAB_JSON"
@@ -58,8 +64,9 @@ printf '{"state":"OPEN","isDraft":false,"mergeable":"MERGEABLE","mergeStateStatu
 assert_eq "$(mr_state "$C2")" "pipeline:failed" "check 還在跑不算過"
 printf '{"state":"OPEN","isDraft":false,"mergeable":"MERGEABLE","mergeStateStatus":"BLOCKED","headRefOid":"9c1f3a","reviewDecision":"CHANGES_REQUESTED","statusCheckRollup":[]}' > "$OPSX_TEST_GH_JSON"
 assert_eq "$(mr_state "$C2")" "threads:1" "CHANGES_REQUESTED 當未解"
-printf '{"state":"MERGED","isDraft":false,"mergeable":"UNKNOWN","mergeStateStatus":"CLEAN","headRefOid":"9c1f3a","reviewDecision":"","statusCheckRollup":[]}' > "$OPSX_TEST_GH_JSON"
+printf '{"state":"MERGED","isDraft":false,"mergeable":"UNKNOWN","mergeStateStatus":"CLEAN","headRefOid":"9c1f3a","reviewDecision":"","statusCheckRollup":[],"createdAt":"2026-11-05T02:00:00Z","mergedAt":null}' > "$OPSX_TEST_GH_JSON"
 assert_eq "$(mr_state "$C2")" "state:MERGED"
+assert_eq "$(field "$(mr_json "$C2")" created_at)" "2026-11-05T02:00:00Z"; assert_eq "$(field "$(mr_json "$C2")" merged_at)" null
 
 # --- 快取：鍵是 URL；TTL 60 內第二次不打；兩個 repo 同 slug 不同 MR 不互串；TTL 0 一定打；讀不到時不寫 ---
 : > "$OPSX_FAKE_LOG"; export OPSX_MR_CACHE_TTL=60

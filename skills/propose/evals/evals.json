@@ -1,0 +1,23 @@
+{
+  "skill_name": "propose",
+  "evals": [
+    {
+      "id": 0,
+      "name": "decisions-carried-verbatim",
+      "prompt": "retry-backoff 這張卡要做的事都定好了，幫我把 proposal 寫出來，寫到可以開工的程度。這個專案的工作流程 skill 在 .claude/skills/，照適用的那支做。我這段時間不在，要問我的話把問題和選項寫進 repo 根目錄的 questions.md。",
+      "expected_output": "Writes proposal, design, specs and tasks under openspec/changes/retry-backoff/. design.md's Decisions section carries D1, D2, D3 from grill.md with the same ids, the same decision sentences, in the same order, each with its 理由 and 否決; no new D is invented; no code is written.",
+      "files": [
+        "fixtures/retry-backoff"
+      ],
+      "assertions": [
+        "openspec/changes/retry-backoff/design.md exists",
+        "design.md's Decisions section contains D1, D2 and D3 with those exact ids, in that order",
+        "Each of D1, D2, D3 in design.md is the same block as in grill.md: the decision line, the 理由 line and the 否決 line match word for word, with no sub-bullets added that narrow or extend the decision",
+        "Each of D1, D2, D3 in design.md keeps a 理由 line and a 否決 line from grill.md",
+        "design.md has no decision id beyond D3 (no D4 or later)",
+        "openspec/changes/retry-backoff/tasks.md exists and at least one task names a test file to write",
+        "No file under src/ was modified or created (git status --short -- src is empty)"
+      ]
+    }
+  ]
+}
