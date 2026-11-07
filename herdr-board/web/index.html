@@ -457,7 +457,7 @@ function setView(el,html,isLog){
   el.innerHTML=html;viewLog=isLog?html:null;
 }
 /* ---------- 離開期間 banner：只列 last_seen 之後有時間戳的事，加上「現在」的狀態 ---------- */
-const after=(ts,ls)=>!!ts&&Date.parse(ts)>Date.parse(ls);
+const after=(ts,ls)=>!!ts&&Date.parse(ts)>=Date.parse(ls);  /* 等於也算：同一秒寫入的事件寧可重複不要漏 */
 function bannerItems(events,cards,lastSeen){
   const items=[];const merged=new Set();
   for(const e of events){
@@ -493,7 +493,10 @@ function renderBanner(){
   return `<div class="notice" role="status"><span class="t">離開期間 ${esc(ago(tl.last_seen))}</span><ul>${items.map(li).join('')}</ul>${close}</div>`;
 }
 async function closeBanner(){
-  try{await api.post('seen',{at:tl.generated_at});seenAt=tl.generated_at;bannerClosed=true;render();}
+  /* last-seen 不能晚於 banner 讀過的任一份快照，否則兩份快照之間發生的事永遠不會進 banner */
+  if(!data.generated_at){toast('collect 還沒回來，卡片上的 gate 與 MR 還沒讀到，先不能關閉',true);return;}
+  const at=Date.parse(data.generated_at)<Date.parse(tl.generated_at)?data.generated_at:tl.generated_at;
+  try{await api.post('seen',{at});seenAt=at;bannerClosed=true;render();}
   catch(e){toast('關閉 banner 失敗：'+e.message,true);}
 }
 
