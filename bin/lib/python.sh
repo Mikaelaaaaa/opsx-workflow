@@ -11,6 +11,6 @@ opsx_python_load() {
   IFS= read -r OPSX_PY < "$f" || true
   if [ -z "$OPSX_PY" ]; then OPSX_PY_ERR="$f 是空的。跑 opsx init --global"; return 1; fi
   if [ ! -f "$OPSX_PY" ] || [ ! -x "$OPSX_PY" ]; then
-    OPSX_PY_ERR="$f 記的 python 不是可執行檔：${OPSX_PY}（pyenv 換過版本？）。跑 opsx init --global"; OPSX_PY=""; return 1
+    OPSX_PY_ERR="$f 記的 python 不是可執行檔：${OPSX_PY}（pyenv 換過版本，或 venv 被刪了？）。跑 opsx init --global"; OPSX_PY=""; return 1
   fi
 }
