@@ -139,7 +139,7 @@ pstack 的調度中心是 `/poteto-mode` chat 加 Cursor cloud agents（orchestr
 coordinator（一個 Claude session，跑 /dispatch，即「派工」）
   讀總表 → 挑 pending 且 depends-on 全 merged 的 PR
   → 在該 repo 開 worktree + pane → prompt → wait → 回寫總表與 workplan 狀態
-  不寫 code、不答 approval、不 merge
+  不寫 code；gate 照固定規則答；五條件全綠的 MR 走 opsx merge 核准（綁 sha，由 worker 的 /babysit merge 執行）
     │
 worker（一個 PR 一個 session，一個 worktree）
   被 opsx hook 注入 branch / change / 下一步 → /apply → /review → /pr → 寫 report.md
@@ -152,8 +152,8 @@ subagent（opsx apply 現有的 test agent、雙 review agent，不變）
 - 派工表是 tsk（跨專案、人挑）+ `workplan.yaml`（單 repo、機器細節），不另發明 pstack 的 plan markdown。coordinator 只是兩者的讀者。
 - 一個 PR 一個 worktree 結構性地解掉「多 session 共用 working tree 要 stage by name」的問題（pstack：separate-before-serializing-shared-state）。
 - `/dispatch` 必須由使用者打，不自動觸發。herdr 的 skill 文件明定只在使用者提到 herdr 時才用。
-- coordinator 不 merge。停在 MR 開好，使用者 merge 後 coordinator 的 health check 看到 merged **自動派依賴它的 PR（已定 2026-11-05）**。這是中控唯一自己做的決定，規則寫死：只派 workplan 裡 `depends-on` 全部 merged、且已有 tasks.md（propose 做過、kind 已確認）的 PR；收件匣裡的東西永遠不自動派。agent、自主程度沿用被依賴那張卡 dispatch.json 的值，kind 用該卡 `.openspec.yaml` 的；decisions.tsv 記一行「自動派：因 <父卡> merged」，開頁 banner 列出來。你在板上可以「停止」它。
-- worker 的 `blocked` 狀態 coordinator 不代答，只通知。
+- coordinator 可以替五條件全綠（opened / not_draft / no_conflicts / pipeline / threads）的卡核准合併（2026-11-07 改，原本是「coordinator 不碰合併」）：呼叫 `opsx merge`，核准綁 head sha，由該卡 worker 的 `/babysit merge` 執行，不自己跑 forge 的合併指令；有衝突的不碰。實作是 `opsx coordinate`，launchd 每 5 分鐘一輪（openspec/specs/opsx-coordinate）。合併後 coordinator 收尾，看到 merged **自動派依賴它的 PR（已定 2026-11-05）**。這是中控唯一自己做的決定，規則寫死：只派 workplan 裡 `depends-on` 全部 merged、且已有 tasks.md（propose 做過、kind 已確認）的 PR；收件匣裡的東西永遠不自動派。agent、自主程度沿用被依賴那張卡 dispatch.json 的值，kind 用該卡 `.openspec.yaml` 的；decisions.tsv 記一行「自動派：因 <父卡> merged」，開頁 banner 列出來。你在板上可以「停止」它。
+- coordinator 只替派出去的卡答 gate，照固定規則：授權題允許這次、真機驗證題標成等使用者驗、等別張卡的題不答並停 pane、要人動手的題不答。worker 的 `blocked` 狀態（終端機等輸入）不代答，只在 log 記 `??`。
 - `/dispatch` 是 skill 帶一支 `dispatch.sh`：派工與 wait 的迴圈是確定性的交給腳本，worker 回報的判斷留給 skill。
 - coordinator 只關閉自己開的 pane 與 worktree。
 
