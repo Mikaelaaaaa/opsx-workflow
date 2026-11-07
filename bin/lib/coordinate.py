@@ -11,8 +11,13 @@ import re
 import subprocess
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import chain  # noqa: E402
+
 MAX_DISPATCH = 6
 REDISPATCH_MINUTES = 10
+# 合併後交給卡自己的 /archive（它標 workplan merged、叫 opsx chain）；過了這麼久還沒歸檔就要人看
+ARCHIVE_GRACE_MINUTES = 30
 AGENT_NAME = re.compile(r"^[a-z][a-z0-9_-]{0,31}$")
 VERIFY_WORDS = ("真機", "實測", "瀏覽器", "herdr 驗", "resume", "真的 claude", "真 herdr", "量測")
 GRANT_WORDS = ("授權", "開 PR", "開 / 改 MR", "gh pr create", "push", "推到 origin", "rebase")
@@ -86,7 +91,7 @@ class Round:
 
     def workplan(self, top):
         if top not in self.plans:
-            self.plans[top] = read_workplan(os.path.join(top, "openspec", "workplan.yaml"))
+            self.plans[top] = read_prs(os.path.join(top, "openspec", "workplan.yaml"))
         return self.plans[top]
 
     def approve_merge(self, c, top):
@@ -100,25 +105,89 @@ class Round:
         self.memo["_approved"][key] = mr["head_sha"]
         self.log("++ %s 五條件全綠，核准合併 %s（%s）" % (key, mr["head_sha"], mr["url"]))
 
+    def wait_for_archive(self, c):
+        """已合併但 agent 還在：歸檔、標 workplan、叫 chain 都是它自己 /archive 的事，這裡不搶。"""
+        key = card_key(c)
+        ago = self.now - datetime.datetime.fromisoformat(c["mr"]["merged_at"])
+        if ago > datetime.timedelta(minutes=ARCHIVE_GRACE_MINUTES):
+            self.log("?? %s 合併 %d 分鐘了還沒歸檔，agent 還在，要人看它卡在哪" % (key, ago.total_seconds() // 60))
+        else:
+            self.log("⏳ %s 已合併，等它自己 /archive" % key)
+
     def clean_up(self, top, merged):
-        self.act(["git", "-C", top, "checkout", "-q", "main"])
-        self.act(["git", "-C", top, "pull", "-q"])
-        for c in merged:
-            key = card_key(c)
-            self.log("++ %s 已合併，收尾" % key)
-            entry = self.dispatch_file.get(key)
-            if entry:
-                self.act(["opsx", "stop", c["slug"], "--repo", top])
-            self.act(["openspec", "archive", c["slug"], "-y"], cwd=top)
-            wt = os.path.join(top, ".claude", "worktrees", c["slug"])
-            if os.path.isdir(wt):
-                self.act(["git", "-C", top, "worktree", "remove", "--force", wt])
-            if entry and entry.get("branch"):
-                self.act(["git", "-C", top, "branch", "-D", entry["branch"]])
-            else:
-                self.log("?? %s dispatch.json 沒記分支，分支沒刪" % key)
-            self.memo["_approved"].pop(key, None)
+        """agent 已經不在的已合併卡：代做 /archive 的事。回傳收尾成功的卡。"""
+        self.update_main(top)
+        done = [c for c in merged if self.archive_card(top, c)]
         self.act(["git", "-C", top, "worktree", "prune"])
+        return done
+
+    def update_main(self, top):
+        """主 checkout 是別的 session 共用的：只在它本來就在 main 而且乾淨時快轉，絕不 checkout。"""
+        rc1, branch, err1 = self.run(["git", "-C", top, "rev-parse", "--abbrev-ref", "HEAD"])
+        rc2, dirty, err2 = self.run(["git", "-C", top, "status", "--porcelain"])
+        if rc1 != 0 or rc2 != 0:
+            self.log("?? %s 讀不到主 checkout 的狀態，不 pull：%s" % (top, (err1 or err2)[:200]))
+        elif branch != "main":
+            self.log("-- %s 主 checkout 在 %s，不 pull" % (top, branch))
+        elif dirty:
+            self.log("-- %s 主 checkout 有沒 commit 的改動，不 pull" % top)
+        else:
+            rc, _, err = self.act(["git", "-C", top, "pull", "-q", "--ff-only"])
+            if rc != 0:
+                self.log("?? %s 主 checkout pull --ff-only 失敗：%s" % (top, err[:200]))
+
+    def archive_card(self, top, c):
+        key = card_key(c)
+        entry = self.dispatch_file.get(key)
+        self.log("++ %s 已在 forge 合併、agent 不在，收尾" % key)
+        if entry and entry.get("mode") != "stopped":
+            self.act(["opsx", "stop", c["slug"], "--repo", top])
+        if not self.mark_merged(top, c["slug"]):
+            return False
+        rc, _, err = self.act(["openspec", "archive", c["slug"], "-y"], cwd=top)
+        if rc != 0:
+            self.log("?? %s openspec archive 失敗：%s" % (key, err[:200]))
+            return False
+        self.memo["_approved"].pop(key, None)
+        # 沒記 worktree 的是早期派的卡，當時 worktree 一律開在這裡
+        wt = entry["worktree"] if entry and entry.get("worktree") else os.path.join(top, ".claude", "worktrees", c["slug"])
+        if os.path.isdir(wt):
+            rc, _, err = self.act(["git", "-C", top, "worktree", "remove", "--force", wt])
+            if rc != 0:
+                self.log("?? %s worktree %s 刪不掉，分支也不刪：%s" % (key, wt, err[:200]))
+                return True
+        if not entry or not entry.get("branch"):
+            self.log("?? %s dispatch.json 沒記分支，分支沒刪" % key)
+            return True
+        rc, _, err = self.act(["git", "-C", top, "branch", "-D", entry["branch"]])
+        if rc != 0:
+            self.log("?? %s 分支 %s 刪不掉：%s" % (key, entry["branch"], err[:200]))
+        return True
+
+    def mark_merged(self, top, slug):
+        """把 workplan 裡含這個 change 的 PR 標成 merged，依賴它的卡這輪就派得出去。不在 workplan 裡的卡沒東西要標。"""
+        path = os.path.join(top, "openspec", "workplan.yaml")
+        pr = pr_of(self.workplan(top), slug)
+        if pr is None:
+            self.log("-- %s 不在 %s，沒有 PR 要標 merged" % (slug, path))
+            return True
+        if self.dry:
+            self.log("DRY workplan %s 的 PR %s 標 merged" % (path, pr["name"]))
+            return True
+        with open(path, encoding="utf-8") as f:
+            lines = f.read().split("\n")
+        i = status_line(lines, pr["name"])
+        if i is None:
+            self.log("?? %s 找不到 PR %s 的 status 行，不收尾" % (path, pr["name"]))
+            return False
+        lines[i] = re.sub(r"status:.*$", "status: merged", lines[i])
+        tmp = path + ".coordinate.tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write("\n".join(lines))
+        os.replace(tmp, path)
+        self.plans.pop(top, None)
+        self.log("ok   workplan 的 PR %s 標 merged" % pr["name"])
+        return True
 
     def answer(self, c, top, gate, text, grant=False):
         args = ["opsx", "answer", c["slug"], "--gate", gate] + (["--grant", "this"] if grant else []) + ["--repo", top, "--", text]
@@ -152,7 +221,7 @@ class Round:
             self.log("⏳ %s gate %s 在等別張卡，先停 pane，有卡合進 main 那輪再派：%s" % (key, w["gate_id"], q[:100]))
             rc, _, _ = self.act(["opsx", "stop", c["slug"], "--repo", top])
             if rc == 0:
-                self.memo["_parked"][key] = self.now.isoformat(timespec="seconds")
+                self.memo["_parked"][key] = {"at": self.now.isoformat(timespec="seconds"), "gate": w["gate_id"]}
             return
         if not pick:
             self.log("?? %s gate %s 沒有選項也沒有建議，要人看：%s" % (key, w["gate_id"], q[:120]))
@@ -176,18 +245,20 @@ class Round:
         self.act(["opsx", "dispatch", c["slug"], "--agent", c["dispatch"]["agent"], "--mode", "autopilot", "--kind", c["kind"], "--repo", top])
         self.memo["_redispatched"][key] = self.now.isoformat(timespec="seconds")
 
-    def dispatch_new(self, cards, repo_paths, merged_this_round):
+    def dispatch_new(self, cards, repo_paths, merged_slugs):
         n = 0
         for c in cards:
-            if c["section"] != "待指派" or c["archived"]:
-                continue
             key, top = card_key(c), repo_paths[c["repo"]]
             entry = self.dispatch_file.get(key)
-            parked = key in self.memo["_parked"]
-            if entry and entry.get("mode") == "stopped" and not parked:
-                continue   # 人在板上停掉的
-            if parked and not merged_this_round:
+            parked = self.memo["_parked"].get(key)
+            if parked:
+                # 等的 gate 還開著，collect 把它放在「待處理」；只在這輪有卡合進 main 時重派
+                if not merged_slugs or c["dispatch"] or c["section"] not in ("待指派", "待處理"):
+                    continue
+            elif c["section"] != "待指派":
                 continue
+            elif entry and entry.get("mode") == "stopped":
+                continue   # 人在板上停掉的
             if not os.path.isfile(os.path.join(c["path"], "tasks.md")) or c["mr"]:
                 continue
             missing = deps_unmerged(c["slug"], self.workplan(top))
@@ -200,6 +271,12 @@ class Round:
             if n >= MAX_DISPATCH:
                 self.log("-- 這輪派滿 %d 張，%s 下輪" % (MAX_DISPATCH, key))
                 continue
+            if parked:
+                text = "這輪合進 main 的卡：%s。照最新的 main 繼續；你等的那張還沒合就再開 gate。" % "、".join(merged_slugs)
+                rc, _, err = self.act(["opsx", "answer", c["slug"], "--gate", parked["gate"], "--repo", top, "--", text])
+                if rc != 0:
+                    self.log("?? %s parked 的 gate %s 回不了，不重派：%s" % (key, parked["gate"], err[:200]))
+                    continue
             agent = entry["agent"] if entry and "agent" in entry else "claude"
             rc, _, err = self.act(["opsx", "dispatch", c["slug"], "--agent", agent, "--mode", "autopilot", "--kind", c["kind"], "--repo", top])
             n += 1
@@ -225,25 +302,46 @@ def read_json(path, what):
         raise CoordinateError("%s（%s）不是合法 JSON：%s" % (what, path, e)) from e
 
 
-def read_workplan(path):
-    """workplan.yaml 的 PR 名 → (status, depends-on)。格式固定、沒有 pyyaml，用正則讀。沒有檔就是沒有依賴。"""
+def read_prs(path):
+    """workplan.yaml 所有 feature 底下的 PR，用 chain.py 同一個 parser。沒有檔就是沒有 PR、沒有依賴。"""
     if not os.path.exists(path):
-        return {}
-    with open(path, encoding="utf-8") as f:
-        text = f.read()
-    out = {}
-    for block in re.split(r"\n      - name: ", text)[1:]:
-        name = block.split("\n", 1)[0].strip()
-        st = re.search(r"^\s+status:\s*(\S+)", block, re.M)
-        deps = re.search(r"depends-on:\s*\[([^\]]*)\]", block)
-        out[name] = (st.group(1) if st else "", [d.strip() for d in (deps.group(1) if deps else "").split(",") if d.strip()])
-    return out
-
-
-def deps_unmerged(slug, plan):
-    if slug not in plan:
         return []
-    return [d for d in plan[slug][1] if d not in plan or plan[d][0] != "merged"]
+    return [pr for f in chain.load_workplan(path).get("features") or [] for pr in f.get("prs") or []]
+
+
+def pr_of(prs, slug):
+    """change 所屬的 PR（PR 名常常跟 change 名不同）；workplan 裡沒有就是 None。"""
+    for pr in prs:
+        if any(c.get("name") == slug for c in pr.get("changes") or []):
+            return pr
+    return None
+
+
+def deps_unmerged(slug, prs):
+    pr = pr_of(prs, slug)
+    if pr is None:
+        return []
+    status = {p.get("name"): p.get("status") for p in prs}
+    return [d for d in pr.get("depends-on") or [] if status.get(d) != "merged"]
+
+
+def status_line(lines, pr_name):
+    """PR「pr_name」自己的 status 行的 index：PR 那行（prs: 底下的 `- name:`）之後、它的 changes: 之前。"""
+    pr_indent = None
+    for i, line in enumerate(lines):
+        m = re.match(r"^( *)prs:\s*$", line)
+        if m:
+            pr_indent = len(m.group(1)) + 2
+            continue
+        if pr_indent is None or not re.match(r"^ {%d}- name:\s*%s\s*(#.*)?$" % (pr_indent, re.escape(pr_name)), line):
+            continue
+        for j in range(i + 1, len(lines)):
+            if re.match(r"^ {%d}status:" % (pr_indent + 2), lines[j]):
+                return j
+            if lines[j].strip() and len(lines[j]) - len(lines[j].lstrip(" ")) <= pr_indent:
+                return None
+        return None
+    return None
 
 
 def drive_dead(disp):
@@ -260,11 +358,12 @@ def drive_dead(disp):
 
 
 def is_merged(c):
-    if c["archived"]:
-        return False
-    if c["mr"] and c["mr"].get("merged_at"):
-        return True
-    return c["stage"] == "archive" and bool(c["dispatch"])
+    """forge 說合了才算；只看 workplan 的 merged 不算，那可能是卡自己 /archive 做到一半。"""
+    return bool(c["mr"] and c["mr"]["merged_at"])
+
+
+def owner_gone(c):
+    return not c["dispatch"] or c["agent_status"] == "unknown" or drive_dead(c["dispatch"])
 
 
 def main():
@@ -280,11 +379,16 @@ def main():
     cards = [c for c in data["cards"] if not c["archived"]]
 
     merged = [c for c in cards if is_merged(c)]
+    orphans = [c for c in merged if owner_gone(c)]
+    for c in merged:
+        if c not in orphans:
+            r.wait_for_archive(c)
     for c in cards:
         if c not in merged and c["mr"] and c["mr"]["state"] == "ready":
             r.approve_merge(c, repo_paths[c["repo"]])
-    for repo in sorted({c["repo"] for c in merged}):
-        r.clean_up(repo_paths[repo], [c for c in merged if c["repo"] == repo])
+    done = []
+    for repo in sorted({c["repo"] for c in orphans}):
+        done += r.clean_up(repo_paths[repo], [c for c in orphans if c["repo"] == repo])
     live = [c for c in cards if c not in merged]
 
     for c in live:
@@ -298,9 +402,9 @@ def main():
             r.redispatch(c, repo_paths[c["repo"]], "agent 不在 herdr 裡（pane %s）" % c["dispatch"].get("pane"))
         elif drive_dead(c["dispatch"]):
             r.redispatch(c, repo_paths[c["repo"]], "drive pid %s 已經不在" % c["dispatch"]["drive_pid"])
-    r.dispatch_new(live, repo_paths, bool(merged))
+    r.dispatch_new(live, repo_paths, [c["slug"] for c in done])
     r.save()
-    r.log("== 結束：%d 張卡，收尾 %d 張" % (len(live), len(merged)))
+    r.log("== 結束：%d 張卡，收尾 %d 張" % (len(live), len(done)))
 
 
 if __name__ == "__main__":

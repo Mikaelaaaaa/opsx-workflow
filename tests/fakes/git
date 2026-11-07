@@ -1,3 +1,13 @@
 #!/usr/bin/env bash
-# 假 git（coordinate 測試用）：只記一行「git <參數>」到 $OPSX_FAKE_LOG，不碰任何 repo。
+# 假 git（coordinate 測試用）：記一行「git <參數>」到 $OPSX_FAKE_LOG，不碰任何 repo。
+# rev-parse --abbrev-ref HEAD 印 $OPSX_TEST_GIT_BRANCH（預設 main）；status --porcelain 印 $OPSX_TEST_GIT_DIRTY（預設空）。
+# 參數含 $OPSX_TEST_GIT_FAIL 的子字串時退出 1。
 printf 'git %s\n' "$*" >> "${OPSX_FAKE_LOG:?}"
+if [ -n "${OPSX_TEST_GIT_FAIL:-}" ]; then
+  case " $* " in *" $OPSX_TEST_GIT_FAIL "*) echo "fatal: fake 失敗：$OPSX_TEST_GIT_FAIL" >&2; exit 1 ;; esac
+fi
+case " $* " in
+  *" rev-parse --abbrev-ref HEAD "*) printf '%s\n' "${OPSX_TEST_GIT_BRANCH:-main}" ;;
+  *" status --porcelain "*) [ -n "${OPSX_TEST_GIT_DIRTY:-}" ] && printf '%s\n' "$OPSX_TEST_GIT_DIRTY" ;;
+esac
+exit 0
