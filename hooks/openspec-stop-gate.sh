@@ -12,7 +12,7 @@ slug="$(card_slug)"
 open="$(tasks_open "$d")"
 if [ "$open" -gt 0 ]; then
   [ "$(st_open_gates "$d")" -gt 0 ] && exit 0
-  stop_block "opsx：$slug 的 tasks.md 還有 $open 個 task 沒勾。要停下來就先把做到一半的 task 做完勾起來（測試綠才准勾），或寫 gates.md 說明卡在哪；不要帶著半個 task 收工。"
+  stop_block "opsx：$slug 的 tasks.md 還有 $open 個 task 沒勾。要停下來就先把做到一半的 task 做完勾起來（測試綠才准勾），或用 Edit 或 Write 寫 gates.md 說明卡在哪；不要帶著半個 task 收工。"
 fi
 if [ "$(status_tests "$d")" != green ]; then
   stop_block "opsx：$slug tasks 全勾，但 status.json 的 tests 不是 green（$(status_tests "$d")）。跑 test agent 把整張卡的測試跑到綠，`opsx status apply n/n <label> --tests green`，再停。"
