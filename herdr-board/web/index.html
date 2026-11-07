@@ -359,7 +359,7 @@ function rowDone(c){
     <div class="act"><span class="badge ok">已完成</span></div></div>`;
 }
 function rowUnmatched(a){
-  return `<div class="row unmatched"><div class="avatar plain">?</div><div class="main"><div class="l1"><span class="title">${esc(a.name||'(沒名字)')}</span><span class="meta">pane ${esc(a.pane)} · ${esc(a.agent_status||'')}</span></div><div class="l2 faint">沒對到卡：不在 dispatch.json，手動開的 agent</div></div><div class="act"><button class="sm" data-act="pane-id" data-pane="${esc(a.pane)}">開啟 pane</button></div></div>`;
+  return `<div class="row unmatched"><div class="avatar plain">?</div><div class="main"><div class="l1"><span class="title">${esc(a.name||'(沒名字)')}</span><span class="meta">pane ${esc(a.pane)} · ${esc(a.agent_status||'')}</span></div><div class="l2 faint">沒對到卡：不在 dispatch.json，手動開的 agent</div></div><div class="act"><button class="sm" data-act="pane-id" data-agent="${esc(a.name||'')}">開啟 pane</button></div></div>`;
 }
 const panel=(title,n,sub,body)=>`<section class="panel"><div class="panel-h"><span class="h2">${title}</span><span class="n">${n}</span>${sub?`<span class="sub">${sub}</span>`:''}</div>${body}</section>`;
 
@@ -591,9 +591,9 @@ function answer(c,text,grant){
 }
 function merge(c){act(`opsx merge ${c.slug}`,()=>api.post('merge',{slug:c.slug,repo:repoTop(c)}));}
 function stop(c){act(`opsx stop ${c.slug}`,()=>api.post('stop',{slug:c.slug,repo:repoTop(c)}));}
-function focusPane(pane){
-  if(!pane){toast('這張沒有 pane',true);return;}
-  act(`herdr pane focus ${pane}`,()=>api.post('focus',{pane}));
+function focusAgent(agent){
+  if(!agent){toast('這張沒有 pane',true);return;}
+  act(`herdr agent focus ${agent}`,()=>api.post('focus',{agent}));
 }
 
 /* ＋新增：範圍選到單一 repo 就建在那個 repo，否則進待分類（board-inbox D6） */
@@ -681,7 +681,7 @@ document.addEventListener('click',e=>{
     if(a==='close'){closeDrawer();return;}
     if(a==='dlg-cancel'){closeDispatch();return;}
     if(a==='dlg-go'){doDispatch();return;}
-    if(a==='pane-id'){focusPane(btn.dataset.pane);return;}
+    if(a==='pane-id'){focusAgent(btn.dataset.agent);return;}
     if(a==='sync'){syncNow();return;}
     if(a==='file'){fileUnfiled(btn.closest('[data-unfiled]'));return;}
     if(a==='drop-open'){ui.drop=btn.dataset.drop;ui.dropText='';render();const i=$('.drop-reason');if(i)i.focus();return;}
@@ -694,7 +694,7 @@ document.addEventListener('click',e=>{
     if(a==='answer'){answer(c,btn.dataset.text,btn.dataset.grant);return;}
     if(a==='merge'){merge(c);return;}
     if(a==='stop'){stop(c);return;}
-    if(a==='pane'){focusPane(c.dispatch&&c.dispatch.pane);return;}
+    if(a==='pane'){focusAgent(c.dispatch&&c.dispatch.pane?c.slug:'');return;}
     if(a==='dispatch'){openDispatch(c);return;}
     if(a==='explore'){exploreFirst(c);return;}
     return;
