@@ -36,7 +36,7 @@ Paths to hand every agent: project root, branch, `proposal.md`, `design.md` (D-i
 
 Spawn all three in a single message so they run concurrently. None of them sees the others' output. Each reads the diff and every changed file in full, plus two or three sibling files per changed file for the local pattern.
 
-**Agent A, spec conformance** (model `claude-sonnet-5-5`). For each D-id in design.md: the file:line that implements it, or a finding. Goals have code; non-goals have none (scope creep is a finding). Each `- [x]` task does what it says, and its `測試：` file tests the `驗收：` scenario it names. Risks in design.md have their stated mitigation. Classification: BUG = task checked but not implemented (cite task number, plus the D-id it serves); MUST_FIX = code deviates from a decision (cite D-id). Do not flag trade-offs design.md already acknowledges. Also return `D_TABLE`: one row per D-id in design.md, followed as well as violated; a followed D gets its file:line, a violated D points at its finding.
+**Agent A, spec conformance** (model `claude-sonnet-5-5`). For each D-id in design.md: the file:line that implements it, or a finding. Goals have code; non-goals have none (scope creep is a finding). Each `- [x]` task does what it says, and its `測試：` file tests the `驗收：` scenario it names. Risks in design.md have their stated mitigation. Classification: BUG = task checked and the diff has no code for it (cite task number, plus the D-id it serves); MUST_FIX = the diff has code for the task or goal but it contradicts a decision (cite D-id), even if the task feels unfinished. Do not flag trade-offs design.md already acknowledges. Also return `D_TABLE`: one row per D-id in design.md, followed as well as violated; a followed D gets its file:line, a violated D points at its finding.
 
 **Agent B, code quality** (model `claude-sonnet-5-5`). Knows nothing about the spec. Reviews for the six ponytail categories, each finding with a concrete failure case or it is downgraded: bug (input → wrong output), 安全 (trust boundary crossed without validation), 負載 (what breaks at 10× rows or users), 沒測試的風險 (new branch / loop / parser / money / auth with no test), 慢 (N+1, unbounded scan, sync I/O in a hot path), 多餘 (dead code, unused dep, duplicate helper, abstraction with one caller). Plus the code-quality lens from `../interrogate/references/code-quality-review.md`. MUST_FIX requires quoting the convention line from CLAUDE.md / ARCHITECTURE.md. Read `references/ponytail-review.md` for the category definitions.
 
@@ -49,7 +49,7 @@ AGENT: <A|B|C>
 D_TABLE:                      # agent A only
 - d_id: <D1>
   status: <followed|violated>
-  where: <file:line | finding number>
+  where: <file:line of the implementation, or of the finding it violates>
 FINDINGS:
 - severity: BUG|MUST_FIX|SUGGESTION
   file: <path>
@@ -72,13 +72,15 @@ Read `../interrogate/references/lead-judgment.md`. Merge: same file:line from tw
 
 Evidence you cannot verify downgrades the finding one level. Only BUG and MUST_FIX in Act on get fixed.
 
-A BUG of the kind 「task 已勾但沒實作」 is always Consider, never Act on: fixing it is redoing `/apply`. Its report line says 回 `/apply <slug>` 做完; review changes no code and does not touch tasks.md for it.
+Seed the report's D 對照 table from Agent A's `D_TABLE` (followed → 照做, violated → 偏離) and keep every row, followed ones included. After bucketing, a row whose finding you dismissed becomes 照做, and a row that a B or C finding in Act on or Consider contradicts becomes 偏離. Cite file:line, not a finding number. Agents B and C write `d_id: none`.
+
+A BUG of the kind 「task 已勾但沒實作」 is always Consider, never Act on: fixing it is redoing `/apply`. Before routing it there, read the diff yourself and confirm the task has no code at all; if it has code that contradicts a D, it is a MUST_FIX against that D and takes the normal Act on path. The report line says 回 `/apply <slug>` 做完; review changes no code and does not touch tasks.md for it.
 
 ## Step 4: fix once
 
-Scope first, before any edit. For every Act-on finding, write its 修前清單 (the file:line you will touch) into the Act on section of report.md. A fix that needs a place outside its list is 超出 the scope: move that finding to Consider and change nothing for it.
+Scope first, before any edit. For every Act-on finding, write its 修前清單 into the Act on section of report.md: the finding's cited file:line, plus at most the one test location for the round's 回歸測試. A fix that needs any other place is 超出 the scope: move that finding to Consider and change nothing for it.
 
-Then apply the fixes, touching only the listed places. A fix may add a 回歸測試, at most 一個 per fix, covering only the line fixed; it must be red before the fix and green after. Run the test agent (same as apply's). A fix that turns the suite red is reverted and reported. Commit: `fix(<scope>): address review findings` with one line per finding in the body. If a hook or safety check blocks the commit, follow `references/harness-claude-code.md`; do not reword the command to get past it. One cycle; no second review.
+Then apply the fixes, touching only the listed places. The whole fix round may add at most 一個 回歸測試 in total, covering only the line fixed; it must be red before the fix and green after. Run the test agent (same as apply's). A fix that turns the suite red is reverted and reported. Commit: `fix(<scope>): address review findings` with one line per finding in the body. If a hook or safety check blocks the commit, follow `../../references/harness-claude-code.md`; do not reword the command to get past it. One cycle; no second review.
 
 ## Step 5: report.md
 
@@ -94,11 +96,11 @@ Then apply the fixes, touching only the listed places. A fix may add a 回歸測
 ### Act on（已修）
 - <file:line> <description> · D-id <Dn|none> · 來源 <A|B|C> · 修前清單 <file:line> · commit <sha>
 ### Consider
-- …
+- <file:line> <description> · D-id <Dn|none> · 來源 <A|B|C>（未實作的 task 寫：回 `/apply <slug>` 做完）
 ### Noted
-- …
+- <file:line> <description> · D-id <Dn|none> · 來源 <A|B|C>
 ### Dismissed
-- … 因為 …
+- <file:line> <description> · D-id <Dn|none> · 來源 <A|B|C> · 因為 …
 
 ## 測試
 <test agent 最後一次的摘要：N passed，lint 狀態>
