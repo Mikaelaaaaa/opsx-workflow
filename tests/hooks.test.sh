@@ -220,6 +220,14 @@ printf '# report\n' > "$C/report.md"; sleep 1
 out="$(sg)"; assert_eq "$out" "" "stop: 全齊放行"
 git -C "$R" commit -q --allow-empty -m "feat: later"   # report 之後又 commit
 out="$(sg)"; assert_eq "$(decision "$out")" block "stop: report 後有新 commit"
+# 卡在 linked worktree：只算卡自己 branch 的 commit，主 checkout 是別的 session 在用
+sgw() { printf '{"cwd":"%s","stop_hook_active":false}' "$WT" | bash "$H/openspec-stop-gate.sh" 2>/dev/null; true; }
+printf '# report\n' > "$C/report.md"; sleep 1
+git -C "$WT" commit -q --allow-empty -m "feat: card later"
+out="$(sgw)"; assert_eq "$(decision "$out")" block "stop: worktree 卡 report 後自己有新 commit"; reason "$out" | grep -q '/review' || fail "stop: worktree 卡要叫重跑 review"
+printf '# report\n' > "$C/report.md"; sleep 1
+git -C "$R" commit -q --allow-empty -m "feat: other session"
+out="$(sgw)"; assert_eq "$out" "" "stop: worktree 卡不看主 checkout 的新 commit"
 # 還沒到 apply（沒 tasks.md）→ 不擋
 rm -f "$C/tasks.md"; out="$(sg)"; assert_eq "$out" "" "stop: 沒 tasks 不擋"
 

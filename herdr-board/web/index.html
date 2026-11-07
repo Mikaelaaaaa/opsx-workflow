@@ -487,7 +487,8 @@ function renderBanner(){
   if(bannerClosed||!tl)return '';
   const close=`<button class="ghost sm" data-act="banner-close">關閉</button>`;
   if(!tl.last_seen)return `<div class="notice" role="status"><span class="t">第一次開板</span><span>之後離開期間的變化會列在這裡</span>${close}</div>`;
-  const items=bannerItems(tl.events,data.cards.filter(inScope),tl.last_seen);
+  /* 不套首頁範圍：last-seen 是全域的，關閉會越過畫面上沒列的卡 */
+  const items=bannerItems(tl.events,data.cards,tl.last_seen);
   if(!items.length)return '';
   const li=i=>`<li>${i.now?'<span class="now">現在</span>':''}${i.key?`<button class="link" data-act="open" data-key="${esc(i.key)}">${esc(i.text)}</button>`:esc(i.text)}</li>`;
   return `<div class="notice" role="status"><span class="t">離開期間 ${esc(ago(tl.last_seen))}</span><ul>${items.map(li).join('')}</ul>${close}</div>`;
