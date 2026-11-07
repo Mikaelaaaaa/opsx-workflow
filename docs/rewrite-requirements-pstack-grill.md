@@ -270,7 +270,7 @@ gmtc-rag       gmtc-rag
 
 | 在哪 | 動作 | 背後 |
 |---|---|---|
-| Inbox 卡 | **派** | 選誰去（claude / codex）、多自主（互動 / 自動 / 開到可合併）、**kind**（七種，預設從來源提示猜）、**模型**（已定 2026-11-05：預設照 kind 給，dev / refactoring / perf / experiment → opus 5.5，bug-fix / chore / ops → sonnet 5.5，可以改；codex 只有 gpt-5）→ `dispatch.sh`：worktree + pane + `agent start … -- --model <id>` + prompt，kind 寫進 `.openspec.yaml`，model 記在 dispatch.json |
+| Inbox 卡 | **派** | 選誰去（claude / codex）、多自主（互動 / 自動＝開到可合併）、**kind**（七種，預設從來源提示猜）、**模型**（已定 2026-11-05：預設照 kind 給，dev / refactoring / perf / experiment → opus 5.5，bug-fix / chore / ops → sonnet 5.5，可以改；codex 只有 gpt-5）→ `dispatch.sh`：worktree + pane + `agent start … -- --model <id>` + prompt，kind 寫進 `.openspec.yaml`，model 記在 dispatch.json |
 | Inbox 卡 | **先 explore** | herdr 開 pane 跑 `/explore <卡>`（explore 做完待決非空，同一個 pane 接 `/grill`） |
 | Inbox 卡 | **丟掉** | status: dropped |
 | 進行中卡 | **回它** | 按建議或打字 → `herdr agent prompt`；gate 關；記 decisions 一行 |
@@ -308,17 +308,16 @@ gmtc-rag       gmtc-rag
 
 第一級不記、第三級不可記。收回：看板「授權」頁刪。
 
-### 三種自主程度怎麼實作（已定 2026-11-05）
+### 兩種自主程度怎麼實作（已定 2026-11-05；2026-11-06 由三種收成兩種）
 
-模式存在 dispatch.json，`dispatch.sh` 照模式起 agent，hook 照模式注入一句行為規則。查過 CLI：Claude Code 有 `--permission-mode`、`--allowedTools` / `--disallowedTools`、`--settings <json>`；codex 有 `-a/--ask-for-approval`、`-s/--sandbox`。
+模式存在 dispatch.json，`dispatch.sh` 照模式起 agent，router hook 照模式注入一句行為規則。查過 CLI：Claude Code 有 `--permission-mode`（acceptEdits / auto / bypassPermissions / manual / dontAsk / plan）、`--allowedTools` / `--disallowedTools`、`--settings <json>`；codex 有 `-a/--ask-for-approval`、`-s/--sandbox`。舊值 `drive` 一律讀成「自動」。
 
 | 模式 | claude 怎麼起 | codex 怎麼起 | opsx 這邊 |
 |---|---|---|---|
-| 互動 | 預設 permission mode，Claude 自己的權限框照跳，人在 pane 按 | `-a on-request -s workspace-write` | hook 注入「interactive：要授權就直接問，不寫 gate」。板上的 blocked 是正常的「終端機等待輸入」 |
-| 自動 | `--permission-mode acceptEdits` + `--settings` 一份 dispatch.sh 產的 JSON：allow 直接做那級（讀寫 worktree、`pnpm test*`、`git commit*`…）、deny 永遠要人那級（`git push*`、`glab mr merge*`、`db:migrate*`…）。「這個 repo 永遠」的授權也渲染進 allow，連問都不問 | `-a never -s workspace-write`；sandbox 擋網路，push 本來就出不去 | **PreToolUse `opsx-grant-gate.sh` 是真正的閘門**：要授權那級的指令進來，查 `grants.toml`（repo 永遠）和 dispatch.json（這張卡）；有授權放行，沒授權回 deny，deny 訊息就是「寫 gates.md 然後做能做的」。settings 只是少跳框，hook 永遠最後裁決。codex 沒 hook，靠 AGENTS.md 同一段文字 + sandbox，弱一級 |
-| 開到可合併 | 同自動 | 同自動 | 多一支 `drive.sh <slug>` 迴圈，pid 記在 dispatch.json：`herdr agent prompt "/apply <slug>" --wait` 等 settled（idle / done / blocked）→ 重讀 `changes/<slug>/` 狀態（跟 hook 的 Router 表同一張）→ `/review` → `/pr` → `/babysit` → 五個合併條件全綠就停（merge 永遠你）。中途開了 gate 就 `herdr agent wait --until working`，你在板上回完它自然繼續。**等待一律用 `herdr agent wait` 阻塞，不准定時 prompt 問「好了沒」**（已定 2026-11-05；每一句 prompt 都是一輪 token，輪詢一天會多吃幾 M）。「停止」= kill 迴圈 + `herdr agent stop` |
+| 互動 | 預設 permission mode，Claude 自己的權限框照跳，人在 pane 按 | `-a on-request -s workspace-write` | router 注入「interactive：要授權就直接問，不寫 gate」。板上的 blocked 是正常的「終端機等待輸入」 |
+| 自動（開到可合併） | `--permission-mode dontAsk` + `--settings` 一份 dispatch.sh 產的 JSON：allow 直接做那級（讀寫 worktree、`pnpm test*`、`git commit*`、常用唯讀與測試指令…）、deny 永遠要人那級（`git push --force*`、`deploy.sh*`…）。「這個 repo 永遠」的授權也渲染進 allow。不在 allow 的指令直接被拒、不跳框，agent 繞過去或寫 gate | `-a never -s workspace-write`；sandbox 擋網路，push 本來就出不去 | **PreToolUse `opsx-grant-gate.sh` 是真正的閘門**：要授權那級的指令進來，查 `grants.toml`（repo 永遠）和 dispatch.json（這張卡）；有授權放行，沒授權回 deny，deny 訊息就是「寫 gates.md 然後做能做的」。router 注入「autopilot：要問人的寫 gates.md，不用 AskUserQuestion」；explore / grill / propose 對產品取捨或不可逆的題寫 gate，其餘採 Recommended 記「自動採用」。dispatch 一律起 `drive.sh <slug>` 迴圈（pid 由 drive 自己寫進 dispatch.json，手動跑的也算）：`herdr agent prompt "/<stage> <slug>" --wait` 等 settled → 重讀 `changes/<slug>/` 狀態（跟 hook 的 Router 表同一張）→ … → `/babysit` → 五個合併條件全綠就停（merge 永遠你）。中途開了 gate 就 `herdr agent wait --until working` 再等 settled。herdr 錯誤不空轉：`agent_not_found` 結束、`agent_blocked` 阻塞等人、其他等 poll 秒。同一個 `/stage` 連送兩次階段沒動，就寫一個「drive 卡在 /X」的 gate 等人。**等待一律用 `herdr agent wait` 阻塞，不准定時 prompt 問「好了沒」**（已定 2026-11-05；每一句 prompt 都是一輪 token，輪詢一天會多吃幾 M）。「停止」= kill 迴圈 + `herdr agent stop`。codex 沒 hook，靠 AGENTS.md 同一段文字 + sandbox，弱一級 |
 
-`--permission-mode` 另有 `auto` 選項，語意沒查，不用；acceptEdits + 明確 allow / deny 比較可控。
+`--permission-mode auto` 語意沒查，不用。acceptEdits 會對 allow 以外的指令跳框，pane 變 blocked，drive 送不進 prompt（2026-11-06 真機三張卡各空轉 200 輪），所以自動改用 dontAsk。
 
 ### 新增的儲存（其餘皆投影）
 
@@ -929,7 +928,7 @@ hook 放 plugin 自己的 `hooks/hooks.json`，用 `${CLAUDE_PLUGIN_ROOT}/hooks/
 | SessionStart | `openspec-context.sh` | `[ -d openspec ] \|\| exit 0`；`openspec list --json` + `workplan.yaml` 擠成一行 additionalContext：active changes、目前 branch 對應的 change、**下一步該打哪個 skill**（tasks 全勾未 archive → `/review` 或 `/archive`；有 change 未勾完 → `/apply <name>`；沒 change → `/propose`）。等於把 `/status` 的 next action 每次自動出現 |
 | UserPromptSubmit | 同一腳本 | 只在 `openspec/` 的 mtime 比上次注入新時才重跑，否則零輸出 |
 | PreToolUse (Bash) | `openspec-commit-gate.sh` | `git commit` 時：repo 無 `workplan.yaml` → 不擋，印一行「閘門未啟用」（舊 repo 第一次 `/propose` 後自動生效）；有 workplan → branch 對到卡且 tasks 有勾才放行；對不到 → deny，message 帶 `[no-change]` 放行並記 `~/.local/state/opsx/bypass.log`。只看 commit 的 branch 不看 index，不逼人用 `git add`（Agentory-AI D131 的 pathspec commit 照用） |
-| PreToolUse (Bash · Edit · Write) | `opsx-grant-gate.sh` | 自動 / 開到可合併 模式下的授權閘門：指令或路徑落在「要授權」那級（push、開 MR、改 MR description、本機 migrate / reset、刪檔、裝套件、外部 API、寫 `.env.*`、rebase）→ 查 `grants.toml`（repo 永遠）與 dispatch.json（這張卡）；有授權 allow，沒有 deny，deny 訊息：「寫 gates.md（建議 · 證據 · 風險 · 沒回預設），然後做能做的」。「永遠要人」那級（merge、deploy、force-push、刪資料、對外發話、改 CI / secrets）一律 deny，訊息同上。互動模式不裝這支 |
+| PreToolUse (Bash · Edit · Write) | `opsx-grant-gate.sh` | 自動模式下的授權閘門：指令或路徑落在「要授權」那級（push、開 MR、改 MR description、本機 migrate / reset、刪檔、裝套件、外部 API、寫 `.env.*`、rebase）→ 查 `grants.toml`（repo 永遠）與 dispatch.json（這張卡）；有授權 allow，沒有 deny，deny 訊息：「寫 gates.md（建議 · 證據 · 風險 · 沒回預設），然後做能做的」。「永遠要人」那級（merge、deploy、force-push、刪資料、對外發話、改 CI / secrets）一律 deny，訊息同上。互動模式不裝這支 |
 | PreToolUse (Bash) | `mr-format-gate.sh` | `glab mr create` / `gh pr create` 時檢查 description 檔含 `## Changes` 與表格列 `\| 編號 \|`，否則 deny。取代現在只提醒的 `mr-note-reminder.sh` |
 | Stop | `openspec-stop-gate.sh` | branch 對應的 `tasks.md` 仍有 `- [ ]`、`status.json` 的 `tests` 不是 green、或有新 commit 但 review 未跑 → block 並說原因 |
 
@@ -975,7 +974,7 @@ pstack 的 encode-lessons-in-structure 與 `/correct`：同一個錯誤修在最
 | 畫面用字 | 標準詞：待處理 / 進行中 / 待指派 / 收件匣 / 已完成；指派 / 先 explore / 捨棄 / 合併；授權跟 repo 範圍、同步跟收件匣、workspace 掛載在範圍選單，頂列只剩範圍 · 待處理數 · ＋（2026-11-05） | §3.6 |
 | 收件匣位置 | 網頁獨立 tab（首頁 / 收件匣），面板仍摺在底（2026-11-05 改） | §3.6 |
 | merged 後自動派依賴 PR | 要，規則寫死：depends-on 全 merged 且有 tasks.md 的才派，沿用父卡的 agent / 模式，kind 用自己的；記 decisions、進 banner、可停止（2026-11-05） | §3.1 |
-| 三種自主程度實作 | 互動 = 預設 permission；自動 = acceptEdits + dispatch.sh 產的 settings allow/deny + `opsx-grant-gate.sh`；開到可合併 = 自動 + `drive.sh` 迴圈；codex `-a never -s workspace-write`（2026-11-05） | §3.6 · §8.5 |
+| 自主程度實作 | 兩種（2026-11-06 由三種收成兩種）：互動 = 預設 permission；自動 = dontAsk + dispatch.sh 產的 settings allow/deny + `opsx-grant-gate.sh` + `drive.sh` 迴圈，開到可合併；codex `-a never -s workspace-write`（2026-11-05） | §3.6 · §8.5 |
 | sources.toml 怎麼來 | `/opsx init` 問答產生；obsidian 資料夾、customer 平台連線都在那時填，沒填不啟用（2026-11-05） | §3.6 |
 | 沒 repo 的來源 | 同步先放 `~/.local/state/opsx/unfiled/`，收件匣「待分類」組，你選 repo 才建殼；不猜（2026-11-05） | §3.6 |
 | 第三個 reviewer | 加，Agent C = pstack interrogate reviewer-prompt + rubric，每次都跑，兼看測試是否證明驗收條件（2026-11-05） | §6 · §8.3 |

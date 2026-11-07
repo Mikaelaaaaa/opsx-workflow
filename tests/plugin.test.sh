@@ -22,14 +22,35 @@ assert os.path.exists(os.path.join(root, a[0]["command"][-1])), a[0]["command"]
 b = [x for x in m["actions"] if x["id"] == "open-pane"]; assert b, m["actions"]
 assert os.path.exists(os.path.join(root, b[0]["command"][-1])), b[0]["command"]
 p = [x for x in m["panes"] if x["id"] == "board"]; assert p, m["panes"]
-assert p[0]["placement"] == "overlay", p[0]
+assert p[0]["placement"] == "split", p[0]
+assert p[0]["title"] == "opsx", p[0]   # open-pane.sh 靠這個 label 認出已開的看板 pane
 assert os.path.exists(os.path.join(root, p[0]["command"][-1])), p[0]["command"]
 PY
 
-# --- open-pane.sh：只叫 herdr 開 overlay pane，用 HERDR_BIN_PATH 給的 herdr ---
-: > "$OPSX_FAKE_LOG"
-out="$(HERDR_BIN_PATH="$FX/fakebin/herdr" bash "$OPSX_ROOT/herdr-board/scripts/open-pane.sh" 2>&1)"; assert_eq "$?" 0 "open-pane: $out"
-assert_eq "$(cat "$OPSX_FAKE_LOG")" "plugin pane open --plugin opsx-board --entrypoint board --placement overlay --focus" "open-pane 的 herdr 呼叫"
+# --- open-pane.sh：本 tab 沒有看板 pane 就在按鍵的 pane 右邊開 split，有就 focus 它 ---
+panes() { # panes <tab_id 有 opsx pane 的 tab>：寫一份 herdr pane list，w1:t1 有按鍵的 pane w1:p2
+  printf '{"id":"cli:pane:list","result":{"panes":[{"pane_id":"w1:p2","tab_id":"w1:t1","workspace_id":"w1"},{"label":"tsk","pane_id":"w1:p5","tab_id":"w1:t1","workspace_id":"w1"},{"label":"opsx","pane_id":"w1:p7","tab_id":"%s","workspace_id":"w1"}],"type":"pane_list"}}\n' "$1" > "$FX/panes.json"
+}
+open_pane() { HERDR_BIN_PATH="$FX/fakebin/herdr" HERDR_PANE_ID=w1:p2 HERDR_TAB_ID=w1:t1 HERDR_WORKSPACE_ID=w1 OPSX_TEST_HERDR_PANES="$FX/panes.json" bash "$OPSX_ROOT/herdr-board/scripts/open-pane.sh" 2>&1; }
+SPLIT="plugin pane open --plugin opsx-board --entrypoint board --placement split --direction right --target-pane w1:p2 --focus"
+
+panes w1:t9; : > "$OPSX_FAKE_LOG"   # 看板 pane 只在別的 tab
+out="$(open_pane)"; assert_eq "$?" 0 "open-pane 沒開過: $out"
+assert_eq "$(cat "$OPSX_FAKE_LOG")" "pane list --workspace w1
+$SPLIT" "本 tab 沒有看板 pane：開 split"
+
+panes w1:t1; : > "$OPSX_FAKE_LOG"
+out="$(open_pane)"; assert_eq "$?" 0 "open-pane 已開: $out"
+assert_eq "$(cat "$OPSX_FAKE_LOG")" "pane list --workspace w1
+plugin pane focus w1:p7" "本 tab 已有看板 pane：只 focus"
+
+for v in HERDR_PANE_ID HERDR_TAB_ID HERDR_WORKSPACE_ID; do
+  : > "$OPSX_FAKE_LOG"
+  out="$(HERDR_BIN_PATH="$FX/fakebin/herdr" HERDR_PANE_ID=w1:p2 HERDR_TAB_ID=w1:t1 HERDR_WORKSPACE_ID=w1 env -u "$v" bash "$OPSX_ROOT/herdr-board/scripts/open-pane.sh" 2>&1)"; rc=$?
+  [ "$rc" -ne 0 ] || fail "缺 $v 要失敗"
+  echo "$out" | grep -q "$v" || fail "缺 $v 的錯誤要寫出變數名: $out"
+  assert_eq "$(cat "$OPSX_FAKE_LOG")" "" "缺 $v 不該叫 herdr"
+done
 : > "$OPSX_FAKE_LOG"
 
 # --- open-board.sh：第一次起 server + 開瀏覽器；第二次只開瀏覽器 ---

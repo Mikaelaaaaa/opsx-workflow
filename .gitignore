@@ -2,3 +2,5 @@
 *-workspace/
 .claude/worktrees/
 __pycache__/
+# opsx 把 openspec/ 寫進 .git/info/exclude；情境題目的 openspec/ 是題目本身，要進 git
+!skills/*/evals/fixtures/**/openspec/

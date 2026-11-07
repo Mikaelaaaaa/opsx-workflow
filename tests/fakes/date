@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# 假 date：設了 OPSX_TEST_NOW（"YYYY-MM-DD HH:MM"）就把「現在」固定在那一分鐘，格式參數照傳；沒設就是真的 date。
+if [ -n "${OPSX_TEST_NOW:-}" ]; then exec /bin/date -j -f '%Y-%m-%d %H:%M' "$OPSX_TEST_NOW" "$@"; fi
+exec /bin/date "$@"

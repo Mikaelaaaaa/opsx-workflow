@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Stop：branch 對到的卡 tasks.md 仍有 - [ ]、status.json tests 不是 green、或有 commit 但 review 沒跑 → block 並說原因。
+# Stop：branch 對到的卡 tasks.md 仍有 - [ ]（gates.md 有 open gate 時這一項放行）、status.json tests 不是 green、或有 commit 但 review 沒跑 → block 並說原因。
 # 要求檔 §8.5。stop_hook_active 為 true（已經因為這個 hook 續跑過一次）就放行，避免無限迴圈。
 source "$(dirname "${BASH_SOURCE[0]}")/_lib.sh"
 
@@ -11,6 +11,7 @@ slug="$(card_slug)"
 
 open="$(tasks_open "$d")"
 if [ "$open" -gt 0 ]; then
+  [ "$(st_open_gates "$d")" -gt 0 ] && exit 0
   stop_block "opsx：$slug 的 tasks.md 還有 $open 個 task 沒勾。要停下來就先把做到一半的 task 做完勾起來（測試綠才准勾），或寫 gates.md 說明卡在哪；不要帶著半個 task 收工。"
 fi
 if [ "$(status_tests "$d")" != green ]; then
@@ -19,8 +20,7 @@ fi
 if [ ! -f "$d/report.md" ]; then
   stop_block "opsx：$slug tasks 全勾、測試綠，但還沒 review。跑 /review $slug 產 report.md 再停。"
 fi
-top="$(repo_top)"
-last_commit="$(git -C "$top" log -1 --format=%ct 2>/dev/null || echo 0)"
+last_commit="$(git -C "$(hook_cwd)" log -1 --format=%ct 2>/dev/null || echo 0)"
 report_ts="$(stat -f %m "$d/report.md" 2>/dev/null || stat -c %Y "$d/report.md" 2>/dev/null || echo 0)"
 if [ "$last_commit" -gt "$report_ts" ]; then
   stop_block "opsx：$slug 在 report.md 之後又有新 commit，review 沒涵蓋到。再跑一次 /review $slug 再停。"

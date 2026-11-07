@@ -18,12 +18,13 @@ command = ["bash", "herdr-board/scripts/open-board.sh"]
 [[actions]]
 id = "open-pane"
 title = "Open opsx pane"
-description = "在目前的 workspace 以 overlay 開看板的 TUI pane。"
+description = "在目前的 pane 右邊以 split 開看板的 TUI pane；這個 tab 已開就 focus 它。"
 command = ["bash", "herdr-board/scripts/open-pane.sh"]
 
 # 右側 pane 的最小 TUI：一行一卡，↑↓ 選、Enter 跳 pane、r 重拉、q 關。不回 gate、不派工、不合併。
+# title 是 herdr pane list 的 label，open-pane.sh 靠它認出本 tab 已開的看板 pane。
 [[panes]]
 id = "board"
 title = "opsx"
-placement = "overlay"
+placement = "split"
 command = ["python3", "herdr-board/tui.py"]

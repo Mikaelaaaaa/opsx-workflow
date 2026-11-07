@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# 假 launchctl：記參數；print 在 $OPSX_TEST_LAUNCHCTL_LOADED 有設時成功（已載入），否則失敗（還沒載入）。
+printf '%s\n' "$*" >> "${OPSX_FAKE_LOG:?}"
+case "$1" in
+  print) [ -n "${OPSX_TEST_LAUNCHCTL_LOADED:-}" ] || { echo "Could not find service" >&2; exit 113; } ;;
+esac
+exit 0
