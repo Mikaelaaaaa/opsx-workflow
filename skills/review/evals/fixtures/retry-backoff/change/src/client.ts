@@ -23,15 +23,20 @@ export async function getJson<T>(url: string, opts: RequestOptions = {}): Promis
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), opts.timeoutMs ?? 10_000);
     let res: Response | undefined;
+    let body: string | undefined;
     try {
       res = await fetchImpl(url, { signal: controller.signal });
+      if (res.ok) {
+        body = await res.text();
+      }
     } catch {
+      res = undefined;
       lastStatus = 0;
     } finally {
       clearTimeout(timer);
     }
-    if (res?.ok) {
-      return (await res.json()) as T;
+    if (body !== undefined) {
+      return JSON.parse(body) as T;
     }
     if (res) {
       lastStatus = res.status;

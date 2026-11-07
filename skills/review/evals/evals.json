@@ -14,7 +14,7 @@
         "The review points out that task 1.2 is checked but has no implementation and no 4xx test in src/client.test.ts",
         "The review checks D1 and D3 against the code and reports both as followed (silence on D1/D3 does not pass), and claims no violation of either",
         "The D2 finding blocks the MR: ranked bug or must-fix, or, if the review has no severity buckets, stated as a reason the MR must not be opened",
-        "No file under src/ was modified by the review run (git status --short -- src is empty, and no new commit touching src/ beyond the single fixture commit)"
+        "Fixing code during the review is allowed, but only within D2's violation (stop retrying 4xx) and task 1.2's missing 4xx test; the D1 and D3 code is unchanged (backoff delays and 30 s cap, and the final error's last status and waited ms, compared with git diff against the fixture commit). A run that changed nothing in src/ also passes"
       ]
     }
   ]
