@@ -120,6 +120,10 @@ If `openspec/workplan.yaml` exists, check whether this change is already listed:
 
 If no workplan exists, create it with this one feature / PR / change; the commit gate turns on once the file exists.
 
+### 5b. Several independent changes from one discussion
+
+When this proposal produced more than one change and they do not depend on each other, give them separate PRs whose `depends-on` names only what they really need. `opsx chain` uses exactly that field: children that depend on the same merged parent are fanned out to subagents by the parent's pane (`../../references/fan-out.md`); a chain of `depends-on` is worked one after the other in one pane.
+
 ### 6. Show final status
 
 ```bash

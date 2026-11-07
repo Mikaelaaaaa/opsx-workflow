@@ -20,7 +20,18 @@ init_global() {
 
   # 記下 python3 背後真正的執行檔，opsx 和 hooks 只叫它（bin/lib/python.sh）。路徑不同就覆寫：
   # pyenv 換版本後舊路徑會失效，重跑這裡是唯一的修法。
-  local py old=""; py="$(python3 -I -c 'import sys; print(sys.executable)')"
+  # 在 venv（含 pyenv-virtualenv）裡改記 base：venv 一刪記下的路徑就失效，而 opsx 只用 stdlib，base 不缺東西。
+  # base 原樣記、不 realpath：brew 的 opt/ symlink 解開會指到帶 patch 版號的 Cellar 目錄，brew upgrade 就失效。
+  local probe venv_prefix exe base py old=""
+  probe="$(python3 -I -c 'import sys; print(sys.prefix if sys.prefix != sys.base_prefix else ""); print(sys.executable); print(sys._base_executable)')" \
+    || die "init --global: 問不到 PATH 上 python 的路徑（上面是 python 的錯誤）"
+  { IFS= read -r venv_prefix; IFS= read -r exe; IFS= read -r base; } <<< "$probe"
+  py="$exe"
+  if [ -n "$venv_prefix" ]; then
+    [ "$base" != "$exe" ] && [ -f "$base" ] && [ -x "$base" ] \
+      || die "init --global: PATH 上的 python 在 venv（${venv_prefix}）裡，拿不到可用的 base interpreter（sys._base_executable = ${base}）。離開 venv 再跑"
+    py="$base"; say "init --global: 偵測到 venv（${venv_prefix}），改記它的 base interpreter"
+  fi
   [ -f "$state/python" ] && IFS= read -r old < "$state/python" || true
   if [ "$old" = "$py" ]; then say "init --global: python 已有（${py}）"
   else
