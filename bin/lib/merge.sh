@@ -21,7 +21,7 @@ opsx_merge() {
 
   # 重驗五條件，一定重抓（快取是給看板每 5 秒拉的）
   local mr; mr="$(OPSX_MR_CACHE_TTL=0 mr_json "$d")"
-  local verdict; verdict="$(printf '%s' "$mr" | python3 -I -c '
+  local verdict; verdict="$(printf '%s' "$mr" | "$OPSX_PY" -I -c '
 import json,sys
 m=json.load(sys.stdin)
 if m["state"]=="ready": print("ok\t"+(m["head_sha"] or "")); sys.exit()
@@ -38,7 +38,7 @@ print("no\t"+m["state"]+"\t"+",".join(bad))')"
   # 寫核准（綁 sha，不刪；見 grant-gate 的 merge_gate）：卡一定要在 dispatch.json（要有 agent 去執行），而且不能是互動模式
   # （互動模式沒有 grant-gate，合併會停在 pane 的權限框，看板上的按鈕永遠轉不完）
   local key="$repo/$slug" now; now="$(now_iso)"
-  OPSX_M_KEY="$key" OPSX_M_SHA="$sha" OPSX_M_NOW="$now" OPSX_LIB="$OPSX_ROOT/bin/lib" python3 -I - "$OPSX_STATE_DIR/dispatch.json" <<'PY' || exit 2
+  OPSX_M_KEY="$key" OPSX_M_SHA="$sha" OPSX_M_NOW="$now" OPSX_LIB="$OPSX_ROOT/bin/lib" "$OPSX_PY" -I - "$OPSX_STATE_DIR/dispatch.json" <<'PY' || exit 2
 import os, sys
 sys.path.insert(0, os.environ["OPSX_LIB"]); import jsonfile
 p = sys.argv[1]; key, sha, now = os.environ["OPSX_M_KEY"], os.environ["OPSX_M_SHA"], os.environ["OPSX_M_NOW"]
@@ -51,7 +51,7 @@ def put(d):
     d[key]["merge_approved"] = sha; d[key]["merge_approved_at"] = now
 jsonfile.update(p, put)
 PY
-  printf '%s\tyou\tmerge-approved\t%s\t%s\n' "$now" "$sha" "$(st_mr_url "$d")" >> "$d/decisions.tsv"
+  log_row "$d" 你 已允許 "核准合併 ${sha}" "${sha} · $(st_mr_url "$d")"
   herdr agent prompt "$slug" "/babysit merge ${sha}" >/dev/null || die "merge: 核准已寫進 dispatch.json，但 herdr agent prompt 失敗；在 pane 裡對 agent 說 /babysit merge ${sha}"
   say "merge: $slug 核准合併 ${sha}，已叫 agent /babysit merge；它跑 glab mr merge 時閘門會放行（只放這個 sha、這條 MR）"
 }

@@ -13,7 +13,10 @@ case "$1 $2" in
       echo "$(( $(cat "$OPSX_TEST_BUSY_LEFT") - 1 ))" > "$OPSX_TEST_BUSY_LEFT"
       echo '{"error":{"code":"agent_pane_busy","message":"agent target pane '"$7"' is not an available shell"},"id":"cli:agent:start"}' >&2; exit 1
     fi
-    if [ -n "${OPSX_TEST_START_FAIL:-}" ]; then echo '{"error":{"code":"'"$OPSX_TEST_START_FAIL"'","message":"nope"},"id":"cli:agent:start"}' >&2; exit 1; fi
+    if [ -n "${OPSX_TEST_START_FAIL:-}" ]; then
+      msg=nope; [ "$OPSX_TEST_START_FAIL" = agent_name_taken ] && msg="agent name $3 is already used; candidates: terminal_id=term_1 pane_id=w9:p1 workspace_id=w9 tab_id=w9:t1 cwd=/x status=Working"
+      echo '{"error":{"code":"'"$OPSX_TEST_START_FAIL"'","message":"'"$msg"'"},"id":"cli:agent:start"}' >&2; exit 1
+    fi
     # OPSX_TEST_NOT_READY_ONCE 指到一個檔：存在就回一次 agent_not_ready（Claude 啟動停在對話框）並刪掉它
     if [ -n "${OPSX_TEST_NOT_READY_ONCE:-}" ] && [ -f "$OPSX_TEST_NOT_READY_ONCE" ]; then
       rm -f "$OPSX_TEST_NOT_READY_ONCE"
@@ -28,10 +31,13 @@ case "$1 $2" in
   # 真格式（2026-11-06 在 pane 裡實跑存下來）：{"id":"cli:agent:list","result":{"agents":[{pane_id:"w1:p2",agent_status,…}],"type":"agent_list"}}
   "agent list") cat "${OPSX_TEST_HERDR_AGENTS:-$(dirname "${BASH_SOURCE[0]}")/herdr-samples/agent-list.json}" ;;
   "pane list") cat "${OPSX_TEST_HERDR_PANES:-$(dirname "${BASH_SOURCE[0]}")/herdr-samples/pane-list.json}" ;;
+  # 真格式（2026-11-06 在 pane w5:pH 實跑）：TARGET 吃 dispatch.json 的 pane id，--format text 是純文字
+  "agent read") cat "$(dirname "${BASH_SOURCE[0]}")/herdr-samples/agent-read.txt" ;;
   "agent prompt") [ -n "${OPSX_TEST_ON_PROMPT:-}" ] && bash "$OPSX_TEST_ON_PROMPT" "$4"; echo '{"result":{"submitted":true}}' ;;
   "agent wait") [ -n "${OPSX_TEST_ON_WAIT:-}" ] && bash "$OPSX_TEST_ON_WAIT"; echo '{"result":{"status":"idle"}}' ;;
   "pane close") echo '{"result":{"closed":true}}' ;;
   "pane focus") echo '{"result":{"focused":true}}' ;;
+  "agent focus") echo '{"result":{"focused":true}}' ;;
   "plugin list") cat "${OPSX_TEST_HERDR_PLUGINS:-/dev/null}"; echo ;;
   "plugin link") echo '{"result":{"linked":true}}' ;;
   "pane current") echo '{"result":{"pane_id":"p42"}}' ;;

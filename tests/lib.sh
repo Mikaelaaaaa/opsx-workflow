@@ -8,7 +8,15 @@ export OPSX_BIN_DIR="$FX/bin"
 export HERDR_ENV=""          # 測試裡永遠不碰 herdr
 export OPSX_NONINTERACTIVE=1 # init 不問問題
 export TZ=Asia/Taipei
+# init --global 會裝 launchd job：測試永遠不寫真的 ~/Library/LaunchAgents、不叫真的 launchctl。
+# 預設當成沒有 launchctl（略過）；要測安裝的檔案自己 use_fakes launchctl 再設 OPSX_LAUNCHCTL=launchctl。
+export OPSX_LAUNCH_AGENTS_DIR="$FX/LaunchAgents"
+export OPSX_LAUNCHCTL="$FX/no-launchctl"
 trap 'rm -rf "$FX"' EXIT
+# opsx init --global 會寫的 python 路徑；opsx 和 hooks 沒有它就不跑
+mkdir -p "$OPSX_STATE_DIR"; python3 -I -c 'import sys; print(sys.executable)' > "$OPSX_STATE_DIR/python"
+# 測試 helper 自己叫的 python3 也走那一支，不經 pyenv shim（每次多 250 ms 左右，一個檔幾十次）
+PATH="$(dirname "$(cat "$OPSX_STATE_DIR/python")"):$PATH"; export PATH
 
 fail() { echo "ASSERT FAIL: $*" >&2; exit 1; }
 assert_eq() { [ "$1" = "$2" ] || fail "expected [$2] got [$1]${3:+ — $3}"; }
@@ -40,4 +48,11 @@ mk_change() { # mk_change <repo-dir> <slug>
   mkdir -p "$1/openspec/changes/$2"
   printf 'schema: opsx\ncreated: 2026-11-05\n' > "$1/openspec/changes/$2/.openspec.yaml"
   git -C "$1" checkout -q -b "feat/$2/mikaela" 2>/dev/null || git -C "$1" checkout -q "feat/$2/mikaela"
+}
+# 跑過 opsx init 的 fixture repo：openspec/ 加 opsx schema，openspec new change --schema opsx 能用
+mk_opsx_repo() { # mk_opsx_repo <name>
+  local d; d="$(mk_repo "$1")"
+  ( cd "$d" && openspec init --tools none "$d" >/dev/null 2>&1 )
+  ( source "$OPSX_ROOT/bin/lib/common.sh"; source "$OPSX_ROOT/bin/lib/python.sh"; opsx_python_load; source "$OPSX_ROOT/bin/lib/init.sh"; install_schema "$d" >/dev/null 2>&1 ) || fail "mk_opsx_repo: schema 裝不起來"
+  printf '%s' "$d"
 }

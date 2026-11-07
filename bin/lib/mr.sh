@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # MR 五條件，drive / collect / merge / grant-gate 共用（herdr-board D5、specs/board-collect）。
-#   mr_json  <card dir>  印 {"url","state","head_sha","conditions":{opened,not_draft,no_conflicts,pipeline,threads},"blocked_on","error"}
+#   mr_json  <card dir>  印 {"url","state","head_sha","conditions":{opened,not_draft,no_conflicts,pipeline,threads},"blocked_on","error","created_at","merged_at"}
 #   mr_state <card dir>  印 ready | draft | conflicts | pipeline:<status> | threads:<n> | state:<s> | none（drive 用的短字串）
 # 來源：report.md 的 ## MR 連結。project 從 URL 解出來用 -R 指定（不靠 cwd：server 的 cwd 不是那個 repo）。
 #   gitlab 的 https://<host>/<group>/<proj>/-/merge_requests/<iid> 變成 glab mr view <iid> -R <host>/<group>/<proj> -F json；
@@ -13,7 +13,7 @@ mr_json() { # <card dir>
   local d="$1" url ttl cache now mtime age raw forge iid proj host path out tmp
   url="$(st_mr_url "$d")"
   if [ -z "$url" ]; then
-    printf '{"url": null, "state": "none", "head_sha": null, "conditions": null, "blocked_on": null, "error": null}\n'; return
+    printf '{"url": null, "state": "none", "head_sha": null, "conditions": null, "blocked_on": null, "error": null, "created_at": null, "merged_at": null}\n'; return
   fi
   ttl="${OPSX_MR_CACHE_TTL:-60}"
   cache="$OPSX_STATE_DIR/cache/mr-$(printf '%s' "$url" | shasum | cut -c1-12).json"
@@ -25,15 +25,15 @@ mr_json() { # <card dir>
   host="$(printf '%s' "$url" | sed -E 's#^https?://([^/]+)/.*#\1#')"
   case "$url" in
     *github.com/*) forge=github; proj="$(printf '%s' "$url" | sed -E 's#^https?://[^/]+/([^/]+/[^/]+)/pull/.*#\1#')"
-      raw="$(gh pr view "$iid" -R "$proj" --json state,isDraft,mergeable,mergeStateStatus,statusCheckRollup,reviewDecision,headRefOid 2>/dev/null || true)" ;;
+      raw="$(gh pr view "$iid" -R "$proj" --json state,isDraft,mergeable,mergeStateStatus,statusCheckRollup,reviewDecision,headRefOid,createdAt,mergedAt 2>/dev/null || true)" ;;
     *) forge=gitlab; path="$(printf '%s' "$url" | sed -E 's#^https?://[^/]+/(.*)/-/merge_requests/.*#\1#')"; proj="$host/$path"
       raw="$(glab mr view "$iid" -R "$proj" -F json 2>/dev/null || true)" ;;
   esac
-  out="$(OPSX_MR_RAW="$raw" python3 -I - "$url" "$forge" "$proj" "$iid" <<'PY'
+  out="$(OPSX_MR_RAW="$raw" "$OPSX_PY" -I - "$url" "$forge" "$proj" "$iid" <<'PY'
 import json, os, sys
 url, forge, proj, iid = sys.argv[1:5]
 raw = os.environ.get("OPSX_MR_RAW", "").strip()   # heredoc 占了 stdin，原始 JSON 走環境變數
-out = {"url": url, "state": "none", "head_sha": None, "conditions": None, "blocked_on": None, "error": None}
+out = {"url": url, "state": "none", "head_sha": None, "conditions": None, "blocked_on": None, "error": None, "created_at": None, "merged_at": None}
 tool = "gh pr view %s -R %s" % (iid, proj) if forge == "github" else "glab mr view %s -R %s" % (iid, proj)
 if not raw:
     out["error"] = "%s 沒回東西（沒登入、沒網路、或 project 不對）" % tool
@@ -55,6 +55,7 @@ if forge == "github":
          "no_conflicts": d.get("mergeable") != "CONFLICTING" and d.get("mergeStateStatus") != "DIRTY",
          "pipeline": checks_ok, "threads": decision != "CHANGES_REQUESTED"}
     sha, ps, n, state = d.get("headRefOid"), ("success" if checks_ok else "failed"), (1 if decision == "CHANGES_REQUESTED" else 0), d.get("state")
+    out.update(created_at=d.get("createdAt"), merged_at=d.get("mergedAt"))
 else:
     ps = (d.get("head_pipeline") or d.get("pipeline") or {}).get("status")
     n = d.get("unresolved_discussions_count")
@@ -63,6 +64,7 @@ else:
     c = {"opened": d.get("state") == "opened", "not_draft": not (d.get("draft") or d.get("work_in_progress")),
          "no_conflicts": not d.get("has_conflicts"), "pipeline": ps is None or ps == "success", "threads": n == 0}
     sha, state = d.get("sha") or (d.get("diff_refs") or {}).get("head_sha"), d.get("state")
+    out.update(created_at=d.get("created_at"), merged_at=d.get("merged_at"))
 first = next((k for k in ("opened", "not_draft", "no_conflicts", "pipeline", "threads") if not c[k]), None)
 short = {"opened": "state:%s" % state, "not_draft": "draft", "no_conflicts": "conflicts",
          "pipeline": "pipeline:%s" % ps, "threads": "threads:%d" % n, None: "ready"}[first]
@@ -78,5 +80,5 @@ PY
 }
 
 mr_state() { # <card dir>
-  mr_json "$1" | python3 -I -c 'import json,sys; print(json.load(sys.stdin)["state"])'
+  mr_json "$1" | "$OPSX_PY" -I -c 'import json,sys; print(json.load(sys.stdin)["state"])'
 }

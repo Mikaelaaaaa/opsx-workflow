@@ -80,8 +80,14 @@ cd "$FX/wt"; out="$(opsx init 2>&1)" || fail "init in worktree: $out"
 assert_eq "$(grep -c '^openspec/$' "$R/.git/info/exclude")" 1 "exclude duplicated or missing via worktree"
 
 # --- --global ---
-cd "$FX"; use_fakes herdr; export OPSX_FAKE_LOG="$FX/herdr.log"; : > "$OPSX_FAKE_LOG"
+cd "$FX"; use_fakes herdr launchctl; export OPSX_FAKE_LOG="$FX/herdr.log"; : > "$OPSX_FAKE_LOG"
+export OPSX_LAUNCHCTL=launchctl   # lib.sh 預設沒有 launchctl；這裡用 fake 測安裝
+rm -f "$OPSX_STATE_DIR/python"
 outg="$(opsx init --global 2>&1)"; assert_eq "$?" 0 "global rc: $outg"
+PY="$(python3 -I -c 'import sys;print(sys.executable)')"
+assert_eq "$(cat "$OPSX_STATE_DIR/python")" "$PY" "init --global 要記下 python3 的 sys.executable"
+[ -x "$(cat "$OPSX_STATE_DIR/python")" ] || fail "記下的 python 不能執行"
+case "$outg" in *"$PY"*) ;; *) fail "輸出要說寫了哪個 python：$outg" ;; esac
 case "$outg" in *"herdr plugin link"*) ;; *) fail "should say plugin linked: $outg" ;; esac
 case "$outg" in *'"linked"'*) fail "herdr JSON leaked into output: $outg" ;; esac
 assert_file "$OPSX_STATE_DIR/grants.toml"
@@ -92,4 +98,43 @@ assert_eq "$(readlink "$OPSX_BIN_DIR/opsx")" "$OPSX_ROOT/bin/opsx"
 echo 'x = 1' >> "$OPSX_STATE_DIR/grants.toml"
 opsx init --global >/dev/null 2>&1 || fail "global rerun"
 assert_grep "x = 1" "$OPSX_STATE_DIR/grants.toml"
+
+# --- 每日同步 launchd：第一次安裝 ---
+PL="$OPSX_LAUNCH_AGENTS_DIR/com.opsx.sync.plist"
+assert_file "$PL"
+case "$outg" in *每日同步*) ;; *) fail "輸出要有每日同步那行：$outg" ;; esac
+pl() { python3 -I -c 'import json,plistlib,sys
+d=plistlib.load(open(sys.argv[1],"rb"))
+for k in sys.argv[2].split("."): d=d[k]
+print(d if isinstance(d,str) else json.dumps(d))' "$PL" "$1"; }
+assert_eq "$(pl ProgramArguments)" "[\"$OPSX_BIN_DIR/opsx\", \"sync\"]"
+assert_eq "$(pl StartCalendarInterval)" '{"Hour": 9, "Minute": 0}'
+assert_eq "$(pl StandardOutPath)" "$OPSX_STATE_DIR/sync.out"; assert_eq "$(pl StandardErrorPath)" "$OPSX_STATE_DIR/sync.out"
+assert_eq "$(pl EnvironmentVariables.OPSX_STATE_DIR)" "$OPSX_STATE_DIR"
+P="$(pl EnvironmentVariables.PATH)"
+for d in "$OPSX_BIN_DIR" /opt/homebrew/bin "$(dirname "$(cat "$OPSX_STATE_DIR/python")")" "$(dirname "$(command -v openspec)")"; do
+  case ":$P:" in *":$d:"*) ;; *) fail "plist 的 PATH 少了 $d：$P" ;; esac
+done
+assert_grep "^bootstrap gui/$(id -u) $PL\$" "$OPSX_FAKE_LOG"
+
+# --- 已經裝過：launchctl print 成功就不重載 ---
+: > "$OPSX_FAKE_LOG"
+OPSX_TEST_LAUNCHCTL_LOADED=1 opsx init --global >/dev/null 2>&1 || fail "global with loaded job"
+assert_grep '^print gui/' "$OPSX_FAKE_LOG"; assert_not_grep '^bootstrap' "$OPSX_FAKE_LOG"
+
+# --- 已載入但 plist 內容變了（例如 nvm / pyenv 升級後重跑）：先 bootout 再 bootstrap，launchd 才會讀新的 ---
+printf '<!-- 舊的 -->\n' > "$PL"; : > "$OPSX_FAKE_LOG"
+OPSX_TEST_LAUNCHCTL_LOADED=1 opsx init --global >/dev/null 2>&1 || fail "global with changed plist"
+assert_grep "^bootout gui/$(id -u)/com.opsx.sync\$" "$OPSX_FAKE_LOG"; assert_grep '^bootstrap' "$OPSX_FAKE_LOG"
+
+# --- 沒有 launchctl：印一行略過，退出 0 ---
+outn="$(OPSX_LAUNCHCTL="$FX/no-such-launchctl" opsx init --global 2>&1)"; assert_eq "$?" 0 "no launchctl rc: $outn"
+case "$outn" in *略過*) ;; *) fail "沒有 launchctl 要說略過：$outn" ;; esac
+
+# python 路徑：相同就不動，不同就覆寫並印新舊
+outg="$(opsx init --global 2>&1)"; case "$outg" in *"python 已有"*) ;; *) fail "路徑相同要說已有：$outg" ;; esac
+printf '/nonexistent/python3\n' > "$OPSX_STATE_DIR/python"
+outg="$(opsx init --global 2>&1)"; assert_eq "$?" 0 "global with stale python: $outg"
+assert_eq "$(cat "$OPSX_STATE_DIR/python")" "$PY" "路徑變了要覆寫"
+case "$outg" in *"/nonexistent/python3"*"$PY"*) ;; *) fail "覆寫要印舊路徑與新路徑：$outg" ;; esac
 echo ok
