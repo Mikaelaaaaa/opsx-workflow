@@ -44,12 +44,36 @@ assert_file "$c/inbox.md"
 assert_no_file "$c/explore.md"
 assert_no_file "$c/grill.md"
 green_tests "$d" s2
+# 情境 2：每次都過的五條另列 baseline，不算進通過率；「沒有要決定的」不要求講出 grill
+python3 -I - "$OPSX_ROOT/skills/explore/evals/evals.json" <<'PY' || fail "scenario 2 needs five baseline items outside assertions, and the nothing-to-decide assertion must not require the word grill"
+import json, sys
+e = json.load(open(sys.argv[1]))["evals"][0]
+assert len(e["baseline"]) == 5
+assert not set(e["baseline"]) & set(e["assertions"])
+for key in ("No grill.md exists", "No questions.md exists", "its 待決 section is empty", "No file under src/ was modified", "The run stopped at explore"):
+    assert sum(key in b for b in e["baseline"]) == 1, key
+nothing = [a for a in e["assertions"] if "nothing for the user to decide" in a]
+assert len(nothing) == 1 and "grill" not in nothing[0].lower()
+assert "grill is not needed" not in e["expected_output"]
+PY
 
-# 情境 1 grill 段：至少三個原始檔，待決恰好三題，有 answers.md 代替人回答
+# 情境 1 grill 段：至少三個原始檔，待決恰好三題；答案不在工作 repo 裡，第二輪才當使用者回覆傳過去
 d="$FX/built/grill-retry-backoff"
 assert_eq "$(sed -n '/^## 待決/,/^## /p' "$d/openspec/changes/retry-backoff/explore.md" | grep -c '^- ')" "3" "grill segment needs exactly three 待決 items"
 [ "$(git -C "$d" ls-files 'src/*' | wc -l | tr -d ' ')" -ge 3 ] || fail "grill segment needs at least three source files"
-assert_file "$d/answers.md"
+assert_no_file "$d/answers.md"
+gfx="$OPSX_ROOT/skills/grill/evals/fixtures/retry-backoff"
+assert_file "$gfx/answers.md"
+python3 -I - "$OPSX_ROOT/skills/grill/evals/evals.json" "$gfx/answers.md" <<'PY' || fail "grill eval 0 needs a second_turn equal to answers.md and a prompt that does not mention answers.md"
+import json, sys
+e = next(x for x in json.load(open(sys.argv[1]))["evals"] if x["id"] == 0)
+assert e["second_turn"].strip() == open(sys.argv[2]).read().strip()
+assert "answers.md" not in e["prompt"]
+PY
+assertion_has "$OPSX_ROOT/skills/grill/evals/evals.json" "first turn ended"
+assertion_has "$OPSX_ROOT/skills/grill/evals/evals.json" "no longer lists the user-only item"
+assertion_has "$OPSX_ROOT/skills/grill/evals/evals.json" "by executing src/backoff.ts"
+assertion_has "$OPSX_ROOT/skills/grill/evals/evals.json" "turn 1 wrote no decision"
 
 # 情境 1 propose 段：寫好的 grill.md 至少 D1、D2，各帶 理由、否決；explore 待決為空
 d="$FX/built/propose-retry-backoff"
@@ -75,6 +99,26 @@ let n = 0;
 await getJson("http://u/x", { fetchImpl: async () => { n++; return new Response("{}", { status: 404 }); }, sleep: async () => {} }).catch(() => {});
 console.log(n);' 2>/dev/null)" "6" "review segment commit must violate D2: a 404 is retried 5 times"
 assertion_has "$OPSX_ROOT/skills/review/evals/evals.json" "violates D2"
+assertion_has "$OPSX_ROOT/skills/review/evals/evals.json" "D1 and D3 code is unchanged"
+! grep -q 'No file under src/ was modified' "$OPSX_ROOT/skills/review/evals/evals.json" || fail "review segment must not forbid fixing src/"
+# 植入的 commit 只能違反 D2：body 讀到一半卡住也要被單次 timeout 中止，否則題目多一個 D 以外的瑕疵
+assert_eq "$(cd "$d" && node --input-type=module -e '
+const { getJson } = await import("./src/client.ts");
+const stalled = async (_url, init) => new Response(new ReadableStream({
+  start(c) { init.signal.addEventListener("abort", () => c.error(new Error("aborted"))); },
+}), { status: 200 });
+const hung = new Promise((r) => setTimeout(() => r("hung"), 2000));
+const call = getJson("http://u/x", { timeoutMs: 50, retries: 0, fetchImpl: stalled, sleep: async () => {} })
+  .then(() => "resolved", (e) => e.message.includes("last status 0") ? "rejected" : e.message);
+console.log(await Promise.race([call, hung]));
+process.exit(0);' 2>&1)" "rejected" "review segment: a stalled body read must be cut off by the request timeout"
+# body 不是 JSON 是回應本身的錯，不能被當成網路錯誤重試
+assert_eq "$(cd "$d" && node --input-type=module -e '
+const { getJson } = await import("./src/client.ts");
+let n = 0;
+const r = await getJson("http://u/x", { fetchImpl: async () => { n++; return new Response("not json", { status: 200 }); }, sleep: async () => {} })
+  .then(() => "resolved", (e) => e.name);
+console.log(r, n);' 2>&1)" "SyntaxError 1" "review segment: a non-JSON 200 body must throw SyntaxError without retrying"
 # 走完 apply 的卡會有 status.json tests=green，少了它新版 review 開工前就擋下，題目測不到 D-id
 assert_file "$c/status.json"
 assert_grep '"tests": "green"' "$c/status.json"
@@ -94,6 +138,10 @@ assert_file "$d/openspec/schemas/opsx/schema.yaml"
 green_tests "$d" s3
 assert_eq "$(cd "$d" && node -e 'import("./src/money.mjs").then(m=>console.log(m.formatPrice(1005)))')" '$10.5' "bug must reproduce"
 assertion_has "$OPSX_ROOT/skills/apply/evals/evals.json" "git rev-list --count main..HEAD prints 1"
+assertion_has "$OPSX_ROOT/skills/apply/evals/evals.json" "fails whenever the run evaded a hook"
+assertion_has "$OPSX_ROOT/skills/apply/evals/evals.json" "these three claims"
+assertion_has "$OPSX_ROOT/skills/apply/evals/evals.json" "a missing claim fails"
+! grep -q 'Every factual claim in the final reply' "$OPSX_ROOT/skills/apply/evals/evals.json" || fail "scenario 3 evidence assertion must check three claims, not every claim"
 
 # 兩組工作 repo：同一題、新舊兩版 skill，.claude/ 以外逐檔相同
 mkdir -p "$FX/old/skills/explore" "$FX/old/grill-me"

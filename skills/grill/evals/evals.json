@@ -4,8 +4,8 @@
     {
       "id": 0,
       "name": "three-bucket-pending",
-      "prompt": "retry-backoff 這張卡的 explore.md 還有幾題待決，幫我定下來。這個專案的工作流程 skill 在 .claude/skills/，照適用的那支做。我這段時間不在：要問我的時候，把你會問的問題和選項寫進 repo 根目錄的 questions.md，然後讀 answers.md，那就是我的回答。",
-      "expected_output": "explore.md 已知 gains the code answer (client.ts has no retry) with a file path and the measured expDelays(5) total; 待決 shrinks to the one user-only item; questions.md shows one question with 2–4 concrete options, recommended option first; grill.md has D1 (exponential backoff, cap 30s) with 理由 and 否決, 未決 only if genuinely needs a run; no code written in src/.",
+      "prompt": "retry-backoff 這張卡的 explore.md 還有幾題待決，幫我定下來。這個專案的工作流程 skill 在 .claude/skills/，照適用的那支做。我這段時間不在：要問我的時候，把你會問的問題和選項寫進 repo 根目錄的 questions.md，寫完就停下來等我回。",
+      "expected_output": "explore.md 已知 gains the code answer (client.ts has no retry) with a file path and the measured expDelays(5) total; 待決 shrinks to the one user-only item; the first turn ends after questions.md shows one question with 2–4 concrete options, recommended option first; grill.md has D1 (exponential backoff, cap 30s) with 理由 and 否決, 未決 only if genuinely needs a run; no code written in src/.",
       "files": [
         "fixtures/retry-backoff"
       ],
@@ -13,19 +13,23 @@
         "explore.md 已知 states src/client.ts has no retry today, citing the file path",
         "explore.md 已知 records the measured expDelays(5) total (15500 ms / 15.5 s) from an actual run, not a guess",
         "explore.md 待決 no longer contains the client.ts item or the expDelays item (bucket 1 and 2 resolved without asking)",
-        "questions.md contains exactly one question with 2 to 4 concrete options (a second question that answers.md does not cover and that the run then returned to 待決 does not count against this)",
+        "questions.md contains exactly one question with 2 to 4 concrete options (a second question that the second-turn reply does not cover and that the run then returned to 待決 does not count against this)",
         "In questions.md the recommended option is listed first and marked (Recommended)",
         "grill.md exists with ## 決策 containing D1 = exponential backoff capped at 30s, with 理由 and 否決 lines",
         "No file under src/ was modified or created (git status shows no src/ changes)",
         "Final reply names propose as the next step (with or without the slug), or, if a question is still open, names how it will be closed before propose",
-        "The transcript shows questions.md was written before answers.md was first read",
-        "grill.md contains no decision the user did not choose: facts found in code or by running something, and numbers derived from them, are not numbered as D's"
-      ]
+        "When the first turn ended, questions.md existed with the question for the user, and the first turn's transcript never reads or quotes the answer text (it only arrives as the second turn's message)",
+        "grill.md contains no decision the user did not choose: facts found in code or by running something, and numbers derived from them, are not numbered as D's",
+        "After the second turn, explore.md 待決 no longer lists the user-only item (the backoff strategy) that the reply answered; it may only keep a new question the reply did not cover",
+        "The expDelays(5) total in explore.md 已知 was obtained by executing src/backoff.ts from the repo (the transcript shows a command that imports or runs that file), not by re-implementing the formula elsewhere or computing it by hand",
+        "In turn 1 wrote no decision for the user-only item (the backoff strategy): the turn-1 transcript shows no write to grill.md that records it, and explore.md 已知 does not state a chosen strategy before the second turn arrives"
+      ],
+      "second_turn": "Exponential, but don't let a single wait go past 30 seconds. The sync job has to finish its page inside a minute."
     },
     {
       "id": 1,
       "name": "empty-pending-stops",
-      "prompt": "kb-export 這張卡還有沒有要我決定的？有就幫我定下來。這個專案的工作流程 skill 在 .claude/skills/，照適用的那支做。我這段時間不在：要問我的時候，把你會問的問題和選項寫進 repo 根目錄的 questions.md，然後讀 answers.md，那就是我的回答。",
+      "prompt": "kb-export 這張卡還有沒有要我決定的？有就幫我定下來。這個專案的工作流程 skill 在 .claude/skills/，照適用的那支做。我這段時間不在：要問我的時候，把你會問的問題和選項寫進 repo 根目錄的 questions.md，寫完就停下來等我回。",
       "expected_output": "Replies that kb-export has no 待決 and the next step is /propose. Writes no grill.md, changes nothing in the repo.",
       "files": [
         "fixtures/empty-pending"
