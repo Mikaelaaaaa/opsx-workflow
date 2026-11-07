@@ -37,7 +37,7 @@ def put(d):
     e = d[os.environ["OPSX_KEY"]]; e["mode"] = "stopped"; e["drive_pid"] = None; e["stopped_at"] = os.environ["OPSX_AT"]
 jsonfile.update(sys.argv[1], put)
 PY
-  printf '%s\t%s\t%s\n' "$(now_iso)" "停止" "stopped" >> "$top/openspec/changes/$slug/decisions.tsv"
+  log_row "$top/openspec/changes/$slug" 你 已停止 停止
   say "stop: $repo/$slug 標 stopped"
 }
 

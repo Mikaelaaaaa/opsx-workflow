@@ -156,6 +156,7 @@ J="$OPSX_STATE_DIR/dispatch.json"
 for s in c1 c2; do
   assert_eq "$(jq -r --arg k "fan/$s" '.[$k] | [.via, .herdr_name, .pane, .tab, .workspace_id, .agent, .mode, (.worktree|tostring)] | join(" ")' "$J")" "p p w5:pQ w5:tJ w5 claude autopilot null" "$s 的代管條目"
   assert_grep "自動派：因 p merged" "$R2/openspec/changes/$s/decisions.tsv"
+  assert_grep $'\t系統\t已指派\t自動派' "$R2/openspec/changes/$s/decisions.tsv"   # opsx-log 的五欄格式
 done
 assert_eq "$(jq -r '."fan/c1" | [.branch, .kind, .model] | join(" ")' "$J")" "feat/c1/mikaela bug-fix claude-sonnet-5-5" "c1 的 branch / kind / 照 kind 的 model"
 assert_eq "$(jq -r '."fan/c2" | [.branch, .kind, .model] | join(" ")' "$J")" "feat/c2/mikaela dev claude-opus-5-5"
@@ -179,7 +180,7 @@ assert_grep '^agent prompt p \[c1\] stop$' "$OPSX_FAKE_LOG"
 assert_not_grep '^pane close' "$OPSX_FAKE_LOG"
 assert_eq "$(jq -r '."fan/c1".mode' "$J")" stopped; jq -e '."fan/c1".stopped_at | startswith("20")' "$J" >/dev/null || fail "c1 要有 stopped_at"
 assert_eq "$(jq -c '."fan/c2"' "$J")" "$(jq -c '."fan/c2"' "$FX/disp.before")" "c2 不該被動到"
-assert_grep 'stopped' "$R2/openspec/changes/c1/decisions.tsv"
+assert_grep $'\t已停止\t' "$R2/openspec/changes/c1/decisions.tsv"
 cd "$R"
 
 # --- 單一子卡續接（3.2–3.4）：本地 bare repo 當 origin，父卡就在 R3 這棵 worktree ---

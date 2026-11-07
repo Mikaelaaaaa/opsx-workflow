@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # opsx answer <slug> --gate <id> [--grant this|card|repo] [--repo <top>] <text…>：回一個 gate。
 # 先驗 gate，再把授權落檔（repo 寫 grants.toml；card 寫 dispatch.json 的 grants；this 寫 dispatch.json 的 once，閘門用掉就刪），
-# 把 gates.md 那段改成 answered，在 decisions.tsv 記一行，最後 herdr agent prompt 送給 agent。卡沒派出就不送，agent 派出時會讀 gates.md。
+# 把 gates.md 那段改成 answered，在 decisions.tsv 記一行（log_row），最後 herdr agent prompt 送給 agent。卡沒派出就不送，agent 派出時會讀 gates.md。
 # 看板的「回它」按鈕背後就是這支；終端機打也一樣。specs/board-actions/spec.md、要求檔 §3.6 授權三級。
 
 # shellcheck source=/dev/null
@@ -114,12 +114,11 @@ if idx + 1 < len(parts): sec2 += "\n"
 parts[idx] = sec2
 tmp = gates_path + ".tmp"; open(tmp, "w", encoding="utf-8").write("".join(parts)); os.replace(tmp, gates_path)
 
-# decisions.tsv 的欄位：time、you、answer、gate、text，有授權時第六欄是 grant
-with open(os.path.join(d, "decisions.tsv"), "a", encoding="utf-8") as f:
-    f.write("%s\tyou\tanswer\t%s\t%s%s\n" % (now, gate, text.replace("\t", " "), ("\t" + grant) if grant else ""))
 print("dispatched" if dispatched else "undispatched")
 PY
 )" || exit 2
+  if [ -n "$grant" ]; then log_row "$d" 你 已允許 "$answer" "$gate · $grant"
+  else log_row "$d" 你 已決定 "$answer" "$gate"; fi
 
   if [ "$result" = dispatched ]; then
     local route name via; route="$(card_route "$repo" "$slug")" || die "讀不懂 dispatch.json，不知道話要送給誰"; name="${route%%$'\t'*}"; via="${route#*$'\t'}"

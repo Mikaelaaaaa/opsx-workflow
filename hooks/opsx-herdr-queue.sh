@@ -2,8 +2,12 @@
 # PostToolUse(Bash)：`opsx chain` 跑完後，執行它寫在 $OPSX_STATE_DIR/herdr-queue/<repo>-<子卡>.tsv 的 herdr 動作。
 # 派工 session 的沙盒擋了 herdr socket，hook 不在沙盒裡，所以續接的 rename / prompt / drive 由這裡代做（grill D5）。
 # 每行 <動作>\t<參數1>\t<參數2>：rename <舊名> <新名> · prompt <agent> <文字> · drive <slug> <repo top>。
-# 依序執行；任一步失敗就停，佇列改名 .failed 留著，子卡 decisions.tsv 記哪一步、herdr 說了什麼。specs/opsx-chain/spec.md。
+# 依序執行；任一步失敗就停，佇列改名 .failed 留著，子卡 decisions.tsv（log_row）記哪一步、herdr 說了什麼。specs/opsx-chain/spec.md。
 source "$(dirname "${BASH_SOURCE[0]}")/_lib.sh"
+# shellcheck source=/dev/null
+source "$OPSX_ROOT/bin/lib/common.sh"   # log_row 用到 die、now_iso
+# shellcheck source=/dev/null
+source "$OPSX_ROOT/bin/lib/log.sh"
 cmd="$(hook_cmd)"
 printf '%s' "$cmd" | grep -qE '(^|\s|&&|;)opsx\s+chain(\s|$)' || exit 0
 top="$(repo_top)"
@@ -37,8 +41,8 @@ PY
       *) out="佇列裡有不認得的動作：$op"; ok=0 ;;
     esac
     if [ "$ok" -eq 0 ]; then
-      out="$(printf '%s' "$out" | tr '\n\t' '  ')"
-      [ -d "$card" ] && printf '%s\t%s\t%s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z' | sed -E 's/(..)$/:\1/')" "續接的 herdr 動作失敗：$op $a → ${out}（佇列留在 $q.failed）" "failed" >> "$card/decisions.tsv"
+      out="$(log_cell "$out")"
+      [ -d "$card" ] && log_row "$card" 系統 已指派 "續接的 herdr 動作失敗：$op $a → ${out}" "$q.failed"
       failures+="$child 的 $op 失敗：${out}；"
       mv "$run" "$q.failed"
       break

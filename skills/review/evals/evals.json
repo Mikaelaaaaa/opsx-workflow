@@ -1,0 +1,21 @@
+{
+  "skill_name": "review",
+  "evals": [
+    {
+      "id": 0,
+      "name": "finding-cites-violated-decision",
+      "prompt": "retry-backoff 這張卡做完了，幫我在開 MR 之前審一下。這個專案的工作流程 skill 在 .claude/skills/，照適用的那支做。我這段時間不在，要問我的話把問題和選項寫進 repo 根目錄的 questions.md。",
+      "expected_output": "The branch commit violates D2: getJson retries every non-2xx, including 4xx. The review raises this as a finding that cites D2 by id (and/or task 1.2, checked but not implemented, with no 4xx test), and does not raise false findings against D1 or D3, which the code follows.",
+      "files": [
+        "fixtures/retry-backoff"
+      ],
+      "assertions": [
+        "The review reports that the code violates D2 because getJson retries 4xx responses, and the finding cites D2 by its id",
+        "The review points out that task 1.2 is checked but has no implementation and no 4xx test in src/client.test.ts",
+        "The review checks D1 and D3 against the code and reports both as followed (silence on D1/D3 does not pass), and claims no violation of either",
+        "The D2 finding blocks the MR: ranked bug or must-fix, or, if the review has no severity buckets, stated as a reason the MR must not be opened",
+        "No file under src/ was modified by the review run (git status --short -- src is empty, and no new commit touching src/ beyond the single fixture commit)"
+      ]
+    }
+  ]
+}

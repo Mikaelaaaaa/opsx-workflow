@@ -49,12 +49,12 @@ continue_one() { # <top> <repo> <父卡> <chain.py 的 child 行>
   local q="$OPSX_STATE_DIR/herdr-queue/$repo-$child.tsv"; ensure_dir "$(dirname "$q")"
   { printf 'rename\t%s\t%s\n' "$old_name" "$child"; printf 'prompt\t%s\t/%s %s\n' "$child" "$stage" "$child"
     [ "$mode" = drive ] && printf 'drive\t%s\t%s\n' "$child" "$top"; true; } > "$q"
-  printf '%s\t%s\t%s\n' "$now" "自動派：因 ${parent} merged（同一個 pane 續接，worktree ${wt}）" "auto-dispatched" >> "$d/decisions.tsv"
+  log_row "$d" 系統 已指派 "自動派：因 ${parent} merged（同一個 pane 續接）" "${wt} · ${branch}"
   say "chain: ${parent} → ${child}：$wt 已切到 ${branch}；改名和第一句 /${stage} 交給 hook（佇列 ${q}）"
 }
 
 chain_skip() { # <子卡目錄> <原因>
-  printf '%s\t%s\t%s\n' "$(now_iso)" "沒有續接：$2" "skipped" >> "$1/decisions.tsv"
+  log_row "$1" 系統 替你決定 "沒有續接：$2"
   say "chain: 沒有續接：$2"
 }
 
@@ -73,8 +73,8 @@ fan_out() { # <top> <repo> <父卡> <chain.py 的 child 行>
   while IFS=$'\t' read -r child branch kind _; do
     [ -n "$child" ] || continue
     local d="$top/openspec/changes/$child"
-    printf '%s\t%s\t%s\n' "$now" "自動派：因 ${parent} merged（fan out，由 ${parent} 的 pane 代管）" "auto-dispatched" >> "$d/decisions.tsv"
-    [ "$mode" = drive ] && printf '%s\t%s\t%s\n' "$now" "父卡是 drive，drive 不支援代管卡（沒有自己的 herdr agent 可以送話），改 autopilot" "decided" >> "$d/decisions.tsv"
+    log_row "$d" 系統 已指派 "自動派：因 ${parent} merged（fan out，由 ${parent} 的 pane 代管）" "$branch"
+    [ "$mode" = drive ] && log_row "$d" 系統 替你決定 "父卡是 drive，drive 不支援代管卡（沒有自己的 herdr agent 可以送話），改 autopilot"
     say "chain: fan out ${child} · ${branch} · ${kind} · /$(stage_name "$top" "$child") · from ${remote}/main"
   done <<< "$plan"
 }

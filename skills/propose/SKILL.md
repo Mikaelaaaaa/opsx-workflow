@@ -54,7 +54,7 @@ Usually the shell already exists (收件 made it, explore and grill wrote into i
 
 ### 2b. Confirm the kind
 
-`.openspec.yaml` has `kind:` (chosen at dispatch, one of dev / bug-fix / refactoring / perf / experiment / ops / chore). Read explore.md and inbox.md; if the kind is wrong for what the change actually is, change it and add one line to `decisions.tsv`: `kind 改 <new>：<reason>`. The board shows the change. If `kind` is missing (shell made by hand), set it and say so. Apply loads its playbook from this value.
+`.openspec.yaml` has `kind:` (chosen at dispatch, one of dev / bug-fix / refactoring / perf / experiment / ops / chore). Read explore.md and inbox.md; if the kind is wrong for what the change actually is, change it and record it with `opsx log <name> <your agent name> 已決定 "kind 改 <new>：<reason>"`. The board shows the change. If `kind` is missing (shell made by hand), set it and say so. Apply loads its playbook from this value.
 
 ### 3. Get the artifact build order
 
