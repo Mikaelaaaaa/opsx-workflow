@@ -28,7 +28,7 @@ The 24 pstack principles, one file each. Read a principle in full before you cit
 
 - prove-it-works — After a task, before declaring done. Verify against the real artifact, not a proxy or "it compiles".
 - fix-root-causes — Debugging. Trace each symptom back to the first place the system went wrong and fix it there. A guard is a fix only when the state it handles is legitimate.
-- sequence-verifiable-units — Multi-step work (sweeps, migrations, runs of similar edits) and how you stack commits and PRs. Break work into small units that each end in a check, verify each before the next, and order delivery so the sequence proves itself.
+- sequence-verifiable-units — Multi-step work (sweeps, migrations, runs of similar edits) and how you stack commits and PRs. Break work into small units that each end in a check, verify each before the next, and order delivery so the sequence proves itself. (In opsx the Delivery order applies between changes and between PRs; one change is still one commit.)
 - test-behavior-not-implementation — Writing, changing, or keeping a test. Assert what the code's users can observe, so the test fails when that behavior breaks and keeps passing when only the internals change.
 - explain-the-number — Before you trust, report, or act on a number you measured (a speedup, a regression, a throughput, a latency, or an eval result). Find what limits it, and rule out that it measured something other than the work you think.
 
