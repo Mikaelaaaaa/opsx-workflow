@@ -19,9 +19,14 @@
 #   no_trigger  true when trigger is ""
 #
 # Usage: debt.sh [code-root]        default ~/code
+#
+# Each run appends one row to <state>/sync.log through `opsx log --sync debt 0 …`.
 set -euo pipefail
 
 root="${1:-$HOME/code}"
+opsx="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/bin/opsx"
+hits="$(mktemp "${TMPDIR:-/tmp}/opsx-debt.XXXXXX")"
+trap 'rm -f "$hits"' EXIT
 
 json_escape() {
 	# Escape backslash, double quote, and control characters for a JSON string.
@@ -67,4 +72,7 @@ for repo_dir in "$root"/*/; do
 			"$(json_escape "$repo")" "$(json_escape "$file")" "$line" "$(json_escape "$comment")" \
 			"$(json_escape "$hash")" "$(json_escape "$limit")" "$(json_escape "$trigger")" "$no_trigger"
 	done
-done
+done | tee "$hits"
+
+# The scan only finds shortcuts; turning them into cards is the inbox sync, so 0 new cards here.
+bash "$opsx" log --sync debt 0 "掃到 $(wc -l < "$hits" | tr -d ' ') 處 shortcut"

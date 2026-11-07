@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# PreToolUse(Bash / Edit / Write)：自動 / 開到可合併 模式下的授權閘門。要求檔 §3.6 授權三級、§8.5。
+# PreToolUse(Bash / Edit / Write)：autopilot 模式下的授權閘門。要求檔 §3.6 授權三級、§8.5。
 #   第三級（永遠要人）一律 deny；第二級查 grants.toml（repo 永遠）與 dispatch.json（這張卡）；
 #   互動模式或不在卡上就不管。deny 訊息要 worker 寫 gates.md 然後做能做的。
 source "$(dirname "${BASH_SOURCE[0]}")/_lib.sh"
@@ -7,17 +7,20 @@ source "$(dirname "${BASH_SOURCE[0]}")/_lib.sh"
 top="$(repo_top)"; slug="$(card_slug)"
 [ -n "$top" ] && [ -n "$slug" ] || exit 0
 repo="$(repo_name)"
-# 沒有 python 就讀不到這張卡的模式。沒派出去的卡照原本不管；派出去的卡明確 deny，
-# 因為 hook 非 0 結束 Claude Code 會當成放行。修法那一條指令本身放行。
+# dispatch.json 壞掉時讀不到模式，就退回比對檔案原文：裡面有這張卡的 key 才擋。
+# 原文也讀不到時，$(<…) 會是空字串、比對不到，所以要先擋。
+if ! mode="$(card_mode "$repo" "$slug")"; then
+  [ -r "$OPSX_STATE_DIR/dispatch.json" ] || deny "opsx 授權閘門：讀不到 $OPSX_STATE_DIR/dispatch.json，分不出這張卡的模式，先擋下。檢查這個檔案的權限"
+  [[ $(<"$OPSX_STATE_DIR/dispatch.json") == *"\"$repo/$slug\""* ]] || exit 0
+  deny "opsx 授權閘門：$OPSX_STATE_DIR/dispatch.json 不是合法 JSON，讀不到這張卡的模式，先擋下。修好這個檔案"
+fi
+case "$mode" in autopilot|drive) ;; *) exit 0 ;; esac
+# 查授權要 python。沒有就明確 deny，因為 hook 非 0 結束 Claude Code 會當成放行。修法那一條指令本身放行。
 if [ -z "$OPSX_PY" ]; then
-  [ -n "$(card_dir)" ] || exit 0
-  [ -f "$OPSX_STATE_DIR/dispatch.json" ] && [[ $(<"$OPSX_STATE_DIR/dispatch.json") == *"\"$repo/$slug\""* ]] || exit 0
   [ "$(hook_cmd)" = "opsx init --global" ] && exit 0
   deny "opsx 授權閘門：讀不到授權，先擋下。$OPSX_PY_ERR"
 fi
 PY_FAIL="opsx 授權閘門：python 執行失敗（${OPSX_PY}），讀不到授權，先擋下。跑 opsx init --global"
-mode="$(card_mode "$repo" "$slug")" || deny "$PY_FAIL"
-case "$mode" in autopilot|drive) ;; *) exit 0 ;; esac
 
 tool="$(hook_tool)"; cmd="$(hook_cmd)"; file="$(hook_file)"
 GATE_MSG="寫 gates.md（type、問題、建議、證據、風險、沒回答的預設），然後做能做的；人在板上回了會自動繼續"
@@ -51,8 +54,15 @@ PY
   fi
   return 0
 }
+# autopilot 用 dontAsk 起，不在 settings allow 的指令 Claude 直接拒；所以有授權的動作要由這裡明說 allow，
+# 板上事後給的「這次 / 這張卡」授權才生效。等整條指令所有檢查都過了才 allow，一段有授權不能替後面那段放行。
+GRANTED=0
+allow() { jq -n '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"allow",permissionDecisionReason:"opsx 授權閘門：有授權"}}'; exit 0; }
+
 level2() { # <action> <label>
-  if has_grant "$repo" "$slug" "$1"; then exit 0; fi
+  local rc=0
+  has_grant "$repo" "$slug" "$1" || rc=$?
+  case "$rc" in 0) GRANTED=1; return 0 ;; 3) ;; *) deny "$PY_FAIL" ;; esac
   deny "opsx 授權閘門：「$2」要授權（第二級），$repo 沒有長期授權、這張卡也沒有。$GATE_MSG"
 }
 
@@ -60,7 +70,7 @@ if [ "$tool" = "Bash" ]; then
   [ -n "$cmd" ] || exit 0
   c="$(printf '%s' "$cmd" | tr '\n' ' ')"
   # 第三級（merge 放行後不 exit，其餘檢查照跑）
-  printf '%s' "$c" | grep -qE '(glab mr merge|gh pr merge)' && merge_gate
+  printf '%s' "$c" | grep -qE '(glab mr merge|gh pr merge)' && merge_gate && GRANTED=1
   printf '%s' "$c" | grep -qE 'git\s+push.*(--force|-f\b|\+[a-zA-Z])' && level3 "force-push"
   printf '%s' "$c" | grep -qE 'git\s+push.*\b(main|master)\b' && level3 "push main"
   printf '%s' "$c" | grep -qiE '(^|\s|/)deploy(\.sh)?(\s|$)' && level3 "deploy"
@@ -74,6 +84,7 @@ if [ "$tool" = "Bash" ]; then
   printf '%s' "$c" | grep -qE '(pnpm (add|install|i)\b|npm (install|i|ci)\b|uv (add|sync)|pip install|yarn add|brew install)' && level2 install "裝套件"
   printf '%s' "$c" | grep -qE '(^|\s|&&|;)git\s+rebase(\s|$)' && level2 rebase "git rebase"
   printf '%s' "$c" | grep -qE '(curl|wget|http)\s+' && ! printf '%s' "$c" | grep -qE 'localhost|127\.0\.0\.1|litellm\.agentory\.cc' && level2 external "呼叫外部 API"
+  [ "$GRANTED" = 1 ] && allow
   exit 0
 fi
 
@@ -82,7 +93,7 @@ if [ "$tool" = "Edit" ] || [ "$tool" = "Write" ]; then
   case "$file" in
     *.gitlab-ci.yml|*/.github/workflows/*|*secrets*|*.sops.*|*/sops/*) level3 "改 CI / secrets（${file}）" ;;
     *.env.example) exit 0 ;;
-    *.env|*.env.*) level2 env "寫 $file" ;;
+    *.env|*.env.*) level2 env "寫 $file"; allow ;;
   esac
 fi
 exit 0

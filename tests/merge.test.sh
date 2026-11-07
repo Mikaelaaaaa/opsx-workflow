@@ -16,7 +16,8 @@ printf '{"state":"opened","draft":false,"has_conflicts":false,"sha":"abc123","he
 out="$(opsx merge x 2>&1)"; assert_eq "$?" 0 "merge: $out"
 assert_eq "$(jq -r '."Agentory-AI/x".merge_approved' "$OPSX_STATE_DIR/dispatch.json")" abc123
 jq -e '."Agentory-AI/x".merge_approved_at | startswith("20")' "$OPSX_STATE_DIR/dispatch.json" >/dev/null || fail "要有 merge_approved_at"
-assert_grep $'\tyou\tmerge-approved\tabc123' "$C/decisions.tsv"
+assert_eq "$(tail -1 "$C/decisions.tsv" | cut -f2-4)" $'你\t已允許\t核准合併 abc123'
+tail -1 "$C/decisions.tsv" | cut -f5 | grep -q '^abc123 · ' || fail "證據要是 sha · MR URL" 
 assert_grep '^agent prompt x /babysit merge abc123$' "$OPSX_FAKE_LOG"
 # 互動模式的卡：沒有閘門，拒絕並說去 pane
 printf '{"Agentory-AI/x":{"mode":"interactive","pane":"p4","agent":"x","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"
@@ -43,4 +44,10 @@ out="$(opsx merge x 2>&1)"; [ $? -ne 0 ] || fail "merge 要重抓，不吃快取
 printf '{"state":"opened","draft":false,"has_conflicts":false,"sha":"abc123","head_pipeline":{"status":"success"},"unresolved_discussions_count":0}' > "$OPSX_TEST_GLAB_JSON"
 printf '{}' > "$OPSX_STATE_DIR/dispatch.json"
 out="$(opsx merge x 2>&1)"; [ $? -ne 0 ] || fail "沒派出要拒絕"; echo "$out" | grep -q '沒派出' || fail "要說沒派出: $out"
+# --- 代管卡（auto-dispatch）：送給 herdr_name，prompt 帶 slug ---
+printf '{"state":"opened","draft":false,"has_conflicts":false,"sha":"abc123","head_pipeline":{"status":"success"},"unresolved_discussions_count":0}' > "$OPSX_TEST_GLAB_JSON"
+printf '{"Agentory-AI/x":{"mode":"autopilot","pane":"p4","agent":"claude","grants":[],"via":"p","herdr_name":"p"}}' > "$OPSX_STATE_DIR/dispatch.json"; : > "$OPSX_FAKE_LOG"
+out="$(opsx merge x 2>&1)"; assert_eq "$?" 0 "代管卡 merge: $out"
+assert_grep '^agent prompt p /babysit merge abc123 x$' "$OPSX_FAKE_LOG"
+assert_eq "$(jq -r '."Agentory-AI/x".merge_approved' "$OPSX_STATE_DIR/dispatch.json")" abc123
 echo ok

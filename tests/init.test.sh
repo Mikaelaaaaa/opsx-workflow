@@ -80,7 +80,8 @@ cd "$FX/wt"; out="$(opsx init 2>&1)" || fail "init in worktree: $out"
 assert_eq "$(grep -c '^openspec/$' "$R/.git/info/exclude")" 1 "exclude duplicated or missing via worktree"
 
 # --- --global ---
-cd "$FX"; use_fakes herdr; export OPSX_FAKE_LOG="$FX/herdr.log"; : > "$OPSX_FAKE_LOG"
+cd "$FX"; use_fakes herdr launchctl; export OPSX_FAKE_LOG="$FX/herdr.log"; : > "$OPSX_FAKE_LOG"
+export OPSX_LAUNCHCTL=launchctl   # lib.sh 預設沒有 launchctl；這裡用 fake 測安裝
 rm -f "$OPSX_STATE_DIR/python"
 outg="$(opsx init --global 2>&1)"; assert_eq "$?" 0 "global rc: $outg"
 PY="$(python3 -I -c 'import sys;print(sys.executable)')"
@@ -97,10 +98,85 @@ assert_eq "$(readlink "$OPSX_BIN_DIR/opsx")" "$OPSX_ROOT/bin/opsx"
 echo 'x = 1' >> "$OPSX_STATE_DIR/grants.toml"
 opsx init --global >/dev/null 2>&1 || fail "global rerun"
 assert_grep "x = 1" "$OPSX_STATE_DIR/grants.toml"
+
+# --- 每日同步 launchd：第一次安裝 ---
+PL="$OPSX_LAUNCH_AGENTS_DIR/com.opsx.sync.plist"
+assert_file "$PL"
+case "$outg" in *每日同步*) ;; *) fail "輸出要有每日同步那行：$outg" ;; esac
+pl() { python3 -I -c 'import json,plistlib,sys
+d=plistlib.load(open(sys.argv[1],"rb"))
+for k in sys.argv[2].split("."): d=d[k]
+print(d if isinstance(d,str) else json.dumps(d))' "$PL" "$1"; }
+assert_eq "$(pl ProgramArguments)" "[\"$OPSX_BIN_DIR/opsx\", \"sync\"]"
+assert_eq "$(pl StartCalendarInterval)" '{"Hour": 9, "Minute": 0}'
+assert_eq "$(pl StandardOutPath)" "$OPSX_STATE_DIR/sync.out"; assert_eq "$(pl StandardErrorPath)" "$OPSX_STATE_DIR/sync.out"
+assert_eq "$(pl EnvironmentVariables.OPSX_STATE_DIR)" "$OPSX_STATE_DIR"
+P="$(pl EnvironmentVariables.PATH)"
+for d in "$OPSX_BIN_DIR" /opt/homebrew/bin "$(dirname "$(cat "$OPSX_STATE_DIR/python")")" "$(dirname "$(command -v openspec)")"; do
+  case ":$P:" in *":$d:"*) ;; *) fail "plist 的 PATH 少了 $d：$P" ;; esac
+done
+assert_grep "^bootstrap gui/$(id -u) $PL\$" "$OPSX_FAKE_LOG"
+
+# --- 已經裝過：launchctl print 成功就不重載 ---
+: > "$OPSX_FAKE_LOG"
+OPSX_TEST_LAUNCHCTL_LOADED=1 opsx init --global >/dev/null 2>&1 || fail "global with loaded job"
+assert_grep '^print gui/' "$OPSX_FAKE_LOG"; assert_not_grep '^bootstrap' "$OPSX_FAKE_LOG"
+
+# --- 已載入但 plist 內容變了（例如 nvm / pyenv 升級後重跑）：先 bootout 再 bootstrap，launchd 才會讀新的 ---
+printf '<!-- 舊的 -->\n' > "$PL"; : > "$OPSX_FAKE_LOG"
+OPSX_TEST_LAUNCHCTL_LOADED=1 opsx init --global >/dev/null 2>&1 || fail "global with changed plist"
+assert_grep "^bootout gui/$(id -u)/com.opsx.sync\$" "$OPSX_FAKE_LOG"; assert_grep '^bootstrap' "$OPSX_FAKE_LOG"
+
+# --- 沒有 launchctl：印一行略過，退出 0 ---
+outn="$(OPSX_LAUNCHCTL="$FX/no-such-launchctl" opsx init --global 2>&1)"; assert_eq "$?" 0 "no launchctl rc: $outn"
+case "$outn" in *略過*) ;; *) fail "沒有 launchctl 要說略過：$outn" ;; esac
+
 # python 路徑：相同就不動，不同就覆寫並印新舊
 outg="$(opsx init --global 2>&1)"; case "$outg" in *"python 已有"*) ;; *) fail "路徑相同要說已有：$outg" ;; esac
 printf '/nonexistent/python3\n' > "$OPSX_STATE_DIR/python"
 outg="$(opsx init --global 2>&1)"; assert_eq "$?" 0 "global with stale python: $outg"
 assert_eq "$(cat "$OPSX_STATE_DIR/python")" "$PY" "路徑變了要覆寫"
 case "$outg" in *"/nonexistent/python3"*"$PY"*) ;; *) fail "覆寫要印舊路徑與新路徑：$outg" ;; esac
+
+# python 路徑：PATH 上的 python3 在 venv 裡 → 記 base，venv 刪掉後 opsx 照常（python-venv-guard）
+"$PY" -m venv --without-pip "$FX/venv" || fail "建 fixture venv 失敗"
+VBASE="$("$FX/venv/bin/python3" -I -c 'import sys; print(sys._base_executable)')"
+case "$VBASE" in "$FX/venv"/*) fail "fixture 的 base 不該在 venv 裡：$VBASE" ;; esac
+outg="$(PATH="$FX/venv/bin:$PATH" opsx init --global 2>&1)"; assert_eq "$?" 0 "venv 裡 init --global: $outg"
+assert_eq "$(cat "$OPSX_STATE_DIR/python")" "$VBASE" "venv 裡要記 base interpreter"
+case "$outg" in *venv*"$VBASE"*) ;; *) fail "輸出要提 venv 和改記的 base：$outg" ;; esac
+rm -rf "$FX/venv"
+opsx collect --root "$FX" > /dev/null 2> "$FX/err" || fail "venv 刪掉後 collect 失敗：$(cat "$FX/err")"
+
+# python 路徑：venv 裡拿不到可用的 base → 失敗，不動 python 檔
+# 假 python3 照常跑 -I -c 的程式，只先把 sys.prefix、sys._base_executable 換成 FAKE_PREFIX、FAKE_BASE
+mkdir -p "$FX/fakevenv"
+cat > "$FX/fakevenv/python3" <<EOF
+#!/usr/bin/env bash
+[ "\$1" = -I ] && [ "\$2" = -c ] || { echo "fake python3 只支援 -I -c：\$*" >&2; exit 2; }
+exec "$PY" -I -c "import sys; sys.prefix = '\$FAKE_PREFIX'; sys._base_executable = '\$FAKE_BASE'
+\$3"
+EOF
+chmod +x "$FX/fakevenv/python3"
+printf '/sentinel/python3\n' > "$OPSX_STATE_DIR/python"
+outg="$(PATH="$FX/fakevenv:$PATH" FAKE_PREFIX=/fake/venv FAKE_BASE=/nonexistent/base3 opsx init --global 2>&1)" \
+  && fail "base 不存在時 init --global 要失敗：$outg"
+case "$outg" in *"/fake/venv"*"/nonexistent/base3"*|*"/nonexistent/base3"*"/fake/venv"*) ;; *) fail "訊息要寫 venv prefix 和拿到的 base：$outg" ;; esac
+assert_eq "$(cat "$OPSX_STATE_DIR/python")" "/sentinel/python3" "base 不存在時 python 檔不能動"
+outg="$(PATH="$FX/fakevenv:$PATH" FAKE_PREFIX=/fake/venv FAKE_BASE="$PY" opsx init --global 2>&1)" \
+  && fail "base 等於 sys.executable 時 init --global 要失敗：$outg"
+case "$outg" in *"/fake/venv"*"$PY"*) ;; *) fail "訊息要寫 venv prefix 和拿到的 base：$outg" ;; esac
+assert_eq "$(cat "$OPSX_STATE_DIR/python")" "/sentinel/python3" "base 等於 sys.executable 時 python 檔不能動"
+printf x > "$FX/noexec"; chmod 644 "$FX/noexec"
+for b in "$FX/noexec" "$FX"; do   # 存在但不能執行、是目錄：都算拿不到
+  outg="$(PATH="$FX/fakevenv:$PATH" FAKE_PREFIX=/fake/venv FAKE_BASE="$b" opsx init --global 2>&1)" \
+    && fail "base 是 $b 時 init --global 要失敗：$outg"
+  assert_eq "$(cat "$OPSX_STATE_DIR/python")" "/sentinel/python3" "base 是 $b 時 python 檔不能動"
+done
+
+# python 路徑：base 是 symlink 時原樣記，不解開（uv、brew 的 base 是 minor 版號的 symlink，解開會釘死 patch 版）
+mkdir -p "$FX/baselink"; ln -s "$PY" "$FX/baselink/python3"
+outg="$(PATH="$FX/fakevenv:$PATH" FAKE_PREFIX=/fake/venv FAKE_BASE="$FX/baselink/python3" opsx init --global 2>&1)"
+assert_eq "$?" 0 "base 是 symlink 時 init --global: $outg"
+assert_eq "$(cat "$OPSX_STATE_DIR/python")" "$FX/baselink/python3" "base 要原樣記，不解 symlink"
 echo ok

@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
 # opsx answer <slug> --gate <id> [--grant this|card|repo] [--repo <top>] <text…>：回一個 gate。
 # 先驗 gate，再把授權落檔（repo 寫 grants.toml；card 寫 dispatch.json 的 grants；this 寫 dispatch.json 的 once，閘門用掉就刪），
-# 把 gates.md 那段改成 answered，在 decisions.tsv 記一行，最後 herdr agent prompt 送給 agent。卡沒派出就不送，agent 派出時會讀 gates.md。
+# 把 gates.md 那段改成 answered，在 decisions.tsv 記一行（log_row），最後 herdr agent prompt 送給 agent。卡沒派出就不送，agent 派出時會讀 gates.md。
 # 看板的「回它」按鈕背後就是這支；終端機打也一樣。specs/board-actions/spec.md、要求檔 §3.6 授權三級。
+
+# shellcheck source=/dev/null
+source "$OPSX_ROOT/bin/lib/route.sh"
 
 opsx_answer() {
   local slug="" gate="" grant="" top="" text=()
@@ -24,6 +27,7 @@ opsx_answer() {
   local repo d answer; repo="$(basename "$top")"; d="$top/openspec/changes/$slug"; answer="${text[*]}"
   [ -d "$d" ] || die "answer: 沒有這張卡：$d"
   [ -f "$d/gates.md" ] || die "answer: $slug 沒有 gates.md，沒有 gate 可回"
+  refuse_if_handed "$repo" "$slug" answer
   mkdir -p "$OPSX_STATE_DIR"
 
   # 一段 python 做完驗證與所有檔案改動：失敗在哪一步就印哪一步，退出 2；成功印 "dispatched" 或 "undispatched"
@@ -110,15 +114,15 @@ if idx + 1 < len(parts): sec2 += "\n"
 parts[idx] = sec2
 tmp = gates_path + ".tmp"; open(tmp, "w", encoding="utf-8").write("".join(parts)); os.replace(tmp, gates_path)
 
-# decisions.tsv 的欄位：time、you、answer、gate、text，有授權時第六欄是 grant
-with open(os.path.join(d, "decisions.tsv"), "a", encoding="utf-8") as f:
-    f.write("%s\tyou\tanswer\t%s\t%s%s\n" % (now, gate, text.replace("\t", " "), ("\t" + grant) if grant else ""))
 print("dispatched" if dispatched else "undispatched")
 PY
 )" || exit 2
+  if [ -n "$grant" ]; then log_row "$d" 你 已允許 "$answer" "$gate · $grant"
+  else log_row "$d" 你 已決定 "$answer" "$gate"; fi
 
   if [ "$result" = dispatched ]; then
-    herdr agent prompt "$slug" "$answer" >/dev/null || die "answer: gates.md 與 decisions 已寫，但 herdr agent prompt 失敗；agent 下次讀 gates.md 會看到答案"
+    local route name via; route="$(card_route "$repo" "$slug")" || die "讀不懂 dispatch.json，不知道話要送給誰"; name="${route%%$'\t'*}"; via="${route#*$'\t'}"
+    herdr agent prompt "$name" "${via:+[$slug] }$answer" >/dev/null || die "answer: gates.md 與 decisions 已寫，但 herdr agent prompt 失敗；agent 下次讀 gates.md 會看到答案"
     say "answer: $slug 的 $gate 已回「${answer}」${grant:+（grant: ${grant}）}，已送進 agent"
   else
     say "answer: $slug 的 $gate 已回「${answer}」${grant:+（grant: ${grant}）}；這張卡沒派出，沒有 agent 可以通知，派出時它會讀 gates.md"

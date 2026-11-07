@@ -54,7 +54,7 @@ Usually the shell already exists (收件 made it, explore and grill wrote into i
 
 ### 2b. Confirm the kind
 
-`.openspec.yaml` has `kind:` (chosen at dispatch, one of dev / bug-fix / refactoring / perf / experiment / ops / chore). Read explore.md and inbox.md; if the kind is wrong for what the change actually is, change it and add one line to `decisions.tsv`: `kind 改 <new>：<reason>`. The board shows the change. If `kind` is missing (shell made by hand), set it and say so. Apply loads its playbook from this value.
+`.openspec.yaml` has `kind:` (chosen at dispatch, one of dev / bug-fix / refactoring / perf / experiment / ops / chore). Read explore.md and inbox.md; if the kind is wrong for what the change actually is, change it and record it with `opsx log <name> <your agent name> 已決定 "kind 改 <new>：<reason>"`. The board shows the change. If `kind` is missing (shell made by hand), set it and say so. Apply loads its playbook from this value.
 
 ### 3. Get the artifact build order
 
@@ -110,6 +110,8 @@ c. **If an artifact requires user input** (unclear context):
    - Use **AskUserQuestion tool** to clarify
    - Then continue with creation
 
+d. **In autopilot** (the router line carries `autopilot：`), never use AskUserQuestion. Unclear context that is a product choice, or a decision that is hard to undo, becomes a gate in `gates.md` in grill's format (`../grill/SKILL.md`, "In autopilot"), and you stop there. Anything else, make the call, say it in design.md's prose (not as a D), and log it in decisions.tsv. A change missing from the workplan gets its own feature and PR named after the slug, instead of a question about which PR group it belongs to.
+
 ### 5. Update workplan
 
 If `openspec/workplan.yaml` exists, check whether this change is already listed:
@@ -117,6 +119,10 @@ If `openspec/workplan.yaml` exists, check whether this change is already listed:
 - **Not listed** → ask which PR group it belongs to (show existing PR groups from workplan), then add it. PR name must match `[a-z][a-z0-9_-]{0,31}` (it becomes the herdr agent name); branch `{feat|fix|chore|refactor|docs|sec}/<slug>/mikaela`; `depends-on` from design.md.
 
 If no workplan exists, create it with this one feature / PR / change; the commit gate turns on once the file exists.
+
+### 5b. Several independent changes from one discussion
+
+When this proposal produced more than one change and they do not depend on each other, give them separate PRs whose `depends-on` names only what they really need. `opsx chain` uses exactly that field: children that depend on the same merged parent are fanned out to subagents by the parent's pane (`../../references/fan-out.md`); a chain of `depends-on` is worked one after the other in one pane.
 
 ### 6. Show final status
 
