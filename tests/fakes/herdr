@@ -30,7 +30,7 @@ case "$1 $2" in
   "pane send-keys") echo '{"result":{"type":"ok"}}' ;;
   # 真格式（2026-11-06 在 pane 裡實跑存下來）：{"id":"cli:agent:list","result":{"agents":[{pane_id:"w1:p2",agent_status,…}],"type":"agent_list"}}
   "agent list") cat "${OPSX_TEST_HERDR_AGENTS:-$(dirname "${BASH_SOURCE[0]}")/herdr-samples/agent-list.json}" ;;
-  "pane list") cat "$(dirname "${BASH_SOURCE[0]}")/herdr-samples/pane-list.json" ;;
+  "pane list") cat "${OPSX_TEST_HERDR_PANES:-$(dirname "${BASH_SOURCE[0]}")/herdr-samples/pane-list.json}" ;;
   # 真格式（2026-11-06 在 pane w5:pH 實跑）：TARGET 吃 dispatch.json 的 pane id，--format text 是純文字
   "agent read") cat "$(dirname "${BASH_SOURCE[0]}")/herdr-samples/agent-read.txt" ;;
   "agent prompt") [ -n "${OPSX_TEST_ON_PROMPT:-}" ] && bash "$OPSX_TEST_ON_PROMPT" "$4"; echo '{"result":{"submitted":true}}' ;;
@@ -42,5 +42,7 @@ case "$1 $2" in
   "plugin link") echo '{"result":{"linked":true}}' ;;
   "pane current") echo '{"result":{"pane_id":"p42"}}' ;;
   "pane report-metadata") echo '{"result":{"ok":true}}' ;;
+  # 真 usage：herdr plugin pane focus <PANE_ID>，只收一個 positional
+  "plugin pane") if [ "$3" = focus ] && [ "$#" -ne 4 ]; then echo "usage: herdr plugin pane focus <PANE_ID>" >&2; exit 2; fi; echo '{"result":{}}' ;;
   *) echo '{"result":{}}' ;;
 esac
