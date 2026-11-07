@@ -73,8 +73,51 @@ init_global() {
   else
     say "init --global: 沒有 herdr，看板 plugin 略過（裝了 herdr 再跑一次）"
   fi
-  say "init --global: launchd 每日同步在 board-inbox 那張卡才裝，略過"
+  install_sync_job "$state" "$bindir"
   say "init --global: 設定在 $state"
+}
+
+# 每天 09:00 跑 opsx sync 的 launchd job（board-inbox）。launchd 的 PATH 只有 /usr/bin:/bin，
+# 找不到 glab / gh、pyenv 的 python3（要 3.11 的 tomllib）、nvm 的 openspec，所以把這些目錄寫進 plist。
+# OPSX_LAUNCH_AGENTS_DIR / OPSX_LAUNCHCTL 讓測試不碰真的 ~/Library 與 launchctl。
+install_sync_job() { # <state> <bindir>
+  local state="$1" bindir="$2" lc="${OPSX_LAUNCHCTL:-launchctl}"
+  if ! command -v "$lc" >/dev/null 2>&1; then say "init --global: 沒有 launchctl（不是 macOS），每日同步略過，要同步就手動跑 opsx sync"; return; fi
+  local dir="${OPSX_LAUNCH_AGENTS_DIR:-$HOME/Library/LaunchAgents}" label=com.opsx.sync
+  local plist="$dir/$label.plist" domain="gui/$(id -u)" path d
+  path="$bindir:/opt/homebrew/bin"
+  for d in "$(dirname "$(cat "$state/python")")" "$(dirname "$(command -v openspec 2>/dev/null || echo /usr/bin/x)")" /usr/local/bin /usr/bin /bin; do
+    case ":$path:" in *":$d:"*) ;; *) path="$path:$d" ;; esac
+  done
+  ensure_dir "$dir"
+  cat > "$plist.tmp" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>$label</string>
+  <key>ProgramArguments</key><array><string>$bindir/opsx</string><string>sync</string></array>
+  <key>StartCalendarInterval</key><dict><key>Hour</key><integer>9</integer><key>Minute</key><integer>0</integer></dict>
+  <key>EnvironmentVariables</key><dict><key>PATH</key><string>$path</string><key>OPSX_STATE_DIR</key><string>$state</string></dict>
+  <key>StandardOutPath</key><string>$state/sync.out</string>
+  <key>StandardErrorPath</key><string>$state/sync.out</string>
+</dict>
+</plist>
+EOF
+  local changed=1
+  if cmp -s "$plist.tmp" "$plist"; then changed=0; rm "$plist.tmp"; say "init --global: $plist 已有"
+  else mv "$plist.tmp" "$plist"; say "init --global: 寫 ${plist}（每日同步 09:00）"; fi
+  # launchd 只在 bootstrap 時讀 plist：已載入而內容變了，要先 bootout 才會用新的 PATH
+  if "$lc" print "$domain/$label" >/dev/null 2>&1 && [ "$changed" = 1 ]; then
+    "$lc" bootout "$domain/$label" || die "init --global: launchctl bootout $domain/$label 失敗"
+  fi
+  if "$lc" print "$domain/$label" >/dev/null 2>&1 && [ "$changed" = 0 ]; then
+    say "init --global: 每日同步 $label 已載入"
+  elif "$lc" bootstrap "$domain" "$plist"; then
+    say "init --global: 每日同步 $label 載入了，每天 09:00 跑 opsx sync，輸出在 $state/sync.out"
+  else
+    die "init --global: launchctl bootstrap $domain $plist 失敗"
+  fi
 }
 
 ask_global_sources() {

@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 # opsx collect [--root <dir>] [--state <dir>]：看板唯一的資料來源，印一份 JSON，不寫檔（mr.sh 的 cache/ 除外）。
-# 讀三處：<root>/*/openspec/changes/*/（含 archive/）、<state>/{dispatch.json,grants.toml,workspaces.toml}、
+# 讀三處：<root>/*/openspec/changes/*/（含 archive/）、<state>/{dispatch.json,grants.toml,workspaces.toml,unfiled/*.md}、
 # herdr agent list（只在 HERDR_ENV 設定時）與 glab / gh（經 mr_json）。specs/board-collect/spec.md。
 #
-# 輸出：{generated_at, scopes[{workspace, repos[]}], cards[], unmatched_agents[], errors[{source,message}]}
-# 每張卡：{repo, slug, title, kind, stage, section, since, waiting, open_gates[{id, opened_at}], dispatch, status, agent_status, mr}
-#   section ∈ 待處理 | 進行中 | 待指派 | 已完成；waiting.type ∈ 等待授權 | 等待決定 | 可以合併 | 終端機等待輸入
+# 輸出：{generated_at, scopes[{workspace, repos[]}], repo_paths{repo: 實體路徑}, cards[], unfiled[{slug, title, source, found}],
+#       last_sync（sync.log 最後一行，沒有檔時 null）， unmatched_agents[], errors[{source,message}]}
+# 每張卡：{repo, slug, title, kind, stage, section, since, waiting, open_gates[{id, opened_at}], dispatch, status, agent_status, mr,
+#        source, upstream, stale}
+#   section ∈ 待處理 | 進行中 | 待指派 | 收件匣 | 已完成（收件匣＝沒派出、stage 還是 explore）；waiting.type ∈ 等待授權 | 等待決定 | 可以合併 | 終端機等待輸入
 #
 # gates.md 的格式（apply 步 5 寫、answer 改）：每個 gate 一段
 #   ## <gate id>
@@ -65,7 +67,7 @@ opsx_collect() {
     printf '%s\n' "$real" >> "$work/seen"; repo_dir="$real/"
     if [ -f "$repo_dir/.git" ]; then printf '%s\n' "$(basename "$repo_dir")" >> "$work/worktrees"; continue; fi
     repo="$(basename "$repo_dir")"
-    printf '%s\n' "$repo" >> "$work/repos"
+    printf '%s\t%s\n' "$repo" "$real" >> "$work/repos"
     seen_archive=0
     for d in "$repo_dir"openspec/changes/*/ $(ls -1dt "$repo_dir"openspec/changes/archive/*/ 2>/dev/null); do
       [ -d "$d" ] || continue
@@ -119,7 +121,8 @@ def load_toml(path):
     except tomllib.TOMLDecodeError as e:
         errors.append({"source": path, "message": "TOML 壞了：%s" % e}); return {}
 
-repos = [r for r in read(os.path.join(work, "repos")).split("\n") if r]
+repo_paths = dict(l.split("\t", 1) for l in read(os.path.join(work, "repos")).split("\n") if l)
+repos = list(repo_paths)
 worktrees = [r for r in read(os.path.join(work, "worktrees")).split("\n") if r]
 workspaces = load_toml(os.path.join(state, "workspaces.toml")).get("repos", {})
 grants = load_toml(os.path.join(state, "grants.toml")).get("repos", {})
@@ -227,6 +230,7 @@ for line in read(os.path.join(work, "cards.tsv")).split("\n"):
     if c["archived"] or c["stage"] == "archive": section = "已完成"
     elif waiting: section = "待處理"
     elif disp: section = "進行中"
+    elif c["stage"] == "explore": section = "收件匣"
     else: section = "待指派"
     cards.append({
         "repo": c["repo"], "slug": c["slug"], "title": one_liner(inbox) or c["slug"], "kind": kind_of(d),
@@ -236,14 +240,31 @@ for line in read(os.path.join(work, "cards.tsv")).split("\n"):
         "dispatch": disp, "status": load_json(os.path.join(d, "status.json"), None),
         "agent_status": agent_status, "mr": c["mr"],
         "grants_repo": grants.get(c["repo"]), "path": d,
+        "source": frontmatter(inbox, "source"), "upstream": frontmatter(inbox, "upstream"), "stale": frontmatter(inbox, "stale") == "true",
     })
 
-order = {"待處理": 0, "進行中": 1, "待指派": 2, "已完成": 3}
+order = {"待處理": 0, "進行中": 1, "待指派": 2, "收件匣": 3, "已完成": 4}
 cards.sort(key=lambda x: (order[x["section"]], x["repo"], x["slug"]))
+unfiled_dir = os.path.join(state, "unfiled")
+unfiled = []
+for name in sorted(os.listdir(unfiled_dir)) if os.path.isdir(unfiled_dir) else []:
+    if not name.endswith(".md"): continue
+    text = read(os.path.join(unfiled_dir, name))
+    unfiled.append({"slug": name[:-3], "title": one_liner(text) or name[:-3], "source": frontmatter(text, "source"), "found": frontmatter(text, "found")})
+# 上次同步：sync.log（opsx log --sync 的格式 ts · source · 新卡數 · 文字）最後一列 source = sync，文字是 sync.py 的 Tally.summary()。
+# debt.sh 自己寫的 debt 掃描列、別的工具寫的列不算。
+SYNC_TEXT = re.compile(r"新建 (\d+) · 更新 (\d+) · 沒變 (\d+) · 錯誤 (\d+)(?:：(.*))?")
+last_sync = None
+for line in reversed([l for l in read(os.path.join(state, "sync.log")).split("\n") if l]):
+    cols = line.split("\t")
+    m = SYNC_TEXT.fullmatch(cols[3]) if len(cols) == 4 and cols[1] == "sync" else None
+    if m:
+        last_sync = {"at": cols[0], "created": int(m[1]), "updated": int(m[2]), "unchanged": int(m[3]), "errors": int(m[4]), "first_error": m[5] or ""}
+        break
 unmatched = [{"name": a.get("terminal_title_stripped") or a.get("agent") or "", "pane": a.get("pane_id"),
               "agent_status": a.get("agent_status"), "cwd": a.get("cwd"), "workspace": a.get("workspace_id")}
              for a in (agents or []) if str(a.get("pane_id")) not in matched_panes]
-print(json.dumps({"generated_at": now, "scopes": scopes, "cards": cards, "unmatched_agents": unmatched, "errors": errors,
+print(json.dumps({"generated_at": now, "scopes": scopes, "repo_paths": repo_paths, "cards": cards, "unfiled": unfiled, "last_sync": last_sync, "unmatched_agents": unmatched, "errors": errors,
                   "legacy": legacy, "worktrees_skipped": worktrees}, ensure_ascii=False))
 PY
 }
