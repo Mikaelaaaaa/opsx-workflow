@@ -132,6 +132,9 @@ class Round:
         """派出去的卡的第一個 open gate，照固定規則答、停、或留給人。"""
         w, key = c["waiting"], card_key(c)
         if w["type"] == "等待授權":
+            if w["action"] == "merge":   # 合併只走 approve_merge 的五條件、綁 sha 核准；這裡給「這次」會繞過它
+                self.log("?? %s gate %s 要合併授權，不代答：合併由 opsx merge 核准" % (key, w["gate_id"]))
+                return
             self.answer(c, top, w["gate_id"], "允許", grant=True)
             return
         if w["type"] == "終端機等待輸入":

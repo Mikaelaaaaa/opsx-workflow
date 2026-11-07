@@ -155,6 +155,12 @@ cards '[{"slug":"a1","section":"待處理","dispatch":'"$D"',"agent_status":"idl
 round || fail "rc: $(cat "$FX/out")"
 assert_grep "^opsx answer a1 --gate g1 --grant this --repo $R -- 允許\$" "$OPSX_FAKE_LOG"
 
+# --- 答 gate：合併的授權題不代答（合併只走 opsx merge 的五條件核准，D3） ---
+cards '[{"slug":"a1","section":"待處理","dispatch":'"$D"',"agent_status":"idle","waiting":{"type":"等待授權","gate_id":"g8","action":"merge","question":"要合併","recommended":null,"options":["這次"]}}]'
+round || fail "rc: $(cat "$FX/out")"
+assert_eq "$(count '^opsx answer')" 0 "合併的授權題不代答：$(cat "$OPSX_FAKE_LOG")"
+grep '??' "$LOG" | grep a1 | grep -q g8 || fail "合併授權題要記 ??：$(cat "$LOG")"
+
 # --- 答 gate：要人動手的不代答 ---
 cards '[{"slug":"a1","section":"待處理","dispatch":'"$D"',"agent_status":"idle","waiting":{"type":"等待決定","gate_id":"g5","question":"這段怎麼驗","recommended":"你在 sandbox 外跑","options":["你在 sandbox 外跑","略過"]}}]'
 round || fail "rc: $(cat "$FX/out")"
