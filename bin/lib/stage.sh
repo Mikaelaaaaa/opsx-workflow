@@ -37,17 +37,6 @@ st_pending_nonempty() {
   [ -f "$1/explore.md" ] || return 1
   awk '/^## 待決/{f=1;next} /^## /{f=0} f' "$1/explore.md" | grep -vE '^\s*$|^\s*<!--|^\s*-\s*$|^\s*（' | grep -q .
 }
-# 新卡（created: 晚於 2026-11-10）的 explore.md 步驟不齊時印缺項；舊卡與沒有 created: 的卡不印。
-# shortcut: 日期門檻，進行中的舊卡都歸檔後拿掉
-st_steps_missing() { # <卡目錄>
-  [ -f "$1/.openspec.yaml" ] || return 0
-  local line created=""
-  while IFS= read -r line; do
-    case "$line" in created:*) created="${line#created:}"; created="${created# }"; break ;; esac
-  done < "$1/.openspec.yaml"
-  [[ "$created" > "2026-11-10" ]] || return 0
-  check_explore "$1"
-}
 st_mr_url() { [ -f "$1/report.md" ] && grep -oE 'https?://[^ )]+/(merge_requests|pull)/[0-9]+' "$1/report.md" | head -1 || true; }
 st_mr_in_report() { [ -n "$(st_mr_url "$1")" ]; }
 st_open_gates() { [ -f "$1/gates.md" ] || { printf 0; return; }; grep -cE '^status:[[:space:]]*open[[:space:]]*$' "$1/gates.md" || true; }
@@ -114,7 +103,7 @@ stage_of() { # <top> <slug>
     printf 'review · %s · %s · skills/review/SKILL.md · skills/review/references/ponytail-review.md\n' "$slug" "$kind"; return
   fi
   if [ -f "$d/explore.md" ]; then
-    if [ -n "$(st_steps_missing "$d")" ]; then printf 'explore · %s · %s · skills/explore/SKILL.md（explore.md 的 ## 步驟 不齊，opsx check %s）\n' "$slug" "$kind" "$slug"; return; fi
+    if [ -n "$(check_explore "$d")" ]; then printf 'explore · %s · %s · skills/explore/SKILL.md（explore.md 的 ## 步驟 不齊，opsx check %s）\n' "$slug" "$kind" "$slug"; return; fi
     if st_pending_nonempty "$d" && [ ! -f "$d/grill.md" ] && [ "$kind" != chore ] && [ "$kind" != bug-fix ]; then printf 'grill · %s · %s · skills/grill/SKILL.md\n' "$slug" "$kind"; return; fi
     printf 'propose · %s · %s · skills/propose/SKILL.md\n' "$slug" "$kind"; return
   fi

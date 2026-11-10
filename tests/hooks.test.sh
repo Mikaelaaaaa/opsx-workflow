@@ -786,6 +786,13 @@ out="$(sg)"; reason "$out" | grep -q '/propose' || fail "stop: 九步補齊後�
 mv "$C/explore.md.keep" "$C/explore.md"
 printf 'schema: opsx\nkind: bug-fix\n' > "$C/.openspec.yaml"
 out="$(sg)"; reason "$out" | grep -q '/propose' || fail "stop: 沒有 created 的卡不回頭補: $(reason "$out")"
+printf 'schema: opsx\ncreated: 2026-11-10\nkind: bug-fix\n' > "$C/.openspec.yaml"
+out="$(sg)"; reason "$out" | grep -q '/propose' || fail "stop: 門檻當天建的卡不回頭補: $(reason "$out")"
+printf 'schema: opsx\ncreated: 2026-11-11\nkind: bug-fix\n' > "$C/.openspec.yaml"
+out="$(sg)"; reason "$out" | grep -q '1 讀卡' || fail "stop: 門檻隔天建的卡缺步要擋: $(reason "$out")"
+printf '## 要選 A 還是 B\nstatus: open\n' > "$C/gates.md"
+out="$(sg)"; assert_eq "$out" "" "stop: 新卡缺步但有會擋的 open gate 放行"
+rm "$C/gates.md"
 printf 'schema: opsx\ncreated: 2026-11-05\nkind: bug-fix\n' > "$C/.openspec.yaml"
 out="$(sg)"; reason "$out" | grep -q '/propose' || fail "stop: 舊卡不回頭補: $(reason "$out")"
 # 一般 open gate 放行；問「要不要接」的 gate 不算

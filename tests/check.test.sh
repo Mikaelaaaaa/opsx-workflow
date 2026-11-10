@@ -79,7 +79,7 @@ printf '%s' "$out" | jq -r '.reason' | grep -q 'task 沒勾' || fail "stop: 子�
 STEP_NAMES=("讀卡" "how" "影響範圍" "why" "prototype" "查資料" "對照 code" "待決" "unslop")
 mk_explore() { # <slug> [<步驟號> <內容>]...：九步預設都填「已知」，後面成對參數覆寫某一步（內容空字串表示該行留白，內容 x 表示整行拿掉）
   local c="$R/openspec/changes/$1" i val; shift
-  mkdir -p "$c"; printf 'schema: opsx\nkind: bug-fix\n' > "$c/.openspec.yaml"
+  mkdir -p "$c"; printf 'schema: opsx\ncreated: 2026-11-12\nkind: bug-fix\n' > "$c/.openspec.yaml"
   { printf '## 已知\n\n- x\n\n## 待決\n\n- \n\n## 不做\n\n- \n\n## 步驟\n\n'
     for i in 1 2 3 4 5 6 7 8 9; do
       val="已知"; set -- "${@}"
@@ -103,10 +103,16 @@ mk_explore steps-blank 2 ""
 out="$(chk steps-blank)" && fail "該行留白要非零"
 printf '%s' "$out" | grep -q '2 how' || fail "要指出 2 how: $out"
 
-mkdir -p "$R/openspec/changes/steps-none"; printf 'schema: opsx\n' > "$R/openspec/changes/steps-none/.openspec.yaml"
+mkdir -p "$R/openspec/changes/steps-none"; printf 'schema: opsx\ncreated: 2026-11-12\n' > "$R/openspec/changes/steps-none/.openspec.yaml"
 printf '## 已知\n\n- x\n\n## 待決\n\n無\n' > "$R/openspec/changes/steps-none/explore.md"
 out="$(chk steps-none)" && fail "沒有 ## 步驟 段要非零"
 printf '%s' "$out" | grep -q '1 讀卡' || fail "沒有步驟段要列出全部步驟: $out"
+
+# 舊卡與沒有 created: 的卡不查步驟（日期門檻跟 stage 一樣）
+printf 'schema: opsx\ncreated: 2026-11-05\n' > "$R/openspec/changes/steps-none/.openspec.yaml"
+out="$(chk steps-none)" || fail "舊卡沒有 ## 步驟 要回 0: $out"
+printf 'schema: opsx\n' > "$R/openspec/changes/steps-none/.openspec.yaml"
+out="$(chk steps-none)" || fail "沒有 created: 的卡沒有 ## 步驟 要回 0: $out"
 
 # --- 影響範圍寫 skip 時，對 diff 的檔案 grep 別處引用，印 Must-fix 候選（驗收：node-steps-gates/specs/node-step-gates/spec.md「skip 影響範圍對照 diff」） ---
 B="$(mk_repo blast)"; git -C "$B" branch -M main

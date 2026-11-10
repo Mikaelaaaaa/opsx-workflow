@@ -20,8 +20,9 @@ stop_reason() { # <dir> <slug> <stage>
   local d="$1" slug="$2" stage="$3" open missing last_commit report_ts confirmed head_sha
   if [ "$stage" = explore ]; then
     [ -f "$d/explore.md" ] || return 0
-    missing="$(st_steps_missing "$d")"
+    missing="$(check_explore "$d")"
     [ -n "$missing" ] || return 0
+    [ "$(st_open_gates_blocking "$d")" -gt 0 ] && return 0
     printf '%s' "explore|opsx：${slug} 的 explore.md ## 步驟 不齊（opsx check ${slug}）：
 $missing
 補齊再停。"

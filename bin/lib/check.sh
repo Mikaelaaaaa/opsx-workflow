@@ -17,8 +17,15 @@ opsx_check() {
 }
 
 # 步驟名與順序要跟 skills/explore/SKILL.md 的 Steps 表、schemas/opsx/templates/explore.md 一致
+# 新卡（created: 晚於 2026-11-10）才查；舊卡與沒有 created: 的卡不印。stage、Stop hook、opsx check 都走這裡。
+# shortcut: 日期門檻，進行中的舊卡都歸檔後拿掉
 check_explore() { # <卡目錄>：explore.md 不存在什麼都不印；存在就逐步檢查 ## 步驟，缺行、留白、skip 沒原因各印一行
-  [ -f "$1/explore.md" ] || return 0
+  [ -f "$1/explore.md" ] && [ -f "$1/.openspec.yaml" ] || return 0
+  local line created=""
+  while IFS= read -r line; do
+    case "$line" in created:*) created="${line#created:}"; created="${created# }"; break ;; esac
+  done < "$1/.openspec.yaml"
+  [[ "$created" > "2026-11-10" ]] || return 0
   awk '
     BEGIN { n = split("讀卡|how|影響範圍|why|prototype|查資料|對照 code|待決|unslop", names, "|") }
     /^## / { on = ($0 == "## 步驟"); next }
