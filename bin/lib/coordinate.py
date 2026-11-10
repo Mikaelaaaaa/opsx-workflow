@@ -386,8 +386,9 @@ class Round:
         last = self.memo["_redispatched"].get(key)
         if last and self.now - datetime.datetime.fromisoformat(last) < datetime.timedelta(minutes=REDISPATCH_MINUTES):
             self.log("-- %s %s，%d 分鐘內重派過，這輪不再派" % (key, why, REDISPATCH_MINUTES))
-            self.notify(c, "dead", last, "重派後 %d 分鐘內又掛了" % REDISPATCH_MINUTES,
-                        "pane %s：%s；看板上重派或停掉" % (c["dispatch"].get("pane"), why))
+            if key not in self.redispatched_now:
+                self.notify(c, "dead", last, "重派後 %d 分鐘內又掛了" % REDISPATCH_MINUTES,
+                            "pane %s：%s；看板上重派或停掉" % (c["dispatch"].get("pane"), why))
             return
         if "agent" not in c["dispatch"]:
             self.log("?? %s %s，但 dispatch.json 沒記 agent，不知道派給誰" % (key, why))
@@ -396,6 +397,7 @@ class Round:
         self.act(["opsx", "stop", c["slug"], "--repo", top])
         self.act(["opsx", "dispatch", c["slug"], "--agent", c["dispatch"]["agent"], "--mode", "autopilot", "--kind", c["kind"], "--repo", top])
         self.memo["_redispatched"][key] = self.now.isoformat(timespec="seconds")
+        self.redispatched_now.add(key)
 
     def settle_parked(self, cards):
         """人手動重派了的 parked 卡不再由這裡管。人在板上把那個 gate 答掉了，記成已答，

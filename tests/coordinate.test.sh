@@ -809,6 +809,19 @@ assert_grep "^opsx stop u --repo $R\$" "$OPSX_FAKE_LOG"; assert_grep '^opsx disp
 assert_eq "$(notes)" 0 "重派成功不通知"
 rm -f "$MEMO"
 
+# --- 單卡同一輪重派兩次：gate 答不出去（agent_not_found）又 agent_status unknown，只派一次、不通知 ---
+cards '[{"slug":"u","section":"進行中","dispatch":'"$D"',"agent_status":"unknown","waiting":{"type":"等待授權","gate_id":"g1","action":"x","question":"允許嗎","recommended":null,"options":[]}}]'
+OPSX_TEST_FAIL_answer=agent_not_found round || fail "rc: $(cat "$FX/out")"
+assert_eq "$(count '^opsx dispatch')" 1 "同一輪只重派一次：$(cat "$OPSX_FAKE_LOG")"
+assert_eq "$(notes)" 0 "同一輪第二次要求重派不通知：$(cat "$OPSX_FAKE_LOG")"
+assert_grep '這輪不再派' "$LOG"
+# 對照：下一輪、十分鐘內又掛，照樣通知一次
+cards '[{"slug":"u","section":"進行中","dispatch":'"$D"',"agent_status":"unknown"}]'
+round || fail "rc: $(cat "$FX/out")"
+assert_eq "$(count '^opsx dispatch')" 0 "下一輪十分鐘內不重派"
+assert_eq "$(notes)" 1 "下一輪十分鐘內又掛要通知：$(cat "$OPSX_FAKE_LOG")"
+rm -f "$MEMO"
+
 # --- 每輪最後回收孤兒 pane：呼叫 opsx reap；dry 只記 DRY；reap 失敗不影響這一輪的結束 ---
 cards '[]'
 round || fail "rc: $(cat "$FX/out")"
