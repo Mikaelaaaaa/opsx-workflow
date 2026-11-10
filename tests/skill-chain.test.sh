@@ -10,8 +10,8 @@ assert_fixed() { grep -qF -- "$1" "$2" || fail "'$1' not in $(basename "$(dirnam
 check_node() { # check_node <skill> <next-command>
   local sk="$OPSX_ROOT/skills/$1/SKILL.md"
   assert_file "$sk"
-  assert_fixed '../../references/continue.md' "$sk"
-  assert_fixed "$2" "$sk"
+  grep -F -- '../../references/continue.md' "$sk" | grep -qF -- "$2" \
+    || fail "no single line in $1/SKILL.md has both continue.md and '$2'"
 }
 check_node explore '/grill <slug>'
 check_node explore '/propose <slug>'
