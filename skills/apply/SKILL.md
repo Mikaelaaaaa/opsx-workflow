@@ -105,6 +105,9 @@ A change with `openspec/changes/<main>/subs/` is a main change (`../../reference
    - Report contract: `DONE <子> <sha>`, or `NEEDS-USER <子>` followed by the question, the options and the evidence.
 4. On `NEEDS-USER <子>`, write the gate in 子殼的 gates.md (`subs/<子>/gates.md`), not the main shell's, and keep going with the others.
 5. When a subagent cannot write the main repo's `openspec/` from its worktree, write its status for it: `opsx status <phase> <n>/<total> "<label>" --sub <子> --worker subagent-<子>`.
+6. Stack each `DONE <子> <sha>` onto the PR branch, in workplan 順序 (the order of the PR's `changes[]`), from the PR branch: `opsx stack <主> <子> <sha>`. It cherry-picks the one commit and checks that sub-change off in the main shell's tasks.md; do not check it off by hand or through skeleton step 10. A report that arrives before its turn waits; the command refuses a sub-change whose dependencies are not stacked yet.
+7. `opsx stack` 退出 3 means conflict: it already aborted and logged a line in decisions.tsv. session 自己重做 that sub-change on the PR branch, through the same sub-shell (`--sub <子>`, worker `session`), test first, one commit. 不在衝突標記上手解: the subagent's tests were green on the old base, nobody would re-verify a hand merge. Then hand the sub-changes that depended on it to new subagents from the new HEAD.
+8. When every item in the main shell's tasks.md is checked, run the whole test suite once on the PR branch, then continue to `/review <主>` and `/pr <主>` once for the main change (`../../references/continue.md`). Sub-changes get no review or pr of their own.
 
 ## When this pane coordinates other cards
 

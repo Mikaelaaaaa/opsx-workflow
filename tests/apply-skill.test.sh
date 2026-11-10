@@ -14,4 +14,9 @@ section "When the main change has subs/" > "$SUBS"
 for k in '先 propose 沒有 tasks.md 的子殼' 'depends-on' 'subagent' '<主>--<子>' 'DONE <子> <sha>' 'NEEDS-USER <子>' '子殼的 gates.md' '不 push'; do
   has "$k" "$SUBS"
 done
+
+# --- Scenario：apply skill 寫明疊回規則（openspec/changes/apply-fanout/specs/subchange-stack/spec.md）---
+for k in 'opsx stack' 'workplan 順序' '退出 3' 'session 自己重做' '/review' '/pr' '不在衝突標記上手解'; do
+  has "$k" "$SUBS"
+done
 echo ok

@@ -171,6 +171,19 @@ def feature_plan(top: str, feature: str) -> list:
     return out
 
 
+def sub_deps(top: str, main: str, sub: str) -> list:
+    """opsx stack：主 change <main> 的 PR 底下子 change <sub> 的 depends-on。workplan 沒有這個 PR 或子 change 就 exit。"""
+    wp_path = os.path.join(top, "openspec", "workplan.yaml")
+    prs = [pr for f in load_workplan(wp_path).get("features") or [] for pr in f.get("prs") or []] if os.path.exists(wp_path) else []
+    pr = next((p for p in prs if p.get("name") == main), None)
+    if pr is None:
+        sys.exit("stack: workplan 沒有主 change（PR）「%s」" % main)
+    hit = [c for c in pr.get("changes") or [] if c.get("name") == sub]
+    if not hit:
+        sys.exit("stack: workplan 的 PR「%s」底下沒有子 change「%s」" % (main, sub))
+    return hit[0].get("depends-on") or []
+
+
 def _child_entry(me: dict, slug: str, branch: str, kind: str, model: str, mode: str, worktree, now: str) -> dict:
     return {"workspace": me.get("workspace"), "workspace_id": me.get("workspace_id"), "tab": me.get("tab"), "pane": me.get("pane"),
             "agent": me.get("agent"), "model": model, "mode": mode, "kind": kind, "worktree": worktree, "branch": branch,
@@ -229,6 +242,8 @@ if __name__ == "__main__":
         old_name, mode = me.get("herdr_name") or os.environ["OPSX_PARENT"], me.get("mode")
         jsonfile.update(sys.argv[2], register_continue)
         print(old_name, mode)   # 寫成功才印：chain.sh 靠退出碼判斷寫入成敗
+    elif len(sys.argv) == 5 and sys.argv[1] == "deps":
+        print("\n".join(sub_deps(*sys.argv[2:])))
     elif len(sys.argv) == 4 and sys.argv[1] == "feature":
         for row in feature_plan(sys.argv[2], sys.argv[3]):
             print("\t".join(row))
@@ -239,4 +254,4 @@ if __name__ == "__main__":
         print(jsonfile.load(sys.argv[2])[os.environ["OPSX_KEY"]].get("mode"))
         jsonfile.update(sys.argv[2], register_fan_out)
     else:
-        sys.exit("用法：chain.py children <top> <repo> <父卡 slug> <dispatch.json> | chain.py feature <top> <feature> | chain.py continue|session|fan-out <dispatch.json>")
+        sys.exit("用法：chain.py children <top> <repo> <父卡 slug> <dispatch.json> | chain.py feature <top> <feature> | chain.py deps <top> <主> <子> | chain.py continue|session|fan-out <dispatch.json>")
