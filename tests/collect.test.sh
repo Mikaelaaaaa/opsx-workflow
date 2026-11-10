@@ -195,15 +195,23 @@ printf '{"id":"cli:agent:list","result":{"agents":[],"type":"agent_list"}}' > "$
 J5="$(opsx collect --root "$ROOT")"; assert_eq "$(q "$(card "$J5" a x4)" agent_status)" unknown; assert_eq "$(q "$J5" errors)" '[]'
 printf '{"id":"cli:agent:list","result":{"agents":[{"agent":"claude","pane_id":"p4","agent_status":"working"},{"agent":"claude","pane_id":"p9","agent_status":"blocked"},{"agent":"claude","pane_id":"p7","agent_status":"idle","cwd":"/Users/me","workspace_id":"w9","terminal_title_stripped":"foo"}],"type":"agent_list"}}' > "$OPSX_TEST_HERDR_AGENTS"
 
-# ---------- 不在 herdr 內 ----------
+# ---------- 不在 pane 裡（HERDR_ENV 未設）也問 herdr ----------
 export HERDR_ENV=""
 : > "$OPSX_FAKE_LOG"
 J="$(opsx collect --root "$ROOT")"; assert_eq "$?" 0
+assert_eq "$(q "$(card "$J" a x4)" agent_status)" working
+assert_eq "$(q "$J" errors)" '[]'
+assert_grep '^agent list' "$OPSX_FAKE_LOG"
+
+# ---------- herdr 叫不通：HERDR_ENV 設或未設都一樣，原文進 errors ----------
+: > "$OPSX_FAKE_LOG"
+J="$(OPSX_TEST_HERDR_LIST_FAIL='socket gone: /x/herdr.sock' opsx collect --root "$ROOT")"; assert_eq "$?" 0
 assert_eq "$(q "$(card "$J" a x4)" agent_status)" null
 assert_eq "$(q "$J" errors.0.source)" herdr
+q "$J" errors.0.message | grep -q 'socket gone: /x/herdr.sock' || fail "herdr 錯誤要帶原文: $(q "$J" errors)"
 assert_eq "$(q "$J" unmatched_agents)" '[]'
-assert_not_grep '^agent list' "$OPSX_FAKE_LOG"
 C="$(card "$J" b y1)"; assert_eq "$(q "$C" waiting)" null "沒 herdr 就判不出 blocked"; assert_eq "$(q "$C" section)" 進行中
+J="$(HERDR_ENV=1 OPSX_TEST_HERDR_LIST_FAIL='socket gone' opsx collect --root "$ROOT")"; assert_eq "$(q "$(card "$J" a x4)" agent_status)" null "HERDR_ENV 設了也一樣"
 
 # ---------- sources.toml 登記的 repo 不在 root 底下也要算（D1）；重複的去重；不存在的跳過 ----------
 Z="$FX/elsewhere/z"; mkdir -p "$Z/openspec/changes" "$Z/.git"
@@ -213,7 +221,7 @@ J="$(opsx collect --root "$ROOT")"; assert_eq "$?" 0 "collect with sources.toml:
 assert_eq "$(printf '%s' "$J" | python3 -I -c 'import json,sys;print(sorted(r for s in json.load(sys.stdin)["scopes"] for r in s["repos"]))')" "['a', 'b', 'z']"
 assert_eq "$(q "$(card "$J" z z1)" section)" 收件匣
 assert_eq "$(printf '%s' "$J" | python3 -I -c 'import json,sys;print(sum(1 for c in json.load(sys.stdin)["cards"] if c["repo"]=="a" and c["slug"]=="x1"))')" 1 "a 兩邊都有，卡不能重複"
-assert_eq "$(q "$J" errors.0.source)" herdr; assert_eq "$(printf '%s' "$J" | python3 -I -c 'import json,sys;print(len(json.load(sys.stdin)["errors"]))')" 1 "不存在的 path 不該進 errors"
+assert_eq "$(q "$J" errors)" '[]' "不存在的 path 不該進 errors（herdr 通，所以 errors 是空的）"
 # ---------- 舊卡在算 stage 之前就濾掉，只計數（collect-perf） ----------
 R2="$FX/code2"; mkdir -p "$R2/r/.git" "$R2/r/openspec/changes"
 for o in old-1 old-2 old-ws old-ideo old-nbsp sd-inbox; do mkdir -p "$R2/r/openspec/changes/$o"; printf 'schema: spec-driven\n' > "$R2/r/openspec/changes/$o/.openspec.yaml"; done
@@ -245,7 +253,7 @@ printf 'schema: spec-driven\n' > "$D/.openspec.yaml"
 printf '# report\n\n## MR\nhttps://gitlab.tsg-navigator.com/agentory/r3/-/merge_requests/4242\n' > "$D/report.md"
 : > "$FX/glab-empty.json"; : > "$OPSX_FAKE_LOG"
 J="$(OPSX_TEST_GLAB_JSON="$FX/glab-empty.json" OPSX_TEST_GLAB_JSON_BY_IID= opsx collect --root "$R3")"; assert_eq "$?" 0
-[ ! -s "$OPSX_FAKE_LOG" ] || fail "只有舊卡的 repo 不該叫 glab / gh：$(cat "$OPSX_FAKE_LOG")"
+[ -z "$(grep -v '^agent list' "$OPSX_FAKE_LOG")" ] || fail "只有舊卡的 repo 不該叫 glab / gh（herdr agent list 除外）：$(cat "$OPSX_FAKE_LOG")"
 assert_eq "$(q "$J" legacy)" '{"r3": 1}'
 E="$(q "$J" errors)" || fail "errors 讀不到：$J"
 case "$E" in *legacy-mr*|*glab*) fail "errors 不該指名舊卡：$E" ;; esac
@@ -404,7 +412,7 @@ assert_eq "$(printf '%s' "$J" | python3 -I -c 'import json,sys;print(json.dumps(
   '{"w1:p3": true, "w1:p4": true, "w1:p5": false, "w1:p7": false, "w1:p9": false}' "unmatched_agents 的 orphan 欄；p9 在 .claude/worktrees/ 底下但 dispatch.json 沒記，是使用者自己的 session"
 # herdr 不可用：orphans 是 []
 export HERDR_ENV=""
-J="$(opsx collect --root "$RP6")"; assert_eq "$(q "$J" orphans)" '[]'
+J="$(OPSX_TEST_HERDR_LIST_FAIL='socket gone' opsx collect --root "$RP6")"; assert_eq "$(q "$J" orphans)" '[]'
 
 # ---------- review 第 1 輪的回歸測試：人或活卡的 pane 不能被當成孤兒（三個重現情境，同一個 orphan_reason） ----------
 # (a) slug 先歸檔、後來又建了活卡：活卡的 pane 與同 cwd 的人工 pane 都不是孤兒

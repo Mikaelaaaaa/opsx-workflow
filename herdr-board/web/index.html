@@ -353,18 +353,23 @@ function counterHtml(cards,sessions,inScope){
 }
 
 /* ---------- 精靈 ---------- */
+function herdrWhy(errors){
+  const e=(errors||[]).find(x=>x.source==='herdr');
+  return e?e.message:'讀不到 agent 狀態';
+}
 function bot(c,size){
   const agent=c.dispatch&&c.dispatch.agent||'claude';
   const col=agent==='codex'?'var(--pet-codex)':'var(--pet-claude)';
-  const st=c.waiting?(c.waiting.type==='可以合併'?'wait':'ask'):(c.agent_status==='working'?'work':'sleep');
+  const st=c.waiting?(c.waiting.type==='可以合併'?'wait':'ask'):(c.agent_status==='working'?'work':c.dispatch&&c.agent_status==null?'unsure':'sleep');
   const pins=[18,32,46].map(x=>`<rect x="${x-2}" y="4" width="4" height="6" fill="${col}" opacity=".9"/><rect x="${x-2}" y="54" width="4" height="6" fill="${col}" opacity=".9"/>`).join('');
-  const look={ask:'0 0;3 -1;3 -1;-3 1;-3 1;0 2;0 0',work:'-3 0;3 0;-3 0',wait:'0 0;0 -2;0 0',sleep:'0 0'}[st];
-  const dur={ask:'4.2s',work:'1.4s',wait:'1.6s',sleep:'1s'}[st];
-  const blink=st==='sleep'?'0;0;0;0;0;0':'0;0;32;32;0;0';
+  const look={ask:'0 0;3 -1;3 -1;-3 1;-3 1;0 2;0 0',work:'-3 0;3 0;-3 0',wait:'0 0;0 -2;0 0',sleep:'0 0',unsure:'0 0'}[st];
+  const dur={ask:'4.2s',work:'1.4s',wait:'1.6s',sleep:'1s',unsure:'1s'}[st];
+  const blink=st==='sleep'||st==='unsure'?'0;0;0;0;0;0':'0;0;32;32;0;0';
   let eyes='';
   if(st==='ask')eyes=`<rect x="17" y="21" width="12" height="20" rx="2" fill="${col}"/><rect x="35" y="21" width="12" height="20" rx="2" fill="${col}"/>`;
   else if(st==='work')eyes=`<rect x="17" y="28" width="12" height="7" rx="1.5" fill="${col}"/><rect x="35" y="28" width="12" height="7" rx="1.5" fill="${col}"/>`;
   else if(st==='wait')eyes=`<path d="M16 37l7-9 7 9M34 37l7-9 7 9" stroke="${col}" stroke-width="3" fill="none" stroke-linejoin="round" stroke-linecap="round"/>`;
+  else if(st==='unsure')eyes=`<rect x="18" y="24" width="10" height="14" rx="2" fill="none" stroke="${col}" stroke-width="2" stroke-dasharray="3 2"/><rect x="36" y="24" width="10" height="14" rx="2" fill="none" stroke="${col}" stroke-width="2" stroke-dasharray="3 2"/>`;
   else eyes=`<rect x="17" y="30" width="12" height="4" rx="1.5" fill="${col}"/><rect x="35" y="30" width="12" height="4" rx="1.5" fill="${col}"/>`;
   const ring=st==='ask'?`<rect class="ring" x="6" y="10" width="52" height="44" rx="5" fill="none" stroke="${col}" stroke-width="2"/>`:'';
   return `<svg class="bot bot-${st}" width="${size}" height="${size}" viewBox="0 0 64 64" role="img" aria-label="${esc(agent)}">${ring}${pins}<rect x="8" y="10" width="48" height="44" rx="4" fill="var(--pet-frame)" stroke="${col}" stroke-width="2"/><rect x="13" y="16" width="38" height="32" rx="2" fill="var(--pet-screen)"/><g><animateTransform attributeName="transform" type="translate" values="${look}" dur="${dur}" repeatCount="indefinite"/>${eyes}</g><rect x="13" y="16" width="38" height="0" fill="var(--pet-screen)"><animate attributeName="height" values="${blink}" keyTimes="0;.9;.93;.95;.98;1" dur="${dur==='1s'?'1s':'4.6s'}" repeatCount="indefinite"/></rect></svg>`;
@@ -391,7 +396,7 @@ function rowRunning(c){
   const mrNote=stuck?`<span class="sep">·</span><span style="color:var(--warn)">MR 卡在 ${esc(COND.find(x=>x[0]===stuck)?.[1]||stuck)}</span>`:'';
   const prog=s?`<span class="prog"><span class="bar"><i class="${stuck?'warn':''}" style="width:${pct}%"></i></span>${esc(PHASE_LABEL[s.phase]||s.phase)} ${esc(s.step)}/${esc(s.total)} · ${esc(s.label)}</span>`:`<span class="prog faint">還沒有 status.json · 階段 ${esc(c.stage)}</span>`;
   const st=c.agent_status;
-  const badge=st==='working'?'<span class="badge ok"><span class="dot live"></span>執行中</span>':st==='done'?'<span class="badge line">完成</span>':st==='idle'?'<span class="badge line">閒置</span>':st==null?'<span class="badge line" title="不在 herdr 內，讀不到 agent 狀態">herdr —</span>':`<span class="badge line">${esc(st)}</span>`;
+  const badge=st==='working'?'<span class="badge ok"><span class="dot live"></span>執行中</span>':st==='done'?'<span class="badge line">完成</span>':st==='idle'?'<span class="badge line">閒置</span>':st==null?`<span class="badge line" title="${esc(herdrWhy(data.errors))}">herdr —</span>`:`<span class="badge line">${esc(st)}</span>`;
   return `<div class="row" data-key="${esc(key(c))}" role="button" tabindex="0" aria-selected="${ui.sel===key(c)}">
     <div class="avatar">${bot(c,30)}</div>
     <div class="main"><div class="l1">${priorityBadge(c)}<span class="title">${esc(c.title)}</span><span class="meta">${esc(c.repo)} · ${esc(c.dispatch.agent||'')} · ${esc(since(c))}</span></div><div class="l2">${prog}${mrNote}</div></div>

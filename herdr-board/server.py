@@ -253,8 +253,6 @@ class Handler(BaseHTTPRequestHandler):
             pane = parse_qs(self.path.split("?", 1)[1] if "?" in self.path else "").get("pane", [""])[0]
             if not PANE_RE.match(pane):
                 self.send_json(400, {"error": "pane 不合格：%r" % pane}); return
-            if not os.environ.get("HERDR_ENV"):
-                self.send_json(200, {"ok": False, "error": "看板 server 不在 herdr 裡（HERDR_ENV 沒設），讀不到 agent 輸出"}); return
             r = run(["herdr", "agent", "read", pane, "--lines", "10", "--format", "text"], OUTPUT_TIMEOUT, self.opsx_env())
             if not r["ok"]:
                 self.send_json(200, {"ok": False, "error": (r["stderr"] or r["stdout"]).strip() or "herdr agent read 失敗"}); return

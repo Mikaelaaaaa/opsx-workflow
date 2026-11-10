@@ -35,7 +35,10 @@ case "$1 $2" in
   "pane read") printf '%s\n' "${OPSX_TEST_PANE_TEXT:-}" ;;
   "pane send-keys") echo '{"result":{"type":"ok"}}' ;;
   # 真格式（2026-11-06 在 pane 裡實跑存下來）：{"id":"cli:agent:list","result":{"agents":[{pane_id:"w1:p2",agent_status,…}],"type":"agent_list"}}
-  "agent list") cat "${OPSX_TEST_HERDR_AGENTS:-$(dirname "${BASH_SOURCE[0]}")/herdr-samples/agent-list.json}" ;;
+  "agent list")
+    # OPSX_TEST_HERDR_LIST_FAIL 設了就把它的值當 stderr 原文、非 0 結束（模擬 socket 連不到）
+    if [ -n "${OPSX_TEST_HERDR_LIST_FAIL:-}" ]; then printf '%s\n' "$OPSX_TEST_HERDR_LIST_FAIL" >&2; exit 1; fi
+    cat "${OPSX_TEST_HERDR_AGENTS:-$(dirname "${BASH_SOURCE[0]}")/herdr-samples/agent-list.json}" ;;
   "pane list") cat "${OPSX_TEST_HERDR_PANES:-$(dirname "${BASH_SOURCE[0]}")/herdr-samples/pane-list.json}" ;;
   # 真格式（2026-11-06 在 pane w5:pH 實跑）：TARGET 吃 dispatch.json 的 pane id，--format text 是純文字
   "agent read") cat "$(dirname "${BASH_SOURCE[0]}")/herdr-samples/agent-read.txt" ;;
