@@ -29,4 +29,15 @@ assert.strictEqual(herdrWhy([{source: 'glab', message: 'g'}, {source: 'herdr', m
   'herdr agent list 失敗：socket gone');
 assert.strictEqual(herdrWhy([{source: 'glab', message: 'g'}]), '讀不到 agent 狀態', '沒有 herdr 那條才用固定字');
 assert.strictEqual(herdrWhy([]), '讀不到 agent 狀態');
+
+// 列上的 herdr 標記 title 要真的取自 data.errors（不是只有 herdrWhy 會算）
+const RS = 'function rowRunning', RE = 'function rowReady';
+const rs = html.indexOf(RS), re = html.indexOf(RE);
+if (rs < 0 || re < rs) throw new Error(`index.html 找不到 ${RS} 到 ${RE} 的範圍`);
+const row = (data, c) => new Function('esc', 'bot', 'herdrWhy', 'data', 'ui', 'key', 'since', 'PHASE_LABEL', 'COND',
+  html.slice(rs, re) + ';return rowRunning;')(esc, bot, herdrWhy, data, {sel: null}, () => 'k', () => '1m', {}, [])(c);
+const running = card({title: 't', repo: 'r', stage: 'apply', status: null, mr: null, agent_status: null});
+const why = 'herdr agent list 失敗：socket gone';
+assert.ok(row({errors: [{source: 'herdr', message: why}]}, running).includes(`title="${why}"`), 'title 要帶 errors 的 herdr 原文');
+assert.ok(row({errors: []}, running).includes('title="讀不到 agent 狀態"'), '沒有 herdr 那條才用固定字');
 JS

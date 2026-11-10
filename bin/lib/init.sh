@@ -92,7 +92,7 @@ init_global() {
 
 # 兩支 launchd job：每天 09:00 跑 opsx sync（board-inbox），每 5 分鐘跑一輪 opsx coordinate（opsx-coordinate）。
 # launchd 的 PATH 只有 /usr/bin:/bin，找不到 glab / gh、pyenv 的 python3（要 3.11 的 tomllib）、nvm 的 openspec，所以把這些目錄寫進 plist。
-# coordinate 另帶 HERDR_ENV=1：沒有它 collect 不問 herdr，coordinate 會整輪拒跑。
+# coordinate 另帶 HERDR_ENV=1：collect 已不看它，留著只因無害（status.sh 的 pane metadata 鏡像才認它）。
 # OPSX_LAUNCH_AGENTS_DIR / OPSX_LAUNCHCTL 讓測試不碰真的 ~/Library 與 launchctl。
 install_launch_jobs() { # <state> <bindir>
   local state="$1" bindir="$2" lc="${OPSX_LAUNCHCTL:-launchctl}"
