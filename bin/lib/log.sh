@@ -25,6 +25,13 @@ sync_row() { # <source> <新卡數> <文字>
   printf '%s\t%s\t%s\t%s\n' "$(now_iso)" "$(log_cell "$1")" "$2" "$(log_cell "$3")" >> "$OPSX_STATE_DIR/sync.log"
 }
 
+reap_row() { # <repo/slug 或 pane> <文字>：卡目錄已不在時，stop / reap 的紀錄寫這裡
+  [ -n "$1" ] || die "log: reap 紀錄的對象不能是空的"
+  [ -n "$2" ] || die "log: reap 紀錄的文字不能是空的"
+  mkdir -p "$OPSX_STATE_DIR"
+  printf '%s\t%s\t%s\n' "$(now_iso)" "$(log_cell "$1")" "$(log_cell "$2")" >> "$OPSX_STATE_DIR/reap.log"
+}
+
 opsx_log() {
   if [ "${1:-}" = --sync ]; then
     [ $# -eq 4 ] || die "log: 用法 opsx log --sync <source> <新卡數> <文字>"

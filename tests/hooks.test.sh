@@ -450,8 +450,19 @@ rm -f "$C/gates.md"
 printf '{"phase":"apply","step":8,"total":8,"label":"x","tests":"green","at":"2026-11-05T15:00:00+08:00"}' > "$C/status.json"
 printf '# report\n四桶…\n' > "$C/report.md"
 out="$(sg)"; assert_eq "$(decision "$out")" block "stop: report 沒 MR → 擋"; reason "$out" | grep -q '/pr' || fail "stop: 要叫 /pr"
-printf '# report\n### Consider\n- a.sh:1 task 沒做 · 回 `/apply eval-core` 做完\n' > "$C/report.md"
-out="$(sg)"; assert_eq "$out" "" "stop: report 列了「回 /apply」不擋 /pr"
+printf '# report\n### 待修（範圍內）\n- a.sh:1 task 沒做 · 回 `/apply eval-core` 做完\n### Consider\n' > "$C/report.md"
+out="$(sg)"; assert_eq "$(decision "$out")" block "stop: 待修（範圍內）有項目 → 擋"; reason "$out" | grep -q '/apply' || fail "stop: 待修要叫 /apply"; reason "$out" | grep -q '/pr' && fail "stop: 待修不叫 /pr"
+printf '# report\n### 待修（範圍內）\n### Consider\n- a.sh:1 設計疑問\n' > "$C/report.md"
+out="$(sg)"; assert_eq "$(decision "$out")" block "stop: 待修空了 → 照一般 pr 站"; reason "$out" | grep -q '/pr' || fail "stop: 待修空了要叫 /pr"
+# 確認: <sha>：HEAD 等於該 sha 時 report 之後的新 commit 不要求重審
+printf '# report\n### 待修（範圍內）\n' > "$C/report.md"; sleep 1
+git -C "$R" commit -q --allow-empty -m "fix: review items"
+out="$(sg)"; reason "$out" | grep -q '再跑一次 /review' || fail "stop: 沒有確認行，report 後新 commit 要求重審"
+printf '# report\n### 待修（範圍內）\n確認: %s\n' "$(git -C "$R" rev-parse HEAD)" > "$C/report.md"; touch -t 200001010000 "$C/report.md"
+out="$(sg)"; reason "$out" | grep -q '/review' && fail "stop: 確認 sha 等於 HEAD 不再要求重審"
+git -C "$R" commit -q --allow-empty -m "fix: after confirm"
+out="$(sg)"; reason "$out" | grep -q '再跑一次 /review' || fail "stop: 確認後又有新 commit 要重審"
+printf '# report\n' > "$C/report.md"
 # babysit 站：有 MR 沒有 babysit: 行
 printf '# report\n\n## MR\nhttps://gitlab.tsg-navigator.com/a/b/-/merge_requests/212 · opened 2026-11-10 · auto-merge: no\n' > "$C/report.md"
 out="$(sg)"; assert_eq "$(decision "$out")" block "stop: MR 已開沒 babysit → 擋"; reason "$out" | grep -q '/babysit' || fail "stop: 要叫 /babysit"
@@ -479,4 +490,41 @@ assert_not_grep '^agent prompt' "$OPSX_FAKE_LOG"
 assert_no_file "$QD/Agentory-AI-qc.tsv"; assert_file "$QD/Agentory-AI-qc.tsv.failed"
 assert_grep 'rename' "$CD/decisions.tsv"; assert_grep 'agent_not_found' "$CD/decisions.tsv"
 printf '%s' "$out" | jq -r '.hookSpecificOutput.additionalContext' | grep -q '失敗' || fail "要用 additionalContext 說失敗: $out"
+
+# ---------- 當前卡：dispatch worktree 根優先，否則 branch 第二段 ----------
+K="$(mk_repo Cards)"
+mk_change "$K" eval-core; mk_change "$K" other-card; mkdir -p "$K/openspec/changes/eval-core/subs/api"
+printf '## 派工指示\n\n- 子殼的指示\n' > "$K/openspec/changes/eval-core/subs/api/inbox.md"
+SUBNOTE="派工指示 1 條 · Read $K/openspec/changes/eval-core/subs/api/inbox.md"
+git -C "$K" checkout -q -b trunk
+git -C "$K" worktree add -q "$K/.claude/worktrees/eval-core" -b feat/core-pr/mikaela
+KW="$K/.claude/worktrees/eval-core"
+rt() { reason "$(run_hook openspec-router.sh "$(j "$1" "" '{}' "下一步")")"; }
+kg() { decision "$(run_hook opsx-grant-gate.sh "$(j "$1" Bash "$(cmdj 'glab mr create -F desc.md')")")"; }
+r="$(rt "$KW")"
+case "$r" in "opsx："*"· eval-core"*) ;; *) fail "card: worktree 名是卡、branch 第二段不是 → 對到 worktree 的卡: $r" ;; esac
+case "$r" in *core-pr*) fail "card: 不該用 branch 第二段 core-pr: $r" ;; esac
+mkdir -p "$KW/hooks"
+r="$(rt "$KW/hooks")"; case "$r" in "opsx："*"· eval-core"*) ;; *) fail "card: cwd 在 worktree 子目錄: $r" ;; esac
+printf '{"Cards/eval-core":{"mode":"autopilot","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"
+assert_eq "$(kg "$KW")" deny "card: authz 閘門在 PR 名不同的 worktree 裡仍生效"
+git -C "$KW" checkout -q feat/other-card/mikaela
+printf '{"Cards/eval-core":{"mode":"autopilot","grants":[]},"Cards/other-card":{"mode":"interactive","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"
+# feature session 的形狀：worktree 名是一張卡，branch 已切到另一張卡
+r="$(rt "$KW")"; case "$r" in "opsx："*"· other-card"*) ;; *) fail "card: worktree 與 branch 指向不同卡 → 聽 branch: $r" ;; esac
+assert_eq "$(kg "$KW")" deny "card: 授權閘門取兩張卡裡受管的那個（worktree autopilot、branch interactive）"
+printf '{"Cards/eval-core":{"mode":"interactive","grants":[]},"Cards/other-card":{"mode":"autopilot","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"
+assert_eq "$(kg "$KW")" deny "card: 授權閘門取兩張卡裡受管的那個（worktree interactive、branch autopilot）"
+git -C "$KW" checkout -q feat/core-pr/mikaela
+# 不在 dispatch worktree：主 checkout、名稱對不到卡的 worktree、巢狀在卡 worktree 底下的 subagent worktree
+printf '{"Cards/eval-core":{"mode":"autopilot","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"
+git -C "$K" checkout -q feat/eval-core/mikaela
+r="$(rt "$K")"; case "$r" in "opsx："*"· eval-core"*) ;; *) fail "card: 主 checkout 照舊用 branch: $r" ;; esac
+git -C "$K" checkout -q trunk
+git -C "$K" worktree add -q "$K/.claude/worktrees/agent-x" -b feat/eval-core--api/mikaela
+r="$(rt "$K/.claude/worktrees/agent-x")"; case "$r" in *"$SUBNOTE"*) ;; *) fail "card: worktree 名對不到卡時用 branch，子殼照舊: $r" ;; esac
+assert_eq "$(kg "$K/.claude/worktrees/agent-x")" deny "card: 子殼照主殼的 autopilot"
+git -C "$K" worktree add -q "$KW/.claude/worktrees/agent-y" -b feat/eval-core--api/nested
+r="$(rt "$KW/.claude/worktrees/agent-y")"; case "$r" in *"$SUBNOTE"*) ;; *) fail "card: 巢狀 subagent worktree 是子殼不是主殼: $r" ;; esac
+rm -f "$OPSX_STATE_DIR/dispatch.json"
 echo ok

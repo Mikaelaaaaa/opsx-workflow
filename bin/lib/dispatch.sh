@@ -97,6 +97,7 @@ PY
       git -C "$top" worktree add -q --no-track "$wt" -b "$branch" "$start"
     fi
   fi
+  warn_untrusted "$top"
   # codex 沒有 router hook：把同一批規則放進 worktree。worktree 已在也寫（重派可能換模式）
   if [ "$agent" = codex ]; then place_agents_md "$wt" "$mode" || die "dispatch: AGENTS.md 放不進 $wt"; fi
 

@@ -31,6 +31,7 @@ assert_eq "$(cat "$OPSX_FAKE_LOG")" "" "沒派出去不該碰 herdr"
 printf 'cp "%s" "%s"\n' "$OPSX_STATE_DIR/dispatch.json" "$FX/drive-snap.json" > "$FX/snap-wait.sh"
 out="$(OPSX_DRIVE_MAX=1 OPSX_TEST_ON_WAIT="$FX/snap-wait.sh" opsx dispatch retry-backoff --agent claude --mode autopilot --kind bug-fix 2>&1)"; rc=$?
 assert_eq "$rc" 0 "dispatch rc: $out"
+case "$out" in *還沒信任*) ;; *) fail "沒信任過的 repo，dispatch 要警告：$out" ;; esac   # fixture 沒有 .claude.json
 wait_drive Agentory-CS retry-backoff   # autopilot 一律起 drive
 assert_eq "$(jq -r '."Agentory-CS/retry-backoff".drive_pid | type' "$FX/drive-snap.json")" number "drive 跑的時候 drive_pid 要登記在 dispatch 寫的 key 下"
 assert_grep '^kind: bug-fix$' "$R/openspec/changes/retry-backoff/.openspec.yaml"

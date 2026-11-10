@@ -7,6 +7,7 @@
 """
 import datetime
 import functools
+import glob
 import json
 import os
 import re
@@ -187,11 +188,14 @@ class Round:
         names = [x.get("name") for x in pr.get("changes") or []]
         if slug not in names:
             # 主 change 合併：PR 標 merged，還沒 done 的子 change 一起標 done
-            pending = []
+            pending, archived = [], []
             marks = [("changes", x.get("name"), "done") for x in pr.get("changes") or [] if x.get("status") != "done"] + [("prs", pr["name"], "merged")]
         else:
-            pending = [x.get("name") for x in pr.get("changes") or [] if x.get("name") != slug and x.get("status") != "done"]
-            marks = [("changes", slug, "done")] + ([] if pending else [("prs", pr["name"], "merged")])
+            # drop 與手動 openspec archive 只搬目錄、不改 workplan；只是目錄不在的可能還沒 propose，不算
+            unfinished = [x.get("name") for x in pr.get("changes") or [] if x.get("name") != slug and x.get("status") != "done"]
+            archived = [n for n in unfinished if is_archived(top, n)]
+            pending = [n for n in unfinished if n not in archived]
+            marks = [("changes", n, "done") for n in [slug] + archived] + ([] if pending else [("prs", pr["name"], "merged")])
         if self.dry:
             self.log("DRY workplan %s 標 %s" % (path, "、".join("%s %s" % (n, v) for _, n, v in marks)))
             return True
@@ -208,6 +212,8 @@ class Round:
             f.write("\n".join(lines))
         os.replace(tmp, path)
         self.plans.pop(top, None)
+        if archived:
+            self.log("ok   workplan 的 change %s 已歸檔、沒更新，跟著標 done" % "、".join(archived))
         if pending:
             self.log("ok   workplan 的 change %s 標 done；PR %s 還有 %s 沒 done，不標 merged" % (slug, pr["name"], "、".join(pending)))
         else:
@@ -455,6 +461,20 @@ def deps_unmerged(slug, prs):
     return [d for d in pr.get("depends-on") or [] if status.get(d) != "merged"]
 
 
+def is_archived(top, name):
+    """change 目錄不在了，而且 openspec archive 留下了 <日期>-<name>。"""
+    changes = os.path.join(top, "openspec", "changes")
+    return not os.path.isdir(os.path.join(changes, name)) and bool(glob.glob(os.path.join(changes, "archive", "????-??-??-" + glob.escape(name))))
+
+
+def waiting_on(prs, slug):
+    """depends-on 裡有這張卡所屬的 PR、自己還沒 merged 的 PR 名。"""
+    pr = pr_of(prs, slug)
+    if pr is None:
+        return []
+    return [p.get("name") for p in prs if pr["name"] in (p.get("depends-on") or []) and p.get("status") != "merged"]
+
+
 def status_line(lines, key, name):
     """`key:`（prs 或 changes）底下 `- name: <name>` 那一項自己的 status 行的 index；找不到是 None。"""
     item_indent = None
@@ -513,7 +533,8 @@ def main():
     orphans = []
     for c in merged:
         if card_key(c) not in r.dispatch_file:
-            r.log("-- %s 已合併但從沒派過，歸檔留給人" % card_key(c))
+            waiting = waiting_on(r.workplan(repo_paths[c["repo"]]), c["slug"])
+            r.log("?? %s 已合併但從沒派過，歸檔留給人%s" % (card_key(c), "；在等它的 PR：" + "、".join(waiting) if waiting else ""))
         elif owner_gone(c) or r.nobody_archiving(c):
             orphans.append(c)
     done = []
@@ -534,6 +555,7 @@ def main():
         elif drive_dead(c["dispatch"]):
             r.redispatch(c, repo_paths[c["repo"]], "drive pid %s 已經不在" % c["dispatch"]["drive_pid"])
     r.dispatch_new(live, repo_paths)
+    r.act(["opsx", "reap"])   # 失敗 act 已經記 log；孤兒的判斷與關閉條件都在 opsx reap
     r.save()
     r.log("== 結束：%d 張卡，收尾 %d 張" % (len(live), len(done)))
 
