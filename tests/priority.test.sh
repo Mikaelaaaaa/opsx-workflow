@@ -109,8 +109,17 @@ card badimp "kind_of_work: incident" "impact: urgent" "evidence: x"
 expect_err badimp impact urgent
 card badkind "kind_of_work: hotfix"
 expect_err badkind kind_of_work hotfix
-card nested "kind_of_work: incident" "impact:" "  security: true" "  evidence: x"
-expect_err nested impact nested
+# D3 字面的寫法：impact 底下縮排 <值>: true 與 evidence（真實卡 pane-reaper 的形狀）
+card nested "kind_of_work: incident" "impact:" "  workaround_exists: true" '  evidence: "手動 opsx stop 可替代"'
+expect nested P1 "workaround_exists"
+card nestedsec "kind_of_work: incident" "impact:" "  security: true" "  data: false" "  evidence: x"
+expect nestedsec P0 "security"
+card nestednoev "kind_of_work: incident" "impact:" "  security: true"
+expect_err nestednoev evidence nestednoev
+card nestedbad "kind_of_work: incident" "impact:" "  security: maybe" "  evidence: x"
+expect_err nestedbad security maybe
+card nestedkind "kind_of_work:" "  incident: true"
+expect_err nestedkind kind_of_work
 card noreason "kind_of_work: incident" "priority: P0"
 expect_err noreason priority_reason noreason
 # 壞一張卡不影響別張

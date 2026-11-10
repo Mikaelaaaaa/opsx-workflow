@@ -303,10 +303,11 @@ class Round:
 
     def dispatch_new(self, cards, repo_paths):
         n = 0
-        running = [c for c in cards if c["dispatch"]]
+        # collect 的快照裡，這一輪 handle_gate 剛停下並 park 的卡 dispatch 還在，不算進行中
+        running = [c for c in cards if c["dispatch"] and card_key(c) not in self.memo["_parked"]]
         busy = len(running)
-        # P0 要位子時停的對象：slug 字母序
-        p2 = sorted((c for c in running if self.level(repo_paths[c["repo"]], c["slug"]).get("level") == "P2"),
+        # P0 要位子時停的對象：slug 字母序；開了 MR 的卡在等合併或 babysit，停掉會中斷人要合的東西
+        p2 = sorted((c for c in running if not c["mr"] and self.level(repo_paths[c["repo"]], c["slug"]).get("level") == "P2"),
                     key=operator.itemgetter("slug"))
         ranked = sorted((self.rank(c, repo_paths[c["repo"]]), i, c) for i, c in enumerate(cards))
         for _, _, c in ranked:

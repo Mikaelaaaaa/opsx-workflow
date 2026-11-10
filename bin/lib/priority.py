@@ -23,35 +23,60 @@ class PriorityError(Exception):
     """事實欄位或 workplan 的 milestone 欄位不合格；訊息指名卡或欄位與值。"""
 
 
+def unquote(v: str) -> str:
+    return v[1:-1] if len(v) >= 2 and v[0] == v[-1] and v[0] in "\"'" else v
+
+
 def frontmatter(text: str) -> tuple:
-    """檔頭兩行 `---` 之間的 `key: value`，與底下有縮排續行的 key（巢狀寫法）。沒有 frontmatter 回 ({}, set())。"""
+    """檔頭兩行 `---` 之間的 `key: value`，與每個 key 底下縮排續行的 [(key, value)]（巢狀寫法）。沒有 frontmatter 回 ({}, {})。"""
     lines = text.split("\n")
     if not lines or lines[0].strip() != "---":
-        return {}, set()
-    out, nested, last = {}, set(), None
+        return {}, {}
+    out, nested, last = {}, {}, None
     for line in lines[1:]:
         if line.strip() == "---":
             return out, nested
+        k, sep, v = line.strip().partition(":")
         if line[:1] in (" ", "\t") and line.strip():
             if last:
-                nested.add(last)
+                nested.setdefault(last, []).append((k.strip(), unquote(v.strip()) if sep else ""))
             continue
-        k, sep, v = line.partition(":")
         if sep:
             last = k.strip()
             out[last] = v.strip()
-    return {}, set()
+    return {}, {}
+
+
+def nested_impact(slug: str, children: list) -> tuple:
+    """D3 字面的寫法：`impact:` 底下縮排 `<值>: true|false`，可帶一行縮排的 `evidence:`。回 (成立的 impact, evidence)。"""
+    impact, evidence = [], ""
+    for k, v in children:
+        if k == "evidence":
+            evidence = v
+        elif k not in IMPACT_P0 + IMPACT_P1:
+            raise PriorityError("%s：impact 不認得「%s」，要是 %s 之一" % (slug, k, "、".join(IMPACT_P0 + IMPACT_P1)))
+        elif v not in ("true", "false"):
+            raise PriorityError("%s：impact 的 %s 要是 true 或 false，收到「%s」" % (slug, k, v))
+        elif v == "true":
+            impact.append(k)
+    return impact, evidence
 
 
 def facts_of(slug: str, text: str) -> dict:
     fm, nested = frontmatter(text)
-    for k in ("kind_of_work", "impact", "evidence", "priority", "priority_reason"):
+    for k in ("kind_of_work", "evidence", "priority", "priority_reason"):
         if k in nested:
-            raise PriorityError("%s：%s 要寫成同一行的 key: value（impact 逗號分隔），不能用縮排的巢狀寫法" % (slug, k))
+            raise PriorityError("%s：%s 要寫成同一行的 key: value，不能用縮排的巢狀寫法" % (slug, k))
     kind = fm.get("kind_of_work") or "planned"   # 沒寫的卡是 planned（agent 開的卡預設）
     if kind not in KINDS:
         raise PriorityError("%s：kind_of_work 要是 incident 或 planned，收到「%s」" % (slug, kind))
-    impact = [x.strip() for x in (fm.get("impact") or "").split(",") if x.strip()]
+    if "impact" in nested and fm.get("impact"):
+        raise PriorityError("%s：impact 同一行有值又有縮排的巢狀寫法，只能擇一" % slug)
+    if "impact" in nested:
+        impact, inner_evidence = nested_impact(slug, nested["impact"])
+        fm["evidence"] = fm.get("evidence") or inner_evidence
+    else:
+        impact = [x.strip() for x in (fm.get("impact") or "").split(",") if x.strip()]
     for x in impact:
         if x not in IMPACT_P0 + IMPACT_P1:
             raise PriorityError("%s：impact 不認得「%s」，要是 %s 之一" % (slug, x, "、".join(IMPACT_P0 + IMPACT_P1)))
@@ -93,12 +118,19 @@ def load_plan(top: str) -> dict:
     """workplan 與 milestone 欄位的驗證；沒有 workplan 等於空的。"""
     path = os.path.join(top, "openspec", "workplan.yaml")
     wp = chain.load_workplan(path) if os.path.exists(path) else {}
-    goals = {m.get("name"): m.get("goal") for m in wp.get("milestones") or []}
+    for m in wp.get("milestones") or []:
+        if not isinstance(m, dict) or not isinstance(m.get("name"), str) or not isinstance(m.get("goal"), str):
+            raise PriorityError("workplan 的 milestones 每項要有字串 name 與 goal，收到「%s」" % (m,))
+    goals = {m["name"]: m["goal"] for m in wp.get("milestones") or []}
     current = wp.get("current_milestone")
+    if current is not None and not isinstance(current, str):
+        raise PriorityError("workplan 的 current_milestone 要是一個名字，收到「%s」" % (current,))
     if current and current not in goals:
         raise PriorityError("workplan 的 current_milestone「%s」不在 milestones 裡（有：%s）" % (current, "、".join(goals) or "無"))
     for f in wp.get("features") or []:
         m = f.get("milestone")
+        if m is not None and not isinstance(m, str):
+            raise PriorityError("workplan 的 feature「%s」的 milestone 要是一個名字，收到「%s」" % (f.get("name"), m))
         if m and m not in goals:
             raise PriorityError("workplan 的 feature「%s」的 milestone「%s」不在 milestones 裡" % (f.get("name"), m))
     return {"features": wp.get("features") or [], "goals": goals, "current": current}
