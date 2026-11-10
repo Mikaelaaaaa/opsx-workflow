@@ -15,7 +15,7 @@ Unified development workflow plugin for Claude Code. Covers the full cycle: thin
 `init --global` 會把 PATH 上 `python3` 背後真正的執行檔記在 `~/.local/state/opsx/python`，opsx 和 hooks 只用它（繞過 pyenv shim，每次省 250 ms 左右）。
 升級到有這個檔的版本後、或 pyenv 換了 python 版本後，要再跑一次 `opsx init --global`；沒跑的話 opsx 會報錯，卡的 branch 上的授權閘門會擋下 Bash 呼叫。
 
-`init --global` 與 `init` 也會改使用者層 Claude Code settings（`$CLAUDE_CONFIG_DIR/settings.json`，沒設才是 `~/.claude/settings.json`）。要寫什麼只有一份標準設定：`templates/settings.opsx.json`（opsx / openspec 的 allow 規則、opsx state 目錄可寫、herdr socket、`gh pr *` 在沙盒外執行）；`init` 在 repo 裡再把該 repo 的根目錄加進可寫目錄。state 目錄下的 `grants.toml`、`dispatch.json`、`dispatch.json.lock` 在沙盒內唯讀（防止被注入的 session 改授權），所以會寫它們的 opsx 子命令（`dispatch`、`stop`、`chain`、`merge`、`answer`）要在沙盒外跑。只追加不存在的項目，改檔前把原檔備份成 `settings.json.opsx-bak`，重跑不動；檔案不是合法 JSON 時直接報錯、不改它。
+`init --global` 與 `init` 也會改使用者層 Claude Code settings（`$CLAUDE_CONFIG_DIR/settings.json`，沒設才是 `~/.claude/settings.json`）。要寫什麼只有一份標準設定：`templates/settings.opsx.json`（opsx / openspec 的 allow 規則、opsx state 目錄可寫、herdr socket、`gh pr *` 在沙盒外執行）；`init` 在 repo 裡再把該 repo 的根目錄加進可寫目錄。state 目錄下的 `grants.toml` 與 `python` 在沙盒內唯讀（防止被注入的 session 改授權、或換掉 hook 跑的 interpreter），所以要改它們得在沙盒外（你的終端機）跑 `opsx init --global` 或 `opsx answer --grant`。`dispatch.json` 目前仍可被沙盒內的 session 寫，這個缺口由 `merge-approval-protect` 補。只追加不存在的項目，改檔前把原檔備份成 `settings.json.opsx-bak`，重跑不動；檔案不是合法 JSON 時直接報錯、不改它。
 
 新電腦 onboarding：裝好 plugin → `opsx init --global` → 每個 repo 根目錄 `opsx init` → `opsx init --check` 確認和標準設定一致（只讀；缺什麼逐項印出，exit 1）。要改全部機器的設定，改 `templates/settings.opsx.json`、再各跑一次 `opsx init --global`，不要手改各台的 settings。
 
