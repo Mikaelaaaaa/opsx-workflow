@@ -55,16 +55,16 @@ opsx_drive() {
         case "$mr" in
           ready) say "drive: $slug MR 五條件全綠，可以合併，停在這裡等人"; opsx_status_quiet "$top" "$slug" pr 5/5 "可以合併"; coordinate_kick "$slug"; return 0 ;;
           none)  say "drive: $slug report.md 有 MR 但 glab 讀不到，等 $poll 秒再看"; sleep "$poll" ;;
-          *)     say "drive: $slug MR 卡在 $mr → /babysit"; herdr_step "$slug" agent prompt "$slug" "/babysit $slug" --wait || return 0; sleep "$poll" ;;
+          *)     say "drive: $slug MR 卡在 $mr → /opsx-workflow:babysit"; herdr_step "$slug" agent prompt "$slug" "/opsx-workflow:babysit $slug" --wait || return 0; sleep "$poll" ;;
         esac ;;
       explore|grill|propose|apply|review|pr)
         if [ "$stage" = "$last" ] && [ "$sent" -ge 2 ]; then
-          write_stuck_gate "$d" "$stage" "$repo" "$slug"; say "drive: $slug 送了兩次 /$stage 階段都沒動，寫了 gate 等人"
+          write_stuck_gate "$d" "$stage" "$repo" "$slug"; say "drive: $slug 送了兩次 /opsx-workflow:$stage 階段都沒動，寫了 gate 等人"
           coordinate_kick "$slug"   # shell 附加寫的 gate 不經過 gate-timestamp hook
           continue
         fi
-        say "drive: $slug → /$stage"
-        herdr_step "$slug" agent prompt "$slug" "/$stage $slug" --wait || return 0
+        say "drive: $slug → /opsx-workflow:$stage"
+        herdr_step "$slug" agent prompt "$slug" "/opsx-workflow:$stage $slug" --wait || return 0
         [ "$HERDR_STEP_OK" = 1 ] || continue   # 沒送進去的不算一次
         if [ "$stage" = "$last" ]; then sent=$((sent+1)); else last="$stage"; sent=1; fi ;;
       *) die "drive: 不認得的階段 $stage" ;;

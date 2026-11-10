@@ -9,7 +9,7 @@ When a parent card merges and more than one child card is ready, `opsx chain <pa
 | A child card's apply, review and pr, when its tasks need nobody | a subagent |
 | Anything that needs the user: a level-two action without a grant, a product choice | the pane, as a gate in that card's `gates.md` |
 | Two cards where one depends on the other | the pane runs them one after the other, never in parallel |
-| Merge (`/babysit merge <sha> <slug>`) | the subagent that owns the card, because the grant gate reads the card from the branch of the directory the command runs in |
+| Merge (`/opsx-workflow:babysit merge <sha> <slug>`) | the subagent that owns the card, because the grant gate reads the card from the branch of the directory the command runs in |
 
 A subagent has no herdr agent name. `opsx answer` and the board cannot reach it, so a subagent never waits for the user. It reports and stops.
 
@@ -31,7 +31,7 @@ Prompts for a fanned-out card reach this pane prefixed with the card's slug:
 |---|---|
 | `[<slug>] 有新的派工指示，Read inbox.md 的 ## 派工指示` | SendMessage that card's subagent to read the `## 派工指示` section of `<top>/openspec/changes/<slug>/inbox.md`, with the real path written in; the relative `inbox.md` does not exist in its worktree. A card whose subagent is not spawned yet (it waits on another card) needs nothing: its brief reads the file when it starts. This is not the "cannot be reached" case below |
 | `[<slug>] <answer text>` | SendMessage the answer to that card's subagent |
-| `/babysit merge <sha> <slug>` | SendMessage the subagent: run `/babysit merge <sha>` in its own worktree |
+| `/opsx-workflow:babysit merge <sha> <slug>` | SendMessage the subagent: run `/opsx-workflow:babysit merge <sha>` in its own worktree |
 | `[<slug>] stop` | stop that subagent (TaskStop); its branch and worktree stay |
 
 If the subagent cannot be reached (it ended and the worktree is gone), write a gate (`type: decision`) in that card's `gates.md`: the card has to be re-dispatched (`opsx stop <slug>`, then 指派 on the board).

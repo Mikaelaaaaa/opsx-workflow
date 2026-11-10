@@ -33,7 +33,7 @@ bad=[k for k in ("opened","not_draft","no_conflicts","pipeline","threads") if no
 print("no\t"+m["state"]+"\t"+",".join(bad))')"
   case "$verdict" in
     ok*) ;;
-    *) die "merge: $slug 的 MR 五條件沒全綠（$(printf '%s' "$verdict" | cut -f2)；沒過：$(printf '%s' "$verdict" | cut -f3)），不核准。用 /babysit 看怎麼了" ;;
+    *) die "merge: $slug 的 MR 五條件沒全綠（$(printf '%s' "$verdict" | cut -f2)；沒過：$(printf '%s' "$verdict" | cut -f3)），不核准。用 /opsx-workflow:babysit 看怎麼了" ;;
   esac
   local sha; sha="$(printf '%s' "$verdict" | cut -f2)"
   [ -n "$sha" ] || die "merge: glab 沒回 MR 的 head sha，核准綁不到 commit，不核准"
@@ -49,13 +49,13 @@ card = jsonfile.load(os.path.join(sd, "dispatch.json")).get(key)
 if not card or card.get("mode") == "stopped":
     sys.exit("merge: %s 沒派出（不在 dispatch.json），沒有 agent 可以執行合併；先 opsx dispatch" % key)
 if card.get("mode") == "interactive":
-    sys.exit("merge: %s 是互動模式，沒有授權閘門，合併要在它的 pane 裡對 agent 說「/babysit merge」並自己按權限框" % key)
+    sys.exit("merge: %s 是互動模式，沒有授權閘門，合併要在它的 pane 裡對 agent 說「/opsx-workflow:babysit merge」並自己按權限框" % key)
 def put(d):
     c = d.setdefault(key, {}); c["merge_approved"] = sha; c["merge_approved_at"] = now
 authz.update(sd, put)
 PY
   log_row "$d" 你 已允許 "核准合併 ${sha}" "${sha} · $(st_mr_url "$d")"
   local route name via; route="$(card_route "$repo" "$slug")" || die "讀不懂 dispatch.json，不知道話要送給誰"; name="${route%%$'\t'*}"; via="${route#*$'\t'}"
-  herdr agent prompt "$name" "/babysit merge ${sha}${via:+ $slug}" >/dev/null || die "merge: 核准已寫進 dispatch.json，但 herdr agent prompt 失敗；在 pane 裡對 agent 說 /babysit merge ${sha}"
-  say "merge: $slug 核准合併 ${sha}，已叫 agent /babysit merge；它跑 glab mr merge 時閘門會放行（只放這個 sha、這條 MR）"
+  herdr agent prompt "$name" "/opsx-workflow:babysit merge ${sha}${via:+ $slug}" >/dev/null || die "merge: 核准已寫進 dispatch.json，但 herdr agent prompt 失敗；在 pane 裡對 agent 說 /opsx-workflow:babysit merge ${sha}"
+  say "merge: $slug 核准合併 ${sha}，已叫 agent /opsx-workflow:babysit merge；它跑 glab mr merge 時閘門會放行（只放這個 sha、這條 MR）"
 }

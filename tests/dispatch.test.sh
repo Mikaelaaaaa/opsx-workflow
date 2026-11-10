@@ -43,7 +43,7 @@ assert_grep '^workspace list$' "$OPSX_FAKE_LOG"
 assert_grep '^agent start retry-backoff --kind claude --pane w1:pE -- --model claude-sonnet-5-5 --permission-mode dontAsk --settings '"$OPSX_STATE_DIR"'/settings/Agentory-CS-retry-backoff-autopilot.json --add-dir ' "$OPSX_FAKE_LOG"
 # 沙盒只准寫 working directories：卡的檔在主 repo 的 openspec/、hook 與 status 寫 state dir，兩個都要 --add-dir
 assert_grep "^agent start retry-backoff .* --add-dir $R/openspec --add-dir $OPSX_STATE_DIR\$" "$OPSX_FAKE_LOG"
-assert_grep '^agent prompt retry-backoff /propose retry-backoff$' "$OPSX_FAKE_LOG"
+assert_grep '^agent prompt retry-backoff /opsx-workflow:propose retry-backoff$' "$OPSX_FAKE_LOG"
 assert_not_grep '^workspace create' "$OPSX_FAKE_LOG"
 # settings：repo 永遠 push 進 allow；merge 在 allow 不在 deny（deny 會蓋過 grant-gate 的放行，merge 由 gate 單獨把關）
 S="$OPSX_STATE_DIR/settings/Agentory-CS-retry-backoff-autopilot.json"; assert_file "$S"
@@ -117,7 +117,7 @@ assert_eq "$(grep -c '^agent start trust-card ' "$OPSX_FAKE_LOG")" 1 "no second 
 assert_grep '^pane wait-output --match trust this folder .*w1:pE$' "$OPSX_FAKE_LOG"
 assert_grep '^pane send-keys w1:pE down enter$' "$OPSX_FAKE_LOG"
 assert_grep '^agent wait trust-card --until idle' "$OPSX_FAKE_LOG"
-assert_grep '^agent prompt trust-card /explore trust-card$' "$OPSX_FAKE_LOG"
+assert_grep '^agent prompt trust-card /opsx-workflow:explore trust-card$' "$OPSX_FAKE_LOG"
 assert_not_grep '^tab close' "$OPSX_FAKE_LOG"
 python3 -I -c 'import json,sys;assert "Agentory-CS/trust-card" in json.load(open(sys.argv[1]))' "$OPSX_STATE_DIR/dispatch.json"
 # 不是 trust 對話框（例如要登入）：不按鍵，關 tab，把畫面印給人看
@@ -179,7 +179,7 @@ R3="$(mk_repo gmtc-rag)"; mkdir -p "$R3/openspec/changes/z"; printf 'schema: ops
 printf '"gmtc-rag" = "develop"\n' >> "$OPSX_STATE_DIR/workspaces.toml"
 out="$(cd "$R3" && opsx dispatch z --agent claude --mode autopilot --kind dev 2>&1)"; [ $? -ne 0 ] || fail "沒有的 workspace 要失敗"
 echo "$out" | grep -q 'develop' && echo "$out" | grep -q 'agnetory-ai' || fail "要列出現有 label: $out"
-assert_grep '^agent prompt rdap-timeout /explore rdap-timeout$' "$OPSX_FAKE_LOG"                       # 沒 explore.md → explore
+assert_grep '^agent prompt rdap-timeout /opsx-workflow:explore rdap-timeout$' "$OPSX_FAKE_LOG"                       # 沒 explore.md → explore
 
 # --- workplan 有 branch 就用它 ---
 R3="$(mk_repo Agentory-AI)"; mkdir -p "$R3/openspec/changes/eval-core"; printf 'schema: opsx\nkind: dev\n' > "$R3/openspec/changes/eval-core/.openspec.yaml"
@@ -296,7 +296,7 @@ out="$(opsx dispatch --feature fs --agent claude --mode autopilot 2>&1)"; assert
 assert_eq "$(grep -c '^agent start' "$OPSX_FAKE_LOG")" 1 "一個 feature 只開一個 agent"
 assert_grep '^agent start fs --kind claude ' "$OPSX_FAKE_LOG"
 assert_grep '^tab create .* --label fs' "$OPSX_FAKE_LOG"
-assert_grep '^agent prompt fs /apply m1$' "$OPSX_FAKE_LOG"
+assert_grep '^agent prompt fs /opsx-workflow:apply m1$' "$OPSX_FAKE_LOG"
 J="$OPSX_STATE_DIR/dispatch.json"
 assert_eq "$(jq -r '."Feat-Repo/@fs" | [.workspace, .workspace_id, .tab, .pane, .worktree, .agent, .mode, (.drive_pid | tostring), (.started_at | length > 0 | tostring), (.model | length > 0 | tostring)] | join(" ")' "$J")" \
   "Feat-Repo w9 w1:tB w1:pE $RF/.claude/worktrees/fs claude autopilot null true true" "session 條目"
@@ -328,7 +328,7 @@ python3 -I -c 'import json,sys;p=sys.argv[1];d=json.load(open(p));d["Feat-Repo/m
 # 重派人停的成員卡、session 還活著：清掉 stopped、送 [m2] /apply m2 給 session，不開 pane
 : > "$OPSX_FAKE_LOG"
 out="$(opsx dispatch m2 --agent claude --mode autopilot 2>&1)"; assert_eq "$?" 0 "session 活著重派 m2: $out"
-assert_eq "$(cat "$OPSX_FAKE_LOG")" "agent prompt fs [m2] /apply m2" "只送一句給 session"
+assert_eq "$(cat "$OPSX_FAKE_LOG")" "agent prompt fs [m2] /opsx-workflow:apply m2" "只送一句給 session"
 assert_eq "$(jq -r '."Feat-Repo/m2" | [.mode, .pane, .via, .herdr_name, (has("stopped_at") | tostring)] | join(" ")' "$J")" "autopilot w1:pE @fs fs false" "m2 不再是 stopped，pane 取自 session"
 
 # opsx stop @fs：關 session pane、標 session 條目 stopped，成員條目不動
@@ -347,7 +347,7 @@ sed -i.bak 's/^"Feat-Repo" = .*/"Feat-Repo" = "agnetory-ai"/' "$OPSX_STATE_DIR/w
 : > "$OPSX_FAKE_LOG"
 out="$(opsx dispatch --feature fs --agent claude --mode autopilot 2>&1)"; assert_eq "$?" 0 "session 重派: $out"
 assert_eq "$(jq -r '."Feat-Repo/m1".mode' "$J")" stopped "人停的 m1 仍是 stopped"
-assert_grep '^agent prompt fs /apply m2$' "$OPSX_FAKE_LOG"
+assert_grep '^agent prompt fs /opsx-workflow:apply m2$' "$OPSX_FAKE_LOG"
 assert_not_grep '^agent prompt fs /.* m1$' "$OPSX_FAKE_LOG"
 
 # 重派人停的成員卡、session 不在：照單卡派（m2 的 branch 沒被 session 的 worktree checkout）
@@ -362,7 +362,7 @@ assert_not_grep '^agent prompt fs' "$OPSX_FAKE_LOG"
 out="$(opsx stop m2 2>&1)" || fail "stop m2: $out"
 : > "$OPSX_FAKE_LOG"
 out="$(opsx dispatch --feature fs --agent claude --mode autopilot 2>&1)"; assert_eq "$?" 0 "單卡留下的 stopped 不算人停的成員: $out"
-assert_grep '^agent prompt fs /apply m2$' "$OPSX_FAKE_LOG"
+assert_grep '^agent prompt fs /opsx-workflow:apply m2$' "$OPSX_FAKE_LOG"
 assert_eq "$(jq -r '."Feat-Repo/m2" | [.mode, .via] | join(" ")' "$J")" "autopilot @fs" "m2 寫成 session 成員"
 assert_eq "$(jq -r '."Feat-Repo/m1".mode' "$J")" stopped "via @fs 的人停成員照樣跳過"
 
@@ -384,7 +384,7 @@ export OPSX_TEST_ON_WAIT="$FX/stop-m1-on-wait.sh"
 out="$(opsx dispatch --feature fs --agent claude --mode autopilot 2>&1)"; assert_eq "$?" 0 "重派途中有人停: $out"
 unset OPSX_TEST_NOT_READY_ONCE OPSX_TEST_PANE_TEXT OPSX_TEST_ON_WAIT
 assert_eq "$(jq -r '."Feat-Repo/m1".mode' "$J")" stopped "途中人停的 m1 不被蓋回"
-assert_grep '^agent prompt fs /apply m2$' "$OPSX_FAKE_LOG"
+assert_grep '^agent prompt fs /opsx-workflow:apply m2$' "$OPSX_FAKE_LOG"
 assert_not_grep '^agent prompt fs /.* m1$' "$OPSX_FAKE_LOG"
 
 # session 條目被 reap 收掉（mode 還是 autopilot、有 reaped_at）：當作 session 不在，人停的成員照單卡派
@@ -416,7 +416,7 @@ assert_eq "$(cat "$OPSX_FAKE_LOG")" "" "空白 --note 不碰 herdr"
 cmp -s "$N/inbox.md" "$FX/note-before.md" || fail "空白 --note 不該動 inbox.md"
 printf 'cp "%s" "%s"\n' "$N/inbox.md" "$FX/note-at-prompt.md" > "$FX/snap-prompt.sh"
 out="$(OPSX_TEST_ON_PROMPT="$FX/snap-prompt.sh" opsx dispatch note-card --agent claude --mode interactive --note "先跑 lint" 2>&1)" || fail "dispatch --note: $out"
-assert_grep '^agent prompt note-card /explore note-card$' "$OPSX_FAKE_LOG"
+assert_grep '^agent prompt note-card /opsx-workflow:explore note-card$' "$OPSX_FAKE_LOG"
 assert_file "$FX/note-at-prompt.md"
 awk '/^## 派工指示[[:space:]]*$/{f=1;next} /^## /{f=0} f && /^- /' "$FX/note-at-prompt.md" | grep -qE '^- 20[0-9-]+T[0-9:]+[+-][0-9:]+ 先跑 lint$' || fail "第一句送出時要已寫入：$(cat "$FX/note-at-prompt.md")"
 cp "$N/inbox.md" "$FX/note-before.md"
