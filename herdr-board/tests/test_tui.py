@@ -1,9 +1,11 @@
-"""herdr-board/tui_model.py：TUI 的純函式（排序、游標、Enter 要做什麼）。curses 不在這裡測。
-驗收：specs/board-plugin/spec.md「最小 TUI」三個 Scenario（herdr-board 5.2）。
+"""herdr-board/tui_model.py：TUI 的純函式（排序、游標、範圍、輸入框、各鍵的 argv）。curses 畫面不在這裡測。
+驗收：specs/board-plugin/spec.md「最小 TUI」的 Scenario（herdr-board 5.2、tui-keys/tui-new-keys）。
 跑法：python3 -I herdr-board/tests/test_tui.py
 """
+import curses
 import importlib.util
 import pathlib
+import subprocess
 import unittest
 
 HERE = pathlib.Path(__file__).resolve().parent
@@ -167,6 +169,126 @@ class CursorTest(unittest.TestCase):
         self.assertIsNone(cur.index)
         cur.move(1)
         self.assertIsNone(cur.index)
+
+
+def proc(argv, rc=0, out="", err=""):
+    return subprocess.CompletedProcess(argv, rc, out, err)
+
+
+class ZoomTest(unittest.TestCase):
+    def test_zoom_argv(self):
+        self.assertEqual(tm.ZOOM_ARGV, ["herdr", "pane", "zoom", "--current", "--toggle"])
+
+    def test_outcome_shows_ok_text_or_first_80_of_stderr(self):
+        self.assertEqual(tm.outcome(tm.ZOOM_ARGV, proc(tm.ZOOM_ARGV), "全屏切換了"), "全屏切換了")
+        note = tm.outcome(tm.ZOOM_ARGV, proc(tm.ZOOM_ARGV, rc=1, err="  " + "x" * 100 + "\n"), "全屏切換了")
+        self.assertEqual(note, "herdr pane zoom --current --toggle 失敗：" + "x" * 80)
+
+
+SCOPES = [{"workspace": "w1", "repos": ["a"]}, {"workspace": None, "repos": ["b"]}]
+WDATA = {"scopes": SCOPES, "repo_paths": {"a": "/r/a", "b": "/r/b"}, "unmatched_agents": [], "errors": [],
+         "cards": [card("ka", "待處理", repo="a"), card("kb", "待處理", repo="b")],
+         "sessions": [dict(SESSION, repo="b")]}
+
+
+class ScopeTest(unittest.TestCase):
+    def test_tab_cycles_all_then_workspaces_then_all(self):
+        seen, scope = [], None
+        for _ in range(3):
+            scope = tm.next_scope(WDATA, scope)
+            seen.append(tm.scope_label(scope))
+        self.assertEqual(seen, ["w1", "沒掛的", "全部"])
+
+    def test_tab_with_no_scopes_stays_all(self):
+        self.assertIsNone(tm.next_scope({"cards": []}, None))
+
+    def test_scope_filters_cards_and_sessions_but_not_pending_count(self):
+        rows = tm.rows(WDATA, done_open=False, scope="w1")
+        self.assertEqual([r["card"]["slug"] for r in rows if r["kind"] == "card"], ["ka"])
+        self.assertFalse(any(r["kind"] == "session" for r in rows), "repo b 的 session 不在 w1")
+        self.assertEqual(tm.top_line(WDATA, "w1"), " opsx  待處理 2  範圍 w1")
+        unmounted = tm.rows(WDATA, done_open=False, scope=tm.next_scope(WDATA, "w1"))
+        self.assertEqual([r["card"]["slug"] for r in unmounted if r["kind"] == "card"], ["kb"])
+        self.assertEqual([r["kind"] for r in unmounted].count("session"), 1)
+
+    def test_all_scope_keeps_everything(self):
+        rows = tm.rows(WDATA, done_open=False, scope=None)
+        self.assertEqual([r["card"]["slug"] for r in rows if r["kind"] == "card"], ["ka", "kb"])
+        self.assertEqual(tm.top_line(WDATA, None), " opsx  待處理 2  範圍 全部")
+
+    def test_vanished_workspace_falls_back_to_all(self):
+        gone = dict(WDATA, scopes=[{"workspace": "w2", "repos": ["a"]}])
+        self.assertIsNone(tm.keep_scope(gone, "w1"))
+        self.assertIsNone(tm.next_scope(gone, "w1"), "從消失的範圍按 Tab 也回全部")
+        self.assertEqual(tm.keep_scope(WDATA, "w1"), "w1")
+        self.assertEqual(tm.keep_scope(WDATA, tm.UNMOUNTED), tm.UNMOUNTED)
+
+
+def typed(*keys):
+    box = tm.LineInput()
+    results = [box.feed(k) for k in keys]
+    return box, results
+
+
+class LineInputTest(unittest.TestCase):
+    def test_edit_chinese_with_backspace(self):
+        box, results = typed("修", "正", curses.KEY_BACKSPACE, "好")
+        self.assertEqual(box.text, "修好")
+        self.assertEqual(results, [None, None, None, None])
+
+    def test_terminal_backspace_chars_and_empty_backspace(self):
+        box, _ = typed("\x7f", "a", "b", "\x7f", "c", "\x08")
+        self.assertEqual(box.text, "a")
+
+    def test_enter_submits_stripped_text(self):
+        self.assertEqual(typed(" ", "修", " ", "X", " ", "\n")[1][-1], ("submit", "修 X"))
+        self.assertEqual(typed("y", curses.KEY_ENTER)[1][-1], ("submit", "y"))
+        self.assertEqual(typed("y", "\r")[1][-1], ("submit", "y"))
+
+    def test_esc_cancels_and_blank_enter_is_not_sent(self):
+        self.assertEqual(typed("修", " ", "X", "\x1b")[1][-1], ("cancel",))
+        self.assertEqual(typed(" ", " ", "\n")[1][-1], ("cancel",))
+        self.assertEqual(typed("\n")[1][-1], ("cancel",))
+
+    def test_other_keys_and_control_chars_are_ignored(self):
+        box, results = typed("a", curses.KEY_LEFT, "\t", "b")
+        self.assertEqual(box.text, "ab")
+        self.assertEqual(results, [None, None, None, None])
+
+
+class NewArgvTest(unittest.TestCase):
+    def test_single_repo_scope_passes_repo_path(self):
+        self.assertEqual(tm.new_argv("/root", WDATA, "w1", "修 X"),
+                         ["bash", "/root/bin/opsx", "new", "--repo", "/r/a", "--", "修 X"])
+
+    def test_all_scope_goes_to_unfiled(self):
+        self.assertEqual(tm.new_argv("/root", WDATA, None, "修 X"), ["bash", "/root/bin/opsx", "new", "--", "修 X"])
+
+    def test_multi_repo_scope_goes_to_unfiled(self):
+        data = dict(WDATA, scopes=[{"workspace": "w1", "repos": ["a", "b"]}])
+        self.assertEqual(tm.new_argv("/root", data, "w1", "修 X"), ["bash", "/root/bin/opsx", "new", "--", "修 X"])
+
+    def test_unmounted_single_repo_uses_its_path(self):
+        self.assertEqual(tm.new_argv("/root", WDATA, tm.UNMOUNTED, "y"),
+                         ["bash", "/root/bin/opsx", "new", "--repo", "/r/b", "--", "y"])
+
+
+OPEN = ["bash", "/root/herdr-board/scripts/open-board.sh"]
+
+
+class OpenArgvTest(unittest.TestCase):
+    def test_card_row_opens_repo_slug(self):
+        row = next(r for r in tm.rows(DATA, done_open=False) if r["kind"] == "card" and r["card"]["slug"] == "ask1")
+        self.assertEqual(tm.open_argv("/root", row), OPEN + ["a/ask1"])
+
+    def test_session_row_opens_current_main(self):
+        row = next(r for r in tm.rows(SDATA, done_open=False) if r["kind"] == "session")
+        self.assertEqual(tm.open_argv("/root", row), OPEN + ["a/bt"])
+
+    def test_nothing_to_open(self):
+        self.assertIsNone(tm.open_argv("/root", {"kind": "session", "session": dict(SESSION, current=None)}), "session 已全部合併")
+        self.assertIsNone(tm.open_argv("/root", {"kind": "header", "section": "待處理"}))
+        self.assertIsNone(tm.open_argv("/root", None), "游標不在卡上")
 
 
 if __name__ == "__main__":
