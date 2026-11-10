@@ -251,7 +251,13 @@ EOF
 )"')"; assert_eq "$(decision "$out")" deny "mr: --body \$(cat <<EOF) 不合格仍擋"
 
 # ---------- gate-timestamp ----------
-gt() { printf '{"cwd":"%s","tool_name":"%s","tool_input":{"file_path":"%s"},"hook_event_name":"PostToolUse"}' "$R" "${2:-Write}" "$1" | OPSX_NOW=2026-11-06T14:05:00+08:00 bash "$H/gate-timestamp.sh" 2>/dev/null; echo "rc=$?"; }
+# 有 open 的 gate 時 hook 會叫 $CLAUDE_PLUGIN_ROOT/bin/opsx coordinate --kick：換成假的 plugin 根，bin/opsx 是 fake，記到 kick.log
+GP="$FX/gate-plugin"; mkdir -p "$GP/bin/lib"; cp "$OPSX_ROOT/bin/lib/common.sh" "$GP/bin/lib/"
+printf '#!/usr/bin/env bash\nOPSX_FAKE_LOG="%s" exec bash "%s/tests/fakes/opsx" "$@"\n' "$FX/kick.log" "$OPSX_ROOT" > "$GP/bin/opsx"
+KL="$FX/kick.log"; : > "$KL"
+gt() { printf '{"cwd":"%s","tool_name":"%s","tool_input":{"file_path":"%s"},"hook_event_name":"PostToolUse"}' "$R" "${2:-Write}" "$1" | CLAUDE_PLUGIN_ROOT="$GP" OPSX_NOW=2026-11-06T14:05:00+08:00 bash "$H/gate-timestamp.sh" 2>/dev/null; echo "rc=$?"; }
+# gt 但連 stderr 一起收：「沒有輸出」要連 stderr 都沒有
+gt_all() { printf '{"tool_name":"%s","tool_input":{"file_path":"%s"}}' "${2:-Write}" "$1" | CLAUDE_PLUGIN_ROOT="$GP" OPSX_NOW=2026-11-06T14:05:00+08:00 bash "$H/gate-timestamp.sh" 2>&1; echo "rc=$?"; }
 G="$C/gates.md"
 assert_eq "$(jq -r '.hooks.PostToolUse[] | select(.matcher=="Edit|Write") | .hooks[].command' "$OPSX_ROOT/hooks/hooks.json")" '"${CLAUDE_PLUGIN_ROOT}/hooks/gate-timestamp.sh"' "gate-ts: hooks.json 要把它註冊在 PostToolUse 的 Edit|Write"
 [ -x "$OPSX_ROOT/hooks/gate-timestamp.sh" ] || fail "gate-ts: hook 要可執行"
@@ -271,7 +277,7 @@ assert_eq "$(cat "$C/tasks.md")" "$(printf '## g1\nstatus: open')" "gate-ts: 不
 rm -f "$G"; out="$(gt "$G")"; assert_eq "$out" "rc=0" "gate-ts: 檔案不存在不擋"
 [ ! -e "$G" ] || fail "gate-ts: 不存在的檔不該被建出來"
 printf '## g1\nstatus: open\n' > "$G"
-printf '{"tool_name":"Write","tool_input":{"file_path":"%s"}}' "$G" | env -u OPSX_NOW bash "$H/gate-timestamp.sh" >/dev/null 2>&1
+printf '{"tool_name":"Write","tool_input":{"file_path":"%s"}}' "$G" | CLAUDE_PLUGIN_ROOT="$GP" env -u OPSX_NOW bash "$H/gate-timestamp.sh" >/dev/null 2>&1
 grep -Eq '^opened_at: [0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}[+-][0-9]{2}:[0-9]{2}$' "$G" || fail "gate-ts: 真時間要是帶冒號 offset 的 ISO：$(cat "$G")"
 
 # gate type：同義詞改正、表外與沒寫只提醒（gate-type-normalize）。提醒走 PostToolUse 的 additionalContext，退出碼永遠 0
@@ -293,6 +299,29 @@ hook_tbl="$(sed -n "s/^SYN='\(.*\)'$/\1/p" "$H/gate-timestamp.sh" | tr ' ' '\n' 
 py_tbl="$(OPSX_LIB="$OPSX_ROOT/bin/lib" python3 -I -c 'import os,sys;sys.path.insert(0,os.environ["OPSX_LIB"]);import gatetype;print("\n".join("%s=%s"%kv for kv in gatetype.SYNONYMS.items()))' | sort)"
 [ -n "$hook_tbl" ] || fail "gate-type: 在 hook 裡找不到 SYN= 那一行"
 assert_eq "$hook_tbl" "$py_tbl" "gate-type: hook 與 python 的同義詞表要一致"
+rm -f "$G" "$C/tasks.md"
+
+# gate 寫入觸發一輪
+printf '## g1\ntype: decision\nstatus: open\n問題: 哪個？\n' > "$G"; : > "$KL"
+out="$(gt_all "$G")"; assert_eq "$out" "rc=0" "gate-ts kick: 退出碼 0、沒有輸出"
+assert_eq "$(cat "$KL")" "opsx coordinate --kick" "gate-ts kick: 有 open 的 gate 要 kick 一次"
+# 已經補過 opened_at、檔案沒變，還有 open 的 gate 照樣 kick
+: > "$KL"; out="$(gt_all "$G" Edit)"; assert_eq "$out" "rc=0"
+assert_eq "$(cat "$KL")" "opsx coordinate --kick" "gate-ts kick: 沒補時間也要 kick"
+# 都答完了不觸發
+printf '## g1\nstatus: answered\nanswer: A\n' > "$G"; : > "$KL"
+out="$(gt_all "$G" Edit)"; assert_eq "$out" "rc=0"
+assert_not_grep coordinate "$KL"
+# status 帶註記不算 open、不是 gates.md、檔案不存在都不觸發
+printf '## g1\nstatus: open (等 push 授權)\n' > "$G"; gt "$G" >/dev/null
+printf '## g1\nstatus: open\n' > "$C/tasks.md"; gt "$C/tasks.md" >/dev/null
+rm -f "$G"; gt "$G" >/dev/null
+assert_eq "$(cat "$KL")" "" "gate-ts kick: 沒有 open 的 gate 不叫 coordinate"
+# kick 失敗不擋 agent
+printf '## g1\ntype: decision\nstatus: open\n' > "$G"
+out="$(OPSX_TEST_FAIL_coordinate="kick boom" gt_all "$G")"; assert_eq "$out" "rc=0" "gate-ts kick 失敗: 退出碼 0、沒有輸出"
+assert_grep '^opsx coordinate --kick$' "$KL"
+assert_grep '^opened_at: 2026-11-06T14:05:00+08:00$' "$G"
 rm -f "$G" "$C/tasks.md"
 
 # ---------- security guard：路徑不算 AI 署名 ----------

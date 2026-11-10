@@ -54,6 +54,10 @@ case "$1 $2" in
   "agent focus") echo '{"result":{"focused":true}}' ;;
   "plugin list") cat "${OPSX_TEST_HERDR_PLUGINS:-/dev/null}"; echo ;;
   "plugin link") echo '{"result":{"linked":true}}' ;;
+  # OPSX_TEST_NOTIFY_ERR 跟 OPSX_TEST_PROMPT_ERR 一樣：每次呼叫取走一行，非 ok 就回那個錯誤碼
+  "notification show") code="$(pop_err "${OPSX_TEST_NOTIFY_ERR:-}")"
+    if [ -n "$code" ]; then echo '{"error":{"code":"'"$code"'","message":"fake"},"id":"cli:notification:show"}' >&2; exit 1; fi
+    echo '{"result":{"type":"ok"}}' ;;
   "pane current") echo '{"result":{"pane_id":"p42"}}' ;;
   "pane report-metadata") echo '{"result":{"ok":true}}' ;;
   # 真 usage：herdr plugin pane focus <PANE_ID>，只收一個 positional
