@@ -316,4 +316,23 @@ assert_eq "$(printf '%s' "$J" | python3 -I -c 'import json,sys;print(json.dumps(
 # herdr 不可用：orphans 是 []
 export HERDR_ENV=""
 J="$(opsx collect --root "$R6")"; assert_eq "$(q "$J" orphans)" '[]'
+
+# ---------- review 第 1 輪的回歸測試：人或活卡的 pane 不能被當成孤兒（三個重現情境，同一個 orphan_reason） ----------
+# (a) slug 先歸檔、後來又建了活卡：活卡的 pane 與同 cwd 的人工 pane 都不是孤兒
+# (b) 活卡的 repo 不在這次掃描範圍：不能判成 card-missing
+# (c) dispatch.json 留著舊的 stopped 條目（pane w1:p9），人自己在同名 worktree 開的 pane（w1:p3）不是它的
+R7="$FX/code7"; mkdir -p "$R7/o/.git" "$R7/o/openspec/changes/foo" "$R7/o/openspec/changes/archive/2026-11-01-foo"
+O7="$(cd "$R7/o" && pwd -P)"; X7="$FX/elsewhere7/x"
+for d in "$R7/o/openspec/changes/foo" "$R7/o/openspec/changes/archive/2026-11-01-foo"; do printf 'schema: opsx\nkind: dev\n' > "$d/.openspec.yaml"; printf '## 一句話\n\nfoo\n' > "$d/inbox.md"; done
+printf '{"o/foo":{"pane":"w1:p1","mode":"autopilot"},"x/lv":{"pane":"w1:p4","mode":"autopilot","worktree":"%s/.claude/worktrees/lv"},"o/bar":{"pane":"w1:p9","mode":"stopped"}}' "$X7" > "$OPSX_STATE_DIR/dispatch.json"
+{ printf '{"id":"cli:agent:list","result":{"agents":['
+  agent6 w1:p1 working "$O7/.claude/worktrees/foo"; printf ','
+  agent6 w1:p2 idle "$O7/.claude/worktrees/foo"; printf ','
+  agent6 w1:p4 idle "$X7/.claude/worktrees/lv"; printf ','
+  agent6 w1:p3 idle "$O7/.claude/worktrees/bar"
+  printf '],"type":"agent_list"}}'; } > "$FX/agents7.json"
+export HERDR_ENV=1
+J="$(OPSX_TEST_HERDR_AGENTS="$FX/agents7.json" opsx collect --root "$R7")"; assert_eq "$?" 0 "回歸 collect: $J"
+assert_eq "$(q "$J" orphans)" '[]' "活卡的 pane、未掃描 repo 的活卡、人自己開的 pane 都不能是孤兒"
+export HERDR_ENV=""
 echo ok

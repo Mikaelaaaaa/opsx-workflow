@@ -284,10 +284,13 @@ for line in reversed([l for l in read(os.path.join(state, "sync.log")).split("\n
         break
 
 # 孤兒 pane：cwd（或 foreground_cwd）在 <repo>/.claude/worktrees/<slug>/ 底下（或 dispatch.json 記的 worktree），
-# 而且這張卡已歸檔、已拆（stage split）、dispatch.json 標 stopped、或卡目錄不在。只對 pane id 不夠：stopped 條目留著舊 pane id，
-# herdr 重用 id 時會指到別人的 pane。判斷只在這裡算一次，coordinate / reap / 看板都讀 orphans。
+# 而且這張卡已歸檔、已拆（stage split）、dispatch.json 標 stopped、或卡目錄不在，而且這個 pane 就是 dispatch.json 該條記的 pane。
+# 三個都要：只看 cwd，人在同名 worktree 自己開的 pane 會被認領；只看 pane id，herdr 重用 id 時會指到別人的 pane。
+# 判斷只在這裡算一次，coordinate / reap / 看板都讀 orphans。
 # workplan 標 merged 的卡（stage archive）還沒歸檔，agent 可能正在跑 /archive，不算。
-card_by_key = {(c["repo"], c["slug"]): c for c in cards}
+# 同一個 slug 先歸檔後又建活卡時活卡優先，所以歸檔的先放、活的後蓋。
+card_by_key = {(c["repo"], c["slug"]): c for c in cards if c["archived"]}
+card_by_key.update({(c["repo"], c["slug"]): c for c in cards if not c["archived"]})
 worktree_of = {}
 for k, e in dispatch.items():
     if e.get("worktree"):
@@ -302,20 +305,24 @@ def worktree_owner(path):
             if p.startswith(prefix) and p[len(prefix):].split("/")[0]: return (repo_, p[len(prefix):].split("/")[0])
     return None
 
-def orphan_reason(key):
-    # .claude/worktrees/ 也放 Claude Code 自己開的 worktree：dispatch.json 沒記過的，不是 opsx 開的 pane
-    if "%s/%s" % key not in dispatch: return None
+def orphan_reason(key, pane):
+    # .claude/worktrees/ 也放別的工具自己開的 worktree：dispatch.json 沒記過、或記的不是這個 pane 的，不是 opsx 開的 pane
+    entry = dispatch.get("%s/%s" % key)
+    if entry is None or str(entry.get("pane")) != str(pane): return None
     c = card_by_key.get(key)
-    if c is None: return "card-missing"
+    if c is None:
+        # 卡不在 cards 裡不等於卡目錄不存在：repo 沒被這次掃描、或被當舊卡濾掉的活卡不能算
+        top = repo_paths.get(key[0])
+        return "card-missing" if top and not os.path.isdir(os.path.join(top, "openspec", "changes", key[1])) else None
     if c["archived"]: return "archived"
     if c["stage"] == "split": return "split"
-    if (dispatch.get("%s/%s" % key) or {}).get("mode") == "stopped": return "stopped"
+    if entry.get("mode") == "stopped": return "stopped"
     return None
 
 orphans = []
 for a in (agents or []):
     key = next((k for k in (worktree_owner(p) for p in (a.get("cwd"), a.get("foreground_cwd")) if p) if k), None)
-    reason = orphan_reason(key) if key else None
+    reason = orphan_reason(key, a.get("pane_id")) if key else None
     if reason:
         orphans.append({"pane": a.get("pane_id"), "cwd": a.get("cwd"), "agent_status": a.get("agent_status"),
                         "repo": key[0], "slug": key[1], "reason": reason})
