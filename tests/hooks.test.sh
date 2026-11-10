@@ -45,6 +45,8 @@ mkdir -p "$OPSX_STATE_DIR"
 printf '{"Agentory-AI/eval-core":{"mode":"autopilot"}}' > "$OPSX_STATE_DIR/dispatch.json"
 out="$(run_hook openspec-router.sh "$(j "$R" "" '{}' "下一步")")"; r="$(reason "$out")"
 case "$r" in *"autopilot："*"不用 AskUserQuestion"*) ;; *) fail "router: autopilot 規則: $r" ;; esac
+case "$r" in *'approval | decision'*'needs: run'*) ;; *) fail "router: autopilot 規則要寫合法 type 與 needs: run: $r" ;; esac
+case "$r" in *"等待決定 / 等待授權"*) fail "router: 不能把看板標籤當 type 值教給 agent: $r" ;; esac
 case "$r" in *"interactive："*) fail "router: autopilot 卡不該有 interactive 規則: $r" ;; esac
 for tok in "不寫迴圈" "賦值" "命令替換" "{ } 群組" "source" "bash -c" '印 $?' "一個 Bash 呼叫做一件事" "opsx log"; do
   case "$r" in *"$tok"*) ;; *) fail "router: autopilot 的 Bash 寫法規則缺「${tok}」: $r" ;; esac
@@ -96,6 +98,8 @@ printf '[repos."Agentory-AI"]\npush = true\nmr = false\nmigrate = false\n' > "$O
 out="$(gg Bash "$(cmdj 'git push gitlab feat/eval-core/mikaela')")"; assert_eq "$(decision "$out")" allow "grant: repo 永遠 push"
 out="$(gg Bash "$(cmdj 'glab mr create -F desc.md')")"; assert_eq "$(decision "$out")" deny "grant: mr 沒授權"
 reason "$out" | grep -q 'gates.md' || fail "grant: deny 要叫它寫 gate"
+reason "$out" | grep -qF 'approval | decision' || fail "grant: deny 要寫合法 type：$(reason "$out")"
+reason "$out" | grep -qF 'needs: run' || fail "grant: deny 要寫 needs: run：$(reason "$out")"
 out="$(gg Bash "$(cmdj 'pnpm db:migrate')")"; assert_eq "$(decision "$out")" allow "grant: 這張卡的 migrate"
 # dontAsk 下不明說 allow 就會被 Claude 拒：有授權的動作要回 permissionDecision allow，不是空輸出
 assert_eq "$(printf '%s' "$out" | jq -r '.hookSpecificOutput.permissionDecision')" allow "grant: 有授權要明說 allow"
@@ -198,6 +202,26 @@ rm -f "$G"; out="$(gt "$G")"; assert_eq "$out" "rc=0" "gate-ts: 檔案不存在�
 printf '## g1\nstatus: open\n' > "$G"
 printf '{"tool_name":"Write","tool_input":{"file_path":"%s"}}' "$G" | env -u OPSX_NOW bash "$H/gate-timestamp.sh" >/dev/null 2>&1
 grep -Eq '^opened_at: [0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}[+-][0-9]{2}:[0-9]{2}$' "$G" || fail "gate-ts: 真時間要是帶冒號 offset 的 ISO：$(cat "$G")"
+
+# gate type：同義詞改正、表外與沒寫只提醒（gate-type-normalize）。提醒走 PostToolUse 的 additionalContext，退出碼永遠 0
+gts() { printf '{"cwd":"%s","tool_name":"Write","tool_input":{"file_path":"%s"},"hook_event_name":"PostToolUse"}' "$R" "$1" | OPSX_NOW=2026-11-06T14:05:00+08:00 bash "$H/gate-timestamp.sh" 2>/dev/null; }
+printf '## g1\ntype: authorization\nneeds: run\nstatus: answered\n\n## g2\ntype: 等待授權\nstatus: answered\n\n## g3\ntype:  Decision \nstatus: answered\n\n## g4\ntype: 決定\nstatus: answered\n\n## g5\ntype: approval\nstatus: answered\n' > "$G"
+out="$(gts "$G")"; assert_eq "$out" "" "gate-type: 同義詞改正不出聲"
+assert_eq "$(cat "$G")" "$(printf '## g1\ntype: approval\nneeds: run\nstatus: answered\n\n## g2\ntype: approval\nstatus: answered\n\n## g3\ntype: decision\nstatus: answered\n\n## g4\ntype: decision\nstatus: answered\n\n## g5\ntype: approval\nstatus: answered')" "gate-type: 同義詞改正，needs 與其他行不動"
+printf '## g1\ntype: approval-ish\nstatus: open\n問題: x\n\n## g2\nstatus: open\n問題: 沒寫\n\n## g3\nstatus: answered\n\n## g4\ntype: decision\nstatus: open\n' > "$G"; cp "$G" "$FX/gt-before.md"
+out="$(gts "$G")"; assert_eq "$(cmp -s "$G" "$FX/gt-before.md" && echo same)" "" "gate-type: 表外與沒寫的 type 要補 opened_at 但不改 type"
+assert_eq "$(jq -r '.hookSpecificOutput.hookEventName' <<<"$out")" PostToolUse
+ctx="$(jq -r '.hookSpecificOutput.additionalContext' <<<"$out")"
+for want in g1 approval-ish 'approval | decision' g2 '沒寫 type' 'needs: run'; do case "$ctx" in *"$want"*) ;; *) fail "gate-type: 提醒要含「${want}」：$ctx" ;; esac; done
+case "$ctx" in *g3*|*g4*) fail "gate-type: answered 與合法的 gate 不該被提醒：$ctx" ;; esac
+assert_eq "$(grep -c '^type: approval-ish$' "$G")" 1 "gate-type: 表外的值原樣保留"
+printf '## g1\ntype: approval-ish\nstatus: open\n' > "$G"; printf '{"tool_name":"Write","tool_input":{"file_path":"%s"}}' "$G" | OPSX_NOW=2026-11-06T14:05:00+08:00 bash "$H/gate-timestamp.sh" >/dev/null 2>&1
+assert_eq "$?" 0 "gate-type: 提醒時退出碼仍是 0"
+# 兩份同義詞表一致：hook 的 SYN 與 bin/lib/gatetype.py 的 SYNONYMS
+hook_tbl="$(sed -n "s/^SYN='\(.*\)'$/\1/p" "$H/gate-timestamp.sh" | tr ' ' '\n' | sort)"
+py_tbl="$(OPSX_LIB="$OPSX_ROOT/bin/lib" python3 -I -c 'import os,sys;sys.path.insert(0,os.environ["OPSX_LIB"]);import gatetype;print("\n".join("%s=%s"%kv for kv in gatetype.SYNONYMS.items()))' | sort)"
+[ -n "$hook_tbl" ] || fail "gate-type: 在 hook 裡找不到 SYN= 那一行"
+assert_eq "$hook_tbl" "$py_tbl" "gate-type: hook 與 python 的同義詞表要一致"
 rm -f "$G" "$C/tasks.md"
 
 # ---------- security guard：路徑不算 AI 署名 ----------

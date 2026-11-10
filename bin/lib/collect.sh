@@ -97,8 +97,9 @@ opsx_collect() {
   fi
 
   # 讀卡的檔與全域狀態，組 JSON
-  OPSX_C_WORK="$work" OPSX_C_STATE="$state" OPSX_C_HERDR_ERR="$herdr_err" OPSX_C_NOW="$now" "$OPSX_PY" -I - <<'PY'
+  OPSX_C_WORK="$work" OPSX_C_STATE="$state" OPSX_C_HERDR_ERR="$herdr_err" OPSX_C_NOW="$now" OPSX_LIB="$OPSX_ROOT/bin/lib" "$OPSX_PY" -I - <<'PY'
 import datetime, json, os, re, sys, tomllib
+sys.path.insert(0, os.environ["OPSX_LIB"]); import gatetype
 
 work, state = os.environ["OPSX_C_WORK"], os.environ["OPSX_C_STATE"]
 errors = []
@@ -152,7 +153,7 @@ if os.path.exists(agents_path) and not os.environ["OPSX_C_HERDR_ERR"]:
         agents = None
         errors.append({"source": "herdr", "message": "agent list 讀不懂（要 result.agents）：%s" % e})
 
-FIELD = re.compile(r"^(type|action|status|opened_at|問題|建議|選項|證據|風險|預設|已確認|answer):\s*(.*)$")
+FIELD = re.compile(r"^(type|needs|action|status|opened_at|問題|建議|選項|證據|風險|預設|已確認|answer):\s*(.*)$")
 
 def parse_gates(text):
     gates, cur, key = [], None, None
@@ -200,8 +201,12 @@ def waiting_of(card, gates, agent_status):
     for g in gates:
         if g.get("status", "").strip() != "open": continue
         base = {"gate_id": g["id"], "question": g.get("問題"), "recommended": g.get("建議"), "evidence": g.get("證據"),
-                "risk": g.get("風險"), "default_if_unanswered": g.get("預設"), "confirmed": g.get("已確認")}
-        if g.get("type") == "approval":
+                "risk": g.get("風險"), "default_if_unanswered": g.get("預設"), "confirmed": g.get("已確認"),
+                "needs": "run" if g.get("needs") == "run" else None}
+        gtype = gatetype.normalize(g.get("type", ""))
+        if gtype is None:
+            return {"type": "type 不明", "action": None, "options": [], **base}
+        if gtype == gatetype.APPROVAL:
             opts = ["這次", "這張卡", "這個 repo 永遠", "拒絕"]
             if g.get("action") == "merge": opts = ["這次", "這張卡", "拒絕"]   # merge 永遠不可長期授權，answer 會拒，按鈕就不要給
             return {"type": "等待授權", "action": g.get("action"), "options": opts, **base}
@@ -215,10 +220,10 @@ def waiting_of(card, gates, agent_status):
         return {"type": "等待決定", "action": None, "options": cleaned, **{**base, "recommended": rec}}
     mr = card["mr"]
     if mr and mr.get("state") == "ready":
-        return {"type": "可以合併", "action": "merge", "gate_id": None, "options": ["合併"], "question": "MR 五條件全綠", "recommended": "合併",
+        return {"type": "可以合併", "action": "merge", "gate_id": None, "needs": None, "options": ["合併"], "question": "MR 五條件全綠", "recommended": "合併",
                 "evidence": mr["url"], "risk": None, "default_if_unanswered": "留在進行中", "confirmed": None}
     if agent_status == "blocked":
-        return {"type": "終端機等待輸入", "action": None, "gate_id": None, "options": ["開啟 pane", "停止", "重新指派"],
+        return {"type": "終端機等待輸入", "action": None, "gate_id": None, "needs": None, "options": ["開啟 pane", "停止", "重新指派"],
                 "question": "agent 在終端機等輸入，板上沒有對應的 gate", "recommended": "開啟 pane", "evidence": None, "risk": "照規則不該發生：要授權的動作應寫 gate",
                 "default_if_unanswered": "agent 停在那裡", "confirmed": None}
     return None

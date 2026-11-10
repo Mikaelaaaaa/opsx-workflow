@@ -297,6 +297,18 @@ cards '[{"slug":"a1","section":"待處理","dispatch":'"$D"',"agent_status":"idl
 round || fail "rc: $(cat "$FX/out")"
 grep '^opsx answer a1 --gate g2 ' "$OPSX_FAKE_LOG" | grep '等使用者驗' | grep -q 'report.md' || fail "真機題的答案：$(cat "$OPSX_FAKE_LOG")"
 
+# --- type 不明、needs: run 的 gate 不代答（gate-type-normalize）：答案會變成指令原文或寫進不明的 gate ---
+: > "$OPSX_FAKE_LOG"; : > "$LOG"
+cards '[{"slug":"a1","section":"待處理","dispatch":'"$D"',"agent_status":"idle","waiting":{"type":"type 不明","needs":null,"gate_id":"gu","question":"沒寫 type","recommended":"照做","options":[]}}]'
+round || fail "type 不明 rc: $(cat "$FX/out")"
+assert_eq "$(count '^opsx answer')" 0 "type 不明不代答：$(cat "$OPSX_FAKE_LOG")"
+grep '??' "$LOG" | grep -q 'gu' || fail "type 不明要記 ?? 給人看：$(cat "$LOG")"
+: > "$OPSX_FAKE_LOG"; : > "$LOG"
+cards '[{"slug":"a1","section":"待處理","dispatch":'"$D"',"agent_status":"idle","waiting":{"type":"等待決定","needs":"run","gate_id":"gr","question":"跑一下","recommended":"ls -la /tmp","options":[]}}]'
+round || fail "needs run rc: $(cat "$FX/out")"
+assert_eq "$(count '^opsx answer')" 0 "needs: run 不代答：$(cat "$OPSX_FAKE_LOG")"
+grep '??' "$LOG" | grep -q 'gr' || fail "needs: run 要記 ?? 給人看：$(cat "$LOG")"
+
 # --- 答 gate：沒有建議就答第一個選項；answer 失敗不換參數重送 ---
 cards '[{"slug":"a1","section":"待處理","dispatch":'"$D"',"agent_status":"idle","waiting":{"type":"等待決定","gate_id":"g3","question":"選哪個","recommended":null,"options":["甲","乙"]}}]'
 round || fail "rc: $(cat "$FX/out")"

@@ -216,6 +216,12 @@ class Round:
         if w["type"] == "終端機等待輸入":
             self.log("?? %s 在 pane %s 等終端機輸入（autopilot 不該問 pane），要人看" % (key, c["dispatch"].get("pane")))
             return
+        if w["type"] == "type 不明":
+            self.log("?? %s gate %s 的 type 沒寫或不在 approval | decision，不代答，要人看：%s" % (key, w["gate_id"], (w.get("question") or "")[:100]))
+            return
+        if w.get("needs") == "run":
+            self.log("?? %s gate %s 要人在終端機跑指令再貼結果，不代答：%s" % (key, w["gate_id"], (w.get("recommended") or "")[:100]))
+            return
         q = w.get("question") or ""
         pick = w.get("recommended") or (w.get("options") or [None])[0]
         text = q + " " + (pick or "")
