@@ -534,6 +534,7 @@ def main():
         elif drive_dead(c["dispatch"]):
             r.redispatch(c, repo_paths[c["repo"]], "drive pid %s 已經不在" % c["dispatch"]["drive_pid"])
     r.dispatch_new(live, repo_paths)
+    r.act(["opsx", "reap"])   # 失敗 act 已經記 log；孤兒的判斷與關閉條件都在 opsx reap
     r.save()
     r.log("== 結束：%d 張卡，收尾 %d 張" % (len(live), len(done)))
 

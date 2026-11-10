@@ -161,7 +161,7 @@ C="$(card "$J" b y1)"; assert_eq "$(q "$C" waiting.type)" 終端機等待輸入
 assert_eq "$(q "$C" waiting.options)" '["開啟 pane", "停止", "重新指派"]'; assert_eq "$(q "$C" section)" 待處理
 
 # 沒對到卡的 agent
-assert_eq "$(q "$J" unmatched_agents)" '[{"agent_status": "idle", "cwd": "/Users/me", "name": "foo", "pane": "p7", "workspace": "w9"}]'
+assert_eq "$(q "$J" unmatched_agents)" '[{"agent_status": "idle", "cwd": "/Users/me", "name": "foo", "orphan": false, "pane": "p7", "workspace": "w9"}]'
 # 真樣本也讀得懂（兩個 agent 都沒對到卡）
 J2="$(OPSX_TEST_HERDR_AGENTS= opsx collect --root "$ROOT")"; assert_eq "$(q "$J2" unmatched_agents.0.pane)" "w1:p2"; assert_eq "$(q "$J2" unmatched_agents.1.name)" "Worktree cleanup"
 assert_eq "$(q "$J" unfiled)" '[]' "沒有 unfiled/ 時是空陣列"
@@ -274,6 +274,67 @@ J="$(PATH="$SLOW:$PATH" opsx collect --root "$R4")"; assert_eq "$?" 0
 grep -q '^mr view 9 ' "$OPSX_FAKE_LOG" || fail "glab 要真的被叫到，慢才有意義：$(cat "$OPSX_FAKE_LOG")"
 G="$(printf '%s' "$J" | python3 -I -c 'import datetime,json,sys;print(int(datetime.datetime.fromisoformat(json.load(sys.stdin)["generated_at"]).timestamp()))')"
 [ "$G" -le $((S + 2)) ] || fail "generated_at 要在讀來源前取：呼叫前 ${S}，generated_at ${G}"
+
+# ---------- 孤兒 pane：cwd 在 opsx worktree 底下，且卡已歸檔 / split / stopped / 目錄不在（specs/opsx-reap「孤兒 pane 的判定」、board-collect「orphans 清單」） ----------
+RP6="$FX/code-reap6"; mkdir -p "$RP6/o/.git" "$RP6/o/openspec/changes/archive"
+O="$(cd "$RP6/o" && pwd -P)"
+mkcard6() { # <slug> [額外 inbox 前言行]
+  local d="$RP6/o/openspec/changes/$1"; mkdir -p "$d"
+  printf 'schema: opsx\ncreated: 2026-11-05\nkind: dev\n' > "$d/.openspec.yaml"
+  printf -- '---\nsource: me\nfound: 2026-11-04\n%s---\n\n## 一句話\n\n%s\n' "${2:-}" "$1" > "$d/inbox.md"
+  printf '## 1\n\n- [ ] 1.1 a\n' > "$d/tasks.md"
+}
+for s in ar ar2; do D="$RP6/o/openspec/changes/archive/2026-11-01-$s"; mkdir -p "$D"; printf 'schema: opsx\nkind: dev\n' > "$D/.openspec.yaml"; printf '## 一句話\n\n%s\n' "$s" > "$D/inbox.md"; done
+mkcard6 sp 'split_into: [sp-a, sp-b]
+'
+mkcard6 st
+mkcard6 lv
+printf '{"o/ar":{"pane":"w1:p1","mode":"autopilot","worktree":"%s/.claude/worktrees/ar"},"o/ar2":{"pane":"w1:p8","mode":"autopilot"},"o/sp":{"pane":"w1:p2","mode":"autopilot"},"o/st":{"pane":"w1:p3","mode":"stopped"},"o/cm":{"pane":"w1:p4","mode":"autopilot"},"o/re":{"pane":"w1:p5","mode":"stopped"},"o/lv":{"pane":"w1:p6","mode":"autopilot"}}' "$O" > "$OPSX_STATE_DIR/dispatch.json"
+agent6() { # <pane> <status> <cwd> [foreground_cwd]
+  printf '{"agent":"claude","pane_id":"%s","agent_status":"%s","cwd":"%s","foreground_cwd":"%s","terminal_title_stripped":"t-%s"}' "$1" "$2" "$3" "${4:-$3}" "$1"
+}
+{ printf '{"id":"cli:agent:list","result":{"agents":['
+  agent6 w1:p1 idle "$O/.claude/worktrees/ar"; printf ','
+  agent6 w1:p2 idle /Users/me "$O/.claude/worktrees/sp"; printf ','
+  agent6 w1:p3 idle "$O/.claude/worktrees/st"; printf ','
+  agent6 w1:p4 idle "$O/.claude/worktrees/cm"; printf ','
+  agent6 w1:p5 idle /Users/me/notes; printf ','
+  agent6 w1:p6 idle "$O/.claude/worktrees/lv"; printf ','
+  agent6 w1:p7 idle /Users/me/code/gmtc-rag; printf ','
+  agent6 w1:p8 working "$O/.claude/worktrees/ar2"; printf ','
+  agent6 w1:p9 idle "$O/.claude/worktrees/my-own-session"
+  printf '],"type":"agent_list"}}'; } > "$FX/agents6.json"
+export HERDR_ENV=1
+J="$(OPSX_TEST_HERDR_AGENTS="$FX/agents6.json" opsx collect --root "$RP6")"; assert_eq "$?" 0 "orphans collect: $J"
+assert_eq "$(printf '%s' "$J" | python3 -I -c 'import json,sys;print(json.dumps({o["pane"]:o["reason"] for o in json.load(sys.stdin)["orphans"]},sort_keys=True))')" \
+  '{"w1:p1": "archived", "w1:p2": "split", "w1:p3": "stopped", "w1:p4": "card-missing", "w1:p8": "archived"}' "孤兒：已歸檔、split（只靠 foreground_cwd）、stopped、卡不在、還在做事的也列"
+assert_eq "$(q "$(printf '%s' "$J" | python3 -I -c 'import json,sys;print(json.dumps([o for o in json.load(sys.stdin)["orphans"] if o["pane"]=="w1:p1"][0]))')" repo)" o
+assert_eq "$(printf '%s' "$J" | python3 -I -c 'import json,sys;o=[o for o in json.load(sys.stdin)["orphans"] if o["pane"]=="w1:p1"][0];print(o["slug"],o["agent_status"],o["cwd"]==sys.argv[1]+"/.claude/worktrees/ar")' "$O")" "ar idle True"
+# unmatched_agents：已歸檔 / split 配到卡的不進來；stopped 與卡不在的進來且 orphan 為 true；使用者自己的 orphan 為 false，pane id 被重用的也是
+assert_eq "$(printf '%s' "$J" | python3 -I -c 'import json,sys;print(json.dumps({a["pane"]:a["orphan"] for a in json.load(sys.stdin)["unmatched_agents"]},sort_keys=True))')" \
+  '{"w1:p3": true, "w1:p4": true, "w1:p5": false, "w1:p7": false, "w1:p9": false}' "unmatched_agents 的 orphan 欄；p9 在 .claude/worktrees/ 底下但 dispatch.json 沒記，是使用者自己的 session"
+# herdr 不可用：orphans 是 []
+export HERDR_ENV=""
+J="$(opsx collect --root "$RP6")"; assert_eq "$(q "$J" orphans)" '[]'
+
+# ---------- review 第 1 輪的回歸測試：人或活卡的 pane 不能被當成孤兒（三個重現情境，同一個 orphan_reason） ----------
+# (a) slug 先歸檔、後來又建了活卡：活卡的 pane 與同 cwd 的人工 pane 都不是孤兒
+# (b) 活卡的 repo 不在這次掃描範圍：不能判成 card-missing
+# (c) dispatch.json 留著舊的 stopped 條目（pane w1:p9），人自己在同名 worktree 開的 pane（w1:p3）不是它的
+RP7="$FX/code-reap7"; mkdir -p "$RP7/o/.git" "$RP7/o/openspec/changes/foo" "$RP7/o/openspec/changes/archive/2026-11-01-foo"
+O7="$(cd "$RP7/o" && pwd -P)"; X7="$FX/elsewhere7/x"
+for d in "$RP7/o/openspec/changes/foo" "$RP7/o/openspec/changes/archive/2026-11-01-foo"; do printf 'schema: opsx\nkind: dev\n' > "$d/.openspec.yaml"; printf '## 一句話\n\nfoo\n' > "$d/inbox.md"; done
+printf '{"o/foo":{"pane":"w1:p1","mode":"autopilot"},"x/lv":{"pane":"w1:p4","mode":"autopilot","worktree":"%s/.claude/worktrees/lv"},"o/bar":{"pane":"w1:p9","mode":"stopped"}}' "$X7" > "$OPSX_STATE_DIR/dispatch.json"
+{ printf '{"id":"cli:agent:list","result":{"agents":['
+  agent6 w1:p1 working "$O7/.claude/worktrees/foo"; printf ','
+  agent6 w1:p2 idle "$O7/.claude/worktrees/foo"; printf ','
+  agent6 w1:p4 idle "$X7/.claude/worktrees/lv"; printf ','
+  agent6 w1:p3 idle "$O7/.claude/worktrees/bar"
+  printf '],"type":"agent_list"}}'; } > "$FX/agents7.json"
+export HERDR_ENV=1
+J="$(OPSX_TEST_HERDR_AGENTS="$FX/agents7.json" opsx collect --root "$RP7")"; assert_eq "$?" 0 "回歸 collect: $J"
+assert_eq "$(q "$J" orphans)" '[]' "活卡的 pane、未掃描 repo 的活卡、人自己開的 pane 都不能是孤兒"
+export HERDR_ENV=""
 
 # ---------- gate type 同義詞、type 不明、needs: run（gate-type-normalize） ----------
 R7="$FX/code7"; mkdir -p "$R7/r6/.git"
