@@ -20,6 +20,7 @@ opsx_stop() {
   [ -f "$f" ] || die "stop: 沒有 dispatch.json"
   local entry; entry="$(OPSX_KEY="$repo/$slug" "$OPSX_PY" -I -c 'import json,os,sys;d=json.load(open(sys.argv[1]));print(json.dumps(d.get(os.environ["OPSX_KEY"],{})))' "$f")"
   [ "$entry" != "{}" ] || die "stop: $repo/$slug 沒派過"
+  local closed=""
   local pid pane; pid="$(printf '%s' "$entry" | jq -r '.drive_pid // empty')"; pane="$(printf '%s' "$entry" | jq -r '.pane // empty')"
   local route name via; route="$(card_route "$repo" "$slug")" || die "stop: 讀不懂 dispatch.json"; name="${route%%$'\t'*}"; via="${route#*$'\t'}"
   if [ -n "$via" ]; then
@@ -28,13 +29,17 @@ opsx_stop() {
     else say "stop: 送不到 ${name}，$slug 照樣標 stopped；它的 subagent 可能還在跑，到 pane $pane 看"; fi
   else
     if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then kill "$pid" 2>/dev/null || true; say "stop: drive pid $pid 已 kill"; fi
-    if [ -n "$pane" ]; then herdr pane close "$pane" >/dev/null 2>&1 && say "stop: pane $pane 關了" || say "stop: pane $pane 關不掉（可能已經不在）"; fi
+    if [ -n "$pane" ]; then
+      if herdr pane close "$pane" >/dev/null 2>&1; then closed=1; say "stop: pane $pane 關了"; else say "stop: pane $pane 關不掉（可能已經不在）"; fi
+    fi
   fi
-  OPSX_KEY="$repo/$slug" OPSX_AT="$(now_iso)" OPSX_LIB="$OPSX_ROOT/bin/lib" "$OPSX_PY" -I - "$f" <<'PY'
+  # pane_closed_at：這個 pane id 已經被關掉了。之後 herdr 若把同一個 id 發給別的 pane，collect 靠它不把新的 pane 當成這張卡的孤兒
+  OPSX_KEY="$repo/$slug" OPSX_AT="$(now_iso)" OPSX_CLOSED="$closed" OPSX_LIB="$OPSX_ROOT/bin/lib" "$OPSX_PY" -I - "$f" <<'PY'
 import os, sys
 sys.path.insert(0, os.environ["OPSX_LIB"]); import jsonfile
 def put(d):
     e = d[os.environ["OPSX_KEY"]]; e["mode"] = "stopped"; e["drive_pid"] = None; e["stopped_at"] = os.environ["OPSX_AT"]
+    if os.environ["OPSX_CLOSED"]: e["pane_closed_at"] = os.environ["OPSX_AT"]
 jsonfile.update(sys.argv[1], put)
 PY
   if [ -d "$top/openspec/changes/$slug" ]; then log_row "$top/openspec/changes/$slug" 你 已停止 停止
