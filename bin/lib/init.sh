@@ -154,8 +154,15 @@ ask_global_sources() {
       if [ -z "$folder" ]; then
         say "init --global: 沒給子資料夾，obsidian 沒登記（整個 vault 不當收件夾）"
       else
-        printf '\n[obsidian]\nvault = "%s"\nfolder = "%s"\n' "$(toml_escape "$ans")" "$(toml_escape "$folder")" >> "$f"
-        say "init --global: obsidian 已登記"
+        case "$ans$folder" in
+          *[[:cntrl:]]*)
+            warn "init --global: vault 或子資料夾含控制字元（可能是打字時按了方向鍵），obsidian 沒登記；重跑 opsx init --global 再答一次" ;;
+          *)
+            printf '\n[obsidian]\nvault = "%s"\nfolder = "%s"\n' "$(toml_escape "$ans")" "$(toml_escape "$folder")" >> "$f"
+            say "init --global: obsidian 已登記"
+            # 照原樣寫入，不替使用者解讀路徑；拖進終端機的路徑帶的 \ 會原樣留著，在這裡就讓人看到
+            [ -d "$ans/$folder" ] || warn "init --global: $ans/$folder 現在不是資料夾，同步時會記錯；路徑裡的 \\ 不會被當成跳脫，要改就編 $f" ;;
+        esac
       fi
     fi
   fi
@@ -172,7 +179,7 @@ ask_global_sources() {
   fi
 }
 
-# TOML basic string 裡的 \ 與 " 要跳脫，不然拖進終端機的路徑（Mobile\ Documents）會寫出解析不了的 sources.toml
+# TOML basic string 裡的 \ 與 " 要跳脫，不然含這兩個字元的路徑會寫出解析不了的 sources.toml
 toml_escape() { # <text>
   local s="${1//\\/\\\\}"
   printf '%s' "${s//\"/\\\"}"

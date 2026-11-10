@@ -377,6 +377,15 @@ assert_eq "$(logcols | cut -f1,4)" "$(printf '2\t1')"
 logcols | cut -f5 | grep -qF "$V/inbox/big5.md" || fail "錯誤要含壞檔路徑：$(lastsync)"
 rm "$V/inbox/big5.md"
 
+# --- 讀不了的筆記（權限、iCloud 下載中）只記一筆錯誤，其他照建 ---
+printf '# 鎖住的\n' > "$V/inbox/locked.md"; chmod 000 "$V/inbox/locked.md"
+printf '# 也正常\n' > "$V/inbox/ok2.md"
+out="$(sync_ob 2>&1)"; assert_eq "$?" 0 "讀不了的筆記不拖垮來源: $out"
+assert_file "$(ob inbox/ok2.md)"
+assert_eq "$(logcols | cut -f1,4)" "$(printf '1\t1')"
+logcols | cut -f5 | grep -qF "$V/inbox/locked.md" || fail "錯誤要含讀不了的檔案路徑：$(lastsync)"
+rm -f "$V/inbox/locked.md"
+
 # --- folder 空或絕對路徑：記錯，不把整個 vault 當收件夾 ---
 printf '# 根目錄的\n' > "$V/root.md"
 cp "$OPSX_STATE_DIR/sources.toml" "$FX/sources.bak"
@@ -386,6 +395,14 @@ assert_eq "$(logcols | cut -f1,4)" "$(printf '0\t1')"; assert_no_file "$(ob root
 sed -i '' "s|^folder = \"\"\$|folder = \"$V\"|" "$OPSX_STATE_DIR/sources.toml"
 sync_ob >/dev/null 2>&1
 assert_eq "$(logcols | cut -f1,4)" "$(printf '0\t1')"; assert_no_file "$(ob root.md)"
+# . 等於整個 vault，.. 跑到 vault 外
+sed -i '' "s|^folder = \".*\"\$|folder = \".\"|" "$OPSX_STATE_DIR/sources.toml"
+sync_ob >/dev/null 2>&1
+assert_eq "$(logcols | cut -f1,4)" "$(printf '0\t1')"; assert_no_file "$(ob root.md)"
+mkdir -p "$FX/outside"; printf '# vault 外的\n' > "$FX/outside/o.md"
+sed -i '' "s|^folder = \".*\"\$|folder = \"../outside\"|" "$OPSX_STATE_DIR/sources.toml"
+sync_ob >/dev/null 2>&1
+assert_eq "$(logcols | cut -f1,4)" "$(printf '0\t1')"; assert_no_file "$(ob ../outside/o.md)"
 cp "$FX/sources.bak" "$OPSX_STATE_DIR/sources.toml"
 
 echo ok

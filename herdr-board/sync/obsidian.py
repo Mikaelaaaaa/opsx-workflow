@@ -42,8 +42,9 @@ def main(toml: pathlib.Path) -> None:
     if conf is None:
         return
     vault = pathlib.Path(conf["vault"])
-    # 空的 folder 會讓整個 vault 變收件夾，絕對路徑會跑到 vault 外面
-    if not conf["folder"] or pathlib.PurePath(conf["folder"]).is_absolute():
+    # 空的或 . 會讓整個 vault 變收件夾，絕對路徑與 .. 會跑到 vault 外面
+    rel = pathlib.PurePosixPath(conf["folder"])
+    if not rel.parts or rel.is_absolute() or ".." in rel.parts:
         print(json.dumps({"error": "folder 要是 vault 裡的相對子資料夾，收到 %r" % conf["folder"]}, ensure_ascii=False))
         return
     folder = vault / conf["folder"]
@@ -55,6 +56,8 @@ def main(toml: pathlib.Path) -> None:
             row = item(vault, note)
         except UnicodeDecodeError:
             row = {"error": "%s 不是 UTF-8" % note}
+        except OSError as e:
+            row = {"error": "%s 讀不了：%s" % (note, e.strerror)}
         print(json.dumps(row, ensure_ascii=False))
 
 

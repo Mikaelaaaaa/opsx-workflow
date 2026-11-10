@@ -215,6 +215,16 @@ assert_not_grep '^\[obsidian\]' "$ST"
 # 引號與反斜線（拖進終端機的路徑會有 \ ）：寫出的 TOML 解析得回原字串
 : > "$ST"; printf '%s\n%s\n\n' '/Users/me/My "V"\x' 'in\box' | ask "$ST" >/dev/null
 assert_eq "$(obsidian_of "$ST")" '/Users/me/My "V"\x|in\box'
+# 控制字元（read -r 沒有 readline，打字時按方向鍵會存進 ESC）：不登記，免得 sources.toml 解析不了
+: > "$ST"; printf '/Users/me/va\033[Dult\ninbox\n\n' | ask "$ST" >/dev/null
+assert_not_grep '^\[obsidian\]' "$ST"
+# vault/folder 不是資料夾：照樣寫入，但當場警告（拖進終端機的 Mobile\ Documents 反斜線會原樣留著）
+: > "$ST"; outa="$(printf '/Users/me/Library/Mobile\\ Documents/v\ninbox\n\n' | ask "$ST" 2>&1)"
+assert_grep '^\[obsidian\]' "$ST"
+case "$outa" in *不是資料夾*) ;; *) fail "不存在的路徑要警告：$outa" ;; esac
+mkdir -p "$FX/realvault/inbox"
+: > "$ST"; outa="$(printf '%s\ninbox\n\n' "$FX/realvault" | ask "$ST" 2>&1)"
+case "$outa" in *不是資料夾*) fail "存在的資料夾不該警告：$outa" ;; esac
 printf '[obsidian]\nvault = "/v"\nfolder = "f"\n' > "$ST"; cp "$ST" "$FX/st-before"
 outa="$(printf '\n' | ask "$ST")"
 assert_eq "$(cat "$ST")" "$(cat "$FX/st-before")" "已登記不改"
