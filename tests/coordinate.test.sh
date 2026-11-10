@@ -402,27 +402,40 @@ LOCK="$OPSX_STATE_DIR/coordinator.lock"; RERUN="$OPSX_STATE_DIR/coordinator.reru
 wait_for() { local i=0; until eval "$2"; do i=$((i+1)); [ $i -lt 100 ] || fail "等不到$1：$(cat "$LOG")"; sleep 0.1; done; }
 starts() { grep -c '== coordinator 開始' "$LOG" || true; }
 ends() { grep -c '== 結束' "$LOG" || true; }
+# lock_free：沒有人拿著 coordinator.lock 的 flock
+lock_free() { python3 -I -c 'import fcntl,sys; f=open(sys.argv[1],"a"); fcntl.flock(f,fcntl.LOCK_EX|fcntl.LOCK_NB)' "$LOCK" 2>/dev/null; }
+# hold_lock：背景 process 拿住 flock 直到被 kill，pid 寫在 HOLDER
+hold_lock() {
+  rm -f "$FX/held"
+  python3 -I -c 'import fcntl,sys,time; f=open(sys.argv[1],"a"); fcntl.flock(f,fcntl.LOCK_EX); open(sys.argv[2],"w").close(); time.sleep(60)' "$LOCK" "$FX/held" &
+  HOLDER=$!
+  wait_for " lock 被拿住" '[ -f "$FX/held" ]'
+}
 
 # --- 同時只跑一輪：另一輪在跑就不動 ---
 mkcard a1
 A1_GRANT='[{"slug":"a1","section":"待處理","dispatch":'"$D"',"agent_status":"idle","waiting":{"type":"等待授權","gate_id":"g1","action":"push","question":"要 push","recommended":null,"options":["這次"]}},{"slug":"x"}]'
 cards "$A1_GRANT"
-mkdir "$LOCK"; printf '%s\n' "$$" > "$LOCK/pid"
+hold_lock
 round; rc=$?
 assert_eq "$rc" 0 "lock 被拿著要以 0 結束：$(cat "$FX/out")"
 assert_eq "$(grep -cE '^opsx (collect|answer|dispatch|stop)' "$OPSX_FAKE_LOG")" 0 "lock 被拿著不讀狀態、不動手：$(cat "$OPSX_FAKE_LOG")"
 assert_file "$RERUN"
 grep -q -- '--' "$LOG" || fail "要記一行 --：$(cat "$LOG")"
-assert_eq "$(cat "$LOCK/pid")" "$$" "別人的 lock 不能動"
-rm -rf "$LOCK" "$RERUN" "$MEMO"
+rm -f "$RERUN"
+round --dry
+assert_no_file "$RERUN"
+kill "$HOLDER"; wait "$HOLDER" 2>/dev/null
+rm -f "$RERUN" "$MEMO"
 
-# --- 死掉的 lock 不擋 ---
-sleep 0 & dead=$!; wait "$dead"
-mkdir "$LOCK"; printf '%s\n' "$dead" > "$LOCK/pid"
+# --- 死掉的 lock 不擋：持有者被 kill -9，lock 檔留著 ---
+hold_lock
+kill -9 "$HOLDER"; wait "$HOLDER" 2>/dev/null
+assert_file "$LOCK"
 round || fail "rc: $(cat "$FX/out")"
-assert_eq "$(ends)" 1 "pid 不在的 lock 要接手跑完：$(cat "$LOG")"
+assert_eq "$(ends)" 1 "持有者死掉的 lock 要接手跑完：$(cat "$LOG")"
 assert_grep "^opsx answer a1 --gate g1 --grant this --repo $R -- 允許\$" "$OPSX_FAKE_LOG"
-assert_no_file "$LOCK"
+lock_free || fail "跑完要放掉 lock"
 rm -f "$MEMO"
 
 # --- 結束前看到記號就再跑一輪：一輪讀 collect 時，另一個 opsx coordinate 撞到 lock 留下記號 ---
@@ -432,7 +445,7 @@ OPSX_TEST_ON_COLLECT="$FX/on_collect.sh" round || fail "rc: $(cat "$FX/out")"
 assert_eq "$(starts)" 2 "要補跑一輪：$(cat "$LOG") 中途那次：$(cat "$FX/nested.out")"
 assert_eq "$(ends)" 2 "要補跑一輪：$(cat "$LOG")"
 assert_eq "$(count '^opsx collect')" 2 "補跑那輪重讀 collect：$(cat "$OPSX_FAKE_LOG")"
-assert_no_file "$RERUN"; assert_no_file "$LOCK"
+assert_no_file "$RERUN"; lock_free || fail "跑完要放掉 lock"
 rm -f "$MEMO"
 
 # --- kick 立刻回傳：背景那輪讀 collect 要睡 3 秒 ---
@@ -444,7 +457,7 @@ t1="$(python3 -I -c 'import time; print(time.time())')"
 assert_eq "$rc" 0 "kick 要以 0 結束：$(cat "$FX/out")"
 python3 -I -c 'import sys; sys.exit(0 if float(sys.argv[2]) - float(sys.argv[1]) < 1 else 1)' "$t0" "$t1" || fail "kick 要在 1 秒內回傳：$t0 → $t1"
 wait_for " kick 那輪結束" '[ "$(ends)" = 1 ]'
-wait_for " lock 放掉" '[ ! -e "$LOCK" ]'
+wait_for " lock 放掉" 'lock_free'
 grep -E '== (coordinator 開始|結束)' "$LOG" | sed -E 's/^.*== (coordinator 開始|結束).*$/\1/' > "$FX/order"
 assert_eq "$(tr '\n' '|' < "$FX/order")" "coordinator 開始|結束|" "log 依序有開始與結束：$(cat "$LOG")"
 
@@ -452,7 +465,7 @@ assert_eq "$(tr '\n' '|' < "$FX/order")" "coordinator 開始|結束|" "log 依�
 rm -f "$MEMO"; : > "$OPSX_FAKE_LOG"; : > "$LOG"
 bash "$OPSX_ROOT/bin/opsx" coordinate --kick > "$FX/out" 2>&1 || fail "kick rc: $(cat "$FX/out")"
 wait_for " kick 那輪結束" '[ "$(ends)" = 1 ]'
-wait_for " lock 放掉" '[ ! -e "$LOCK" ]'
+wait_for " lock 放掉" 'lock_free'
 assert_grep "^opsx answer a1 --gate g1 --grant this --repo $R -- 允許\$" "$OPSX_FAKE_LOG"
 
 # --- kick 起不來：記一行原因，仍以 0 結束 ---
@@ -509,6 +522,13 @@ grep '^notification show \[demo/a1\]' "$OPSX_FAKE_LOG" | grep -q 'pane w1:p1' ||
 [ -n "$(memo_get _notified demo/a1/blocked/w1:p1)" ] || fail "_notified 要有 blocked 鍵：$(cat "$MEMO")"
 round || fail "rc: $(cat "$FX/out")"
 assert_eq "$(notes)" 0 "同一個 pane 不再通知"
+# 人處理完、卡不再等人，之後同一個 pane 又卡住要再通知
+cards '[{"slug":"a1","section":"待處理","dispatch":'"$D"',"agent_status":"working"}]'
+round || fail "rc: $(cat "$FX/out")"
+assert_eq "$(memo_get _notified demo/a1/blocked/w1:p1)" "" "不等人了要清掉 blocked 鍵：$(cat "$MEMO")"
+cards '[{"slug":"a1","section":"待處理","dispatch":'"$D"',"agent_status":"blocked","waiting":{"type":"終端機等待輸入","gate_id":null,"question":"agent 在終端機等輸入","recommended":"開啟 pane","options":["開啟 pane"]}}]'
+round || fail "rc: $(cat "$FX/out")"
+assert_eq "$(notes)" 1 "同一個 pane 再卡住要再通知一次"
 rm -f "$MEMO"
 
 # --- 可以合併照 head sha 通知 ---

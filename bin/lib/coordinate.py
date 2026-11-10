@@ -6,11 +6,10 @@
 用法：coordinate.py <state dir> [--dry]
 """
 import datetime
-import errno
+import fcntl
 import json
 import os
 import re
-import shutil
 import subprocess
 import sys
 
@@ -217,6 +216,14 @@ class Round:
             self.log("?? 通知 %s 送不出去，下一輪再送：%s" % (key, (err or out).replace("\n", " ")[:200]))
             return
         self.memo["_notified"][key] = self.now.isoformat(timespec="seconds")
+        # 送出就存：這輪後面的步驟出錯時，下一輪不會把同一則再送一次
+        self.save()
+
+    def forget_waiting(self, c):
+        """卡沒在等人了：清掉它 gate 與 blocked 的通知紀錄，同一個 pane 之後再卡、或 gate id 被重用時才會再通知。"""
+        prefixes = tuple("%s/%s/" % (card_key(c), kind) for kind in ("gate", "blocked"))
+        for key in [k for k in self.memo["_notified"] if k.startswith(prefixes)]:
+            del self.memo["_notified"][key]
 
     def notify_gate(self, c, w, why):
         self.notify(c, "gate", w["gate_id"], "gate %s %s" % (w["gate_id"], why), "看板：" + one_line(w.get("question") or ""))
@@ -427,67 +434,6 @@ def drive_dead(disp):
     return False
 
 
-def pid_alive(pid):
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    return True
-
-
-def lock_pid(lock):
-    """lock 裡記的 pid；lock 剛好被放掉時是 None。"""
-    try:
-        with open(os.path.join(lock, "pid"), encoding="utf-8") as f:
-            return int(f.read().strip())
-    except FileNotFoundError:
-        return None
-
-
-def try_lock(lock):
-    # 先在旁邊的目錄寫好 pid 再 rename 成 lock：別人看到 lock 時裡面一定已經有 pid，不會把剛拿到的誤認成死掉的
-    tmp = "%s.%d" % (lock, os.getpid())
-    os.mkdir(tmp)
-    with open(os.path.join(tmp, "pid"), "w", encoding="utf-8") as f:
-        f.write("%d\n" % os.getpid())
-    try:
-        os.rename(tmp, lock)
-    except OSError as e:
-        shutil.rmtree(tmp)
-        if e.errno in (errno.EEXIST, errno.ENOTEMPTY):
-            return False
-        raise
-    return True
-
-
-def take_lock(lock):
-    """macOS 沒有 flock，用目錄當 lock。持有者的 pid 不在了（被 kill -9）就清掉重拿一次。"""
-    if try_lock(lock):
-        return True
-    pid = lock_pid(lock)
-    if pid is not None and pid_alive(pid):
-        return False
-    try:
-        drop_lock(lock)
-    except FileNotFoundError:
-        pass   # 持有者剛好自己放掉了
-    return try_lock(lock)
-
-
-def drop_lock(lock):
-    # 先改名再刪：刪到一半的空目錄會被別人的 rename 蓋過去
-    old = "%s.old.%d" % (lock, os.getpid())
-    os.rename(lock, old)
-    shutil.rmtree(old)
-
-
-def release_lock(lock):
-    if lock_pid(lock) == os.getpid():
-        drop_lock(lock)
-
-
 def is_merged(c):
     """forge 說合了才算；只看 workplan 的 merged 不算，那可能是卡自己 /archive 做到一半。"""
     return bool(c["mr"] and c["mr"]["merged_at"])
@@ -500,22 +446,23 @@ def owner_gone(c):
 
 def main():
     state, dry = sys.argv[1], "--dry" in sys.argv[2:]
-    lock = os.path.join(state, "coordinator.lock")
     rerun = os.path.join(state, "coordinator.rerun")
-    if not take_lock(lock):
-        # 不等也不搶：同時跑兩輪會答同一個 gate、重派同一張卡兩次。拿著 lock 的那輪結束前會看到記號補跑
-        with open(rerun, "w", encoding="utf-8"):
-            pass
-        Round(state, dry).log("-- 另一輪 coordinator 在跑（pid %s），留下重跑記號" % lock_pid(lock))
-        return 0
-    try:
+    # process 死掉時 kernel 會放掉 flock，所以不用處理殘留的 lock 檔
+    with open(os.path.join(state, "coordinator.lock"), "a", encoding="utf-8") as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            # 不等也不搶：同時跑兩輪會答同一個 gate、重派同一張卡兩次。拿著 lock 的那輪結束前會看到記號補跑
+            if not dry:
+                with open(rerun, "w", encoding="utf-8"):
+                    pass
+            Round(state, dry).log("-- 另一輪 coordinator 在跑，留下重跑記號")
+            return 0
         rc = one_round(state, dry)
         # 補跑一次為限：事件連發時不一直跑下去，之後的記號留給下一次
-        if os.path.exists(rerun):
+        if not dry and os.path.exists(rerun):
             os.remove(rerun)
             rc = one_round(state, dry) or rc
-    finally:
-        release_lock(lock)
     return rc
 
 
@@ -545,6 +492,8 @@ def one_round(state, dry):
 
     for c in live:
         w = c["waiting"]
+        if not w:
+            r.forget_waiting(c)
         if c["dispatch"] and w and w["type"] != "可以合併":
             r.handle_gate(c, repo_paths[c["repo"]])
         if c["mr"] and c["mr"]["state"] == "ready":
