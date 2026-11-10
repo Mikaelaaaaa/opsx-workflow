@@ -14,6 +14,11 @@ case "$out" in *"卡的目錄不存在"*) fail "不該印卡的目錄不存在: 
 assert_grep "pane close w1:p3" "$OPSX_FAKE_LOG"
 python3 -I -c 'import json,sys;d=json.load(open(sys.argv[1]))["a/gone"];assert d["mode"]=="stopped" and d["stopped_at"],d' "$OPSX_STATE_DIR/dispatch.json" || fail "dispatch.json 要標 stopped"
 assert_grep "gone" "$OPSX_STATE_DIR/reap.log"
+python3 -I -c 'import json,sys;assert json.load(open(sys.argv[1]))["a/gone"]["pane_closed_at"]' "$OPSX_STATE_DIR/dispatch.json" || fail "pane 關成功要記 pane_closed_at（之後 pane id 被重用時，collect 靠它不認領新的 pane）"
+# pane 沒關成：不記 pane_closed_at，這個 pane 之後仍可能是孤兒
+printf '{"a/stuck":{"pane":"w1:p4","mode":"autopilot","drive_pid":null}}' > "$OPSX_STATE_DIR/dispatch.json"
+OPSX_TEST_PANE_CLOSE_FAIL=pane_busy opsx stop stuck --repo "$R" >/dev/null 2>&1 || fail "stop pane 關不掉也要 rc 0"
+python3 -I -c 'import json,sys;d=json.load(open(sys.argv[1]))["a/stuck"];assert d["mode"]=="stopped" and "pane_closed_at" not in d,d' "$OPSX_STATE_DIR/dispatch.json" || fail "pane 關不掉不能記 pane_closed_at"
 
 # ---------- opsx reap：用真的 collect（假 herdr 回 agent list），斷言 herdr 被叫了什麼 ----------
 ROOT="$FX/code"; mkdir -p "$ROOT/o/.git" "$ROOT/o/openspec/changes/archive"
