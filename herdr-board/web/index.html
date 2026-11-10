@@ -662,7 +662,7 @@ function renderDrawer(){
   const w=c.waiting;let ask='';
   if(w){
     let answers='';
-    if(w.type==='等待授權')answers=`<button class="primary" data-act="answer" data-grant="this" data-text="允許">允許這次</button><button data-act="answer" data-grant="card" data-text="允許">這張卡都允許</button>${w.action==='merge'?'':`<button data-act="answer" data-grant="repo" data-text="允許">這個 repo 永遠允許</button>`}<button class="ghost danger" data-act="answer" data-text="拒絕">拒絕</button><input type="text" id="reply" aria-label="回覆" placeholder="或打字回覆，Enter 送出">`;
+    if(w.type==='等待授權'){const has=k=>(w.options||[]).includes(k);answers=`${has('這次')?`<button class="primary" data-act="answer" data-grant="this" data-text="允許">允許這次</button>`:''}${has('這張卡')?`<button data-act="answer" data-grant="card" data-text="允許">這張卡都允許</button>`:''}${has('這個 repo 永遠')?`<button data-act="answer" data-grant="repo" data-text="允許">這個 repo 永遠允許</button>`:''}<button class="ghost danger" data-act="answer" data-text="拒絕">拒絕</button><input type="text" id="reply" aria-label="回覆" placeholder="或打字回覆，Enter 送出">`;}
     else if(w.type==='等待決定'&&w.needs==='run')answers=`<div class="mono" style="margin-bottom:8px">在終端機跑這行：<code>${esc(w.recommended||'')}</code> <button data-act="copy" data-text="${esc(w.recommended||'')}">複製</button></div><input type="text" id="reply" aria-label="貼結果" placeholder="貼上執行結果，Enter 送出">`;
     else if(w.type==='type 不明')answers=`<div class="mono">gates.md 的 type 沒寫或不是 approval | decision，請改成其中之一：<code>${esc((c.path||'')+'/gates.md')}</code> <button data-act="copy" data-text="${esc((c.path||'')+'/gates.md')}">複製路徑</button></div>`;
     else if(w.type==='等待決定')answers=(w.options||[]).map(o=>`<button class="${o===w.recommended?'primary':''}" data-act="answer" data-text="${esc(o)}">${esc(o)}</button>`).join('')+`<input type="text" id="reply" aria-label="回覆" placeholder="或打字回覆，Enter 送出">`;
@@ -728,7 +728,7 @@ function stop(c){act(`opsx stop ${c.slug}`,()=>api.post('stop',{slug:c.slug,repo
 function reap(pane){act(`opsx reap${pane?' --pane '+pane:''}`,()=>api.post('reap',pane?{pane}:{}));}
 function focusAgent(agent){
   if(!agent){toast('這張沒有 pane',true);return;}
-  act(`herdr agent focus ${agent}`,()=>api.post('focus',{agent}));
+  act(`herdr agent focus ${agent}`,()=>api.post('focus',{agent}).then(r=>r.hint?{...r,stdout:r.hint}:r));
 }
 
 /* ＋新增：範圍選到單一 repo 就建在那個 repo，否則進待分類（board-inbox D6） */

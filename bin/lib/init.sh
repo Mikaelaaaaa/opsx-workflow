@@ -60,6 +60,16 @@ init_global() {
   write_if_missing "$state/workspaces.toml" '# repo ↔ herdr workspace。opsx init 在 repo 裡跑時問一次；指派時也會自動記。
 [repos]
 '
+  local term_line='# terminal_app = "Warp"'
+  case "${TERM_PROGRAM:-}" in
+    WarpTerminal) term_line='terminal_app = "Warp"' ;;
+    ghostty) term_line='terminal_app = "Ghostty"' ;;
+    iTerm.app) term_line='terminal_app = "iTerm"' ;;
+    Apple_Terminal) term_line='terminal_app = "Terminal"' ;;
+  esac
+  write_if_missing "$state/config.toml" "# opsx 全域設定。terminal_app：看板「開啟 pane」切完 herdr 焦點後帶到前景的終端機 app（open -a 認得的名稱）。
+$term_line
+"
   local link="$bindir/opsx"
   if [ -L "$link" ] && [ "$(readlink "$link")" = "$OPSX_ROOT/bin/opsx" ]; then
     say "init --global: $link 已有"
@@ -208,13 +218,26 @@ EOF
 }
 
 ask_global_sources() {
-  local f="$1" ans
+  local f="$1" ans folder
   if ! grep -q '^\[obsidian\]' "$f"; then
-    printf 'obsidian 要掃的資料夾（vault 絕對路徑/子資料夾，直接 Enter 跳過）：'
+    printf 'obsidian vault 的絕對路徑（直接 Enter 跳過）：'
     read -r ans
     if [ -n "$ans" ]; then
-      printf '\n[obsidian]\nvault = "%s"\nfolder = "%s"\n' "${ans%%/[0-9]*}" "${ans#*/}" >> "$f"
-      say "init --global: obsidian 已登記（請打開檔案確認 vault / folder 切得對）"
+      printf 'vault 裡當收件夾的子資料夾（例 01-Projects/inbox）：'
+      read -r folder
+      if [ -z "$folder" ]; then
+        say "init --global: 沒給子資料夾，obsidian 沒登記（整個 vault 不當收件夾）"
+      else
+        case "$ans$folder" in
+          *[[:cntrl:]]*)
+            warn "init --global: vault 或子資料夾含控制字元（可能是打字時按了方向鍵），obsidian 沒登記；重跑 opsx init --global 再答一次" ;;
+          *)
+            printf '\n[obsidian]\nvault = "%s"\nfolder = "%s"\n' "$(toml_escape "$ans")" "$(toml_escape "$folder")" >> "$f"
+            say "init --global: obsidian 已登記"
+            # 照原樣寫入，不替使用者解讀路徑；拖進終端機的路徑帶的 \ 會原樣留著，在這裡就讓人看到
+            [ -d "$ans/$folder" ] || warn "init --global: $ans/$folder 現在不是資料夾，同步時會記錯；路徑裡的 \\ 不會被當成跳脫，要改就編 $f" ;;
+        esac
+      fi
     fi
   fi
   if ! grep -q '^\[customer\]' "$f"; then
@@ -228,6 +251,12 @@ ask_global_sources() {
       say "init --global: customer 已登記"
     fi
   fi
+}
+
+# TOML basic string 裡的 \ 與 " 要跳脫，不然含這兩個字元的路徑會寫出解析不了的 sources.toml
+toml_escape() { # <text>
+  local s="${1//\\/\\\\}"
+  printf '%s' "${s//\"/\\\"}"
 }
 
 write_if_missing() { # <file> <content>

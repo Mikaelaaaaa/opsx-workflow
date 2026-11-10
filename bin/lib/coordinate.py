@@ -17,6 +17,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import chain  # noqa: E402
+import grantactions  # noqa: E402
 import jsonfile  # noqa: E402
 import priority  # noqa: E402
 import safefile  # noqa: E402
@@ -55,6 +56,7 @@ class Round:
         self.levels = {}
         self.level_errors = {}
         self.orders = {}
+        self.redispatched_now = set()
 
     def log(self, msg):
         line = "%s %s" % (self.now.strftime("%Y-%m-%d %H:%M:%S"), msg)
@@ -250,10 +252,11 @@ class Round:
         elif rc != 0:
             self.log("?? %s gate %s 回不了：%s" % (card_key(c), gate, err[:200]))
 
-    def notify(self, c, kind, ident, event, body):
+    def notify(self, c, kind, ident, event, body, scope=None):
         """這裡處理不了、要人去處理的事。每輪從狀態重算，送過的鍵記在 _notified，所以事件觸發那輪漏掉的由定時那輪補，也不會重送。
+        scope 是去重鍵的前綴，預設是這張卡；feature session 的事屬於整個 session，傳 <repo>/@<feature>。
         herdr 的通知沒有點擊動作，內文要寫去哪裡處理。"""
-        key = "%s/%s/%s" % (card_key(c), kind, ident)
+        key = "%s/%s/%s" % (scope or card_key(c), kind, ident)
         if key in self.memo["_notified"]:
             return
         rc, out, err = self.act(["herdr", "notification", "show", "[%s] %s" % (card_key(c), event),
@@ -265,11 +268,18 @@ class Round:
         # 送出就存：這輪後面的步驟出錯時，下一輪不會把同一則再送一次
         self.save()
 
-    def forget_waiting(self, c):
-        """卡沒在等人了：清掉它 gate 與 blocked 的通知紀錄，同一個 pane 之後再卡、或 gate id 被重用時才會再通知。"""
+    def forget_waiting(self, c, live):
+        """卡沒在等人了：清掉它 gate 與 blocked 的通知紀錄，同一個 pane 之後再卡、或 gate id 被重用時才會再通知。
+        session 的 blocked 鍵是整個 session 的：同 session 還有卡在等那個 pane 就留著，不然下一張還卡著的卡會再送一次。"""
         prefixes = tuple("%s/%s/" % (card_key(c), kind) for kind in ("gate", "blocked"))
         for key in [k for k in self.memo["_notified"] if k.startswith(prefixes)]:
             del self.memo["_notified"][key]
+        scope = session_scope(c)
+        if scope:
+            still = {"%s/blocked/%s" % (scope, o["dispatch"].get("pane")) for o in live
+                     if session_scope(o) == scope and o["waiting"] and o["waiting"]["type"] == "終端機等待輸入"}
+            for key in [k for k in self.memo["_notified"] if k.startswith(scope + "/blocked/") and k not in still]:
+                del self.memo["_notified"][key]
 
     def notify_gate(self, c, w, why):
         self.notify(c, "gate", w["gate_id"], "gate %s %s" % (w["gate_id"], why), "看板：" + one_line(w.get("question") or ""))
@@ -279,6 +289,7 @@ class Round:
         w, key = c["waiting"], card_key(c)
         if w.get("needs") == "run":
             self.log("?? %s gate %s 要人在終端機跑指令再貼結果，不代答：%s" % (key, w["gate_id"], (w.get("recommended") or "")[:100]))
+            self.notify_gate(c, w, "要你在終端機跑指令")
             return
         if w["type"] == "等待授權":
             # 合併永遠由人按：action 不一定剛好寫成 merge（mr-merge、external 打合併 API），題目也要看
@@ -286,15 +297,17 @@ class Round:
                 self.log("?? %s gate %s 要合併授權，不代答：合併由人在板上按" % (key, w["gate_id"]))
                 self.notify_gate(c, w, "要合併授權")
                 return
-            self.answer(c, top, w["gate_id"], "允許", grant=True)
+            self.answer(c, top, w["gate_id"], "允許", grant=w["action"] in grantactions.ACTIONS)
             return
         if w["type"] == "終端機等待輸入":
             pane = c["dispatch"].get("pane")
             self.log("?? %s 在 pane %s 等終端機輸入（autopilot 不該問 pane），要人看" % (key, pane))
-            self.notify(c, "blocked", pane, "在終端機等輸入", "pane %s：%s" % (pane, one_line(w.get("question") or "")))
+            self.notify(c, "blocked", pane, "在終端機等輸入", "pane %s：%s" % (pane, one_line(w.get("question") or "")),
+                        scope=session_scope(c))
             return
         if w["type"] == "type 不明":
             self.log("?? %s gate %s 的 type 沒寫或不在 approval | decision，不代答，要人看：%s" % (key, w["gate_id"], (w.get("question") or "")[:100]))
+            self.notify_gate(c, w, "的 type 不明")
             return
         q = w.get("question") or ""
         pick = w.get("recommended") or (w.get("options") or [None])[0]
@@ -345,6 +358,10 @@ class Round:
         last = self.memo["_redispatched"].get(key)
         if last and self.now - datetime.datetime.fromisoformat(last) < datetime.timedelta(minutes=REDISPATCH_MINUTES):
             self.log("-- %s %s，%d 分鐘內重派過，這輪不再派" % (key, why, REDISPATCH_MINUTES))
+            # 這一輪剛重派過（同 feature 的第二張卡走到這裡）不算又掛了
+            if key not in self.redispatched_now:
+                self.notify(c, "dead", last, "重派後 %d 分鐘內又掛了" % REDISPATCH_MINUTES,
+                            "pane %s：%s；看板上重派或停掉" % (c["dispatch"].get("pane"), why), scope=key)
             return
         if "agent" not in c["dispatch"]:
             self.log("?? %s %s，但 dispatch.json 沒記 agent，不知道派給誰" % (key, why))
@@ -359,6 +376,7 @@ class Round:
             self.log("?? %s 重派開不了 session：%s" % (key, err[:200]))
             return
         self.memo["_redispatched"][key] = self.now.isoformat(timespec="seconds")
+        self.redispatched_now.add(key)
 
     def redispatch(self, c, top, why):
         if c["dispatch"].get("feature"):
@@ -479,6 +497,13 @@ def mark_stopped(d, key, at):
 
 def card_key(c):
     return "%s/%s" % (c["repo"], c["slug"])
+
+
+def session_scope(c):
+    """卡屬於 feature session 時的通知鍵前綴 <repo>/@<feature>，否則 None。session 內的卡共用 pane，一件事不分卡。"""
+    if c["dispatch"] and c["dispatch"].get("feature"):
+        return "%s/@%s" % (c["repo"], c["dispatch"]["feature"])
+    return None
 
 
 def one_line(text):
@@ -652,7 +677,7 @@ def one_round(state, dry):
     for c in live:
         w = c["waiting"]
         if not w:
-            r.forget_waiting(c)
+            r.forget_waiting(c, live)
         if c["dispatch"] and w and w["type"] != "可以合併":
             r.handle_gate(c, repo_paths[c["repo"]])
         if c["mr"] and c["mr"]["state"] == "ready":

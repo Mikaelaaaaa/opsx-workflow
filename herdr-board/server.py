@@ -33,6 +33,7 @@ import subprocess
 import sys
 import threading
 import time
+import tomllib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs
 
@@ -71,7 +72,7 @@ FLAG_RE = {
     "mode": re.compile(r"^(interactive|autopilot|drive)$"),
     "kind": re.compile(r"^(dev|bug-fix|refactoring|perf|experiment|ops|chore)$"),
     "repo": re.compile(r"^/[^\0]{1,1024}$"),
-    "source": re.compile(r"^(gitlab|github|debt)$"),
+    "source": re.compile(r"^(gitlab|github|debt|obsidian)$"),
     "note": re.compile(r"^[^\n\r\0]{1,2000}\Z"),   # \Z 不是 $：$ 會放過結尾的 \n
     "pane": PANE_RE,
 }
@@ -181,6 +182,24 @@ def run(argv: list[str], timeout: int, env: dict) -> dict:
         out, err = p.communicate()
         return {"ok": False, "stdout": out, "stderr": "%s 超過 %d 秒沒回，已整組殺掉" % (" ".join(argv[:2]), timeout), "rc": 124}
     return {"ok": p.returncode == 0, "stdout": out, "stderr": err, "rc": p.returncode}
+
+
+def raise_terminal(state: pathlib.Path, env: dict) -> str | None:
+    """把 config.toml 的 terminal_app 帶到前景；成功回 None，帶不起來回要給人看的一句話。"""
+    path = state / "config.toml"
+    where = "已在 herdr 切到該 pane，"
+    try:
+        app = tomllib.loads(path.read_text(encoding="utf-8")).get("terminal_app")
+    except FileNotFoundError:
+        app = None
+    except (tomllib.TOMLDecodeError, UnicodeDecodeError, OSError) as e:
+        return "%s但 %s 壞了或讀不到（%s），請切到終端機" % (where, path, e)
+    if not isinstance(app, str) or not app or "\0" in app:
+        return '%s請切到終端機。要自動帶到前景，在 %s 寫 terminal_app = "Warp"（換成你的 app）' % (where, path)
+    r = run(["open", "-a", app], 10, env)
+    if not r["ok"]:
+        return "%s請切到 %s（open -a 失敗：%s）" % (where, app, r["stderr"].strip())
+    return None
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -308,7 +327,12 @@ class Handler(BaseHTTPRequestHandler):
                 agent = body.get("agent")
                 if not isinstance(agent, str) or not SLUG_RE.match(agent):
                     raise ValueError("agent 不合格：%r" % agent)
-                self.send_json(200, run(["herdr", "agent", "focus", agent], 10, self.opsx_env())); return
+                r = run(["herdr", "agent", "focus", agent], 10, self.opsx_env())
+                if r["ok"]:
+                    hint = raise_terminal(self.cfg.state, self.opsx_env())
+                    if hint:
+                        r["hint"] = hint
+                self.send_json(200, r); return
             args = priority_args(body) if action == "priority" else build_args(action, body)
         except (ValueError, json.JSONDecodeError) as e:
             self.send_json(400, {"error": str(e)}); return

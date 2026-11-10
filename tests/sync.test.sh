@@ -67,7 +67,7 @@ assert_eq "$(cards)" "" "已歸檔的 source 不能再建殼"
 assert_eq "$(cat "$CH/archive/2026-11-01-debt-$H/inbox.md")" "$(cat "$FX/archived.md")" "歸檔的卡不動"
 
 # --- 不合格的來源 ---
-assert_rc 2 opsx sync --root "$ROOT" --source obsidian
+assert_rc 2 opsx sync --root "$ROOT" --source customer
 
 # --- launchd 與按鈕同時觸發：拿不到鎖就退出 3，sync.log 不多行 ---
 n="$(wc -l < "$LOG" | tr -d ' ')"
@@ -280,5 +280,137 @@ grep -qE '^upstream_updated: 20[0-9]{2}-[0-9]{2}-[0-9]{2}T' "$SI" || fail "upstr
 printf '[]' > "$OPSX_TEST_ISSUES/gh-z.json"; cp "$GS/issue-view-closed.json" "$OPSX_TEST_ISSUES/gh-view-$N.json"
 opsx sync --root "$ROOT" --source github >/dev/null 2>&1
 assert_grep '^upstream: closed$' "$SI"
+
+# ========== 沒有 repo 的來源寫進待分類（sync-obsidian / sync-unfiled-sink）==========
+# 正式來源都還綁 repo：把 debt 的收集換成固定的、沒有 repo 的 item，再跑 sync.main
+sync_unrepo() { # <items json：[{source, slug, title}]>
+  python3 -I -c 'import json,sys
+sys.path.insert(0, sys.argv[1] + "/bin/lib")
+import sync
+items = [dict(i, repo=None, path=None, type="功能", body=None, evidence="- 測試來源", extra={}) for i in json.loads(sys.argv[2])]
+sync.debt_items = lambda *_: (items, set())
+sys.argv = ["opsx sync", "--state", sys.argv[3], "--opsx-root", sys.argv[1], "--root", sys.argv[4], "--source", "debt"]
+sys.exit(sync.main())' "$OPSX_ROOT" "$1" "$OPSX_STATE_DIR" "$ROOT"; }
+UF="$OPSX_STATE_DIR/unfiled"
+repo_changes() { find "$FX" -path "$OPSX_STATE_DIR" -prune -o -path '*/openspec/changes/*' -print | sort; }
+unfiled_files() { find "$UF" -maxdepth 1 -name '*.md' | sort; }
+
+# --- 沒有 repo 的新項目：寫進待分類，不在任何 repo 建殼，計入新建 ---
+before="$(repo_changes)"
+out="$(sync_unrepo '[{"source":"x:1","slug":"ob-1234abcd","title":"收件夾的筆記"}]' 2>&1)"; assert_eq "$?" 0 "sync unrepo: $out"
+assert_file "$UF/ob-1234abcd.md"; assert_grep '^source: x:1$' "$UF/ob-1234abcd.md"; assert_grep '^收件夾的筆記$' "$UF/ob-1234abcd.md"
+assert_eq "$(repo_changes)" "$before" "沒有 repo 的 item 不能在 repo 建殼"
+assert_eq "$(logcols)" "$(printf '1\t0\t0\t0\t')"
+
+# --- 待分類撞名：依序 -2、-3，原檔不動；同一次同步裡重複的 source 只寫一份 ---
+printf -- '---\ntype: 功能\nsource: me\n---\n\n## 一句話\n\n手動的\n' > "$UF/ob-5678abcd.md"; cp "$UF/ob-5678abcd.md" "$FX/me-unfiled.md"
+sync_unrepo '[{"source":"x:2","slug":"ob-5678abcd","title":"二"},{"source":"x:3","slug":"ob-5678abcd","title":"三"},{"source":"x:2","slug":"ob-5678abcd","title":"二"}]' >/dev/null 2>&1
+assert_eq "$(cat "$UF/ob-5678abcd.md")" "$(cat "$FX/me-unfiled.md")" "撞名的原檔不動"
+assert_grep '^source: x:2$' "$UF/ob-5678abcd-2.md"; assert_grep '^source: x:3$' "$UF/ob-5678abcd-3.md"
+assert_no_file "$UF/ob-5678abcd-4.md"
+assert_eq "$(logcols)" "$(printf '2\t0\t0\t0\t')"
+
+# --- 重跑不重複 ---
+files="$(unfiled_files)"
+sync_unrepo '[{"source":"x:1","slug":"ob-1234abcd","title":"收件夾的筆記"},{"source":"x:2","slug":"ob-5678abcd","title":"二"}]' >/dev/null 2>&1
+assert_eq "$(unfiled_files)" "$files"; assert_eq "$(logcols)" "$(printf '0\t0\t2\t0\t')"
+
+# --- 已捨棄的不再進來 ---
+mkdir -p "$UF/dropped"; mv "$UF/ob-1234abcd.md" "$UF/dropped/"
+files="$(unfiled_files)"
+sync_unrepo '[{"source":"x:1","slug":"ob-1234abcd","title":"收件夾的筆記"}]' >/dev/null 2>&1
+assert_eq "$(unfiled_files)" "$files" "dropped 裡有同 source 就不再寫"
+assert_eq "$(logcols | cut -f1)" 0
+
+# ========== obsidian 收件夾（sync-obsidian / obsidian-source）==========
+sync_ob() { opsx sync --root "$ROOT" --source obsidian; }
+firstline() { awk -v h="## $1" '$0==h{f=1;next} f&&NF{print;exit}' "$2"; }
+sect() { awk -v h="## $1" '$0==h{f=1;next} /^## /{f=0} f' "$2"; }
+ob() { printf '%s/ob-%s.md' "$UF" "$(printf '%s' "$1" | shasum -a 1 | cut -c1-8)"; }
+
+# --- 沒設定就不啟用 ---
+files="$(unfiled_files)"
+out="$(sync_ob 2>&1)"; assert_eq "$?" 0 "沒有 [obsidian]: $out"
+assert_eq "$(logcols)" "$(printf '0\t0\t0\t0\t')"; assert_eq "$(unfiled_files)" "$files"
+
+# --- 收件夾不存在：記一筆錯誤，含拼好的路徑 ---
+V="$FX/vault"
+printf '\n[obsidian]\nvault = "%s"\nfolder = "inbox"\n' "$V" >> "$OPSX_STATE_DIR/sources.toml"
+out="$(sync_ob 2>&1)"; assert_eq "$?" 0 "收件夾不存在仍退出 0: $out"
+assert_eq "$(logcols | cut -f4)" 1; logcols | cut -f5 | grep -qF "$V/inbox" || fail "錯誤要含拼好的路徑：$(lastsync)"
+
+# --- 新筆記 · 子資料夾 · 隱藏的不收 · 沒有標題用檔名 · frontmatter 不進內文 · 只跑 obsidian ---
+mkdir -p "$V/inbox/a" "$V/inbox/.trash"
+printf '# 看板要能貼圖\n\n細節\n' > "$V/inbox/想法.md"
+printf '子資料夾的\n' > "$V/inbox/a/b.md"
+printf '# x\n' > "$V/inbox/.trash/x.md"; printf '# y\n' > "$V/inbox/.y.md"
+printf '只有內文\n' > "$V/inbox/待辦.md"
+printf -- '---\ntags: [x]\n---\n# 標題\n' > "$V/inbox/n.md"
+printf 'x\n' > "$V/inbox/c.txt"
+: > "$OPSX_FAKE_LOG"
+out="$(sync_ob 2>&1)"; assert_eq "$?" 0 "sync obsidian: $out"
+assert_eq "$(cat "$OPSX_FAKE_LOG")" "" "--source obsidian 不呼叫 glab、gh"
+OI="$(ob inbox/想法.md)"
+assert_file "$OI"; assert_grep '^source: obsidian:inbox/想法.md$' "$OI"; assert_grep '^type: 功能$' "$OI"
+assert_eq "$(firstline 一句話 "$OI")" 看板要能貼圖
+sect 內文 "$OI" | grep -q '^細節$' || fail "內文要含細節：$(cat "$OI")"
+sect 證據 "$OI" | grep -qF "$V/inbox/想法.md" || fail "證據要有筆記的絕對路徑：$(cat "$OI")"
+assert_grep '^source: obsidian:inbox/a/b.md$' "$(ob inbox/a/b.md)"
+! grep -l -e '^source: .*\.trash' -e '^source: .*\.y\.md' -e '^source: .*c\.txt' "$UF"/*.md || fail "隱藏的與非 .md 不收"
+assert_eq "$(firstline 一句話 "$(ob inbox/待辦.md)")" 待辦
+NI="$(ob inbox/n.md)"; assert_not_grep 'tags' "$NI"; assert_eq "$(firstline 一句話 "$NI")" 標題
+assert_eq "$(logcols)" "$(printf '4\t0\t0\t0\t')"
+
+# --- 筆記改了不更新 ---
+cp "$OI" "$FX/oi.md"; printf '# 改過了\n' > "$V/inbox/想法.md"
+sync_ob >/dev/null 2>&1
+assert_eq "$(cat "$OI")" "$(cat "$FX/oi.md")" "待分類不依筆記改寫"; assert_eq "$(logcols | cut -f2)" 0
+
+# --- 搬進 repo 後不更新也不記錯 ---
+OS="$(basename "$OI" .md)"
+out="$(opsx file "$OS" --repo "$A" 2>&1)" || fail "opsx file: $out"
+FI="$CH/$OS/inbox.md"; assert_file "$FI"; cp "$FI" "$FX/fi.md"
+printf '# 又改了\n' > "$V/inbox/想法.md"
+sync_ob >/dev/null 2>&1
+assert_eq "$(cat "$FI")" "$(cat "$FX/fi.md")" "搬進 repo 後不依筆記改寫"
+assert_eq "$(logcols | cut -f2,4)" "$(printf '0\t0')"
+
+# --- 一篇不是 UTF-8 的筆記只記一筆錯誤，其他照建；U+2028 不會切斷 JSON ---
+printf '\xa4\xa4\xa4\xe5\n' > "$V/inbox/big5.md"
+printf '# 正常\n' > "$V/inbox/ok.md"
+printf '# 分隔\nline\342\200\250two\n' > "$V/inbox/sep.md"
+out="$(sync_ob 2>&1)"; assert_eq "$?" 0 "壞筆記不拖垮來源: $out"
+assert_file "$(ob inbox/ok.md)"; assert_file "$(ob inbox/sep.md)"
+assert_eq "$(logcols | cut -f1,4)" "$(printf '2\t1')"
+logcols | cut -f5 | grep -qF "$V/inbox/big5.md" || fail "錯誤要含壞檔路徑：$(lastsync)"
+rm "$V/inbox/big5.md"
+
+# --- 讀不了的筆記（權限、iCloud 下載中）只記一筆錯誤，其他照建 ---
+printf '# 鎖住的\n' > "$V/inbox/locked.md"; chmod 000 "$V/inbox/locked.md"
+printf '# 也正常\n' > "$V/inbox/ok2.md"
+out="$(sync_ob 2>&1)"; assert_eq "$?" 0 "讀不了的筆記不拖垮來源: $out"
+assert_file "$(ob inbox/ok2.md)"
+assert_eq "$(logcols | cut -f1,4)" "$(printf '1\t1')"
+logcols | cut -f5 | grep -qF "$V/inbox/locked.md" || fail "錯誤要含讀不了的檔案路徑：$(lastsync)"
+rm -f "$V/inbox/locked.md"
+
+# --- folder 空或絕對路徑：記錯，不把整個 vault 當收件夾 ---
+printf '# 根目錄的\n' > "$V/root.md"
+cp "$OPSX_STATE_DIR/sources.toml" "$FX/sources.bak"
+sed -i '' 's|^folder = "inbox"$|folder = ""|' "$OPSX_STATE_DIR/sources.toml"
+sync_ob >/dev/null 2>&1
+assert_eq "$(logcols | cut -f1,4)" "$(printf '0\t1')"; assert_no_file "$(ob root.md)"
+sed -i '' "s|^folder = \"\"\$|folder = \"$V\"|" "$OPSX_STATE_DIR/sources.toml"
+sync_ob >/dev/null 2>&1
+assert_eq "$(logcols | cut -f1,4)" "$(printf '0\t1')"; assert_no_file "$(ob root.md)"
+# . 等於整個 vault，.. 跑到 vault 外
+sed -i '' "s|^folder = \".*\"\$|folder = \".\"|" "$OPSX_STATE_DIR/sources.toml"
+sync_ob >/dev/null 2>&1
+assert_eq "$(logcols | cut -f1,4)" "$(printf '0\t1')"; assert_no_file "$(ob root.md)"
+mkdir -p "$FX/outside"; printf '# vault 外的\n' > "$FX/outside/o.md"
+sed -i '' "s|^folder = \".*\"\$|folder = \"../outside\"|" "$OPSX_STATE_DIR/sources.toml"
+sync_ob >/dev/null 2>&1
+assert_eq "$(logcols | cut -f1,4)" "$(printf '0\t1')"; assert_no_file "$(ob ../outside/o.md)"
+cp "$FX/sources.bak" "$OPSX_STATE_DIR/sources.toml"
 
 echo ok

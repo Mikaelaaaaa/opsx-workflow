@@ -49,7 +49,7 @@ herdr socket 不在使用者層標準設定裡：能連它的 session 可以用 
   - `opsx new [--repo <path>] -- <一句話>`：＋新增。範圍選到單一 repo 時建在那裡（slug `me-<YYYYMMDD-HHMM>`），否則寫進 `~/.local/state/opsx/unfiled/` 待分類。
   - `opsx file <slug> --repo <path>`：待分類選 repo 建卡。
   - `opsx drop <slug> [--repo <path>] -- <理由>`：捨棄，理由必填；收件卡歸檔並標 `outcome: declined`，待分類移到 `unfiled/dropped/`。
-  - `opsx sync [--source gitlab|github|debt]`：撈 `sources.toml` 登記的 repo 裡指派給你的 issue，和 code 裡的 `shortcut:` 註解，以 inbox.md 的 `source` 去重（含 archive），建殼或更新。上游關閉、註解刪掉只標記（列灰色），卡由你捨棄。每次跑完經 `opsx log --sync` 在 `~/.local/state/opsx/sync.log` 記一列 source `sync`（文字是新建、更新、沒變、錯誤數與第一個錯誤），紀錄 tab 讀得到；同一時間只跑一支，另一支退出碼 3。
+  - `opsx sync [--source gitlab|github|debt|obsidian]`：撈 `sources.toml` 登記的 repo 裡指派給你的 issue，和 code 裡的 `shortcut:` 註解，以 inbox.md 的 `source` 去重（含 archive），建殼或更新。`[obsidian]` 收件夾（`vault` / `folder`，含子資料夾）的每篇筆記進待分類，建好之後不再依筆記內容更新。上游關閉、註解刪掉只標記（列灰色），卡由你捨棄。每次跑完經 `opsx log --sync` 在 `~/.local/state/opsx/sync.log` 記一列 source `sync`（文字是新建、更新、沒變、錯誤數與第一個錯誤），紀錄 tab 讀得到；同一時間只跑一支，另一支退出碼 3。
   - 每日同步：`opsx init --global` 裝 launchd job `com.opsx.sync`（`~/Library/LaunchAgents/com.opsx.sync.plist`），每天 09:00 跑 `opsx sync`，輸出在 `~/.local/state/opsx/sync.out`。
 - 紀錄 tab 在 `board-log` 那張卡（`openspec/workplan.yaml`）。
 

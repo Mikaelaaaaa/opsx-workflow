@@ -159,6 +159,23 @@ opsx init --global >/dev/null 2>&1 || fail "global rerun"
 assert_grep "x = 1" "$OPSX_STATE_DIR/grants.toml"
 assert_grep '"k":1' "${OPSX_STATE_DIR}-protected/authz.json"   # 重跑不清授權
 
+# --- config.toml：terminal_app 依 TERM_PROGRAM 預填（specs/opsx-init「--global 建 config.toml 並預填終端機 app」）---
+CT="$OPSX_STATE_DIR/config.toml"
+rm -f "$CT"
+TERM_PROGRAM=WarpTerminal opsx init --global >/dev/null 2>&1 || fail "global with Warp"
+assert_grep '^terminal_app = "Warp"$' "$CT"
+TERM_PROGRAM=ghostty opsx init --global >/dev/null 2>&1 || fail "global rerun with ghostty"
+assert_grep '^terminal_app = "Warp"$' "$CT"   # 已有的檔不覆蓋
+assert_not_grep 'Ghostty' "$CT"
+rm -f "$CT"
+TERM_PROGRAM=vscode opsx init --global >/dev/null 2>&1 || fail "global with vscode"
+assert_file "$CT"
+assert_not_grep '^terminal_app' "$CT"   # 對不出來不寫值
+assert_grep '^# terminal_app' "$CT"
+rm -f "$CT"
+( unset TERM_PROGRAM; opsx init --global >/dev/null 2>&1 ) || fail "global without TERM_PROGRAM"
+assert_not_grep '^terminal_app' "$CT"
+
 # --- 沙盒權限：裝進 CLAUDE_CONFIG_DIR/settings.json（specs/opsx-init「--global 把沙盒權限裝進使用者層」）---
 CS="$CLAUDE_CONFIG_DIR/settings.json"
 assert_file "$CS"
@@ -324,4 +341,36 @@ mkdir -p "$FX/baselink"; ln -s "$PY" "$FX/baselink/python3"
 outg="$(PATH="$FX/fakevenv:$PATH" FAKE_PREFIX=/fake/venv FAKE_BASE="$FX/baselink/python3" opsx init --global 2>&1)"
 assert_eq "$?" 0 "base 是 symlink 時 init --global: $outg"
 assert_eq "$(cat "$OPSX_STATE_DIR/python")" "$FX/baselink/python3" "base 要原樣記，不解 symlink"
+
+# --- --global 問 obsidian 收件夾：vault 與子資料夾分兩題，原樣寫入（sync-obsidian / obsidian-source）---
+# 互動模式要 tty，測試直接叫 ask_global_sources，stdin 依序答 vault、子資料夾、customer（Enter 跳過）
+ask() { ( source "$OPSX_ROOT/bin/lib/common.sh"; source "$OPSX_ROOT/bin/lib/init.sh"; ask_global_sources "$1" ); }
+obsidian_of() { python3 -I -c 'import sys,tomllib;o=tomllib.load(open(sys.argv[1],"rb"))["obsidian"];print(o["vault"]+"|"+o["folder"])' "$1"; }
+ST="$FX/sources-ask.toml"
+: > "$ST"; printf '/Users/me/vault\n01-Projects/inbox\n\n' | ask "$ST" >/dev/null
+assert_eq "$(obsidian_of "$ST")" "/Users/me/vault|01-Projects/inbox"
+: > "$ST"; printf '/Users/me/notes\nInbox\n\n' | ask "$ST" >/dev/null
+assert_eq "$(obsidian_of "$ST")" "/Users/me/notes|Inbox"
+: > "$ST"; printf '\n\n' | ask "$ST" >/dev/null
+assert_not_grep '^\[obsidian\]' "$ST"
+# 子資料夾空答案：不登記，免得整個 vault 變收件夾
+: > "$ST"; printf '/Users/me/vault\n\n\n' | ask "$ST" >/dev/null
+assert_not_grep '^\[obsidian\]' "$ST"
+# 引號與反斜線（拖進終端機的路徑會有 \ ）：寫出的 TOML 解析得回原字串
+: > "$ST"; printf '%s\n%s\n\n' '/Users/me/My "V"\x' 'in\box' | ask "$ST" >/dev/null
+assert_eq "$(obsidian_of "$ST")" '/Users/me/My "V"\x|in\box'
+# 控制字元（read -r 沒有 readline，打字時按方向鍵會存進 ESC）：不登記，免得 sources.toml 解析不了
+: > "$ST"; printf '/Users/me/va\033[Dult\ninbox\n\n' | ask "$ST" >/dev/null
+assert_not_grep '^\[obsidian\]' "$ST"
+# vault/folder 不是資料夾：照樣寫入，但當場警告（拖進終端機的 Mobile\ Documents 反斜線會原樣留著）
+: > "$ST"; outa="$(printf '/Users/me/Library/Mobile\\ Documents/v\ninbox\n\n' | ask "$ST" 2>&1)"
+assert_grep '^\[obsidian\]' "$ST"
+case "$outa" in *不是資料夾*) ;; *) fail "不存在的路徑要警告：$outa" ;; esac
+mkdir -p "$FX/realvault/inbox"
+: > "$ST"; outa="$(printf '%s\ninbox\n\n' "$FX/realvault" | ask "$ST" 2>&1)"
+case "$outa" in *不是資料夾*) fail "存在的資料夾不該警告：$outa" ;; esac
+printf '[obsidian]\nvault = "/v"\nfolder = "f"\n' > "$ST"; cp "$ST" "$FX/st-before"
+outa="$(printf '\n' | ask "$ST")"
+assert_eq "$(cat "$ST")" "$(cat "$FX/st-before")" "已登記不改"
+case "$outa" in *obsidian*) fail "已登記不再問 obsidian：$outa" ;; esac
 echo ok
