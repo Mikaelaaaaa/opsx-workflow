@@ -236,12 +236,16 @@ def file_unfiled(state: pathlib.Path, item: dict, today: str) -> pathlib.Path:
     """沒有 repo 的 item 寫成 <state>/unfiled/<slug>.md；撞名規則跟 new.sh 一樣，只看 unfiled/ 這一層。"""
     unfiled = state / "unfiled"
     unfiled.mkdir(parents=True, exist_ok=True)
-    path, n = unfiled / ("%s.md" % item["slug"]), 1
-    while path.exists():
-        n += 1
-        path = unfiled / ("%s-%d.md" % (item["slug"], n))
-    safefile.write_atomic(str(path), inbox_text(item, today))
-    return path
+    text, n = inbox_text(item, today), 1
+    path = unfiled / ("%s.md" % item["slug"])
+    while True:
+        try:
+            with path.open("x", encoding="utf-8") as f:
+                f.write(text)
+            return path
+        except FileExistsError:
+            n += 1
+            path = unfiled / ("%s-%d.md" % (item["slug"], n))
 
 
 def update_debt(entry: dict, item: dict) -> bool:

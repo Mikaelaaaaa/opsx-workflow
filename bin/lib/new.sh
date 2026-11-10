@@ -53,8 +53,18 @@ opsx_new() {
     local dir="$OPSX_STATE_DIR/unfiled"
     s="$slug"; n=1
     mkdir -p "$dir"
-    while [ -e "$dir/$s.md" ] || [ -e "$dir/$s" ]; do n=$((n+1)); s="$slug-$n"; done
-    cp "$body" "$dir/$s.md"
+    # set -C 讓重導向以 O_EXCL 建檔：建成功就是拿到這個 slug，並行的另一個呼叫只會建失敗再試下一號。
+    # 附件資料夾 <slug>/ 已經在的 slug 也不能用，放掉剛建的空檔再換號。
+    while :; do
+      if ( set -C; : > "$dir/$s.md" ) 2>/dev/null; then
+        [ -e "$dir/$s" ] || break
+        rm -f "$dir/$s.md"
+      elif [ ! -e "$dir/$s.md" ]; then
+        die "new: 建不了 $dir/$s.md"
+      fi
+      n=$((n+1)); s="$slug-$n"
+    done
+    cat "$body" > "$dir/$s.md" || { rm -f "$dir/$s.md"; die "new: 寫不進 $dir/$s.md"; }
     dest="$dir/$s/attachments"
   fi
   if [ ${#names[@]} -gt 0 ]; then
