@@ -6,6 +6,8 @@
 
 # shellcheck source=/dev/null
 source "$OPSX_ROOT/bin/lib/note.sh"
+# shellcheck source=/dev/null
+source "$OPSX_ROOT/bin/lib/agents-md.sh"
 
 opsx_dispatch() {
   local slug="" agent=claude model="" mode=autopilot kind="" top="" feature="" plan="" note="" has_note=""
@@ -96,6 +98,8 @@ PY
     fi
   fi
   warn_untrusted "$top"
+  # codex 沒有 router hook：把同一批規則放進 worktree。worktree 已在也寫（重派可能換模式）
+  if [ "$agent" = codex ]; then place_agents_md "$wt" "$mode" || die "dispatch: AGENTS.md 放不進 $wt"; fi
 
   # workspace：workspaces.toml 記的是 label（人看的，例 agnetory-ai），herdr 的 tab create 只吃 id（w1），
   # 所以用 `herdr workspace list`（result.workspaces[].{label,workspace_id}，2026-11-06 實跑）換；沒掛就開一個以 repo 為 label 的
@@ -145,6 +149,8 @@ PY
     aargs+=(--add-dir "$top/openspec" --add-dir "$OPSX_STATE_DIR")
   else
     if [ "$mode" = interactive ]; then aargs+=(-a on-request -s workspace-write); else aargs+=(-a never -s workspace-write); fi
+    # 卡的檔在主 repo 的 openspec/，不在 worktree；沒有這兩個，規則叫它寫的 gates.md / status.json 寫不進
+    aargs+=(--add-dir "$top/openspec" --add-dir "$OPSX_STATE_DIR")
   fi
   # 剛開的 pane 的 shell 還沒到 prompt 時 herdr 回 agent_pane_busy，同一個 pane 最多試六次；起不來就收掉剛開的 tab，不留空 tab 給人收
   local out try=1
