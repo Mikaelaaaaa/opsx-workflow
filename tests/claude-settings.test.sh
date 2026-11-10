@@ -86,6 +86,17 @@ out="$(run --file "$FX/cfg/absent.json" --template "$T" --check 2>&1)"; rc=$?
 assert_eq "$rc" 3 "檔案不存在時 --check 要 exit 3：$out"
 assert_no_file "$FX/cfg/absent.json"
 
+# --- 寫入路徑：settings.json 是 symlink（dotfiles）且權限 0600 → 連結還在、真檔更新、權限不變、不留暫存檔 ---
+mkdir -p "$FX/dot" "$FX/linkcfg"
+printf '{"env":{"TOKEN":"x"}}' > "$FX/dot/settings.json"; chmod 600 "$FX/dot/settings.json"
+ln -s "$FX/dot/settings.json" "$FX/linkcfg/settings.json"
+run --file "$FX/linkcfg/settings.json" --add-dir /y/repo >/dev/null || fail "symlink merge rc"
+[ -L "$FX/linkcfg/settings.json" ] || fail "symlink 被換成一般檔"
+assert_eq "$(jget "$FX/dot/settings.json" permissions.additionalDirectories)" '["/y/repo"]' "真檔沒更新"
+assert_eq "$(jget "$FX/dot/settings.json" env.TOKEN)" '"x"'
+assert_eq "$(python3 -I -c 'import os,stat,sys; print(oct(stat.S_IMODE(os.stat(sys.argv[1]).st_mode)))' "$FX/dot/settings.json")" 0o600 "權限被改了"
+assert_eq "$(ls -A "$FX/dot" | grep -c 'tmp$' || true)" 0 "留下暫存檔"
+
 # --- 壞 JSON：非 0、訊息含檔名、位元組不變、不備份 ---
 rm -f "$S.opsx-bak"
 printf '{"sandbox": ' > "$S"

@@ -11,6 +11,8 @@ import json
 import os
 import re
 import shutil
+import stat
+import tempfile
 
 CHECK_MISSING = 3  # --check 有缺項時的 exit code；1 留給「檔案或範本壞了」
 VAR = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
@@ -100,11 +102,16 @@ def main():
     bak = args.file + ".opsx-bak"
     if exists and not os.path.exists(bak):
         shutil.copy2(args.file, bak)
-    os.makedirs(os.path.dirname(args.file), exist_ok=True)
-    tmp = args.file + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
+    # 寫到 symlink 指向的真檔（dotfiles），暫存檔放同一個目錄且名字唯一；沿用原檔權限，新檔 0600
+    real = os.path.realpath(args.file)
+    directory = os.path.dirname(real)
+    os.makedirs(directory, exist_ok=True)
+    mode = stat.S_IMODE(os.stat(real).st_mode) if exists else 0o600
+    fd, tmp = tempfile.mkstemp(dir=directory, prefix=".settings.", suffix=".tmp")
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
         f.write(json.dumps(data, indent=2, ensure_ascii=False) + "\n")
-    os.replace(tmp, args.file)
+    os.chmod(tmp, mode)
+    os.replace(tmp, real)
     print("changed" if exists else "created")
 
 
