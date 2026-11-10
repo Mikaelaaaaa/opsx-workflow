@@ -102,3 +102,32 @@ stage_of() { # <top> <slug>
   printf 'explore · %s · %s · skills/explore/SKILL.md\n' "$slug" "$kind"
 }
 stage_name() { stage_of "$1" "$2" | cut -d' ' -f1; }
+
+# 舊 spec-driven 的 change：.openspec.yaml 沒有 schema: opsx，inbox.md 不存在或只有空白。看板只計數、router 清單不列。
+# 只用 builtin：真 repo 裡有幾百張舊卡，每張 fork 一次 stage 判斷就是十幾秒。
+collect_is_legacy() { # <change dir>
+  local line inbox
+  if [ -f "$1/.openspec.yaml" ]; then
+    while IFS= read -r line || [ -n "$line" ]; do
+      [[ $line =~ ^schema:[[:space:]]*opsx[[:space:]]*$ ]] && return 1
+    done < "$1/.openspec.yaml"
+  fi
+  if [ -f "$1/inbox.md" ]; then
+    # [:space:] 依 locale：先刪掉全形空白 U+3000 與 NBSP 的位元組，沒有 LANG 的啟動方式（launchd、nohup）下也算空白
+    inbox=$(<"$1/inbox.md"); inbox=${inbox//$'\xe3\x80\x80'/}; inbox=${inbox//$'\xc2\xa0'/}
+    [[ $inbox =~ [^[:space:]] ]] && return 1
+  fi
+  return 0
+}
+
+# 進行中的主殼，每行印一項 `/<stage> <slug>`，slug 字母序。archive 目錄、舊卡、已拆的卡不列；子殼在 subs/ 底下，glob 碰不到。
+active_changes() { # <top>
+  local d slug stage
+  for d in "$1"/openspec/changes/*/; do
+    d="${d%/}"; slug="${d##*/}"
+    [ -d "$d" ] && [ "$slug" != archive ] || continue
+    if collect_is_legacy "$d"; then continue; fi
+    stage="$(stage_name "$1" "$slug")"
+    if [ "$stage" != split ]; then printf '/%s %s\n' "$stage" "$slug"; fi
+  done
+}
