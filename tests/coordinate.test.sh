@@ -427,12 +427,31 @@ assert_eq "$(count '^opsx answer p1')" 0 "已答過不再答：$(cat "$OPSX_FAKE
 assert_grep "^opsx dispatch p1 --agent codex " "$OPSX_FAKE_LOG"
 assert_eq "$(memo_get _parked demo/p1)" "" "派出去後清 parked"
 
-# --- parked：人在板上答掉 gate（不是 coordinator 答的），清 parked、不派 ---
+# --- parked：人在板上答掉 gate（不是 coordinator 答的），不再答、照派卡規則重派，沿用原 agent ---
 cp "$FX/memo.parked" "$MEMO"
 cards '[{"slug":"p1","section":"待指派","dispatch":null}]'
 round || fail "rc: $(cat "$FX/out")"
-assert_eq "$(memo_get _parked demo/p1)" "" "人答掉 gate 要清 parked"
-assert_eq "$(count '^opsx (answer|dispatch) p1')" 0 "人停掉的卡不派：$(cat "$OPSX_FAKE_LOG")"
+assert_eq "$(count '^opsx answer p1')" 0 "人答過的 gate 不再答：$(cat "$OPSX_FAKE_LOG")"
+assert_grep "^opsx dispatch p1 --agent codex " "$OPSX_FAKE_LOG"
+assert_eq "$(memo_get _parked demo/p1)" "" "重派後清 parked"
+
+# --- parked：人答掉 gate 但卡的依賴還沒合，不派，parked 留著並記已答 ---
+cp "$FX/memo.parked" "$MEMO"
+cat >> "$R/openspec/workplan.yaml" <<'EOF'
+      - name: p1
+        branch: feat/p1/m
+        status: pending
+        depends-on: [p]
+        changes:
+          - name: p1
+            status: pending
+EOF
+cards '[{"slug":"p1","section":"待指派","dispatch":null}]'
+round || fail "rc: $(cat "$FX/out")"
+assert_eq "$(count '^opsx (answer|dispatch) p1')" 0 "依賴沒合不派：$(cat "$OPSX_FAKE_LOG")"
+assert_eq "$(memo_get _parked demo/p1 | grep -c "'answered': True")" 1 "parked 要留著並記已答：$(cat "$MEMO")"
+cp "$WP0" "$R/openspec/workplan.yaml"
+sed -i '' '/- name: g$/,/status:/s/status: pending/status: merged/' "$R/openspec/workplan.yaml"
 
 # --- parked：人手動重派過，清 parked，agent 不見了照常重派 ---
 cp "$FX/memo.parked" "$MEMO"
