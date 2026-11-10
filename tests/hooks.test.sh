@@ -101,6 +101,15 @@ out="$(cg 'git commit -m "chore: bump"')"; assert_eq "$(decision "$out")" deny "
 out="$(cg 'git commit -m "chore: bump [no-change] 只是改 README"')"; assert_eq "$(decision "$out")" allow "commit: [no-change] 放行"
 assert_grep "Agentory-AI" "$OPSX_STATE_DIR/bypass.log"
 out="$(cg 'ls -la')"; assert_eq "$out" "" "commit: 非 commit 指令不出聲"
+# 子殼分支 <主>--<子>：看子殼的 tasks.md，不看主殼
+mkdir -p "$C/subs/s1"; printf '## 1. x\n\n- [ ] 1.1 a\n' > "$C/subs/s1/tasks.md"
+printf '## 1. x\n\n- [ ] 1.1 s1\n' > "$C/tasks.md"
+git -C "$R" checkout -q -b feat/eval-core--s1/mikaela
+out="$(cg 'git commit -m "feat: x"')"; assert_eq "$(decision "$out")" deny "commit: 子殼全未勾要擋"
+reason "$out" | grep -q 'subs/s1' || fail "commit: 子殼的 deny 要寫子殼路徑: $(reason "$out")"
+printf '## 1. x\n\n- [x] 1.1 a\n' > "$C/subs/s1/tasks.md"
+out="$(cg 'git commit -m "feat: x"')"; assert_eq "$(decision "$out")" allow "commit: 子殼有勾放行（主殼全未勾）"
+printf '## 1. x\n\n- [x] 1.1 a\n- [ ] 1.2 b\n' > "$C/tasks.md"; rm -rf "$C/subs"
 git -C "$R" checkout -q feat/eval-core/mikaela
 
 # ---------- grant gate ----------

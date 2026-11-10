@@ -43,4 +43,32 @@ assert_rc 2 opsx status apply 1/8 x --change nope
 # --- --show 印目前的，沒有檔印 none ---
 out="$(opsx status --show)"; echo "$out" | grep -q "review 1/7" || fail "show: $out"
 rm "$S"; out="$(opsx status --show)"; assert_eq "$out" "none"
+
+# --- worker：一般分支是 session ---
+opsx status apply 1/3 x || fail "worker session"
+python3 -I -c 'import json,sys;d=json.load(open(sys.argv[1]));assert d["worker"]=="session",d' "$S"
+
+# --- 子殼分支 <主>--<子>：寫子殼的 status.json，worker 是 subagent-<子>，主殼不動 ---
+mkdir -p "$R/openspec/changes/eval-core/subs/s1"
+cp "$S" "$S.before"
+git -C "$R" checkout -q -b feat/eval-core--s1/mikaela
+opsx status apply 1/3 "子" || fail "子殼分支 rc"
+SS="$R/openspec/changes/eval-core/subs/s1/status.json"
+python3 -I -c 'import json,sys;d=json.load(open(sys.argv[1]));assert d["worker"]=="subagent-s1" and d["label"]=="子",d' "$SS"
+diff -q "$S" "$S.before" >/dev/null || fail "子殼分支不該動主殼 status.json"
+
+# --- 子殼不存在：rc 2，訊息含它要找的路徑 ---
+git -C "$R" checkout -q -b feat/eval-core--nope/mikaela
+out="$(opsx status apply 1/3 x 2>&1)"; rc=$?
+assert_eq "$rc" 2 "子殼不存在 rc"
+echo "$out" | grep -q 'openspec/changes/eval-core/subs/nope' || fail "子殼不存在的訊息: $out"
+
+# --- --sub / --worker：session 在主 change 分支上替子殼寫 ---
+git -C "$R" checkout -q feat/eval-core/mikaela
+rm "$SS"
+opsx status apply 2/3 y --sub s1 --worker subagent-s1 || fail "--sub rc"
+python3 -I -c 'import json,sys;d=json.load(open(sys.argv[1]));assert d["worker"]=="subagent-s1" and d["step"]==2,d' "$SS"
+opsx status apply 3/3 z --sub s1 || fail "--sub 無 --worker"
+python3 -I -c 'import json,sys;d=json.load(open(sys.argv[1]));assert d["worker"]=="session",d' "$SS"
+assert_rc 2 opsx status apply 1/3 x --sub nope
 echo ok
