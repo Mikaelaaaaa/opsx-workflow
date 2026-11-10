@@ -4,11 +4,15 @@
 # 把一張卡派出去：開 worktree，在 repo 掛的 workspace 開 herdr tab，agent start，送第一句 prompt，記進 dispatch.json。
 # 要求檔 §3.6「派」、§3.6 自主程度表、§3.1。herdr 的每個呼叫都可以被 PATH 上的假 herdr 取代（tests/fakes）。
 
+# shellcheck source=/dev/null
+source "$OPSX_ROOT/bin/lib/note.sh"
+
 opsx_dispatch() {
-  local slug="" agent=claude model="" mode=autopilot kind="" top="" feature="" plan=""
+  local slug="" agent=claude model="" mode=autopilot kind="" top="" feature="" plan="" note="" has_note=""
   while [ $# -gt 0 ]; do
     case "$1" in
       --feature) feature="$2"; shift 2 ;;
+      --note) has_note=1; note="$(note_oneline "$2")"; shift 2 ;;
       --agent) agent="$2"; shift 2 ;;
       --model) model="$2"; shift 2 ;;
       --mode) mode="$2"; shift 2 ;;
@@ -23,6 +27,7 @@ opsx_dispatch() {
     slug="$feature"   # herdr agent 名、worktree、tab 都用 feature 名
   fi
   [ -n "$slug" ] || die "dispatch: 要給 slug"
+  [ -z "$has_note" ] || [ -n "$note" ] || die "dispatch: --note 壓成一行後是空的"
   [ -n "$top" ] || top="$(git_toplevel)"
   [ -n "$top" ] || die "dispatch: 不在 git repo 裡，或給 --repo"
   top="$(cd "$top" && pwd -P)"
@@ -187,6 +192,8 @@ PY
   # 第一句：照狀態
   local first; first="$(stage_name "$top" "$card")"
   case "$first" in explore|grill|propose|apply|review|pr|babysit) ;; *) first=explore ;; esac
+  # 指示要在 agent 讀到第一句前就在卡上；放在前面每一步之後，失敗的派工不會留下指示，重跑也不會寫兩條
+  if [ -n "$note" ]; then note_append "$d" "$note" || die "dispatch: 寫不進 $d/inbox.md 的派工指示，第一句沒送"; fi
   herdr agent prompt "$slug" "/$first $card" >/dev/null
   local c via=""
   [ -n "$feature" ] && via="（session ${feature}）"

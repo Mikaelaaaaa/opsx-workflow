@@ -136,4 +136,50 @@ gates; : > "$OPSX_FAKE_LOG"
 printf '{"Agentory-AI/x":{"mode":"autopilot","pane":"p4","agent":"claude","grants":[],"herdr_name":"fs","via":"fs","feature":"fs"}}' > "$OPSX_STATE_DIR/dispatch.json"
 out="$(opsx answer x --gate g2 "選 B" 2>&1)"; assert_eq "$?" 0 "session 代管卡 answer: $out"
 assert_grep '^agent prompt fs \[x\] 選 B$' "$OPSX_FAKE_LOG"
+
+# --- 子 change：--sub 回 subs/<子>/gates.md，decisions 記子殼，主 change 的檔不動（board-tree answer-sub）---
+mk_change "$R" bt; B="$R/openspec/changes/bt"; S="$B/subs/as"; mkdir -p "$S"
+printf '## g1\ntype: decision\nstatus: open\n問題: 主的\n' > "$B/gates.md"; cp "$B/gates.md" "$FX/main-before.md"
+subgates() { printf '## g1\ntype: decision\nstatus: open\n問題: 選哪個\n\n## g2\ntype: approval\naction: push\nstatus: open\n問題: 要 push\n' > "$S/gates.md"; }
+subgates; printf '{}' > "$OPSX_STATE_DIR/dispatch.json"; : > "$OPSX_FAKE_LOG"
+out="$(opsx answer bt --sub as --gate g1 第一項 2>&1)"; assert_eq "$?" 0 "answer --sub: $out"
+awk '/^## g1/{f=1} /^## g2/{f=0} f' "$S/gates.md" > "$FX/sg1.txt"
+assert_grep '^status: answered' "$FX/sg1.txt"; assert_grep '^answer: 第一項$' "$FX/sg1.txt"
+assert_eq "$(tail -1 "$S/decisions.tsv" | cut -f2-5)" $'你\t已決定\t第一項\tg1'
+cmp -s "$B/gates.md" "$FX/main-before.md" || fail "主 change 的 gates.md 不該變"; assert_no_file "$B/decisions.tsv"
+assert_eq "$(cat "$OPSX_FAKE_LOG")" "" "主 change 沒派出就不 prompt"
+
+# 子殼不存在：退出非 0，訊息含 subs/nope，什麼都不動
+cp "$S/gates.md" "$FX/sub-before.md"; cp "$S/decisions.tsv" "$FX/sub-before.tsv"; cp "$OPSX_STATE_DIR/dispatch.json" "$FX/disp-before.json"
+out="$(opsx answer bt --sub nope --gate g1 ok 2>&1)"; [ $? -ne 0 ] || fail "子殼不存在要退出非零"
+echo "$out" | grep -q 'subs/nope' || fail "訊息要含 subs/nope: $out"
+assert_no_file "$B/subs/nope"; assert_no_file "$B/decisions.tsv"
+cmp -s "$B/gates.md" "$FX/main-before.md" || fail "主 gates.md 不該變"
+cmp -s "$S/gates.md" "$FX/sub-before.md" || fail "子 gates.md 不該變"; cmp -s "$S/decisions.tsv" "$FX/sub-before.tsv" || fail "子 decisions 不該變"
+cmp -s "$OPSX_STATE_DIR/dispatch.json" "$FX/disp-before.json" || fail "dispatch.json 不該變"
+assert_eq "$(cat "$OPSX_FAKE_LOG")" "" "不該碰 herdr"
+
+# 主 change 有派出：送給主的 herdr_name，前綴一律 [主/子]，有沒有 via 都一樣
+subgates; : > "$OPSX_FAKE_LOG"
+printf '{"Agentory-AI/bt":{"mode":"autopilot","pane":"p5","agent":"claude","grants":[],"herdr_name":"fb"}}' > "$OPSX_STATE_DIR/dispatch.json"
+out="$(opsx answer bt --sub as --gate g1 選 A 2>&1)"; assert_eq "$?" 0 "sub 派出: $out"
+assert_grep '^agent prompt fb \[bt/as\] 選 A$' "$OPSX_FAKE_LOG"
+subgates; : > "$OPSX_FAKE_LOG"
+printf '{"Agentory-AI/bt":{"mode":"autopilot","pane":"p5","agent":"claude","grants":[],"via":"p","herdr_name":"p"}}' > "$OPSX_STATE_DIR/dispatch.json"
+out="$(opsx answer bt --sub as --gate g1 選 A 2>&1)"; assert_eq "$?" 0 "sub 代管: $out"
+assert_grep '^agent prompt p \[bt/as\] 選 A$' "$OPSX_FAKE_LOG"
+
+# 卡級 / 這次的授權記在主 change 的條目（受保護位置）；子 change 沒有自己的條目，dispatch.json 不寫授權
+chmod -R u+w "$PD" 2>/dev/null; rm -rf "$PD"
+subgates; printf '{"Agentory-AI/bt":{"mode":"autopilot","pane":"p5","agent":"claude","grants":[],"herdr_name":"fb"}}' > "$OPSX_STATE_DIR/dispatch.json"
+out="$(opsx answer bt --sub as --gate g2 --grant card 允許 2>&1)"; assert_eq "$?" 0 "sub card: $out"
+assert_eq "$(jq -c '."Agentory-AI/bt".grants' "$PD/authz.json")" '["push"]'
+assert_eq "$(jq -c '."Agentory-AI/bt".grants' "$OPSX_STATE_DIR/dispatch.json")" '[]' "card 授權不該寫進 dispatch.json"
+assert_eq "$(tail -1 "$S/decisions.tsv" | cut -f2-5)" $'你\t已允許\t允許\tg2 · card'
+subgates
+out="$(opsx answer bt --sub as --gate g2 --grant this 允許 2>&1)"; assert_eq "$?" 0 "sub this: $out"
+assert_eq "$(jq -c '."Agentory-AI/bt".once' "$PD/authz.json")" '["push"]'
+assert_eq "$(jq -c 'keys' "$PD/authz.json")" '["Agentory-AI/bt"]' "子 change 沒有自己的授權條目"
+assert_eq "$(jq -c 'keys' "$OPSX_STATE_DIR/dispatch.json")" '["Agentory-AI/bt"]' "子 change 不進 dispatch.json"
+assert_no_file "$B/decisions.tsv"
 echo ok

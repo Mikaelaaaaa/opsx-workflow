@@ -21,6 +21,13 @@ if [ -n "$slug" ] && [ -n "${OPSX_PY:-}" ]; then
   esac
 fi
 
+# 第二站之後由 drive 送、重派由 coordinate 送，都不帶指示；只有這裡每句都跑，所以由這裡提醒。每句都跑，只用 awk 不起 python
+card="$(card_dir)"
+if [ -n "$card" ] && [ -f "$card/inbox.md" ]; then
+  notes="$(awk '/^## 派工指示[[:space:]]*$/ { f = 1; next } /^## / { f = 0 } f && /^- / { n++ } END { print n + 0 }' "$card/inbox.md")"
+  if [ "$notes" -gt 0 ]; then rule=" · 派工指示 $notes 條 · Read $card/inbox.md ## 派工指示 · 跟 D 衝突開 gate$rule"; fi
+fi
+
 for kw in babysit pickup pause forensics correct reflect audit deepen dispatch; do
   case " $lower " in *"/$kw "*|*" $kw "*|*"/$kw"*)
     ctx "$ev" "opsx 平行流程：$kw · Read skills/$kw/SKILL.md；做完下一次 prompt 重讀主流程狀態$rule"; exit 0 ;;

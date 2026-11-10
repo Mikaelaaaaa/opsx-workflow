@@ -59,6 +59,24 @@ printf '{}' > "$OPSX_STATE_DIR/dispatch.json"
 out="$(run_hook openspec-router.sh "$(j "$R" "" '{}' "下一步")")"; r="$(reason "$out")"
 case "$r" in *"autopilot："*|*"interactive："*|*"不寫迴圈"*) fail "router: 沒派過不附規則: $r" ;; esac
 rm -f "$OPSX_STATE_DIR/dispatch.json"
+# 派工指示（dispatch-note-cli note-router）：段裡有條目就每句帶「派工指示 N 條 · Read <inbox.md> …」
+printf -- '---\ntype: 功能\n---\n\n## 一句話\n\n- 不算\n- 不算\n' > "$C/inbox.md"
+out="$(run_hook openspec-router.sh "$(j "$R" "" '{}' "下一步")")"; reason "$out" | grep -q '^opsx：babysit' || fail "router: 沒有段落照常注入: $(reason "$out")"
+reason "$out" | grep -q '派工指示' && fail "router: 沒有段落不帶派工指示: $(reason "$out")"
+printf '\n## 派工指示\n\n' >> "$C/inbox.md"
+out="$(run_hook openspec-router.sh "$(j "$R" "" '{}' "下一步")")"; reason "$out" | grep -q '^opsx：babysit' || fail "router: 空段落照常注入: $(reason "$out")"
+reason "$out" | grep -q '派工指示' && fail "router: 空段落不帶派工指示: $(reason "$out")"
+printf -- '- 2026-11-10T12:00:00+08:00 先跑 lint\n- 2026-11-10T12:05:00+08:00 撤銷上一條\n\n## 備註\n\n- 不算\n- 不算\n' >> "$C/inbox.md"
+NOTE="派工指示 2 條 · Read $R/openspec/changes/eval-core/inbox.md ## 派工指示 · 跟 D 衝突開 gate"
+out="$(run_hook openspec-router.sh "$(j "$R" "" '{}' "下一步")")"; r="$(reason "$out")"
+case "$r" in "opsx："*"$NOTE"*) ;; *) fail "router: 主流程行要帶派工指示: $r" ;; esac
+out="$(run_hook openspec-router.sh "$(j "$R" "" '{}' "" SessionStart)")"; r="$(reason "$out")"
+case "$r" in *"$NOTE"*) ;; *) fail "router: SessionStart 要帶派工指示: $r" ;; esac
+out="$(run_hook openspec-router.sh "$(j "$R" "" '{}' "/babysit 看一下 MR")")"; r="$(reason "$out")"
+case "$r" in *"平行流程：babysit"*"$NOTE"*) ;; *) fail "router: 平行流程行要帶派工指示: $r" ;; esac
+out="$(run_hook openspec-router.sh "$(j "$R" "" '{}' "先 tdd 把測試寫出來")")"; r="$(reason "$out")"
+case "$r" in "opsx：tdd"*"$NOTE"*) ;; *) fail "router: tdd 行要帶派工指示: $r" ;; esac
+rm -f "$C/inbox.md"
 # 不是 opsx repo → 不印
 P="$(mk_repo plain)"; out="$(run_hook openspec-router.sh "$(j "$P" "" '{}' "hi")")"; assert_eq "$out" "" "router: 非 opsx repo 要安靜"
 # 沒對到卡的 branch
@@ -207,6 +225,26 @@ out="$(mg 'gh pr create --title t --body "## Changes
 | 1 | a | b | c |"')"; assert_eq "$(decision "$out")" allow "mr: --body 內嵌"
 out="$(mg 'gh pr create --title t --body "just text"')"; assert_eq "$(decision "$out")" deny "mr: body 不合格"
 out="$(mg 'glab mr list')"; assert_eq "$out" "" "mr: 其他 glab 指令不出聲"
+out="$(mg 'opsx answer s g1 -- "之後用 gh pr create 開 MR"')"; assert_eq "$out" "" "mr: 雙引號內的字樣不觸發"
+out="$(mg "opsx answer s g1 -- 'glab mr create 之後再開'")"; assert_eq "$out" "" "mr: 單引號內的字樣不觸發"
+out="$(mg 'echo "it'"'"'s gh pr create"')"; assert_eq "$out" "" "mr: 雙引號內含單引號的字樣不觸發"
+out="$(mg 'cat > inbox.md <<'"'EOF'"'
+用 glab mr create 開 MR
+EOF')"; assert_eq "$out" "" "mr: heredoc 內的字樣不觸發"
+out="$(mg 'cd x && glab mr create -F bad.md')"; assert_eq "$(decision "$out")" deny "mr: && 之後的 create 仍檢查"
+out="$(mg 'gh pr create --title "it'"'"'s" --body "just text"')"; assert_eq "$(decision "$out")" deny "mr: 引號內含單引號不讓真的 create 漏掉"
+out="$(mg "echo it's ok; if true; then gh pr create --fill --title 'x'; fi")"; assert_eq "$(decision "$out")" deny "mr: 未配對撇號與 then 之後的 create 不漏檢"
+out="$(mg 'gh pr create --title t --body "$(cat <<'"'EOF'"'
+## Changes
+
+| 編號 | 程式碼改動 | 業務層邏輯 | 對應測試 |
+| 1 | a | b | c |
+EOF
+)"')"; assert_eq "$(decision "$out")" allow "mr: --body \$(cat <<EOF) 合格仍放行"
+out="$(mg 'gh pr create --title t --body "$(cat <<'"'EOF'"'
+just text
+EOF
+)"')"; assert_eq "$(decision "$out")" deny "mr: --body \$(cat <<EOF) 不合格仍擋"
 
 # ---------- gate-timestamp ----------
 gt() { printf '{"cwd":"%s","tool_name":"%s","tool_input":{"file_path":"%s"},"hook_event_name":"PostToolUse"}' "$R" "${2:-Write}" "$1" | OPSX_NOW=2026-11-06T14:05:00+08:00 bash "$H/gate-timestamp.sh" 2>/dev/null; echo "rc=$?"; }
