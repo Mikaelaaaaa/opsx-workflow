@@ -145,6 +145,8 @@ cmp -s "$C/gates.md" "$FX/before.md" || fail "拒絕時 gates.md 不該變"
 assert_no_file "$PD/authz.json"   # 拒絕時不該有授權寫入（受保護位置連檔都不該出現）
 out="$(opsx answer x --gate g1 --grant card "允許" 2>&1)"; assert_eq "$?" 0 "authorization 要能授權：$out"
 assert_eq "$(jq -c '."Agentory-AI/x".grants' "$PD/authz.json")" '["push"]' "authorization 的授權要落在受保護位置"
+rm -rf "$PD"   # g1 的授權已留下 push，不清掉的話下面的斷言就算 g4 什麼都沒寫也會過
 out="$(opsx answer x --gate g4 --grant card "允許" 2>&1)"; assert_eq "$?" 0 "等待授權 要能授權：$out"
-assert_eq "$(jq -c '."Agentory-AI/x".grants' "$PD/authz.json")" '["push"]'
+assert_eq "$(jq -c '."Agentory-AI/x".grants' "$PD/authz.json")" '["push"]' "等待授權 的授權要自己落在受保護位置"
+awk '/^## g4/{f=1} f' "$C/gates.md" | grep -q '^status: answered' || fail "g4 要 answered"
 echo ok
