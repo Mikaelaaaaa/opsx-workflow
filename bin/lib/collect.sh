@@ -436,6 +436,8 @@ def orphan_reason(key, pane):
     # .claude/worktrees/ 也放別的工具自己開的 worktree：dispatch.json 沒記過、或記的不是這個 pane 的，不是 opsx 開的 pane
     entry = dispatch.get("%s/%s" % key)
     if entry is None or str(entry.get("pane")) != str(pane): return None
+    # opsx 自己已經關掉這個 pane（stop 記 pane_closed_at、reap 記 reaped_at）：同一個 id 現在是別人的 pane
+    if entry.get("pane_closed_at") or entry.get("reaped_at"): return None
     c = card_by_key.get(key)
     if c is None:
         # 卡不在 cards 裡不等於卡目錄不存在：repo 沒被這次掃描、或被當舊卡濾掉的活卡不能算
@@ -446,8 +448,18 @@ def orphan_reason(key, pane):
     if entry.get("mode") == "stopped": return "stopped"
     return None
 
+# 活卡（沒歸檔、不是 split、dispatch.json 不是 stopped）佔著的 pane：續接、代管（via）的卡共用同一個 pane 與 worktree，
+# worktree_of 又是最後一筆勝出，所以 pane 上只要還有活卡，這個 pane 就不是孤兒，不管 worktree 現在算給誰。
+live_panes = set()
+for k, e in dispatch.items():
+    key = tuple(k.split("/", 1)); c = card_by_key.get(key)
+    if c is None or c["archived"] or c["stage"] == "split" or e.get("mode") == "stopped": continue
+    live_panes.add(str(e.get("pane")))
+    if e.get("via"): live_panes.add(str((dispatch.get("%s/%s" % (key[0], e["via"])) or {}).get("pane")))
+
 orphans = []
 for a in (agents or []):
+    if str(a.get("pane_id")) in live_panes: continue
     key = next((k for k in (worktree_owner(p) for p in (a.get("cwd"), a.get("foreground_cwd")) if p) if k), None)
     reason = orphan_reason(key, a.get("pane_id")) if key else None
     if reason:

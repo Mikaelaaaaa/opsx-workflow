@@ -490,4 +490,41 @@ assert_not_grep '^agent prompt' "$OPSX_FAKE_LOG"
 assert_no_file "$QD/Agentory-AI-qc.tsv"; assert_file "$QD/Agentory-AI-qc.tsv.failed"
 assert_grep 'rename' "$CD/decisions.tsv"; assert_grep 'agent_not_found' "$CD/decisions.tsv"
 printf '%s' "$out" | jq -r '.hookSpecificOutput.additionalContext' | grep -q '失敗' || fail "要用 additionalContext 說失敗: $out"
+
+# ---------- 當前卡：dispatch worktree 根優先，否則 branch 第二段 ----------
+K="$(mk_repo Cards)"
+mk_change "$K" eval-core; mk_change "$K" other-card; mkdir -p "$K/openspec/changes/eval-core/subs/api"
+printf '## 派工指示\n\n- 子殼的指示\n' > "$K/openspec/changes/eval-core/subs/api/inbox.md"
+SUBNOTE="派工指示 1 條 · Read $K/openspec/changes/eval-core/subs/api/inbox.md"
+git -C "$K" checkout -q -b trunk
+git -C "$K" worktree add -q "$K/.claude/worktrees/eval-core" -b feat/core-pr/mikaela
+KW="$K/.claude/worktrees/eval-core"
+rt() { reason "$(run_hook openspec-router.sh "$(j "$1" "" '{}' "下一步")")"; }
+kg() { decision "$(run_hook opsx-grant-gate.sh "$(j "$1" Bash "$(cmdj 'glab mr create -F desc.md')")")"; }
+r="$(rt "$KW")"
+case "$r" in "opsx："*"· eval-core"*) ;; *) fail "card: worktree 名是卡、branch 第二段不是 → 對到 worktree 的卡: $r" ;; esac
+case "$r" in *core-pr*) fail "card: 不該用 branch 第二段 core-pr: $r" ;; esac
+mkdir -p "$KW/hooks"
+r="$(rt "$KW/hooks")"; case "$r" in "opsx："*"· eval-core"*) ;; *) fail "card: cwd 在 worktree 子目錄: $r" ;; esac
+printf '{"Cards/eval-core":{"mode":"autopilot","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"
+assert_eq "$(kg "$KW")" deny "card: authz 閘門在 PR 名不同的 worktree 裡仍生效"
+git -C "$KW" checkout -q feat/other-card/mikaela
+printf '{"Cards/eval-core":{"mode":"autopilot","grants":[]},"Cards/other-card":{"mode":"interactive","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"
+# feature session 的形狀：worktree 名是一張卡，branch 已切到另一張卡
+r="$(rt "$KW")"; case "$r" in "opsx："*"· other-card"*) ;; *) fail "card: worktree 與 branch 指向不同卡 → 聽 branch: $r" ;; esac
+assert_eq "$(kg "$KW")" deny "card: 授權閘門取兩張卡裡受管的那個（worktree autopilot、branch interactive）"
+printf '{"Cards/eval-core":{"mode":"interactive","grants":[]},"Cards/other-card":{"mode":"autopilot","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"
+assert_eq "$(kg "$KW")" deny "card: 授權閘門取兩張卡裡受管的那個（worktree interactive、branch autopilot）"
+git -C "$KW" checkout -q feat/core-pr/mikaela
+# 不在 dispatch worktree：主 checkout、名稱對不到卡的 worktree、巢狀在卡 worktree 底下的 subagent worktree
+printf '{"Cards/eval-core":{"mode":"autopilot","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"
+git -C "$K" checkout -q feat/eval-core/mikaela
+r="$(rt "$K")"; case "$r" in "opsx："*"· eval-core"*) ;; *) fail "card: 主 checkout 照舊用 branch: $r" ;; esac
+git -C "$K" checkout -q trunk
+git -C "$K" worktree add -q "$K/.claude/worktrees/agent-x" -b feat/eval-core--api/mikaela
+r="$(rt "$K/.claude/worktrees/agent-x")"; case "$r" in *"$SUBNOTE"*) ;; *) fail "card: worktree 名對不到卡時用 branch，子殼照舊: $r" ;; esac
+assert_eq "$(kg "$K/.claude/worktrees/agent-x")" deny "card: 子殼照主殼的 autopilot"
+git -C "$K" worktree add -q "$KW/.claude/worktrees/agent-y" -b feat/eval-core--api/nested
+r="$(rt "$KW/.claude/worktrees/agent-y")"; case "$r" in *"$SUBNOTE"*) ;; *) fail "card: 巢狀 subagent worktree 是子殼不是主殼: $r" ;; esac
+rm -f "$OPSX_STATE_DIR/dispatch.json"
 echo ok

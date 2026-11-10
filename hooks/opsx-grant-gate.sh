@@ -6,7 +6,9 @@ source "$(dirname "${BASH_SOURCE[0]}")/_lib.sh"
 
 top="$(repo_top)"; slug="$(card_slug)"
 slug="${slug%%--*}"   # 子殼分支 <主>--<子> 沒有自己的 dispatch.json 條目，照主 change 的模式與授權
-[ -n "$top" ] && [ -n "$slug" ] || exit 0
+wt="$(wt_name)"; wt="${wt%%--*}"
+[ -n "$top" ] || exit 0
+[ -n "$slug" ] || [ -n "$wt" ] || exit 0
 repo="$(repo_name)"
 # dispatch.json 壞掉時讀不到模式，就退回比對檔案原文：裡面有這張卡的 key 才擋。
 # 原文也讀不到時，$(<…) 會是空字串、比對不到，所以要先擋。
@@ -15,6 +17,13 @@ if ! mode="$(card_mode "$repo" "$slug")"; then
   [[ $(<"$OPSX_STATE_DIR/dispatch.json") == *"\"$repo/$slug\""* ]] || exit 0
   deny "opsx 授權閘門：$OPSX_STATE_DIR/dispatch.json 不是合法 JSON，讀不到這張卡的模式，先擋下。修好這個檔案"
 fi
+# dispatch.json 的 key 是派工時的名字，也就是 worktree 名（feature session 是 feature 名），可以跟 branch 的卡不同：兩個有一個受管就照受管的那個
+case "$mode" in autopilot|drive) ;; *)
+  if [ -n "$wt" ] && [ "$wt" != "$slug" ]; then
+    wmode="$(card_mode "$repo" "$wt" || true)"
+    case "$wmode" in autopilot|drive) slug="$wt"; mode="$wmode" ;; esac
+  fi ;;
+esac
 case "$mode" in autopilot|drive) ;; *) exit 0 ;; esac
 # 查授權要 python。沒有就明確 deny，因為 hook 非 0 結束 Claude Code 會當成放行。修法那一條指令本身放行。
 if [ -z "$OPSX_PY" ]; then

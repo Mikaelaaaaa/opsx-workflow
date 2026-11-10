@@ -406,6 +406,32 @@ J="$(OPSX_TEST_HERDR_AGENTS="$FX/agents7.json" opsx collect --root "$RP7")"; ass
 assert_eq "$(q "$J" orphans)" '[]' "活卡的 pane、未掃描 repo 的活卡、人自己開的 pane 都不能是孤兒"
 export HERDR_ENV=""
 
+# ---------- review 第 2 輪的兩個 BUG：回歸測試 ----------
+# (1) opsx 已經關掉的 pane（stop 記 pane_closed_at、reap 記 reaped_at），條目還記著 pane id；herdr 之後把同一個 id 發給別人，
+#     人在那棵 worktree 開的 pane 三個條件都符合，不能因此被當成孤兒
+RP8="$FX/code-reap8"; mkdir -p "$RP8/o/.git" "$RP8/o/openspec/changes/st" "$RP8/o/openspec/changes/archive/2026-11-01-ar"
+O8="$(cd "$RP8/o" && pwd -P)"
+for d in "$RP8/o/openspec/changes/st" "$RP8/o/openspec/changes/archive/2026-11-01-ar"; do printf 'schema: opsx\nkind: dev\n' > "$d/.openspec.yaml"; printf '## 一句話\n\nx\n' > "$d/inbox.md"; done
+printf '{"o/st":{"pane":"w1:p3","mode":"stopped","pane_closed_at":"2026-11-10T10:00:00+08:00"},"o/ar":{"pane":"w1:p5","mode":"autopilot","reaped_at":"2026-11-10T10:00:00+08:00"}}' > "$OPSX_STATE_DIR/dispatch.json"
+{ printf '{"id":"cli:agent:list","result":{"agents":['
+  agent6 w1:p3 idle "$O8/.claude/worktrees/st"; printf ','
+  agent6 w1:p5 idle "$O8/.claude/worktrees/ar"
+  printf '],"type":"agent_list"}}'; } > "$FX/agents8.json"
+export HERDR_ENV=1
+J="$(OPSX_TEST_HERDR_AGENTS="$FX/agents8.json" opsx collect --root "$RP8")"; assert_eq "$?" 0 "回歸 1 collect: $J"
+assert_eq "$(q "$J" orphans)" '[]' "已經關掉的 pane（pane_closed_at / reaped_at）的 id 被重用時，新的 pane 不是孤兒"
+# (2) 兩個條目共用一棵 worktree 與一個 pane（chain 續接）：條目順序讓最後一筆是已歸檔的，活著的續接 pane 也不能列成孤兒
+RP9="$FX/code-reap9"; mkdir -p "$RP9/o/.git" "$RP9/o/openspec/changes/kid" "$RP9/o/openspec/changes/archive/2026-11-01-par"
+O9="$(cd "$RP9/o" && pwd -P)"
+for d in "$RP9/o/openspec/changes/kid" "$RP9/o/openspec/changes/archive/2026-11-01-par"; do printf 'schema: opsx\nkind: dev\n' > "$d/.openspec.yaml"; printf '## 一句話\n\nx\n' > "$d/inbox.md"; done
+printf '{"o/kid":{"pane":"w1:p1","mode":"autopilot","worktree":"%s/.claude/worktrees/par"},"o/par":{"pane":"w1:p1","mode":"autopilot","worktree":"%s/.claude/worktrees/par"}}' "$O9" "$O9" > "$OPSX_STATE_DIR/dispatch.json"
+{ printf '{"id":"cli:agent:list","result":{"agents":['
+  agent6 w1:p1 idle "$O9/.claude/worktrees/par"
+  printf '],"type":"agent_list"}}'; } > "$FX/agents9.json"
+J="$(OPSX_TEST_HERDR_AGENTS="$FX/agents9.json" opsx collect --root "$RP9")"; assert_eq "$?" 0 "回歸 2 collect: $J"
+assert_eq "$(q "$J" orphans)" '[]' "共用 worktree 與 pane 的活卡（kid）還在，不能列成孤兒"
+export HERDR_ENV=""
+
 # ---------- gate type 同義詞、type 不明、needs: run（gate-type-normalize） ----------
 R7="$FX/code7"; mkdir -p "$R7/r6/.git"
 gcard() { # <slug> <gates.md 內容>
