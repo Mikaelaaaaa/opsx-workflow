@@ -1,16 +1,19 @@
 #!/usr/bin/env bash
-# opsx answer <slug> --gate <id> [--grant this|card|repo] [--repo <top>] <text…>：回一個 gate。
+# opsx answer <slug> [--sub <子>] --gate <id> [--grant this|card|repo] [--repo <top>] <text…>：回一個 gate。
 # 先驗 gate，再把授權落檔（repo 寫 grants.toml；card 與 this 寫受保護位置 bin/lib/authz.py 的 grants / once，閘門用掉 once 就刪），
 # 把 gates.md 那段改成 answered，在 decisions.tsv 記一行（log_row），最後 herdr agent prompt 送給 agent。卡沒派出就不送，agent 派出時會讀 gates.md。
+# --sub：gates.md 與 decisions.tsv 換成 changes/<slug>/subs/<子>/ 的；子 change 跑在主 change 的 session、不在 dispatch.json，
+# 所以授權、派出判斷與送話對象都照主 change，送話一律帶 [<slug>/<子>] 讓 session 轉給對的 subagent。
 # 看板的「回它」按鈕背後就是這支；終端機打也一樣。specs/board-actions/spec.md、要求檔 §3.6 授權三級。
 
 # shellcheck source=/dev/null
 source "$OPSX_ROOT/bin/lib/route.sh"
 
 opsx_answer() {
-  local slug="" gate="" grant="" top="" text=()
+  local slug="" sub="" gate="" grant="" top="" text=()
   while [ $# -gt 0 ]; do
     case "$1" in
+      --sub) sub="$2"; shift 2 ;;
       --gate) gate="$2"; shift 2 ;;
       --grant) grant="$2"; shift 2 ;;
       --repo) top="$2"; shift 2 ;;
@@ -19,14 +22,18 @@ opsx_answer() {
       *) if [ -z "$slug" ]; then slug="$1"; else text+=("$1"); fi; shift ;;
     esac
   done
-  [ -n "$slug" ] && [ -n "$gate" ] && [ ${#text[@]} -gt 0 ] || die "answer: 用法 opsx answer <slug> --gate <id> [--grant this|card|repo] <text…>"
+  [ -n "$slug" ] && [ -n "$gate" ] && [ ${#text[@]} -gt 0 ] || die "answer: 用法 opsx answer <slug> [--sub <子>] --gate <id> [--grant this|card|repo] <text…>"
   case "$grant" in ""|this|card|repo) ;; *) die "answer: --grant 要是 this|card|repo，收到 $grant" ;; esac
   [ -n "$top" ] || top="$(git_toplevel)"
   [ -n "$top" ] || die "answer: 不在 git repo 裡，或給 --repo"
   top="$(cd "$top" && pwd -P)"
   local repo d answer; repo="$(basename "$top")"; d="$top/openspec/changes/$slug"; answer="${text[*]}"
   [ -d "$d" ] || die "answer: 沒有這張卡：$d"
-  [ -f "$d/gates.md" ] || die "answer: $slug 沒有 gates.md，沒有 gate 可回"
+  if [ -n "$sub" ]; then
+    d="$d/subs/$sub"
+    [ -d "$d" ] || die "answer: $slug 底下沒有子 change：$d"
+  fi
+  [ -f "$d/gates.md" ] || die "answer: $slug${sub:+/$sub} 沒有 gates.md，沒有 gate 可回"
   refuse_if_handed "$repo" "$slug" answer
   mkdir -p "$OPSX_STATE_DIR"
 
@@ -122,7 +129,8 @@ PY
 
   if [ "$result" = dispatched ]; then
     local route name via; route="$(card_route "$repo" "$slug")" || die "讀不懂 dispatch.json，不知道話要送給誰"; name="${route%%$'\t'*}"; via="${route#*$'\t'}"
-    herdr agent prompt "$name" "${via:+[$slug] }$answer" >/dev/null || die "answer: gates.md 與 decisions 已寫，但 herdr agent prompt 失敗；agent 下次讀 gates.md 會看到答案"
+    local prefix="${via:+[$slug] }"; [ -z "$sub" ] || prefix="[$slug/$sub] "
+    herdr agent prompt "$name" "$prefix$answer" >/dev/null || die "answer: gates.md 與 decisions 已寫，但 herdr agent prompt 失敗；agent 下次讀 gates.md 會看到答案"
     say "answer: $slug 的 $gate 已回「${answer}」${grant:+（grant: ${grant}）}，已送進 agent"
   else
     say "answer: $slug 的 $gate 已回「${answer}」${grant:+（grant: ${grant}）}；這張卡沒派出，沒有 agent 可以通知，派出時它會讀 gates.md"
