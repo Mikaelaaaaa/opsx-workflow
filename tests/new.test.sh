@@ -35,4 +35,40 @@ assert_rc 2 opsx new --repo "$A" -- "$(printf 'a\nb')"
 assert_rc 2 opsx new -- ""
 assert_rc 2 opsx new --repo "$FX/nope" -- 有字
 assert_eq "$(snap)" "$before"; assert_eq "$(ls "$OPSX_STATE_DIR/unfiled")" "$ub"
+
+# --- 並行：同一分鐘 8 個呼叫，slug 互不相同、每張卡內容完整（specs/board-actions「並行新增到…」）---
+par_new() { # par_new <輸出目錄> <opsx new 的前置參數…>：同時起 8 個，各帶「並行<i>」
+  local out="$1" i; shift
+  mkdir -p "$out"
+  for i in 1 2 3 4 5 6 7 8; do opsx new "$@" -- "並行$i" > "$out/$i.out" 2> "$out/$i.err" & done
+  wait
+}
+count() { wc -l | tr -d ' '; }
+assert_par() { # assert_par <輸出目錄> <slug 前綴> <各卡內容檔的 glob>
+  local out="$1" i
+  for i in 1 2 3 4 5 6 7 8; do assert_not_grep '失敗' "$out/$i.err"; assert_eq "$(count < "$out/$i.out")" 1 "並行$i 要印一個 slug"; done
+  assert_eq "$(cat "$out"/*.out | sort -u | count)" 8 "8 個 slug 要互不相同"
+  assert_eq "$(ls -d $2* | count)" 8 "落地的卡要剛好 8 張"
+  for i in 1 2 3 4 5 6 7 8; do assert_eq "$(grep -l "^並行$i\$" $3 | count)" 1 "並行$i 的內容要在剛好一張卡裡"; done
+}
+export OPSX_TEST_NOW="2026-11-06 15:00"
+par_new "$FX/par-unfiled"
+assert_par "$FX/par-unfiled" "$OPSX_STATE_DIR/unfiled/me-20261106-1500" "$OPSX_STATE_DIR/unfiled/me-20261106-1500*.md"
+
+export OPSX_TEST_NOW="2026-11-06 15:10"
+spec_before="$(ls -A "$A/openspec")"
+par_new "$FX/par-repo" --repo "$A"
+assert_par "$FX/par-repo" "$A/openspec/changes/me-20261106-1510" "$A/openspec/changes/me-20261106-1510*/inbox.md"
+assert_eq "$(ls -A "$A/openspec")" "$spec_before" "保留用的東西不能留在 openspec/ 下"
+
+# --- 建殼失敗：退出非零、印原因、只呼叫一次、不留殘渣 ---
+export OPSX_TEST_NOW="2026-11-06 15:20"
+mkdir -p "$FX/failspec"
+printf '#!/usr/bin/env bash\necho "fake openspec: boom" >&2\necho x >> "%s/spec.calls"\nexit 1\n' "$FX" > "$FX/failspec/openspec"; chmod +x "$FX/failspec/openspec"
+before="$(snap)"; spec_before="$(ls -A "$A/openspec")"
+PATH="$FX/failspec:$PATH" opsx new --repo "$A" -- 有字 > /dev/null 2> "$FX/fail.err"; rc=$?
+[ "$rc" -ne 0 ] || fail "openspec 失敗時 opsx new 要退出非零"
+assert_grep 'boom' "$FX/fail.err"
+assert_eq "$(count < "$FX/spec.calls")" 1 "openspec 失敗不能換 slug 重試"
+assert_eq "$(snap)" "$before"; assert_eq "$(ls -A "$A/openspec")" "$spec_before" "失敗後不能留保留殘渣"
 echo ok

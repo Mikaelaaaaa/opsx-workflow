@@ -25,4 +25,15 @@ assert_rc 2 opsx file nope --repo "$A"
 assert_rc 2 opsx file me-20261106-1430
 assert_rc 2 opsx file ../x --repo "$A"
 assert_eq "$(find "$A/openspec/changes" | sort)" "$before"
+
+# --- 並行：file 與 new --repo 同時挑到同一個 slug，兩邊內容都完整（specs/board-actions「分類與新增並行撞名」）---
+export OPSX_TEST_NOW="2026-11-06 15:30"
+assert_eq "$(opsx new -- 待分類的那件)" me-20261106-1530
+opsx file me-20261106-1530 --repo "$A" > "$FX/p1.out" 2> "$FX/p1.err" &
+opsx new --repo "$A" -- 另一件 > "$FX/p2.out" 2> "$FX/p2.err" &
+wait
+assert_not_grep '失敗' "$FX/p1.err"; assert_not_grep '失敗' "$FX/p2.err"
+assert_eq "$(cat "$FX/p1.out" "$FX/p2.out" | sort -u | wc -l | tr -d ' ')" 2 "兩個 slug 要不同"
+assert_eq "$(grep -l '^待分類的那件$' "$A"/openspec/changes/me-20261106-1530*/inbox.md | wc -l | tr -d ' ')" 1
+assert_eq "$(grep -l '^另一件$' "$A"/openspec/changes/me-20261106-1530*/inbox.md | wc -l | tr -d ' ')" 1
 echo ok

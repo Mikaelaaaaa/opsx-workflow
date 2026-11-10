@@ -79,9 +79,18 @@ opsx_repo_top() { # <path>
 # 在 <top> 用 openspec 建殼，inbox.md 寫成 <內容檔>；slug 已存在就依序加 -2、-3。印實際的 slug。
 # 總長超過 32 時截中段、保留最後一段（issue 編號）：gh-<repo>-1 撞名要變 gh-<re>-1-2，不能變成 issue #2 的 gh-<repo>-2。
 # 沒有 - 或最後一段太長（留不下開頭至少一個字）時，改成截尾再加 -N。
+# 並行呼叫挑同一個 slug：先 mkdir <top>/openspec/.reserve-<slug>（原子）拿到保留，才建殼；建完或失敗都放掉。
+# 不能預先 mkdir changes/<slug>：openspec new change 看到已存在會拒絕。
 new_shell() { # <top> <slug> <inbox 內容檔>
-  local top="$1" slug="$2" n=1 head tail keep
-  while [ -e "$top/openspec/changes/$slug" ]; do
+  local top="$1" slug="$2" n=1 head tail keep res
+  while :; do
+    res="$top/openspec/.reserve-$slug"
+    if mkdir "$res" 2>/dev/null; then
+      [ -e "$top/openspec/changes/$slug" ] || break
+      rmdir "$res"
+    elif [ ! -e "$res" ]; then
+      die "建不了保留目錄 $res"
+    fi
     n=$((n+1)); slug="$2-$n"
     [ ${#slug} -gt 32 ] || continue
     head="${2%-*}"; tail="${2##*-}"; keep=$((32 - ${#tail} - ${#n} - 2))
@@ -91,7 +100,8 @@ new_shell() { # <top> <slug> <inbox 內容檔>
       slug="${2:0:$((32 - ${#n} - 1))}"; slug="${slug%-}-$n"
     fi
   done
-  ( cd "$top" && openspec new change "$slug" --schema opsx >/dev/null ) || die "openspec new change $slug 失敗（${top}）"
-  cp "$3" "$top/openspec/changes/$slug/inbox.md"
+  ( cd "$top" && openspec new change "$slug" --schema opsx >/dev/null ) || { rmdir "$res"; die "openspec new change $slug 失敗（${top}）"; }
+  cp "$3" "$top/openspec/changes/$slug/inbox.md" || { rmdir "$res"; die "寫不進 $top/openspec/changes/$slug/inbox.md"; }
+  rmdir "$res"
   printf '%s\n' "$slug"
 }
