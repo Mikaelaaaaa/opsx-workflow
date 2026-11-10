@@ -6,7 +6,8 @@ source "$(dirname "${BASH_SOURCE[0]}")/_lib.sh"
 cmd="$(hook_cmd)"
 # 在指令骨架上找 create / edit 類子命令：不限命令位置，then、do、sudo、env、絕對路徑前綴都要擋。
 # description 的抽取在下面仍讀原始 $cmd。
-cmd_skeleton "$cmd" | grep -qE '\b(gh[[:space:]]+pr[[:space:]]+(create|edit)|glab[[:space:]]+mr[[:space:]]+(create|update))\b' || exit 0
+sk="$(cmd_skeleton "$cmd")" || deny "opsx MR 閘門：perl 執行失敗，讀不到指令骨架，先擋下。確認 perl 可用"
+printf '%s' "$sk" | grep -qE '\b(gh[[:space:]]+pr[[:space:]]+(create|edit)|glab[[:space:]]+mr[[:space:]]+(create|update))\b' || exit 0
 
 desc=""
 # -F / --description-file / --body-file <path>

@@ -6,8 +6,6 @@ set -euo pipefail
 INPUT=$(cat)
 COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command // empty' 2>/dev/null)
 [[ -z "$COMMAND" ]] && exit 0
-# 判斷「是不是 git push / add / commit」只看會執行的部分；引號與 heredoc 內的字樣不算。旗標與署名仍讀原始 COMMAND。
-SKELETON=$(printf '%s' "$COMMAND" | perl "$(dirname "${BASH_SOURCE[0]}")/cmd-skeleton.pl")
 
 deny() {
   jq -n --arg reason "$1" '{
@@ -19,6 +17,9 @@ deny() {
   }'
   exit 0
 }
+
+# 判斷「是不是 git push / add / commit」只看會執行的部分；引號與 heredoc 內的字樣不算。旗標與署名仍讀原始 COMMAND。
+SKELETON=$(printf '%s' "$COMMAND" | perl "$(dirname "${BASH_SOURCE[0]}")/cmd-skeleton.pl") || deny "perl failed, cannot read the command skeleton. Make sure perl works."
 
 # ── Block push to main/master ──
 if echo "$SKELETON" | grep -qE '(^|\s|&&|\|\||;)git\s+push(\s|$)'; then
@@ -50,9 +51,10 @@ if echo "$SKELETON" | grep -qE '(^|\s|&&|\|\||;)git\s+commit(\s|$)'; then
   # shortcut: a trailer line is recognised by its first word right after a quote or line start; fine as an accident guard, go back to parsing -m values if it must resist deliberate evasion
   NAMES='(claude|anthropic)'
   VALUE='("[^"]*|'"'"'[^'"'"']*|[^[:space:]"'"'"']*)'
-  if echo "$COMMAND" | grep -iqE "(^|[\"'])(co-authored-by|generated with).*${NAMES}" \
+  # A trailer line starts after a quote, a real newline, or a literal \n / \r (printf, echo -e, $'…'); leading blanks are allowed.
+  if echo "$COMMAND" | grep -iqE "(^|[\"']|\\\\n|\\\\r)[[:space:]]*(co-authored-by|generated with).*${NAMES}" \
     || echo "$COMMAND" | grep -iqE "(--author|--trailer)[= ]+${VALUE}${NAMES}" \
-    || echo "$COMMAND" | grep -iqE "GIT_(AUTHOR|COMMITTER)_NAME=${VALUE}${NAMES}"; then
+    || echo "$COMMAND" | grep -iqE "GIT_(AUTHOR|COMMITTER)_(NAME|EMAIL)=${VALUE}${NAMES}"; then
     deny "Commit must not carry an AI attribution (Co-Authored-By / Generated with / author naming Claude or Anthropic)."
   fi
 fi

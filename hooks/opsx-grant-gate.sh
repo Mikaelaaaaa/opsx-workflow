@@ -74,7 +74,7 @@ if [ "$tool" = "Bash" ]; then
   [ -n "$cmd" ] || exit 0
   c="$(printf '%s' "$cmd" | tr '\n' ' ')"
   # 比對只看會執行的部分（骨架），引號與 heredoc 內的字樣不算；merge_gate 與訊息仍讀原文
-  sk="$(cmd_skeleton "$cmd" | tr '\n' ' ')"
+  sk="$(cmd_skeleton "$cmd" | tr '\n' ' ')" || deny "opsx 授權閘門：perl 執行失敗，讀不到指令骨架，先擋下。確認 perl 可用"
   # 第三級（merge 放行後不 exit，其餘檢查照跑）
   printf '%s' "$sk" | grep -qE '(glab mr merge|gh pr merge)' && merge_gate && GRANTED=1
   printf '%s' "$sk" | grep -qE 'git\s+push.*(--force|-f\b|\+[a-zA-Z])' && level3 "force-push"
