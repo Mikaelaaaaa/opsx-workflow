@@ -91,6 +91,8 @@ git -C "$R" checkout -q feat/eval-core/mikaela
 cg() { run_hook openspec-commit-gate.sh "$(j "$R" Bash "{\"command\":$(printf '%s' "$1" | jq -Rs .)}")"; }
 out="$(cg 'git commit -m "feat: x" -- a.ts')"; reason "$out" | grep -q '閘門未啟用' || fail "commit: no workplan → 不擋: $out"
 assert_eq "$(decision "$out")" allow
+out="$(cg 'git -C "/a b" commit -m x')"; assert_eq "$(decision "$out")" allow "commit: 沒有 workplan 時目錄含空白也不擋"
+reason "$out" | grep -q '閘門未啟用' || fail "commit: 沒有 workplan 時目錄含空白要印未啟用: $(reason "$out")"
 printf 'prs:\n  - name: eval-core\n    status: in-progress\n' > "$R/openspec/workplan.yaml"
 printf '## 1. x\n\n- [ ] 1.1 a\n' > "$C/tasks.md"
 out="$(cg 'git commit -m "feat: x" -- a.ts')"; assert_eq "$(decision "$out")" deny "commit: tasks 全未勾要擋"
@@ -115,6 +117,16 @@ out="$(cg "cd $FX/wt && git commit -m x")"; assert_eq "$(decision "$out")" allow
 out="$(cg "cd $R && git commit -m x")"; assert_eq "$(decision "$out")" deny "commit: cd 進沒有卡的 main 仍擋"
 out="$(cg "cd $R && git -C $FX/wt commit -m x")"; assert_eq "$(decision "$out")" allow "commit: -C 優先於 cd"
 out="$(cg "cd $FX && git -C wt commit -m x")"; assert_eq "$(decision "$out")" allow "commit: -C 相對路徑以 cd 的目錄為基準"
+out="$(cg "cd $FX/wt && git add f && git commit -m x")"; assert_eq "$(decision "$out")" allow "commit: cd 之後還有別的指令仍看 cd 的目錄"
+out="$(cg "cd $FX/wt; git commit -m x")"; assert_eq "$(decision "$out")" allow "commit: cd 用 ; 接 commit 也看 cd 的目錄"
+out="$(cg "cd $R && git add f && git commit -m x")"; assert_eq "$(decision "$out")" deny "commit: cd 到沒有卡的 main、中間隔著別的指令仍擋"
+out="$(cg "git -C $FX/wt commit-tree x && git commit -m y")"; assert_eq "$(decision "$out")" deny "commit: commit-tree 不是 commit，不能拿它的 -C 目錄"
+for c in 'git -C ~/wt commit -m x' 'cd ~/wt && git commit -m x' 'git -C /tmp/a\b commit -m x' 'git -C /tmp/wt-* commit -m x' 'git -C /tmp/wt? commit -m x' 'git -C /tmp/{a,b} commit -m x'; do
+  out="$(cg "$c")"; assert_eq "$(decision "$out")" deny "commit: 目錄含 ~、反斜線或萬用字元要 deny（${c}）"
+  reason "$out" | grep -qF "$(printf '%s' "$c" | sed -E 's/^.*(-C|cd) ([^ ]+).*$/\2/')" || fail "commit: deny 要點名讀不出來的值（${c}）: $(reason "$out")"
+done
+out="$(cg 'cd "$A" && git -C "$B" commit -m x')"; assert_eq "$(decision "$out")" deny "commit: cd 與 -C 都讀不出來要 deny"
+assert_eq "$(reason "$out" | grep -o '引號包住的路徑' | wc -l | tr -d ' ')" 2 "commit: deny 要兩個值都點名: $(reason "$out")"
 for c in 'git -C "/path with space" commit -m x' 'cd "/path with space" && git commit -m x' 'cd $WT && git commit -m x' 'git -C "$WT" commit -m x'; do
   out="$(cg "$c")"; assert_eq "$(decision "$out")" deny "commit: 目錄讀不出來要 deny（${c}）"
   reason "$out" | grep -q '空白' && reason "$out" | grep -q '不含空白的字面路徑' || fail "commit: 目錄讀不出來的 deny 要說明原因與改法（${c}）: $(reason "$out")"
