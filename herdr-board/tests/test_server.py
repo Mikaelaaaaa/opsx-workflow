@@ -240,8 +240,13 @@ class ServerTest(unittest.TestCase):
         self.assertEqual(status, 200, body)
         self.assertEqual(self.log.read_text().strip().split("\n"), ["sync", "sync --source debt"])
 
-    def test_sync_rejects_unknown_source(self):
+    def test_sync_obsidian(self):
         status, _, body = self.req("/api/sync", {"source": "obsidian"}, token=self.token)
+        self.assertEqual(status, 200, body)
+        self.assertEqual(self.log.read_text().strip().split("\n"), ["sync --source obsidian"])
+
+    def test_sync_rejects_unknown_source(self):
+        status, _, body = self.req("/api/sync", {"source": "customer"}, token=self.token)
         self.assertEqual(status, 400, body)
         self.assertEqual(self.log.read_text(), "")
 

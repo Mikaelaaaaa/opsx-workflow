@@ -72,7 +72,7 @@ FLAG_RE = {
     "mode": re.compile(r"^(interactive|autopilot|drive)$"),
     "kind": re.compile(r"^(dev|bug-fix|refactoring|perf|experiment|ops|chore)$"),
     "repo": re.compile(r"^/[^\0]{1,1024}$"),
-    "source": re.compile(r"^(gitlab|github|debt)$"),
+    "source": re.compile(r"^(gitlab|github|debt|obsidian)$"),
     "note": re.compile(r"^[^\n\r\0]{1,2000}\Z"),   # \Z 不是 $：$ 會放過結尾的 \n
     "pane": PANE_RE,
 }
