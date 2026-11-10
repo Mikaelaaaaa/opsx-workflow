@@ -228,10 +228,13 @@ EOF
 )"')"; assert_eq "$(decision "$out")" deny "guard: heredoc"
 
 # ---------- stop gate ----------
-sg() { printf '{"cwd":"%s","stop_hook_active":%s}' "$R" "${1:-false}" | bash "$H/openspec-stop-gate.sh" 2>/dev/null; true; }
+STOP_STATE="$OPSX_STATE_DIR/stop-chain"
+# 每次呼叫先清擋的次數；要測次數的 case 用 KEEP=1 sg 保留
+sg() { [ -n "${KEEP:-}" ] || rm -rf "$STOP_STATE"; printf '{"cwd":"%s","stop_hook_active":%s}' "$R" "${1:-false}" | bash "$H/openspec-stop-gate.sh" 2>/dev/null; true; }
+done_report() { printf '# report\n\n## MR\nhttps://gitlab.tsg-navigator.com/a/b/-/merge_requests/212 · opened 2026-11-10 · auto-merge: no\nbabysit: 2026-11-10T14:00:00+08:00\n' > "$C/report.md"; }
 printf '## 1. x\n\n- [x] 1.1 a\n- [ ] 1.2 b\n' > "$C/tasks.md"
 out="$(sg)"; assert_eq "$(decision "$out")" block "stop: 有未勾"; reason "$out" | grep -q '1 個 task 沒勾' || fail "stop: 沒 gates.md 要說幾個 task 沒勾"
-out="$(sg true)"; assert_eq "$out" "" "stop: stop_hook_active 放行"
+out="$(sg true)"; assert_eq "$(decision "$out")" block "stop: stop_hook_active 不再是放行條件"
 printf '## real-herdr\nstatus: open\n' > "$C/gates.md"
 out="$(sg)"; assert_eq "$out" "" "stop: 有未勾但有 open gate 放行"
 printf '## real-herdr\nstatus: answered\n' > "$C/gates.md"
@@ -248,20 +251,96 @@ out="$(sg)"; assert_eq "$(decision "$out")" block "stop: open gate 不放行 tes
 rm -f "$C/gates.md"
 printf '{"phase":"apply","step":8,"total":8,"label":"x","tests":"green","at":"2026-11-05T15:00:00+08:00"}' > "$C/status.json"
 rm -f "$C/report.md"; out="$(sg)"; assert_eq "$(decision "$out")" block "stop: 沒 report"; reason "$out" | grep -q '/review' || fail "stop: 要叫跑 review"
-printf '# report\n' > "$C/report.md"; sleep 1
+done_report; sleep 1
 out="$(sg)"; assert_eq "$out" "" "stop: 全齊放行"
 git -C "$R" commit -q --allow-empty -m "feat: later"   # report 之後又 commit
 out="$(sg)"; assert_eq "$(decision "$out")" block "stop: report 後有新 commit"
 # 卡在 linked worktree：只算卡自己 branch 的 commit，主 checkout 是別的 session 在用
-sgw() { printf '{"cwd":"%s","stop_hook_active":false}' "$WT" | bash "$H/openspec-stop-gate.sh" 2>/dev/null; true; }
-printf '# report\n' > "$C/report.md"; sleep 1
+sgw() { [ -n "${KEEP:-}" ] || rm -rf "$STOP_STATE"; printf '{"cwd":"%s","stop_hook_active":false}' "$WT" | bash "$H/openspec-stop-gate.sh" 2>/dev/null; true; }
+done_report; sleep 1
 git -C "$WT" commit -q --allow-empty -m "feat: card later"
 out="$(sgw)"; assert_eq "$(decision "$out")" block "stop: worktree 卡 report 後自己有新 commit"; reason "$out" | grep -q '/review' || fail "stop: worktree 卡要叫重跑 review"
-printf '# report\n' > "$C/report.md"; sleep 1
+done_report; sleep 1
 git -C "$R" commit -q --allow-empty -m "feat: other session"
 out="$(sgw)"; assert_eq "$out" "" "stop: worktree 卡不看主 checkout 的新 commit"
-# 還沒到 apply（沒 tasks.md）→ 不擋
-rm -f "$C/tasks.md"; out="$(sg)"; assert_eq "$out" "" "stop: 沒 tasks 不擋"
+
+# ---------- stop gate：下一站 ----------
+rm -f "$C/tasks.md" "$C/report.md" "$C/status.json" "$C/gates.md" "$C/grill.md"
+# explore.md 寫好、待決空、沒有 tasks.md → /propose
+out="$(sg)"; assert_eq "$(decision "$out")" block "stop: explore 完待決空 → 擋"; reason "$out" | grep -q '/propose' || fail "stop: 要叫 /propose"
+# dev 卡待決非空 → /grill
+printf '## 已知\n- x\n\n## 待決\n- 選 A 還是 B\n\n## 不做\n' > "$C/explore.md"
+printf 'schema: opsx\ncreated: 2026-11-05\nkind: dev\n' > "$C/.openspec.yaml"
+out="$(sg)"; assert_eq "$(decision "$out")" block "stop: dev 待決非空 → 擋"; reason "$out" | grep -q '/grill' || fail "stop: 要叫 /grill"
+# bug-fix 同一張 explore.md → 跳過 grill 直接 /propose
+printf 'schema: opsx\ncreated: 2026-11-05\nkind: bug-fix\n' > "$C/.openspec.yaml"
+out="$(sg)"; assert_eq "$(decision "$out")" block "stop: bug-fix 待決非空 → 擋"
+reason "$out" | grep -q '/propose' || fail "stop: bug-fix 要叫 /propose"
+reason "$out" | grep -q '/grill' && fail "stop: bug-fix 不提 /grill"
+# 沒有 explore.md → 不擋
+mv "$C/explore.md" "$C/explore.md.bak"; out="$(sg)"; assert_eq "$out" "" "stop: 沒 explore.md 不擋"
+mv "$C/explore.md.bak" "$C/explore.md"
+# 一般 open gate 放行；問「要不要接」的 gate 不算
+printf '## 要選 A 還是 B\nstatus: open\n' > "$C/gates.md"
+out="$(sg)"; assert_eq "$out" "" "stop: chain 站有一般 open gate 放行"
+printf '## 要不要接 /propose\nstatus: open\n' > "$C/gates.md"
+out="$(sg)"; assert_eq "$(decision "$out")" block "stop: 「要不要接」的 gate 不算 open"; reason "$out" | grep -q '/propose' || fail "stop: 要不要接的 gate 下仍要叫 /propose"
+printf '## x\nstatus: open\nquestion: 要不要接 /apply\n' > "$C/gates.md"
+out="$(sg)"; assert_eq "$(decision "$out")" block "stop: question 行含「要不要接」也不算 open"
+# apply 站（tasks.md 一個都沒勾）：「要不要接 /apply」的 gate 不放行，reason 叫 /apply
+printf '## 1. x\n\n- [ ] 1.1 a\n- [ ] 1.2 b\n' > "$C/tasks.md"
+printf '## 要不要接 /apply\nstatus: open\n' > "$C/gates.md"
+out="$(sg)"; assert_eq "$(decision "$out")" block "stop: apply 站「要不要接」gate 不放行"; reason "$out" | grep -q 'invoke /apply' || fail "stop: apply 站 reason 要叫 invoke /apply"
+rm -f "$C/gates.md" "$C/tasks.md"
+
+# 擋的次數：同一站 3 次，第 4 次 hook 寫 gate 放行；第 5 次不寫第二個
+rm -rf "$STOP_STATE"
+out="$(KEEP=1 sg)"; assert_eq "$(decision "$out")" block "stop: 第 1 次擋"
+out="$(KEEP=1 sg)"; assert_eq "$(decision "$out")" block "stop: 第 2 次擋"
+out="$(KEEP=1 sg)"; assert_eq "$(decision "$out")" block "stop: 第 3 次擋"
+assert_no_file "$C/gates.md"
+out="$(KEEP=1 sg)"; assert_eq "$out" "" "stop: 第 4 次放行"
+assert_grep '^## 卡在接 /propose' "$C/gates.md"; assert_grep '^status: open$' "$C/gates.md"; assert_grep '^opened_at: ' "$C/gates.md"
+out="$(KEEP=1 sg)"; assert_eq "$out" "" "stop: 第 5 次放行"
+assert_eq "$(grep -c '^## 卡在接 /propose' "$C/gates.md")" 1 "stop: 不寫第二個 gate"
+# gate 被回答後次數歸零：再擋，不再寫新 gate
+sed -i.bak 's/^status: open$/status: answered/' "$C/gates.md"; rm -f "$C/gates.md.bak"
+out="$(KEEP=1 sg)"; assert_eq "$(decision "$out")" block "stop: gate 答完後重新擋"
+assert_eq "$(grep -c '^## 卡在接 /propose' "$C/gates.md")" 1 "stop: 答完後第一次擋不寫新 gate"
+rm -f "$C/gates.md"
+# stop_hook_active 為 true 次數未滿仍擋
+out="$(sg true)"; assert_eq "$(decision "$out")" block "stop: stop_hook_active 為 true 仍擋"
+# 站換了從 1 起算
+rm -rf "$STOP_STATE"
+out="$(KEEP=1 sg)"; out="$(KEEP=1 sg)"
+assert_eq "$(cat "$STOP_STATE/Agentory-AI-eval-core")" "propose 2" "stop: propose 站記 2 次"
+printf '## 1. x\n\n- [ ] 1.1 a\n' > "$C/tasks.md"
+out="$(KEEP=1 sg)"; assert_eq "$(decision "$out")" block "stop: 換站後擋"
+assert_eq "$(cat "$STOP_STATE/Agentory-AI-eval-core")" "apply 1" "stop: 換站從 1 起算"
+# 現有檢查共用次數：tests red 擋 3 次，第 4 次寫「卡在接 /apply」
+printf '## 1. x\n\n- [x] 1.1 a\n' > "$C/tasks.md"
+printf '{"phase":"apply","step":8,"total":8,"label":"x","tests":"red","at":"2026-11-05T15:00:00+08:00"}' > "$C/status.json"
+rm -rf "$STOP_STATE"
+out="$(KEEP=1 sg)"; assert_eq "$(decision "$out")" block "stop: tests red 第 1 次"; reason "$out" | grep -q green || fail "stop: tests red 要說 green"
+out="$(KEEP=1 sg)"; out="$(KEEP=1 sg)"; assert_eq "$(decision "$out")" block "stop: tests red 第 3 次"
+out="$(KEEP=1 sg)"; assert_eq "$out" "" "stop: tests red 第 4 次放行"
+assert_grep '^## 卡在接 /apply' "$C/gates.md"
+rm -f "$C/gates.md"
+
+# pr 站：report.md 在、沒有 ## MR
+printf '{"phase":"apply","step":8,"total":8,"label":"x","tests":"green","at":"2026-11-05T15:00:00+08:00"}' > "$C/status.json"
+printf '# report\n四桶…\n' > "$C/report.md"
+out="$(sg)"; assert_eq "$(decision "$out")" block "stop: report 沒 MR → 擋"; reason "$out" | grep -q '/pr' || fail "stop: 要叫 /pr"
+printf '# report\n### Consider\n- a.sh:1 task 沒做 · 回 `/apply eval-core` 做完\n' > "$C/report.md"
+out="$(sg)"; assert_eq "$out" "" "stop: report 列了「回 /apply」不擋 /pr"
+# babysit 站：有 MR 沒有 babysit: 行
+printf '# report\n\n## MR\nhttps://gitlab.tsg-navigator.com/a/b/-/merge_requests/212 · opened 2026-11-10 · auto-merge: no\n' > "$C/report.md"
+out="$(sg)"; assert_eq "$(decision "$out")" block "stop: MR 已開沒 babysit → 擋"; reason "$out" | grep -q '/babysit' || fail "stop: 要叫 /babysit"
+done_report
+out="$(sg)"; assert_eq "$out" "" "stop: 有 babysit: 行放行"
+# 沒有卡的 branch 不擋
+git -C "$R" checkout -q -b scratch-x; out="$(sg)"; assert_eq "$out" "" "stop: branch 對不到卡不擋"
+git -C "$R" checkout -q "feat/eval-core/mikaela"
 
 # ---------- herdr 佇列（auto-dispatch D5）：PostToolUse 看到 opsx chain 才執行，依序、失敗就停 ----------
 use_fakes herdr; export OPSX_FAKE_LOG="$FX/herdr.log"
