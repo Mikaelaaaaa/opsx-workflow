@@ -424,13 +424,14 @@ out="$(sg)"; assert_eq "$(decision "$out")" block "stop: review 最後一步 rep
 printf '{"phase":"apply","step":8,"total":8,"label":"x","tests":"green","at":"2026-11-05T15:00:00+08:00"}' > "$C/status.json"
 rm -f "$C/gates.md"; rm -rf "$STOP_STATE"
 # 子 change 的 subagent 在背景做：主殼未勾但只能等通知，不計次、不寫 gate
-mk_sub() { # <子> <worker> <at>
+iso_shift() { python3 -I -c 'import datetime, sys; h, z = int(sys.argv[1]), int(sys.argv[2]); print((datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=h)).astimezone(datetime.timezone(datetime.timedelta(hours=z))).isoformat(timespec="seconds"))' "$1" "$2"; }
+mk_sub() { # <子> <worker> <at> [step]
   local s="$C/subs/$1"; mkdir -p "$s/specs/x"
   printf 'schema: opsx\nparent: eval-core\n' > "$s/.openspec.yaml"
   printf '## Why\n' > "$s/proposal.md"; printf '## Context\n' > "$s/design.md"
   printf '## 1. a\n\n- [ ] 1.1 t\n  - 驗收：a\n  - 測試：b\n' > "$s/tasks.md"
   printf '### Requirement: r\n\n#### Scenario: s\n' > "$s/specs/x/spec.md"
-  printf '{"phase":"apply","step":0,"total":4,"label":"x","tests":"unknown","at":"%s","worker":"%s"}' "$3" "$2" > "$s/status.json"
+  printf '{"phase":"apply","step":%s,"total":4,"label":"x","tests":"unknown","at":"%s","worker":"%s"}' "${4:-0}" "$3" "$2" > "$s/status.json"
 }
 FRESH="$( source "$OPSX_ROOT/bin/lib/common.sh"; now_iso )"
 printf '## 1. x\n\n- [ ] 1.1 `attach-cli`：a\n- [x] 1.2 `attach-board`：b\n' > "$C/tasks.md"
@@ -450,6 +451,18 @@ mk_sub attach-cli session "$FRESH"
 out="$(sg)"; assert_eq "$(decision "$out")" block "stop: 子殼 worker 是 session"
 mk_sub attach-cli subagent-attach-cli "not-a-time"
 out="$(sg)"; assert_eq "$(decision "$out")" block "stop: at 解析不了照擋"
+mk_sub attach-cli subagent-attach-cli "$(iso_shift -3 8)"
+out="$(sg)"; assert_eq "$(decision "$out")" block "stop: at 是 3 小時前（換算時區後）"
+mk_sub attach-cli subagent-attach-cli "$(iso_shift 3 8)"
+out="$(sg)"; assert_eq "$(decision "$out")" block "stop: at 是未來照擋"
+mk_sub attach-cli subagent-attach-cli "$(iso_shift 0 -5)"
+out="$(sg)"; assert_eq "$out" "" "stop: 負時區的新 at 放行"
+mk_sub attach-cli subagent-attach-cli "$FRESH" 4
+out="$(sg)"; assert_eq "$(decision "$out")" block "stop: 子 change 已回報 DONE（step=total）但還沒疊，照擋"
+printf '## 1. x\n\n- [x] 1.1 `attach-cli`：a\n- [ ] R1.1 疊完後檢查 `attach-cli` 的 new.sh\n' > "$C/tasks.md"
+mk_sub attach-cli subagent-attach-cli "$FRESH"
+out="$(sg)"; assert_eq "$(decision "$out")" block "stop: 子殼名只出現在後面的 R task 行，照擋"
+printf '## 1. x\n\n- [ ] 1.1 `attach-cli`：a\n- [x] 1.2 `attach-board`：b\n' > "$C/tasks.md"
 rm -rf "$C/subs"; rm -f "$C/gates.md"; rm -rf "$STOP_STATE"
 # hook 自己寫的「卡在接」gate：建議是選項之一，不是 hook 內部說明
 printf '## 1. x\n\n- [ ] 1.1 a\n' > "$C/tasks.md"

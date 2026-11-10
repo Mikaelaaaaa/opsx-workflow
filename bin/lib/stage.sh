@@ -12,8 +12,8 @@ st_card_dir() { # <top> <slug>
 st_card_kind() { local d="$1"; [ -f "$d/.openspec.yaml" ] && sed -n 's/^kind: *//p' "$d/.openspec.yaml" | head -1 || true; }
 st_status_tests() { local d="$1"; [ -f "$d/status.json" ] && jq -r '.tests // "unknown"' "$d/status.json" 2>/dev/null || printf 'unknown'; }
 st_review_running() { local d="$1"; [ -f "$d/status.json" ] && jq -e '.phase == "review" and .step < .total' "$d/status.json" >/dev/null 2>&1; }
-# 主殼有子 change 的 subagent 在背景做：子殼名在主殼某個未勾行、status.json 的 worker 是 subagent-*、at 在 120 分鐘內。
-# 已疊的子殼 status.json 不會更新，所以「未疊」只認主殼 tasks.md 的勾選。
+# 主殼有子 change 的 subagent 在背景做：子殼名在主殼某個未勾 task 行的編號之後、status.json 的 worker 是 subagent-* 且 step < total、at 在過去 120 分鐘內。
+# 已疊的子殼 status.json 不會更新，所以「未疊」只認主殼 tasks.md 的勾選；收到 DONE 後 session 把子殼 status 寫成 n/n，等疊的時候不算在跑。
 # shortcut: 120 分鐘上限，subagent 死了又沒通知最多多等兩小時；有心跳之後改看心跳
 st_subagent_running() { # <主殼目錄>
   local d="$1" s name now; now="$(date +%s)"
@@ -21,11 +21,11 @@ st_subagent_running() { # <主殼目錄>
   for s in "$d"/subs/*/; do
     s="${s%/}"; [ -f "$s/status.json" ] || continue
     name="$(basename "$s")"
-    grep -E '^[[:space:]]*- \[ \]' "$d/tasks.md" | grep -qF "\`$name\`" || continue
+    grep -qE "^[[:space:]]*- \[ \] [^ ]+ \`$name\`" "$d/tasks.md" || continue
     jq -e --argjson now "$now" '
       (.at | capture("^(?<t>.{19})(?<s>[+-])(?<h>[0-9]{2}):(?<m>[0-9]{2})$")) as $p
       | (($p.t + "Z" | fromdateiso8601) - (if $p.s == "+" then 1 else -1 end) * (($p.h | tonumber) * 3600 + ($p.m | tonumber) * 60)) as $at
-      | (.worker | startswith("subagent-")) and ($now - $at) <= 7200
+      | (.worker | startswith("subagent-")) and .step < .total and ($now - $at) >= 0 and ($now - $at) <= 7200
     ' "$s/status.json" >/dev/null 2>&1 && return 0
   done
   return 1
