@@ -275,6 +275,35 @@ grep -q '^mr view 9 ' "$OPSX_FAKE_LOG" || fail "glab 要真的被叫到，慢才
 G="$(printf '%s' "$J" | python3 -I -c 'import datetime,json,sys;print(int(datetime.datetime.fromisoformat(json.load(sys.stdin)["generated_at"]).timestamp()))')"
 [ "$G" -le $((S + 2)) ] || fail "generated_at 要在讀來源前取：呼叫前 ${S}，generated_at ${G}"
 
+# ---------- gate type 同義詞、type 不明、needs: run（gate-type-normalize） ----------
+R7="$FX/code7"; mkdir -p "$R7/r6/.git"
+gcard() { # <slug> <gates.md 內容>
+  local d="$R7/r6/openspec/changes/$1"; mkdir -p "$d"
+  printf 'schema: opsx\ncreated: 2026-11-10\nkind: dev\n' > "$d/.openspec.yaml"; printf '## 一句話\n\n%s\n' "$1" > "$d/inbox.md"
+  printf '## 1\n\n- [ ] 1.1 a\n' > "$d/tasks.md"; printf '%b' "$2" > "$d/gates.md"
+}
+gcard t-auth    '## g1\ntype: authorization\naction: push\nstatus: open\n問題: push？\n建議: 允許\n'
+gcard t-zh-dec  '## g1\ntype: 等待決定\nstatus: open\n問題: 哪個？\n選項: A | B (Recommended)\n'
+gcard t-zh-auth '## g1\ntype:  等待授權 \naction: push\nstatus: open\n問題: push？\n'
+gcard t-notype  '## g1\nstatus: open\n問題: 沒寫 type\n建議: 照做\n'
+gcard t-ish     '## g1\ntype: approval-ish\nstatus: open\n問題: 表外\n'
+gcard t-run     '## g1\ntype: decision\nneeds: run\nstatus: open\n問題: 跑一下\n建議: ls -la /tmp\n'
+gcard t-plain   '## g1\ntype: decision\nstatus: open\n問題: 選\n選項: A | B\n建議: A\n'
+gcard t-badneed '## g1\ntype: decision\nneeds: ssh\nstatus: open\n問題: 選\n'
+J="$(opsx collect --root "$R7")"; assert_eq "$?" 0 "gate-type collect rc"
+w() { q "$(card "$J" r6 "$1")" "waiting.$2"; }
+assert_eq "$(w t-auth type)" 等待授權 "authorization 是授權"
+assert_eq "$(w t-auth options)" '["這次", "這張卡", "這個 repo 永遠", "拒絕"]'
+assert_eq "$(w t-zh-dec type)" 等待決定; assert_eq "$(w t-zh-dec options)" '["A", "B"]'
+assert_eq "$(w t-zh-auth type)" 等待授權 "值前後有空白"
+assert_eq "$(w t-notype type)" "type 不明" "沒寫 type 不再當決定"
+assert_eq "$(w t-notype options)" '[]'; assert_eq "$(w t-notype gate_id)" g1; assert_eq "$(w t-notype question)" "沒寫 type"
+assert_eq "$(w t-ish type)" "type 不明" "表外的值"
+assert_eq "$(w t-run needs)" run; assert_eq "$(w t-run type)" 等待決定; assert_eq "$(w t-run recommended)" "ls -la /tmp"
+assert_eq "$(w t-plain needs)" null "沒標 needs"
+assert_eq "$(w t-badneed needs)" null "needs 只認 run"
+assert_eq "$(w t-auth needs)" null; assert_eq "$(w t-notype needs)" null
+
 # ---------- session：workplan 的 feature 收成 sessions[]（specs/board-collect「收成 session 的 feature」等四條） ----------
 R6="$FX/code6"; S6="$FX/state6"; mkdir -p "$R6/s/.git" "$R6/t/.git" "$R6/u/.git" "$R6/t/openspec/changes" "$R6/u/openspec/changes" "$S6"
 sess() { printf '%s' "$1" | python3 -I -c 'import json,sys;d=json.load(sys.stdin)

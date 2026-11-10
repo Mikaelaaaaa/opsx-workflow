@@ -284,7 +284,7 @@ const PHASE_LABEL={explore:'explore',grill:'grill',propose:'propose',apply:'appl
 const MODEL_BY_KIND={dev:'claude-opus-5-5',refactoring:'claude-opus-5-5',perf:'claude-opus-5-5',experiment:'claude-opus-5-5','bug-fix':'claude-sonnet-5-5',chore:'claude-sonnet-5-5',ops:'claude-sonnet-5-5'};
 const GRANT_LABEL={push:'push',mr:'建立 MR',migrate:'本機 migrate',delete:'刪檔',install:'裝套件',rebase:'rebase',external:'外部 API',env:'寫 .env'};
 const GRANT_OF={'這次':'this','這張卡':'card','這個 repo 永遠':'repo'};
-const WAIT_BADGE={'等待授權':'data','等待決定':'data','可以合併':'ok','終端機等待輸入':'danger'};
+const WAIT_BADGE={'等待授權':'data','等待決定':'data','type 不明':'danger','可以合併':'ok','終端機等待輸入':'danger'};
 const COND=[['opened','MR 開著'],['not_draft','不是草稿'],['no_conflicts','沒有衝突'],['pipeline','Pipeline 通過'],['threads','沒有未解的討論']];
 
 const $=(s,el=document)=>el.querySelector(s);
@@ -336,10 +336,11 @@ function bot(c,size){
 /* ---------- 列 ---------- */
 function rowAttn(c){
   const w=c.waiting;let l2='',act='';
-  const rec=w.recommended?`<span class="sep">·</span>建議：${esc(w.recommended)}`:'';
+  const rec=w.recommended?`<span class="sep">·</span>${w.needs==='run'?'在終端機跑':'建議'}：${esc(w.recommended)}`:'';
   if(w.type==='等待授權'){l2=`<span class="q">${esc(w.question||w.action||'')}</span>${rec}`;
     act=(w.options||[]).map((o,i)=>o==='拒絕'?`<button class="sm ghost danger" data-act="answer" data-text="拒絕">拒絕</button>`:`<button class="sm ${i===0?'primary':''}" data-act="answer" data-grant="${GRANT_OF[o]||''}" data-text="允許">${esc(o)}</button>`).join('');}
-  else if(w.type==='等待決定'){l2=`<span class="q">${esc(w.question||'')}</span>${rec}`;act=(w.recommended?`<button class="primary sm" data-act="answer" data-text="${esc(w.recommended)}">照建議</button>`:'')+`<button class="sm" data-act="open">自己選</button>`;}
+  else if(w.type==='等待決定'){l2=`<span class="q">${esc(w.question||'')}</span>${rec}`;act=(w.recommended&&w.needs!=='run'?`<button class="primary sm" data-act="answer" data-text="${esc(w.recommended)}">照建議</button>`:'')+`<button class="sm ${w.needs==='run'?'primary':''}" data-act="open">${w.needs==='run'?'貼結果':'自己選'}</button>`;}
+  else if(w.type==='type 不明'){l2=`<span class="q">${esc(w.question||'')}</span><span class="sep">·</span>gates.md 的 type 要寫 approval | decision`;act=`<button class="sm" data-act="open">看詳情</button>`;}
   else if(w.type==='可以合併'){l2=`<span class="q">MR 五個條件都通過</span><span class="sep">·</span><span class="mono">${esc(c.mr.head_sha||'').slice(0,8)}</span>`;act=`<button class="primary sm" data-act="merge">合併</button><a class="sm" href="${esc(c.mr.url)}" target="_blank" rel="noopener"><button class="sm">開啟 MR</button></a>`;}
   else {l2=`<span class="q">${esc(w.question)}</span>`;act=`<button class="primary sm" data-act="pane">開啟 pane</button><button class="sm" data-act="stop">停止</button>`;}
   return `<div class="row" data-key="${esc(key(c))}" role="button" tabindex="0" aria-selected="${ui.sel===key(c)}">
@@ -604,6 +605,8 @@ function renderDrawer(){
   if(w){
     let answers='';
     if(w.type==='等待授權')answers=`<button class="primary" data-act="answer" data-grant="this" data-text="允許">允許這次</button><button data-act="answer" data-grant="card" data-text="允許">這張卡都允許</button>${w.action==='merge'?'':`<button data-act="answer" data-grant="repo" data-text="允許">這個 repo 永遠允許</button>`}<button class="ghost danger" data-act="answer" data-text="拒絕">拒絕</button><input type="text" id="reply" aria-label="回覆" placeholder="或打字回覆，Enter 送出">`;
+    else if(w.type==='等待決定'&&w.needs==='run')answers=`<div class="mono" style="margin-bottom:8px">在終端機跑這行：<code>${esc(w.recommended||'')}</code> <button data-act="copy" data-text="${esc(w.recommended||'')}">複製</button></div><input type="text" id="reply" aria-label="貼結果" placeholder="貼上執行結果，Enter 送出">`;
+    else if(w.type==='type 不明')answers=`<div class="mono">gates.md 的 type 沒寫或不是 approval | decision，請改成其中之一：<code>${esc((c.path||'')+'/gates.md')}</code> <button data-act="copy" data-text="${esc((c.path||'')+'/gates.md')}">複製路徑</button></div>`;
     else if(w.type==='等待決定')answers=(w.options||[]).map(o=>`<button class="${o===w.recommended?'primary':''}" data-act="answer" data-text="${esc(o)}">${esc(o)}</button>`).join('')+`<input type="text" id="reply" aria-label="回覆" placeholder="或打字回覆，Enter 送出">`;
     else if(w.type==='可以合併')answers=`<button class="primary" data-act="merge">合併</button><a href="${esc(c.mr.url)}" target="_blank" rel="noopener"><button>開啟 MR</button></a>`;
     else answers=`<button class="primary" data-act="pane">開啟 pane</button><button data-act="stop">停止</button><button data-act="dispatch">重新指派</button>`;
@@ -646,6 +649,7 @@ function answer(c,text,grant){
   if(!c.waiting||!c.waiting.gate_id){toast('這一項沒有 gate 可回',true);return;}
   act(`opsx answer ${c.slug} --gate ${c.waiting.gate_id}${grant?' --grant '+grant:''} "${text}"`,()=>api.post('answer',{slug:c.slug,gate:c.waiting.gate_id,grant:grant||'',text,repo:repoTop(c)}));
 }
+function copyText(t){navigator.clipboard.writeText(t).then(()=>toast('已複製'),()=>toast('複製失敗，請手動選取',true));}
 function answerTree(s,b){
   act(`opsx answer ${b.main}${b.sub?' --sub '+b.sub:''} --gate ${b.gate}${b.grant?' --grant '+b.grant:''} "${b.text}"`,
     ()=>api.post('answer',{...answerBody(b.main,b.sub,b.gate,b.text),grant:b.grant,repo:(data.repo_paths||{})[s.repo]}));
@@ -751,6 +755,7 @@ document.addEventListener('click',e=>{
     if(a==='logf'){setLogFilter(btn.dataset.f);render();return;}
     if(a==='log-more'){logMore();render();return;}
     if(a==='ev-open'){if(!byKey(btn.dataset.key)){toast(btn.dataset.key+' 不在首頁（archive 只列最新的幾張）',true);return;}showTab('home');openDrawer(btn.dataset.key);return;}
+    if(a==='copy'){copyText(btn.dataset.text);return;}
     if(a==='tree-answer'){const s=data.sessions.find(s=>skey(s)===ui.open);if(s)answerTree(s,btn.dataset);return;}
     if(!c)return;
     if(a==='open'){openDrawer(k);return;}

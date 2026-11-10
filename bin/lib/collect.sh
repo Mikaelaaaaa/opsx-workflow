@@ -9,11 +9,12 @@
 #        source, upstream, stale, session（收進 session 的主 change 才有："<repo>/<feature>"）}
 # sessions[]：{repo, feature, section, main_done, main_total, sub_done, sub_total, current{slug, stage}|null,
 #   mains[{slug, pr_status, stage, section, dispatch, agent_status, open_gates, waiting, subs[{slug, status, stage, worker, open_gates, waiting}]}]}
-#   section ∈ 待處理 | 進行中 | 待指派 | 收件匣 | 已完成（收件匣＝沒派出、stage 還是 explore）；waiting.type ∈ 等待授權 | 等待決定 | 可以合併 | 終端機等待輸入
+#   section ∈ 待處理 | 進行中 | 待指派 | 收件匣 | 已完成（收件匣＝沒派出、stage 還是 explore）；waiting.type ∈ 等待授權 | 等待決定 | type 不明 | 可以合併 | 終端機等待輸入；waiting.needs ∈ run | null
 #
 # gates.md 的格式（apply 步 5 寫、answer 改）：每個 gate 一段
 #   ## <gate id>
 #   type: approval | decision      action: push|mr|migrate|…（approval 才有）      status: open | answered      opened_at: <ISO>
+#   needs: run（可選：建議欄是要人在終端機跑的指令；看板不給照建議）      type 沒寫或不在同義詞表內 → waiting.type 為 type 不明
 #   問題: …   建議: …   選項: a | b (Recommended) | c（decision 才有）   證據: …   風險: …   預設: …
 #   已確認: …（可多行，到下一個欄位為止）   answer: …（answered 時）
 
@@ -102,6 +103,7 @@ opsx_collect() {
   OPSX_C_WORK="$work" OPSX_C_STATE="$state" OPSX_C_HERDR_ERR="$herdr_err" OPSX_C_NOW="$now" OPSX_C_LIB="$OPSX_ROOT/bin/lib" "$OPSX_PY" -I - <<'PY'
 import datetime, json, os, re, sys, tomllib
 sys.path.insert(0, os.environ["OPSX_C_LIB"])
+import gatetype
 from chain import load_workplan
 
 work, state = os.environ["OPSX_C_WORK"], os.environ["OPSX_C_STATE"]
@@ -156,7 +158,7 @@ if os.path.exists(agents_path) and not os.environ["OPSX_C_HERDR_ERR"]:
         agents = None
         errors.append({"source": "herdr", "message": "agent list 讀不懂（要 result.agents）：%s" % e})
 
-FIELD = re.compile(r"^(type|action|status|opened_at|問題|建議|選項|證據|風險|預設|已確認|answer):\s*(.*)$")
+FIELD = re.compile(r"^(type|needs|action|status|opened_at|問題|建議|選項|證據|風險|預設|已確認|answer):\s*(.*)$")
 
 def parse_gates(text):
     gates, cur, key = [], None, None
@@ -204,8 +206,12 @@ def waiting_of(card, gates, agent_status):
     for g in gates:
         if g.get("status", "").strip() != "open": continue
         base = {"gate_id": g["id"], "question": g.get("問題"), "recommended": g.get("建議"), "evidence": g.get("證據"),
-                "risk": g.get("風險"), "default_if_unanswered": g.get("預設"), "confirmed": g.get("已確認")}
-        if g.get("type") == "approval":
+                "risk": g.get("風險"), "default_if_unanswered": g.get("預設"), "confirmed": g.get("已確認"),
+                "needs": "run" if g.get("needs") == "run" else None}
+        gtype = gatetype.normalize(g.get("type", ""))
+        if gtype is None:
+            return {"type": "type 不明", "action": None, "options": [], **base}
+        if gtype == gatetype.APPROVAL:
             opts = ["這次", "這張卡", "這個 repo 永遠", "拒絕"]
             if g.get("action") == "merge": opts = ["這次", "這張卡", "拒絕"]   # merge 永遠不可長期授權，answer 會拒，按鈕就不要給
             return {"type": "等待授權", "action": g.get("action"), "options": opts, **base}
@@ -219,10 +225,10 @@ def waiting_of(card, gates, agent_status):
         return {"type": "等待決定", "action": None, "options": cleaned, **{**base, "recommended": rec}}
     mr = card["mr"]
     if mr and mr.get("state") == "ready":
-        return {"type": "可以合併", "action": "merge", "gate_id": None, "options": ["合併"], "question": "MR 五條件全綠", "recommended": "合併",
+        return {"type": "可以合併", "action": "merge", "gate_id": None, "needs": None, "options": ["合併"], "question": "MR 五條件全綠", "recommended": "合併",
                 "evidence": mr["url"], "risk": None, "default_if_unanswered": "留在進行中", "confirmed": None}
     if agent_status == "blocked":
-        return {"type": "終端機等待輸入", "action": None, "gate_id": None, "options": ["開啟 pane", "停止", "重新指派"],
+        return {"type": "終端機等待輸入", "action": None, "gate_id": None, "needs": None, "options": ["開啟 pane", "停止", "重新指派"],
                 "question": "agent 在終端機等輸入，板上沒有對應的 gate", "recommended": "開啟 pane", "evidence": None, "risk": "照規則不該發生：要授權的動作應寫 gate",
                 "default_if_unanswered": "agent 停在那裡", "confirmed": None}
     return None

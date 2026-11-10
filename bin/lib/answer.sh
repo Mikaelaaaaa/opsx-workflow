@@ -42,7 +42,7 @@ opsx_answer() {
   result="$(OPSX_A_DIR="$d" OPSX_A_GATE="$gate" OPSX_A_GRANT="$grant" OPSX_A_TEXT="$answer" OPSX_A_REPO="$repo" OPSX_A_SLUG="$slug" \
             OPSX_A_SD="$OPSX_STATE_DIR" OPSX_A_NOW="$(now_iso)" OPSX_LIB="$OPSX_ROOT/bin/lib" "$OPSX_PY" -I - <<'PY'
 import os, re, sys, tomllib
-sys.path.insert(0, os.environ["OPSX_LIB"]); import authz, jsonfile
+sys.path.insert(0, os.environ["OPSX_LIB"]); import authz, gatetype, jsonfile
 e = os.environ
 d, gate, grant, text, repo, slug, sd, now = (e["OPSX_A_DIR"], e["OPSX_A_GATE"], e["OPSX_A_GRANT"], e["OPSX_A_TEXT"],
                                              e["OPSX_A_REPO"], e["OPSX_A_SLUG"], e["OPSX_A_SD"], e["OPSX_A_NOW"])
@@ -69,7 +69,7 @@ def field(name):
 if field("status") != "open":
     fail("answer: gate「%s」不是 open（status: %s），不能再回" % (gate, field("status") or "缺"))
 gtype, action = field("type"), field("action")
-if grant and gtype != "approval":
+if grant and gatetype.normalize(gtype) != gatetype.APPROVAL:
     fail("answer: --grant 只對 type: approval 的 gate 有意義，「%s」是 %s" % (gate, gtype or "沒寫 type"))
 if grant == "repo" and action == "merge":
     fail("answer: merge 永遠要人，不能給「這個 repo 永遠」")
