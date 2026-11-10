@@ -20,6 +20,11 @@ for k in 'opsx stack' 'workplan 順序' '退出 3' 'session 自己重做' '/revi
   has "$k" "$SUBS"
 done
 
+# --- stop-gate-waits-on-subagents：收到 DONE 要把子殼 status 寫成 n/n，Stop hook 才不把等疊當成 subagent 在跑 ---
+has 'opsx status apply <total>/<total>' "$SUBS"
+has '--sub <子> --worker session' "$SUBS"
+has 'anything that is not `NEEDS-USER`' "$SUBS"
+
 # --- grant-action：授權 gate 要寫 action:，值取自 hook 的 deny 訊息 ---
 has 'action: <value>' "$SK"
 has "grant hook's deny message" "$SK"
