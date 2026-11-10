@@ -19,6 +19,7 @@ for v in security data prod_or_main workaround_exists blocks_all_agents; do grep
 grep -q '^evidence:.*有 impact 就要 evidence' "$FX/tpl-fm" || fail "evidence 註解缺「有 impact 就要 evidence」"
 
 # --- Scenario：opsx new 寫 planned ---
+cd "$FX"   # 從 dispatch 的 worktree 跑時，cwd 不能讓 opsx new 把 fixture 的卡當成 agent 開的
 A="$(mk_opsx_repo a)"
 out="$(opsx new --repo "$A" -- 一句話)"; assert_eq "$?" 0 "new: $out"
 frontmatter "$A/openspec/changes/$out/inbox.md" > "$FX/new-fm"
