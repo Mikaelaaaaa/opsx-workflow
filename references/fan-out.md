@@ -18,6 +18,7 @@ A subagent has no herdr agent name. `opsx answer` and the board cannot reach it,
 One Agent call per child, `isolation: "worktree"`, `run_in_background: true`. The brief must contain:
 
 - First commands: `git fetch <remote>` and `git switch --no-track -c <branch> <remote>/main` (both from the `chain:` line). Without `--no-track` git tries to write `.git/config`, the sandbox refuses, and the worktree is left half switched.
+- Before anything else: read the `## 派工指示` section of `<top>/openspec/changes/<slug>/inbox.md` (write the main repo's real path in place of `<top>`; the subagent's worktree has no `openspec/`) and follow it. No section, or no entries in it, means start as usual. The router reminds a pane of these notes on every prompt, but a subagent's turns never reach the router, so a note written before the card was dispatched is read here or not at all. If a note contradicts a D in the card's `design.md`, do not pick a side: report `NEEDS-USER <slug>` with the note, the D id and the options.
 - The workflow: call the `apply` skill for `<slug>`; it continues through `review`, `pr` and `babysit` itself (`continue.md`), so do not call them again. Name the skill; a subagent that is not told invents its own process.
 - What the parent card changed: its file list (`git show --stat` of the merge) and the D-ids in its `design.md` that the child builds on. The subagent starts with none of this pane's context.
 - The report contract: finish with `DONE <slug> <MR url>`, or `NEEDS-USER <slug>` followed by the question, the options and the evidence. Commit and push before reporting, because the harness may remove the worktree once the subagent ends.
@@ -28,6 +29,7 @@ Prompts for a fanned-out card reach this pane prefixed with the card's slug:
 
 | Prompt the pane receives | What the pane does |
 |---|---|
+| `[<slug>] 有新的派工指示，Read inbox.md 的 ## 派工指示` | SendMessage that card's subagent to read the `## 派工指示` section of `<top>/openspec/changes/<slug>/inbox.md`, with the real path written in; the relative `inbox.md` does not exist in its worktree |
 | `[<slug>] <answer text>` | SendMessage the answer to that card's subagent |
 | `/babysit merge <sha> <slug>` | SendMessage the subagent: run `/babysit merge <sha>` in its own worktree |
 | `[<slug>] stop` | stop that subagent (TaskStop); its branch and worktree stay |
