@@ -147,6 +147,8 @@ main{flex:1;min-width:0;padding-left:max(16px,env(safe-area-inset-left,0px));pad
 .checks{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:1fr 1fr;gap:6px 16px;font-size:13px}
 .checks li{display:flex;gap:8px;align-items:center;color:var(--fg-2)}
 .checks .yes{color:var(--success);font-family:var(--font-mono)}.checks .no{color:var(--danger);font-family:var(--font-mono)}
+.drawer .note-row{font-size:13px;padding:3px 0;word-break:break-word}
+#note-add{width:100%;margin-top:8px}
 .drawer .foot{display:flex;gap:8px;flex-wrap:wrap;align-items:center;padding-top:16px}
 .drawer .foot .path{margin-left:auto;font-family:var(--font-mono);font-size:11px;color:var(--fg-3);word-break:break-all}
 .x{border:0;background:transparent;width:32px;min-height:32px;padding:0;font-size:20px;color:var(--fg-3);border-radius:var(--r)}
@@ -292,6 +294,21 @@ const esc=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;',
 const key=c=>c.repo+'/'+c.slug;
 const byKey=k=>data.cards.find(c=>key(c)===k);
 const repoTop=c=>c.path?c.path.split('/openspec/changes/')[0]:null;
+/* 派工指示（inbox.md ## 派工指示）：tests/dispatch-note-web.test.sh 從 const esc= 切到 end 標記執行 */
+function dispatchBody(c,p){
+  const b={slug:c.slug,agent:p.agent,model:p.model,mode:p.mode,kind:p.kind,repo:repoTop(c)};
+  const note=(p.note||'').trim();if(note)b.note=note;
+  return b;
+}
+const noteBody=(c,text)=>({slug:c.slug,text,repo:repoTop(c)});
+/* 有 gate 時不給追加：抽屜裡的單行輸入只留給回 gate，免得指示被送成答案 */
+function notesSection(c){
+  const list=c.notes||[];const add=!(c.open_gates||[]).length&&c.section!=='已完成';
+  if(!list.length&&!add)return '';
+  const rows=list.map(n=>`<div class="note-row"><span class="mono faint">${esc(String(n.at).replace('T',' ').slice(0,16))}</span> ${esc(n.text)}</div>`).join('');
+  return `<section><h3>派工指示 <span class="src">inbox.md</span></h3>${rows}${add?`<input type="text" id="note-add" aria-label="追加派工指示" placeholder="追加一條指示，Enter 送出">`:''}</section>`;
+}
+/* 派工指示 end */
 function ago(iso){
   if(!iso)return '';const t=Date.parse(iso);if(isNaN(t))return iso;
   const s=Math.max(0,(Date.now()-t)/1000);
@@ -601,6 +618,7 @@ function renderDrawer(){
   const c=byKey(ui.open);if(!c){closeDrawer();return;}
   /* 重畫前留住打到一半的回覆和焦點，畫完放回去（每 5 秒重拉會走到這裡） */
   const oldReply=$('#reply');const keep=oldReply?{v:oldReply.value,focus:document.activeElement===oldReply,s:oldReply.selectionStart}:null;
+  const oldNote=$('#note-add');const keepNote=oldNote?{v:oldNote.value,focus:document.activeElement===oldNote,s:oldNote.selectionStart}:null;
   const w=c.waiting;let ask='';
   if(w){
     let answers='';
@@ -624,9 +642,10 @@ function renderDrawer(){
   const logSec=`<section><h3>紀錄 <span class="src">decisions.tsv</span></h3>${tlErr?`<div class="faint" style="color:var(--danger)">${esc(tlErr)}</div>`:!tl?'<div class="faint">載入中…</div>':mine.length?`<div class="panel" style="margin-top:0">${mine.map(evRow).join('')}</div>`:'<div class="faint">這張卡還沒有紀錄</div>'}</section>`;
   const foot=`<div class="foot">${d.pane?`<button class="ghost sm" data-act="pane">開啟 pane ${esc(d.pane)}</button><button class="ghost sm" data-act="stop">停止</button>`:''}${c.section!=='已完成'?`<button class="ghost sm" data-act="dispatch">${d.pane?'重新指派':'指派'}</button>`:''}<span class="path">${esc(c.path||'')}</span></div>`;
   const headBadge=w?`<span class="badge ${WAIT_BADGE[w.type]}">${esc(w.type)}</span>`:c.agent_status==='working'?'<span class="badge ok"><span class="dot live"></span>執行中</span>':'';
-  $('#drawer').innerHTML=`<header><div style="padding-top:2px">${bot(c,40)}</div><div class="ttl"><h2>${esc(c.title)}${headBadge}</h2><div class="flow">${flowLine(c)}</div></div><button class="x" data-act="close" aria-label="關閉">×</button></header><div class="body">${ask}${facts}${prog}${out}${mr}${logSec}${foot}</div>`;
+  $('#drawer').innerHTML=`<header><div style="padding-top:2px">${bot(c,40)}</div><div class="ttl"><h2>${esc(c.title)}${headBadge}</h2><div class="flow">${flowLine(c)}</div></div><button class="x" data-act="close" aria-label="關閉">×</button></header><div class="body">${ask}${notesSection(c)}${facts}${prog}${out}${mr}${logSec}${foot}</div>`;
   $('#drawer').hidden=false;$('#scrim').hidden=false;
   const nr=$('#reply');if(nr&&keep){nr.value=keep.v;if(keep.focus){nr.focus();try{nr.setSelectionRange(keep.s,keep.s);}catch(e){}}}
+  const nn=$('#note-add');if(nn&&keepNote){nn.value=keepNote.v;if(keepNote.focus){nn.focus();try{nn.setSelectionRange(keepNote.s,keepNote.s);}catch(e){}}}
 }
 async function loadOutput(c){
   const k=key(c);
@@ -644,6 +663,10 @@ async function act(label,fn){
   try{const r=await fn();toast(label+(r&&r.stdout?'\n'+r.stdout.trim():''));await refresh(true);}
   catch(e){toast(label+' 失敗：'+e.message,true);}
   finally{ui.busy=false;}
+}
+/* 送成功才清輸入框：失敗時打的字留著可以重送（act 成功後重畫抽屜會保留輸入框的值，所以要在重畫前清） */
+function submitNote(c,text){
+  act(`opsx note ${c.slug} -- "${text}"`,async()=>{const r=await api.post('note',noteBody(c,text));const el=$('#note-add');if(el)el.value='';return r;});
 }
 function answer(c,text,grant){
   if(!c.waiting||!c.waiting.gate_id){toast('這一項沒有 gate 可回',true);return;}
@@ -708,6 +731,7 @@ function openDispatch(c){
     <div class="opt"><span>類型（寫進 .openspec.yaml，決定 playbook）</span><div class="kinds">${Object.keys(KIND).map(k=>`<button data-kind="${k}" aria-pressed="${k===kind}">${KIND[k]}</button>`).join('')}</div></div>
     <div class="opt"><span>模型（預設照類型；codex 只有 gpt-5）</span><div class="kinds models" style="grid-template-columns:repeat(3,minmax(0,1fr))"><button data-model="claude-opus-5-5" aria-pressed="${MODEL_BY_KIND[kind]==='claude-opus-5-5'}">opus 5.5</button><button data-model="claude-sonnet-5-5" aria-pressed="${MODEL_BY_KIND[kind]==='claude-sonnet-5-5'}">sonnet 5.5</button><button data-model="gpt-5" aria-pressed="false">gpt-5（codex）</button></div></div>
     <div class="opt"><span>自主程度</span><label class="radio"><input type="radio" name="md" value="interactive"><span><b>互動</b><small>每一步都問你</small></span></label><label class="radio"><input type="radio" name="md" value="autopilot" checked><span><b>自動</b><small>一路做到可以合併，要你決定或授權的寫 gate；合併仍是你</small></span></label></div>
+    <div class="opt"><span>指示（選填，寫進 inbox.md ## 派工指示）</span><input type="text" id="dlg-note" aria-label="派工指示" placeholder="這次派工要 agent 注意的事"></div>
     <div class="note">階段 ${esc(c.stage)}：派出後第一句是 /${esc(c.stage)} ${esc(c.slug)}<br>pane 開在 ${ws?esc(ws):`新 workspace「${esc(c.repo)}」`}<br>${esc(c.repo)} 長期授權：${granted.length?esc(granted.join('、')):'無（碰到會寫 gate）'}</div>
     <div class="go"><button data-act="dlg-cancel">取消</button><button class="primary" data-act="dlg-go">指派</button></div></div>`;
   $('#dialog').hidden=false;$('#scrim').hidden=false;
@@ -718,8 +742,9 @@ function doDispatch(){
   const agent=$('#dialog input[name=ag]:checked').value,mode=$('#dialog input[name=md]:checked').value;
   const kb=$('#dialog .kinds:not(.models) button[aria-pressed=true]');const mb=$('#dialog .models button[aria-pressed=true]');
   const kind=kb?kb.dataset.kind:c.kind;const model=agent==='codex'?'gpt-5':(mb?mb.dataset.model:MODEL_BY_KIND[kind]);
+  const body=dispatchBody(c,{agent,model,mode,kind,note:$('#dlg-note').value});
   closeDispatch();
-  act(`opsx dispatch ${c.slug} --agent ${agent} --model ${model} --mode ${mode} --kind ${kind}`,()=>api.post('dispatch',{slug:c.slug,agent,model,mode,kind,repo:repoTop(c)}));
+  act(`opsx dispatch ${c.slug} --agent ${agent} --model ${model} --mode ${mode} --kind ${kind}${body.note?` --note "${body.note}"`:''}`,()=>api.post('dispatch',body));
 }
 
 /* ---------- 範圍選單 ---------- */
@@ -789,6 +814,7 @@ document.addEventListener('keydown',e=>{
       return;}
     if(e.target.id==='new-text'){if(e.key==='Enter')submitNew();else if(e.key==='Escape')closeNew();return;}
     if(e.key==='Enter'&&e.target.id==='reply'){const c=byKey(ui.open);const v=e.target.value.trim();if(c&&v)answer(c,v,null);}
+    if(e.key==='Enter'&&e.target.id==='note-add'){const c=byKey(ui.open);const v=e.target.value.trim();if(c&&v)submitNote(c,v);}
     return;
   }
   if(e.key==='Escape'){if(!$('#dialog').hidden)closeDispatch();else if(ui.open)closeDrawer();else closeMenu();return;}
