@@ -70,10 +70,17 @@ titled_gate_open() { # <dir> <站>
   awk -v t="## 卡在接 /$2" '/^## /{cur = ($0 == t || index($0, t " #") == 1)} cur && /^status:[ \t]*open[ \t]*$/{found = 1} END{exit !found}' "$1/gates.md"
 }
 
-# 標題帶流水號：答完的舊 gate 跟新 gate 同名的話，opsx answer 只找得到第一個
+# 標題帶流水號：答完的舊 gate 跟新 gate 同名的話，opsx answer 只找得到第一個。
+# 取現有 #N 的最大值加一（gates.md 少了較早的 gate 時數量會小於最大號）；沒有數字的舊標題算 1。
 write_auto_gate() { # <dir> <slug> <站>
   local f="$1/gates.md" n=0
-  [ -f "$f" ] && n="$(grep -cE "^## 卡在接 /$3( #[0-9]+)?$" "$f" || true)"
+  [ -f "$f" ] && n="$(awk -v t="## 卡在接 /$3" '
+    index($0, t) == 1 { rest = substr($0, length(t) + 1)
+      if (rest ~ /^[ \t]*$/) k = 1
+      else if (rest ~ /^ #[0-9]+[ \t]*$/) k = substr(rest, 3) + 0
+      else next
+      if (k > max) max = k }
+    END { print max + 0 }' "$f")"
   [ -s "$f" ] && printf '\n' >> "$f"
   {
     printf '## 卡在接 /%s #%s\ntype: decision\nstatus: open\nopened_at: %s\n' "$3" "$((n + 1))" "$(now_iso)"
