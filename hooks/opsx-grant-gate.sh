@@ -90,7 +90,7 @@ level2() { # <action> <label>
   local rc=0
   has_grant "$repo" "$slug" "$1" || rc=$?
   case "$rc" in 0) GRANTED=1; return 0 ;; 3) ;; *) deny "$PY_FAIL" ;; esac
-  deny "opsx 授權閘門：「$2」要授權（第二級），$repo 沒有長期授權、這張卡也沒有。$GATE_MSG"
+  deny "opsx 授權閘門：「$2」要授權（第二級），$repo 沒有長期授權、這張卡也沒有。gate 寫 action: $1。$GATE_MSG"
 }
 
 if [ "$tool" = "Bash" ]; then

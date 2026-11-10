@@ -103,6 +103,17 @@ gates; sed -i.bak 's/^action: push$/action: git push/' "$C/gates.md"; rm -f "$C/
 out="$(opsx answer x --gate g1 --grant repo "允許" 2>&1)"; [ $? -ne 0 ] || fail "壞 action 要拒絕"; echo "$out" | grep -q 'git push' || fail "要印出 action: $out"
 python3 -I -c 'import tomllib,sys;tomllib.load(open(sys.argv[1],"rb"))' "$OPSX_STATE_DIR/grants.toml" || fail "grants.toml 被寫壞了"
 
+# --- 字元合法但不在八個動作內（grant-action）：拒絕、點名 gate / 原值 / 合法值，三個檔都不動 ---
+gates; sed -i.bak 's/^action: push$/action: external-api/' "$C/gates.md"; rm -f "$C/gates.md.bak"
+cp "$C/gates.md" "$FX/before-ext.md"; cp "$OPSX_STATE_DIR/grants.toml" "$FX/before-grants.toml"; cat "$PD/authz.json" > "$FX/before-authz.json" 2>/dev/null || : > "$FX/before-authz.json"
+for g in card repo this; do
+  out="$(opsx answer x --gate g1 --grant "$g" "允許" 2>&1)"; [ $? -ne 0 ] || fail "${g}: 不在八個內的 action 要拒絕"
+  for want in g1 external-api push mr migrate delete install rebase external env; do echo "$out" | grep -qF "$want" || fail "${g}: 訊息要含 ${want}: $out"; done
+done
+cmp -s "$C/gates.md" "$FX/before-ext.md" || fail "拒絕時 gates.md 不該變"
+cmp -s "$OPSX_STATE_DIR/grants.toml" "$FX/before-grants.toml" || fail "拒絕時 grants.toml 不該變"
+{ cat "$PD/authz.json" 2>/dev/null || :; } | cmp -s - "$FX/before-authz.json" || fail "拒絕時受保護授權不該變"
+
 # --- 答案以 -- 開頭：用 -- 隔開 ---
 gates
 out="$(opsx answer x --gate g2 -- "--no-verify 可以嗎" 2>&1)"; assert_eq "$?" 0 "-- 文字: $out"
