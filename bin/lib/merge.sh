@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # opsx merge <slug> [--repo <top>]：核准合併（看板「合併」按鈕背後的那支，herdr-board D5）。
-# 它不自己跑 glab mr merge。它重驗五條件，把核准（MR 的 head sha）寫進 dispatch.json，在 decisions.tsv 記一行，
+# 它不自己跑 glab mr merge。它重驗五條件，把核准（MR 的 head sha）寫進受保護位置（bin/lib/authz.py，沙盒內寫不到），在 decisions.tsv 記一行，
 # 然後叫那張卡的 agent「/babysit merge」去執行；grant-gate 只在 sha 相符、指令單獨一條、MR 號碼對時放行。核准綁 sha，不刪。
 
 # shellcheck source=/dev/null
@@ -38,21 +38,21 @@ print("no\t"+m["state"]+"\t"+",".join(bad))')"
   local sha; sha="$(printf '%s' "$verdict" | cut -f2)"
   [ -n "$sha" ] || die "merge: glab 沒回 MR 的 head sha，核准綁不到 commit，不核准"
 
-  # 寫核准（綁 sha，不刪；見 grant-gate 的 merge_gate）：卡一定要在 dispatch.json（要有 agent 去執行），而且不能是互動模式
-  # （互動模式沒有 grant-gate，合併會停在 pane 的權限框，看板上的按鈕永遠轉不完）
+  # 寫核准（綁 sha，不刪；見 grant-gate 的 merge_gate）到受保護位置，dispatch.json 只讀：卡一定要在 dispatch.json（要有 agent 去執行），
+  # 而且不能是互動模式（互動模式沒有 grant-gate，合併會停在 pane 的權限框，看板上的按鈕永遠轉不完）
   local key="$repo/$slug" now; now="$(now_iso)"
-  OPSX_M_KEY="$key" OPSX_M_SHA="$sha" OPSX_M_NOW="$now" OPSX_LIB="$OPSX_ROOT/bin/lib" "$OPSX_PY" -I - "$OPSX_STATE_DIR/dispatch.json" <<'PY' || exit 2
+  OPSX_M_KEY="$key" OPSX_M_SHA="$sha" OPSX_M_NOW="$now" OPSX_M_SD="$OPSX_STATE_DIR" OPSX_LIB="$OPSX_ROOT/bin/lib" "$OPSX_PY" -I - <<'PY' || exit 2
 import os, sys
-sys.path.insert(0, os.environ["OPSX_LIB"]); import jsonfile
-p = sys.argv[1]; key, sha, now = os.environ["OPSX_M_KEY"], os.environ["OPSX_M_SHA"], os.environ["OPSX_M_NOW"]
-card = jsonfile.load(p).get(key)
+sys.path.insert(0, os.environ["OPSX_LIB"]); import authz, jsonfile
+sd, key, sha, now = os.environ["OPSX_M_SD"], os.environ["OPSX_M_KEY"], os.environ["OPSX_M_SHA"], os.environ["OPSX_M_NOW"]
+card = jsonfile.load(os.path.join(sd, "dispatch.json")).get(key)
 if not card or card.get("mode") == "stopped":
     sys.exit("merge: %s 沒派出（不在 dispatch.json），沒有 agent 可以執行合併；先 opsx dispatch" % key)
 if card.get("mode") == "interactive":
     sys.exit("merge: %s 是互動模式，沒有授權閘門，合併要在它的 pane 裡對 agent 說「/babysit merge」並自己按權限框" % key)
 def put(d):
-    d[key]["merge_approved"] = sha; d[key]["merge_approved_at"] = now
-jsonfile.update(p, put)
+    c = d.setdefault(key, {}); c["merge_approved"] = sha; c["merge_approved_at"] = now
+authz.update(sd, put)
 PY
   log_row "$d" 你 已允許 "核准合併 ${sha}" "${sha} · $(st_mr_url "$d")"
   local route name via; route="$(card_route "$repo" "$slug")" || die "讀不懂 dispatch.json，不知道話要送給誰"; name="${route%%$'\t'*}"; via="${route#*$'\t'}"
