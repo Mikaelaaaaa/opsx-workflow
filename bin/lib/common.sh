@@ -82,16 +82,18 @@ opsx_repo_top() { # <path>
 # 並行呼叫挑同一個 slug：先 mkdir <top>/openspec/.reserve-<slug>（原子）拿到保留，才建殼；建完或失敗都放掉。
 # 不能預先 mkdir changes/<slug>：openspec new change 看到已存在會拒絕。
 new_shell() { # <top> <slug> <inbox 內容檔>
-  local top="$1" slug="$2" n=1 head tail keep res
+  local top="$1" slug="$2" n=1 head tail keep res err
   while :; do
     res="$top/openspec/.reserve-$slug"
-    if mkdir "$res" 2>/dev/null; then
+    if err="$(mkdir "$res" 2>&1)"; then
       [ -e "$top/openspec/changes/$slug" ] || break
       rmdir "$res"
     elif [ ! -w "$top/openspec" ]; then
       die "建不了保留目錄 ${res}（${top}/openspec 不可寫）"
     fi
-    n=$((n+1)); slug="$2-$n"
+    n=$((n+1))
+    [ "$n" -le 1000 ] || die "試了 1000 個 slug 都拿不到保留（最後一個 ${res}）：${err}"
+    slug="$2-$n"
     [ ${#slug} -gt 32 ] || continue
     head="${2%-*}"; tail="${2##*-}"; keep=$((32 - ${#tail} - ${#n} - 2))
     if [ "$head" != "$2" ] && [ "$keep" -ge 1 ]; then

@@ -99,4 +99,20 @@ PATH="$FX/failcat:$PATH" opsx new -- 寫不進去 > /dev/null 2> "$FX/cat.err"; 
 [ "$rc" -ne 0 ] || fail "待分類寫入失敗時 opsx new 要退出非零"
 assert_eq "$(ls "$OPSX_STATE_DIR/unfiled" | grep -c 'me-20261106-1600')" 0 "寫入失敗不能留檔（含 0 byte）"
 assert_eq "$(count < "$FX/cat.calls")" 1 "寫入失敗不能換號重試"
+
+# --- mkdir 因撞名以外的原因一直失敗（磁碟滿之類）而 openspec/ 可寫：換號有上限，要 die，不能無限換（review R2.1）---
+export OPSX_TEST_NOW="2026-11-06 16:10"
+mkdir -p "$FX/enospc"
+printf '#!/usr/bin/env bash\ncase "$*" in *.reserve-*) echo x >> "%s/mkdir.calls"; echo "mkdir: No space left on device" >&2; exit 1;; esac\nexec /bin/mkdir "$@"\n' "$FX" > "$FX/enospc/mkdir"; chmod +x "$FX/enospc/mkdir"
+before="$(snap)"
+PATH="$FX/enospc:$PATH" opsx new --repo "$A" -- 磁碟滿 > /dev/null 2> "$FX/enospc.err" &
+pid=$!
+( sleep 60; kill "$pid" 2>/dev/null ) &
+killer=$!
+wait "$pid"; rc=$?
+kill "$killer" 2>/dev/null
+[ "$rc" -ne 0 ] && [ "$rc" -ne 143 ] || fail "mkdir 一直失敗時 opsx new 要自己退出非零（rc=${rc}；143 是被測試的逾時保護殺掉）"
+assert_grep 'No space left' "$FX/enospc.err"
+[ "$(count < "$FX/mkdir.calls")" -le 1100 ] || fail "換號沒有上限：mkdir 被呼叫 $(count < "$FX/mkdir.calls") 次"
+assert_eq "$(snap)" "$before"
 echo ok
