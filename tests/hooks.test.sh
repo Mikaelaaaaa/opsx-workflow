@@ -107,6 +107,13 @@ cg 'git commit -m "chore: bump [no-change] 再一次"' >/dev/null 2>&1 || true
 assert_eq "$(cat "$FX/victim")" "keep me" "commit: bypass.log 不能附加到 symlink 的目標"
 rm -f "$OPSX_STATE_DIR/bypass.log"
 out="$(cg 'ls -la')"; assert_eq "$out" "" "commit: 非 commit 指令不出聲"
+out="$(cg 'echo "之後再 git commit -m x"')"; assert_eq "$out" "" "commit: 引號內的 git commit 不出聲"
+out="$(cg 'bash -c "git commit -m x"')"; assert_eq "$(decision "$out")" deny "commit: bash -c 內的 commit 仍擋"
+# 三種容器（grill D2）：commit 訊息、opsx answer 答案、寫檔 heredoc 內提到 git commit 不觸發
+out="$(cg 'opsx answer s g1 -- "之後再 git commit -m x，不要 git commit --amend"')"; assert_eq "$out" "" "commit: answer 答案文字提到 git commit 不觸發"
+out="$(cg 'cat > n.md <<'"'EOF'"'
+git commit -m x
+EOF')"; assert_eq "$out" "" "commit: 寫檔 heredoc 內提到 git commit 不觸發"
 # 子殼分支 <主>--<子>：看子殼的 tasks.md，不看主殼
 mkdir -p "$C/subs/s1"; printf '## 1. x\n\n- [ ] 1.1 a\n' > "$C/subs/s1/tasks.md"
 printf '## 1. x\n\n- [ ] 1.1 s1\n' > "$C/tasks.md"
@@ -152,6 +159,175 @@ out="$(gg Write '{"file_path":"/x/.env.local","content":"A=1"}')"; assert_eq "$(
 out="$(gg Write '{"file_path":"/x/.env.example","content":"A="}')"; assert_eq "$(decision "$out")" allow "grant: .env.example 可以"
 out="$(gg Edit '{"file_path":"/x/.gitlab-ci.yml","old_string":"a","new_string":"b"}')"; assert_eq "$(decision "$out")" deny "grant: 改 CI 第三級"
 out="$(gg Edit '{"file_path":"/x/src/a.ts","old_string":"a","new_string":"b"}')"; assert_eq "$(decision "$out")" allow "grant: 一般檔直接做"
+# 字樣只在引號 / heredoc 內 → 不管；字串裡真的在執行的仍照第三級擋
+out="$(gg Bash "$(cmdj 'git commit -m "docs: 說明 glab mr merge 與 gh pr merge 的核准流程"')")"; assert_eq "$out" "" "grant: commit 訊息提到 merge 不觸發"
+out="$(gg Bash "$(cmdj 'opsx answer s g1 -- "不要 git push --force origin main，也不要 pnpm add x"')")"; assert_eq "$out" "" "grant: answer 文字提到 force-push / 裝套件不觸發"
+out="$(gg Bash "$(cmdj 'cat > inbox.md <<'"'EOF'"'
+drop table users; deploy.sh; curl https://api.example.com/x; rm -rf /
+EOF')")"; assert_eq "$out" "" "grant: heredoc 內的字樣不觸發"
+out="$(gg Bash "$(cmdj 'git push gitlab "main"')")"; assert_eq "$(decision "$out")" deny "grant: 引號包住的 main 仍是 push main"
+out="$(gg Bash "$(cmdj "git push --force gitlab 'feat/x'")")"; assert_eq "$(decision "$out")" deny "grant: 單引號分支名不讓 force-push 漏掉"
+out="$(gg Bash "$(cmdj 'bash -c "glab mr merge 212"')")"; assert_eq "$(decision "$out")" deny "grant: bash -c 內的 merge 仍擋"
+out="$(gg Bash "$(cmdj 'git push gitlab feat/eval-core/mikaela && bash <<EOF
+git push --force gitlab main
+EOF')")"; assert_eq "$(decision "$out")" deny "grant: 已授權的 push 後面串 bash heredoc 的 force-push 仍擋（本體會被執行）"
+out="$(gg Bash "$(cmdj 'echo "$(gh pr merge 12)"')")"; assert_eq "$(decision "$out")" deny "grant: 雙引號內 \$(…) 的 merge 仍擋"
+out="$(gg Bash "$(cmdj 'eval "git push --force gitlab main"')")"; assert_eq "$(decision "$out")" deny "grant: eval 內的 force-push 仍擋"
+out="$(gg Bash "$(cmdj 'echo ok && sh -c '"'"'pnpm add left-pad'"'"'')")"; assert_eq "$(decision "$out")" deny "grant: sh -c 單引號內的裝套件仍擋"
+
+# 第三級白名單容器（grill D1）：三種容器的資料部分不算，其他寫法一律照原文比對
+out="$(gg Bash "$(cmdj 'git commit -m "$(cat <<'"'EOF'"'
+fix: glab mr merge、drop table users、git push --force origin main
+EOF
+)"')")"; assert_eq "$out" "" "grant 白名單: 標準 commit heredoc 寫法不觸發"
+out="$(gg Bash "$(cmdj "git commit -m 'it is glab mr merge' -m \"second: git push --force origin main\"")")"; assert_eq "$out" "" "grant 白名單: 多個 -m 不觸發"
+out="$(gg Bash "$(cmdj "opsx answer s g1 -- 'glab mr merge 之後再做'")")"; assert_eq "$out" "" "grant 白名單: answer 單引號文字不觸發"
+out="$(gg Bash "$(cmdj 'cat > notes.md <<'"'EOF'"'
+git push --force origin main
+EOF')")"; assert_eq "$out" "" "grant 白名單: cat 寫檔 heredoc（quoted delimiter）不觸發"
+out="$(gg Bash "$(cmdj 'cat >> notes.md <<EOF
+./deploy.sh spark1-prod
+EOF')")"; assert_eq "$out" "" "grant 白名單: cat 寫檔 heredoc（unquoted、沒有命令替換）不觸發"
+out="$(gg Bash "$(cmdj 'git commit -m "$(git push --force gitlab main)"')")"; assert_eq "$(decision "$out")" deny "grant 白名單: commit 訊息內的 \$(…) 仍擋"
+out="$(gg Bash "$(cmdj 'opsx answer s g1 -- "$(gh pr merge 12)"')")"; assert_eq "$(decision "$out")" deny "grant 白名單: answer 內的 \$(…) 仍擋"
+out="$(gg Bash "$(cmdj 'cat > f <<EOF
+$(git push --force gitlab main)
+EOF')")"; assert_eq "$(decision "$out")" deny "grant 白名單: unquoted heredoc 內的 \$(…) 仍擋"
+out="$(gg Bash "$(cmdj 'cat <<EOF | sh
+git push --force gitlab main
+EOF')")"; assert_eq "$(decision "$out")" deny "grant 白名單: heredoc 接 pipe 進 sh 仍擋"
+out="$(gg Bash "$(cmdj 'psql <<SQL
+DROP TABLE users;
+SQL')")"; assert_eq "$(decision "$out")" deny "grant 繞過口: heredoc 餵 psql"
+out="$(gg Bash "$(cmdj 'ssh spark1 bash <<EOF
+cd /srv && ./deploy.sh spark1-prod
+EOF')")"; assert_eq "$(decision "$out")" deny "grant 繞過口: heredoc 餵 ssh bash"
+out="$(gg Bash "$(cmdj 'git push gitlab feat/eval-core/mikaela && psql -c "DROP TABLE users"')")"; assert_eq "$(decision "$out")" deny "grant 繞過口: 已授權 push 串 psql -c DROP TABLE"
+out="$(gg Bash "$(cmdj 'git push gitlab feat/eval-core/mikaela && ssh spark1 "cd /srv && ./deploy.sh spark1-prod"')")"; assert_eq "$(decision "$out")" deny "grant 繞過口: 已授權 push 串 ssh deploy"
+out="$(gg Bash "$(cmdj 'c="git push --force gitlab main"; $c')")"; assert_eq "$(decision "$out")" deny "grant 繞過口: 變數展開"
+out="$(gg Bash "$(cmdj 'source <(echo "git push --force gitlab main")')")"; assert_eq "$(decision "$out")" deny "grant 繞過口: source <(…)"
+out="$(gg Bash "$(cmdj 'bash -e -c "git push --force gitlab main"')")"; assert_eq "$(decision "$out")" deny "grant 繞過口: bash -e -c"
+out="$(gg Bash "$(cmdj 'bash --norc -c "git push --force gitlab main"')")"; assert_eq "$(decision "$out")" deny "grant 繞過口: bash --norc -c"
+out="$(gg Bash "$(cmdj 'dash -c "git push --force gitlab main"')")"; assert_eq "$(decision "$out")" deny "grant 繞過口: dash -c"
+out="$(gg Bash "$(cmdj 'bash -lc "git push --force gitlab main"')")"; assert_eq "$(decision "$out")" deny "grant 繞過口: bash -lc"
+out="$(gg Bash "$(cmdj "bash -c \$'git push --force gitlab main'")")"; assert_eq "$(decision "$out")" deny "grant 繞過口: bash -c \$'…'"
+out="$(gg Bash "$(cmdj 'echo "$(echo "a b" ; git push -f gitlab main)"')")"; assert_eq "$(decision "$out")" deny "grant 繞過口: \$(…) 內有帶空白的引號"
+out="$(gg Bash "$(cmdj "echo hi # 'x
+git push --force gitlab main
+echo 'y'")")"; assert_eq "$(decision "$out")" deny "grant 繞過口: 註解內的引號吃掉下一行"
+out="$(gg Bash "$(cmdj 'git add ".github/workflows/my ci.yml"')")"; assert_eq "$(decision "$out")" deny "grant 繞過口: 帶空白的引號 CI 路徑"
+out="$(gg Bash "$(cmdj 'bash -c "bash -c \"bash -c '"'"'git push --force gitlab main'"'"'\""')")"; assert_eq "$(decision "$out")" deny "grant 遞迴: 3 層巢狀"
+out="$(gg Bash "$(cmdj 'bash -c "bash -c \"bash -c '"'"'bash -c \"git push --force gitlab main\"'"'"'\""')")"; assert_eq "$(decision "$out")" deny "grant 遞迴: 4 層巢狀"
+out="$(gg Bash "$(cmdj "$(printf 'git push --force gitlab main\r')")")"; assert_eq "$(decision "$out")" deny "grant: CRLF 指令照擋"
+out="$(gg Bash '{"command":""}')"; assert_eq "$out" "" "grant: 空指令不出聲"
+mkdir -p "$FX/noperl"; printf '#!/usr/bin/env bash\nexit 127\n' > "$FX/noperl/perl"; chmod +x "$FX/noperl/perl"
+out="$(PATH="$FX/noperl:$PATH" gg Bash "$(cmdj 'ls')")"; assert_eq "$(decision "$out")" deny "grant: perl 失敗要 deny，不是放行"
+reason "$out" | grep -q perl || fail "grant: perl 失敗的 deny 要說是 perl: $(reason "$out")"
+mkdir -p "$FX/noperl-l3"
+printf '#!/usr/bin/env bash\ncase "$1" in *cmd-containers.pl) exit 1 ;; esac\nexec %s "$@"\n' "$(command -v perl)" > "$FX/noperl-l3/perl"; chmod +x "$FX/noperl-l3/perl"
+out="$(PATH="$FX/noperl-l3:$PATH" gg Bash "$(cmdj 'ls')")"; assert_eq "$(decision "$out")" deny "grant: 只有 cmd-containers.pl 失敗也要 deny"
+
+# 白名單容器的「容器本身」不能變成繞過口（review 第 2 輪）：已授權 push 串在前面時閘門會明確 allow，所以每個都要 deny
+deny3() { local cmd out; cmd="$(cat)"; out="$(gg Bash "$(cmdj "$cmd")")"; assert_eq "$(decision "$out")" deny "$1"; }
+allow3() { local cmd out; cmd="$(cat)"; out="$(gg Bash "$(cmdj "$cmd")")"; assert_eq "$out" "" "$1"; }
+deny3 "grant 容器: 引號內的 git commit -m 不是容器" <<'X'
+git push gitlab feat/eval-core/mikaela && echo "git commit -m '" && git push --force gitlab main && echo "'"
+X
+deny3 "grant 容器: eval 後的 git commit -m 不是容器" <<'X'
+git push gitlab feat/eval-core/mikaela && eval git commit -m '; git push --force gitlab main'
+X
+deny3 "grant 容器: 引號內 git commit -m 字串裡的命令替換仍會執行" <<'X'
+git push gitlab feat/eval-core/mikaela && echo "git commit -m '$(git push --force gitlab main)'"
+X
+deny3 "grant 容器: 註解內的 git commit -m 不是容器" <<'X'
+git push gitlab feat/eval-core/mikaela
+# git commit -m '
+git push --force gitlab main
+# '
+X
+deny3 "grant 容器: 引號內的 opsx answer 不是容器" <<'X'
+git push gitlab feat/eval-core/mikaela && echo "opsx answer a b -- "; git push --force gitlab main; echo ""
+X
+deny3 "grant 容器: 同上，換成 merge（merge_gate 也不能被繞過）" <<'X'
+git push gitlab feat/eval-core/mikaela && echo "git commit -m '" && glab mr merge 212 && echo "'"
+X
+deny3 "grant 容器: commit 標準寫法後面緊接命令替換" <<'X'
+git commit -m "$(cat <<'EOF'
+msg
+EOF
+)$(git push --force gitlab main)$(cat <<'EOF'
+EOF
+)"
+X
+deny3 "grant 容器: commit heredoc 在第一個結尾行就結束，後面的行會執行" <<'X'
+git commit -m "$(cat <<'EOF'
+msg
+EOF
+xx; git push -f gitlab main
+EOF
+)"
+X
+deny3 "grant 容器: 跨行單引號內的假 heredoc opener" <<'X'
+echo '
+cat > f <<EOF
+'; git push -f gitlab main
+EOF
+X
+deny3 "grant 容器: opener 行尾反斜線續行接 pipe 進 sh" <<'X'
+cat <<EOF \
+| sh
+git push --force gitlab main
+EOF
+X
+deny3 "grant 容器: delimiter 是混合寫法 <<\"E\"OF" <<'X'
+cat > f <<"E"OF
+x
+EOF
+git push --force gitlab main
+E
+X
+deny3 "grant 容器: delimiter 是 EOF-1" <<'X'
+cat > f <<EOF-1
+x
+EOF-1
+git push --force gitlab main
+EOF
+X
+deny3 "grant 容器: 前面定義了 cat 函式" <<'X'
+git push gitlab feat/eval-core/mikaela
+cat() { bash; }
+cat <<'EOF'
+git push --force gitlab main
+EOF
+X
+deny3 "grant 容器: 扣掉 commit 訊息後，串在後面的第三級仍擋" <<'X'
+git commit -m 'a' && git push --force gitlab main
+X
+deny3 "grant 容器: 扣掉 answer 答案後，串在後面的第三級仍擋" <<'X'
+opsx answer s --gate g1 'a' ; git push --force gitlab main
+X
+deny3 "grant 容器: 扣掉 heredoc 本體後，後面的第三級仍擋" <<'X'
+cat > f <<'EOF'
+x
+EOF
+git push --force gitlab main
+X
+allow3 "grant 容器: opsx answer 真實用法（--gate、單引號文字）不觸發" <<'X'
+opsx answer s --gate g1 'git push --force gitlab main 之後再說'
+X
+allow3 "grant 容器: opsx answer 帶 --grant 與雙引號文字不觸發" <<'X'
+opsx answer s --gate g1 --grant this "glab mr merge 之後再說"
+X
+allow3 "grant 容器: cd 之後的 cat heredoc 不觸發" <<'X'
+cd x && cat > f <<'EOF'
+git push --force gitlab main
+EOF
+X
+big="$(head -c 40000 /dev/zero | tr '\0' a)"
+out="$(gg Bash "$(cmdj "git commit -m \"$big git push --force gitlab main\"")")"; assert_eq "$(decision "$out")" deny "grant 容器: 超過長度上限就整段原樣比對（不扣容器）"
+many="$(printf 'cat > f <<EOF\n%.0s' $(seq 1 1500))"
+out="$(gg Bash "$(cmdj "$many")")"; assert_eq "$(decision "$out")" allow "grant 容器: 一堆沒有結尾的 heredoc opener 不會拖到逾時"
+
 # 第二級 deny 帶精確的 action 值，agent 照抄寫 gate（grant-action）；一個授權都沒有的狀態下八個動作各擋一次
 printf '# grants\n' > "$OPSX_STATE_DIR/grants.toml"; printf '{}' > "$PD/authz.json"
 for pair in "push|git push gitlab feat/eval-core/mikaela" "mr|glab mr create -F desc.md" "migrate|pnpm db:migrate" "delete|rm -rf build" \
@@ -282,6 +458,7 @@ out="$(mg 'echo "it'"'"'s gh pr create"')"; assert_eq "$out" "" "mr: 雙引號�
 out="$(mg 'cat > inbox.md <<'"'EOF'"'
 用 glab mr create 開 MR
 EOF')"; assert_eq "$out" "" "mr: heredoc 內的字樣不觸發"
+out="$(mg 'git commit -m "docs: gh pr create 與 glab mr create 的格式"')"; assert_eq "$out" "" "mr: commit 訊息提到 create 不觸發"
 out="$(mg 'cd x && glab mr create -F bad.md')"; assert_eq "$(decision "$out")" deny "mr: && 之後的 create 仍檢查"
 out="$(mg 'gh pr create --title "it'"'"'s" --body "just text"')"; assert_eq "$(decision "$out")" deny "mr: 引號內含單引號不讓真的 create 漏掉"
 out="$(mg "echo it's ok; if true; then gh pr create --fill --title 'x'; fi")"; assert_eq "$(decision "$out")" deny "mr: 未配對撇號與 then 之後的 create 不漏檢"
@@ -296,6 +473,15 @@ out="$(mg 'gh pr create --title t --body "$(cat <<'"'EOF'"'
 just text
 EOF
 )"')"; assert_eq "$(decision "$out")" deny "mr: --body \$(cat <<EOF) 不合格仍擋"
+# 字串裡真的在執行的指令仍檢查（骨架遞迴）
+out="$(mg 'bash -c "gh pr create --fill"')"; assert_eq "$(decision "$out")" deny "mr: bash -c 內的 create 仍擋"
+out="$(mg "sh -c 'glab mr create --fill'")"; assert_eq "$(decision "$out")" deny "mr: sh -c 單引號內的 create 仍擋"
+out="$(mg 'eval "gh pr create --fill"')"; assert_eq "$(decision "$out")" deny "mr: eval 內的 create 仍擋"
+out="$(mg 'echo "$(gh pr create --fill)"')"; assert_eq "$(decision "$out")" deny "mr: 雙引號內 \$(…) 的 create 仍擋"
+out="$(mg 'echo "`gh pr create --fill`"')"; assert_eq "$(decision "$out")" deny "mr: 雙引號內反引號的 create 仍擋"
+out="$(mg 'echo "$(echo "$(echo "$(echo "$(gh pr create --fill)")")")"')"; assert_eq "$(decision "$out")" deny "mr: 超過 3 層的 create 原樣比對仍擋"
+out="$(mg 'echo "$(echo hi) 之後用 gh pr create"')"; assert_eq "$out" "" "mr: 雙引號內 \$(…) 之外的字樣不觸發"
+out="$(mg "echo 'gh pr create' | xargs -I{} echo {}")"; assert_eq "$out" "" "mr: 單引號字樣餵 xargs 不觸發"
 
 # ---------- gate-timestamp ----------
 # 有 open 的 gate 時 hook 會叫 $CLAUDE_PLUGIN_ROOT/bin/opsx coordinate --kick：換成假的 plugin 根，bin/opsx 是 fake，記到 kick.log
@@ -405,6 +591,50 @@ feat: x
 Co-Authored-By: Claude
 EOF
 )"')"; assert_eq "$(decision "$out")" deny "guard: heredoc"
+# 字樣只在引號 / heredoc 內 → 不擋
+out="$(sd 'echo "git push origin main"')"; assert_eq "$(decision "$out")" allow "guard: 引號內的 push main"
+out="$(sd 'opsx answer s g1 -- "git add .env 之後再說"')"; assert_eq "$(decision "$out")" allow "guard: 引號內的 git add .env"
+out="$(sd 'bash -c "git push origin main"')"; assert_eq "$(decision "$out")" deny "guard: bash -c 內的 push main 仍擋"
+out="$(sd 'git push origin "main"')"; assert_eq "$(decision "$out")" deny "guard: 引號包住的 main 仍擋"
+# 三種容器（grill D2）：提到 push main、claude 不擋；真的署名寫在 heredoc 餵給 commit 的訊息裡仍擋
+out="$(sd 'git commit -m "docs: git push origin main 與 git add .env 的說明"')"; assert_eq "$(decision "$out")" allow "guard: commit 訊息提到 push main / add .env"
+out="$(sd 'opsx answer s g1 -- "git push origin main，Co-Authored-By: Claude 都只是文字"')"; assert_eq "$(decision "$out")" allow "guard: answer 答案文字提到 push main 與署名字樣"
+out="$(sd 'cat > n.md <<'"'EOF'"'
+git push origin main
+Co-Authored-By: Claude
+EOF')"; assert_eq "$(decision "$out")" allow "guard: 寫檔 heredoc 內的字樣"
+out="$(sd 'git commit -F - <<'"'EOF'"'
+feat: x
+
+Co-Authored-By: Claude <noreply@anthropic.com>
+EOF')"; assert_eq "$(decision "$out")" deny "guard: heredoc 餵給 git commit -F - 的署名仍擋"
+out="$(PATH="$FX/noperl:$PATH" sd 'git commit -m x')"; assert_eq "$(decision "$out")" deny "guard: perl 失敗要 deny"
+out="$(PATH="$FX/noperl:$PATH" mg 'ls')"; assert_eq "$(decision "$out")" deny "mr: perl 失敗要 deny"
+out="$(PATH="$FX/noperl:$PATH" cg 'git commit -m x')"; assert_eq "$(decision "$out")" deny "commit: perl 失敗要 deny"
+# 署名寫法的變體（spec 署名寫法的變體）
+out="$(sd "git commit -m \$'x\nCo-Authored-By: Claude <a@b.c>'")"; assert_eq "$(decision "$out")" deny "guard: \$'…' 內的字面 \\n 後接署名"
+out="$(sd 'printf "x\n\nCo-Authored-By: Claude <a@b.c>\n" | git commit -F -')"; assert_eq "$(decision "$out")" deny "guard: printf 的 \\n 後接署名"
+out="$(sd 'echo -e "x\nCo-Authored-By: Claude" | git commit -F -')"; assert_eq "$(decision "$out")" deny "guard: echo -e 的 \\n 後接署名"
+out="$(sd 'git commit -m "x
+   Co-Authored-By: Claude <a@b.c>"')"; assert_eq "$(decision "$out")" deny "guard: 署名行前面有縮排空白"
+out="$(sd 'GIT_AUTHOR_EMAIL=noreply@anthropic.com git commit -m x')"; assert_eq "$(decision "$out")" deny "guard: GIT_AUTHOR_EMAIL"
+# 骨架的寫法（bash -e -c、bash -lc、$'…'、heredoc 餵 bash）由第二級、MR 閘門、commit 閘門用，各自要看得到
+out="$(mg 'bash -e -c "gh pr create --fill"')"; assert_eq "$(decision "$out")" deny "mr: bash -e -c 內的 create 仍擋"
+out="$(mg 'bash -lc "gh pr create --fill"')"; assert_eq "$(decision "$out")" deny "mr: bash -lc 內的 create 仍擋"
+out="$(mg "bash -c \$'gh pr create --fill'")"; assert_eq "$(decision "$out")" deny "mr: bash -c \$'…' 內的 create 仍擋"
+out="$(mg 'bash <<EOF
+gh pr create --fill
+EOF')"; assert_eq "$(decision "$out")" deny "mr: heredoc 餵給 bash 的 create 仍擋"
+out="$(cg 'bash -e -c "git commit -m x"')"; assert_eq "$(decision "$out")" deny "commit: bash -e -c 內的 commit 仍擋"
+out="$(cg 'bash <<EOF
+git commit -m x
+EOF')"; assert_eq "$(decision "$out")" deny "commit: heredoc 餵給 bash 的 commit 仍擋"
+# 署名只抓署名形式：內文提到 claude / anthropic 放行
+out="$(sd 'git commit -m "fix: claude 路徑處理"')"; assert_eq "$(decision "$out")" allow "guard: 內文提到 claude"
+out="$(sd 'git commit -m "feat: x" -m "改用 Anthropic SDK 的 retry"')"; assert_eq "$(decision "$out")" allow "guard: 第二個 -m 提到 anthropic"
+out="$(sd 'git commit -m "docs: 說明 Co-Authored-By 與 Generated with 的檢查規則"')"; assert_eq "$(decision "$out")" allow "guard: 提到署名字樣但不是署名行"
+out="$(sd 'git commit -m "x" -m "Generated with [Claude Code](https://claude.com/claude-code)"')"; assert_eq "$(decision "$out")" deny "guard: Generated with 行"
+out="$(sd 'GIT_COMMITTER_NAME=Claude git commit -m x')"; assert_eq "$(decision "$out")" deny "guard: GIT_COMMITTER_NAME"
 
 # ---------- stop gate ----------
 STOP_STATE="$OPSX_STATE_DIR/stop-chain"

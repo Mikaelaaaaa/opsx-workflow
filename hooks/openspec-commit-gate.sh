@@ -5,7 +5,8 @@
 source "$(dirname "${BASH_SOURCE[0]}")/_lib.sh"
 
 cmd="$(hook_cmd)"
-printf '%s' "$cmd" | grep -qE '(^|\s|&&|\|\||;)git\s+(-C\s+\S+\s+)?commit(\s|$)' || exit 0
+sk="$(cmd_skeleton "$cmd")" || deny "opsx commit 閘門：perl 執行失敗，讀不到指令骨架，先擋下。確認 perl 可用"
+printf '%s' "$sk" | grep -qE '(^|\s|&&|\|\||;)git\s+(-C\s+\S+\s+)?commit(\s|$)' || exit 0
 
 top="$(repo_top)"
 [ -n "$top" ] || exit 0
