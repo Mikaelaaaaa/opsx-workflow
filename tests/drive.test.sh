@@ -182,4 +182,28 @@ echo "$out" | grep -q "不在 dispatch.json" || fail "要說明為什麼結束: 
 : > "$OPSX_FAKE_LOG"; printf '{"Agentory-CS/retry-backoff":{"mode":"stopped","pane":"p42","grants":[],"drive_pid":null}}' > "$OPSX_STATE_DIR/dispatch.json"
 out="$(opsx drive retry-backoff 2>&1)"; assert_eq "$?" 0; assert_eq "$(cat "$OPSX_FAKE_LOG")" "" "stopped 的卡不該碰 herdr"
 assert_eq "$(jq -r '."Agentory-CS/retry-backoff".drive_pid' "$OPSX_STATE_DIR/dispatch.json")" null "stopped 的卡不登記 pid"
+
+# --- 跑到一半卡被 /archive 搬走（fixture 沒有 workplan）→ 結束，搬走之後不再送 prompt，不寫 gate ---
+reset_apply
+printf '{"Agentory-CS/retry-backoff":{"mode":"drive","pane":"p42","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"
+mkdir -p "$R/openspec/changes/archive"
+cat > "$FX/archive_on_prompt.sh" <<EOF
+mv "$C" "$R/openspec/changes/archive/2026-11-10-retry-backoff"
+EOF
+export OPSX_TEST_ON_PROMPT="$FX/archive_on_prompt.sh"
+out="$(opsx drive retry-backoff 2>&1)"; assert_eq "$?" 0 "drive 卡被歸檔: $out"
+assert_eq "$(grep -c '^agent prompt' "$OPSX_FAKE_LOG")" 1 "歸檔後不該再送 prompt: $(cat "$OPSX_FAKE_LOG")"
+echo "$out" | grep -q "已歸檔" || fail "要說已歸檔: $out"
+[ ! -e "$C/gates.md" ] || fail "不該在不存在的卡目錄寫 gate"
+
+# --- 卡目錄被直接刪掉（archive/ 底下也沒有）→ 同樣結束，訊息不同 ---
+rm -rf "$R/openspec/changes/archive/2026-11-10-retry-backoff"; mkdir -p "$C"
+printf 'schema: opsx\nkind: bug-fix\n' > "$C/.openspec.yaml"; reset_apply
+printf '{"Agentory-CS/retry-backoff":{"mode":"drive","pane":"p42","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"
+printf 'rm -rf "%s"\n' "$C" > "$FX/delete_on_prompt.sh"
+export OPSX_TEST_ON_PROMPT="$FX/delete_on_prompt.sh"
+out="$(opsx drive retry-backoff 2>&1)"; assert_eq "$?" 0 "drive 卡被刪: $out"
+assert_eq "$(grep -c '^agent prompt' "$OPSX_FAKE_LOG")" 1 "刪掉後不該再送 prompt: $(cat "$OPSX_FAKE_LOG")"
+echo "$out" | grep -q "卡目錄不見了" || fail "要說卡目錄不見了: $out"
+[ ! -e "$C" ] || fail "不該重建卡目錄: $(ls -A "$C")"
 echo ok
