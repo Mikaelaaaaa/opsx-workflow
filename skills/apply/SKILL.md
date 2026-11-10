@@ -101,7 +101,7 @@ A change with `openspec/changes/<main>/subs/` is a main change (`../../reference
 3. The brief follows `../../references/fan-out.md` ("Spawning") with these differences:
    - Start point: the PR branch's current HEAD, not `<remote>/main`. Branch: `git switch --no-track -c <action>/<主>--<子>/<user> <PR branch>`. opsx maps `<主>--<子>` to `subs/<子>/`: `opsx status` writes the sub-shell's status.json and the commit gate reads the sub-shell's tasks.md.
    - The workflow: call the `apply` skill for the sub-change, on its own tasks.md. Name the skill.
-   - 派工指示: read the `## 派工指示` section of the main shell's `<top>/openspec/changes/<主>/inbox.md`, not the sub-shell's. `opsx note` writes only to main cards, so a sub-shell's inbox.md never has that section.
+   - 派工指示: read the `## 派工指示` section of the main shell's `<top>/openspec/changes/<主>/inbox.md`, not the sub-shell's. `opsx note` writes only to main cards, so a sub-shell's inbox.md never has that section. A note that contradicts a D in the main shell's `design.md` is reported as `NEEDS-USER <子>`, so step 4 finds the right gates.md.
    - It commits once and stops: 不 push, no review, no pr. The harness may remove its worktree when it ends, and a resumed subagent does not get the old worktree back; the commit stays on its branch in the shared `.git`, which is all stacking needs. A follow-up for a finished sub-change goes to a new subagent on that branch, not a resumed one.
    - Report contract: `DONE <子> <sha>`, or `NEEDS-USER <子>` followed by the question, the options and the evidence.
 4. On `NEEDS-USER <子>`, write the gate in 子殼的 gates.md (`subs/<子>/gates.md`), not the main shell's, and keep going with the others.
