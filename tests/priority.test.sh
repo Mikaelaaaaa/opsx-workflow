@@ -109,6 +109,10 @@ card badimp "kind_of_work: incident" "impact: urgent" "evidence: x"
 expect_err badimp impact urgent
 card badkind "kind_of_work: hotfix"
 expect_err badkind kind_of_work hotfix
+card nested "kind_of_work: incident" "impact:" "  security: true" "  evidence: x"
+expect_err nested impact nested
+card noreason "kind_of_work: incident" "priority: P0"
+expect_err noreason priority_reason noreason
 # 壞一張卡不影響別張
 expect sec P0 "security"
 

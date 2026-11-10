@@ -23,23 +23,31 @@ class PriorityError(Exception):
     """事實欄位或 workplan 的 milestone 欄位不合格；訊息指名卡或欄位與值。"""
 
 
-def frontmatter(text: str) -> dict:
-    """檔頭兩行 `---` 之間的 `key: value`；沒有 frontmatter 回空 dict。"""
+def frontmatter(text: str) -> tuple:
+    """檔頭兩行 `---` 之間的 `key: value`，與底下有縮排續行的 key（巢狀寫法）。沒有 frontmatter 回 ({}, set())。"""
     lines = text.split("\n")
     if not lines or lines[0].strip() != "---":
-        return {}
-    out = {}
+        return {}, set()
+    out, nested, last = {}, set(), None
     for line in lines[1:]:
         if line.strip() == "---":
-            return out
+            return out, nested
+        if line[:1] in (" ", "\t") and line.strip():
+            if last:
+                nested.add(last)
+            continue
         k, sep, v = line.partition(":")
         if sep:
-            out[k.strip()] = v.strip()
-    return {}
+            last = k.strip()
+            out[last] = v.strip()
+    return {}, set()
 
 
 def facts_of(slug: str, text: str) -> dict:
-    fm = frontmatter(text)
+    fm, nested = frontmatter(text)
+    for k in ("kind_of_work", "impact", "evidence", "priority", "priority_reason"):
+        if k in nested:
+            raise PriorityError("%s：%s 要寫成同一行的 key: value（impact 逗號分隔），不能用縮排的巢狀寫法" % (slug, k))
     kind = fm.get("kind_of_work") or "planned"   # 沒寫的卡是 planned（agent 開的卡預設）
     if kind not in KINDS:
         raise PriorityError("%s：kind_of_work 要是 incident 或 planned，收到「%s」" % (slug, kind))
@@ -52,6 +60,8 @@ def facts_of(slug: str, text: str) -> dict:
     override = fm.get("priority")
     if override and override not in LEVELS:
         raise PriorityError("%s：priority 要是 P0、P1、P2，收到「%s」" % (slug, override))
+    if override and not fm.get("priority_reason"):
+        raise PriorityError("%s：priority 是 %s 但 priority_reason 是空的；改等級要寫理由（opsx priority --set … --reason …）" % (slug, override))
     return {"kind": kind, "impact": impact, "priority": override, "priority_reason": fm.get("priority_reason") or ""}
 
 
