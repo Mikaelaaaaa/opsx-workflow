@@ -8,6 +8,19 @@ cmd="$(hook_cmd)"
 sk="$(cmd_skeleton "$cmd")" || deny "opsx commit 閘門：perl 執行失敗，讀不到指令骨架，先擋下。確認 perl 可用"
 printf '%s' "$sk" | grep -qE '(^|\s|&&|\|\||;)git\s+(-C\s+\S+\s+)?commit(\s|$)' || exit 0
 
+# commit 實際作用的目錄決定對卡，不是 session cwd；hook_cwd 認 OPSX_CWD
+join_dir() { case "$2" in /*) printf '%s' "$2" ;; *) printf '%s/%s' "$1" "$2" ;; esac; }
+unset OPSX_CWD
+if [[ "$sk" =~ (cd[[:space:]]+([^[:space:]]+)[[:space:]]*\&\&[[:space:]]*)?git[[:space:]]+(-C[[:space:]]+([^[:space:]]+)[[:space:]]+)?commit ]]; then
+  case "${BASH_REMATCH[2]}${BASH_REMATCH[4]}" in
+    *[\"\'\$\`]*) deny "opsx commit 閘門：指令裡的目錄（'${BASH_REMATCH[4]:-${BASH_REMATCH[2]}}'）含空白、引號或變數，閘門讀不到 commit 實際作用的 repo。改用不含空白的字面路徑（git -C /abs/path commit 或 cd /abs/path && git commit）。" ;;
+  esac
+  target="$(hook_cwd)"
+  [ -n "${BASH_REMATCH[2]}" ] && target="$(join_dir "$target" "${BASH_REMATCH[2]}")"
+  [ -n "${BASH_REMATCH[4]}" ] && target="$(join_dir "$target" "${BASH_REMATCH[4]}")"
+  [ -d "$target" ] && export OPSX_CWD="$target"
+fi
+
 top="$(repo_top)"
 [ -n "$top" ] || exit 0
 if [ ! -f "$top/openspec/workplan.yaml" ]; then

@@ -16,7 +16,7 @@ jqr() { printf '%s' "$HOOK_INPUT" | jq -r "$1 // empty" 2>/dev/null || true; }
 hook_cmd()  { jqr '.tool_input.command'; }
 hook_tool() { jqr '.tool_name'; }
 hook_file() { jqr '.tool_input.file_path'; }
-hook_cwd()  { local c; c="$(jqr '.cwd')"; printf '%s' "${c:-$PWD}"; }
+hook_cwd()  { local c; c="${OPSX_CWD:-$(jqr '.cwd')}"; printf '%s' "${c:-$PWD}"; }
 hook_prompt() { jqr '.prompt'; }
 # 指令骨架：只留真的會執行的部分（引號字串、heredoc 本體不算；bash -c、eval、$(…) 內的算）。比對指令用它，不要對原始字串 grep。
 cmd_skeleton() { printf '%s' "$1" | perl "$OPSX_ROOT/hooks/cmd-skeleton.pl"; }
