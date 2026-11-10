@@ -20,6 +20,11 @@ const shot = {name: 'shot.png', size: 3, data: 'AAEC'};
 assert.deepStrictEqual(newRequest('試試看', [], R), {path: 'new', body: {text: '試試看', repo: R}}, '新增帶範圍');
 assert.deepStrictEqual(newRequest('試試看', [], null), {path: 'new', body: {text: '試試看'}}, '範圍是全部時不帶 repo');
 assert.deepStrictEqual(newRequest('  試試看 \n\n', [], null), {path: 'new', body: {text: '試試看'}}, '單行不帶檔照舊（前後空行不算第二行）');
+const line200 = 'x'.repeat(200), line201 = 'x'.repeat(201), line70k = '{"a":1}'.repeat(10000);
+assert.deepStrictEqual(newRequest(line200, [], null), {path: 'new', body: {text: line200}}, '單行 200 字仍走 new');
+assert.deepStrictEqual(newRequest(`  ${line200} \n`, [], null), {path: 'new', body: {text: line200}}, '200 字的界線不算前後空白');
+assert.deepStrictEqual(newRequest(line201, [], null), {path: 'paste', body: {text: line201, files: []}}, '單行 201 字改走 paste');
+assert.deepStrictEqual(newRequest(line70k, [], R), {path: 'paste', body: {text: line70k, files: [], repo: R}}, '單行 70 KB 改走 paste 且帶範圍');
 assert.deepStrictEqual(newRequest('第一行\nhttps://example.com/x', [], null),
   {path: 'paste', body: {text: '第一行\nhttps://example.com/x', files: []}}, '多行貼上');
 assert.deepStrictEqual(newRequest('第一行\nhttps://example.com/x', [], R),
