@@ -47,13 +47,14 @@ opsx_drive() {
       babysit)
         local mr; mr="$(OPSX_MR_CACHE_TTL=0 mr_state "$d")"   # 剛 /babysit 過，要看新值，不吃看板的 60 秒快取
         case "$mr" in
-          ready) say "drive: $slug MR 五條件全綠，可以合併，停在這裡等人"; opsx_status_quiet "$top" "$slug" pr 5/5 "可以合併"; return 0 ;;
+          ready) say "drive: $slug MR 五條件全綠，可以合併，停在這裡等人"; opsx_status_quiet "$top" "$slug" pr 5/5 "可以合併"; coordinate_kick "$slug"; return 0 ;;
           none)  say "drive: $slug report.md 有 MR 但 glab 讀不到，等 $poll 秒再看"; sleep "$poll" ;;
           *)     say "drive: $slug MR 卡在 $mr → /babysit"; herdr_step "$slug" agent prompt "$slug" "/babysit $slug" --wait || return 0; sleep "$poll" ;;
         esac ;;
       explore|grill|propose|apply|review|pr)
         if [ "$stage" = "$last" ] && [ "$sent" -ge 2 ]; then
           write_stuck_gate "$d" "$stage" "$repo" "$slug"; say "drive: $slug 送了兩次 /$stage 階段都沒動，寫了 gate 等人"
+          coordinate_kick "$slug"   # shell 附加寫的 gate 不經過 gate-timestamp hook
           continue
         fi
         say "drive: $slug → /$stage"
@@ -80,9 +81,10 @@ herdr_step() { # <slug> <herdr args…>
       # herdr 收下了，只是 5 秒內沒看到 agent 動（指令馬上出錯、hook 擋掉）。算送過，卡住保護才數得到
       say "drive: $slug 的 prompt 送進去了但 agent 沒動（agent_prompt_stalled）"; HERDR_STEP_OK=1; return 0 ;;
     agent_not_found)
-      say "drive: $slug 的 pane 沒了（herdr agent_not_found），結束"; return 1 ;;
+      say "drive: $slug 的 pane 沒了（herdr agent_not_found），結束"; coordinate_kick "$slug"; return 1 ;;
     agent_blocked)
       say "drive: $slug 在終端機等待輸入，等人在 pane 處理完"
+      coordinate_kick "$slug"
       herdr agent wait "$slug" --until working >/dev/null 2>&1 && herdr agent wait "$slug" >/dev/null 2>&1 || sleep "$poll"
       return 0 ;;
     *)
@@ -152,6 +154,12 @@ dispatched() { # <repo> <slug>
 import json,os,sys
 d=json.load(open(sys.argv[1])); c=d.get(os.environ["OPSX_KEY"]); sys.exit(0 if c is not None and c.get("mode") != "stopped" else 1)
 PY
+}
+
+# 要人的時刻叫 coordinate 馬上跑一輪（重派、通知人），不等 launchd 的 5 分鐘。失敗只記一行，drive 照原本的路走
+coordinate_kick() { # <slug>
+  local err
+  err="$(opsx coordinate --kick 2>&1 >/dev/null)" || say "drive: $1 叫不動 opsx coordinate --kick：$err"
 }
 
 opsx_status_quiet() { # <top> <slug> <phase> <n/t> <label>

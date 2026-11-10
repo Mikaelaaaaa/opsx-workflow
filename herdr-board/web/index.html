@@ -183,8 +183,8 @@ main{flex:1;min-width:0;padding-left:max(16px,env(safe-area-inset-left,0px));pad
 
 /* 科技精靈：晶片外框 + LED 眼。廠商色只在接腳、邊框、LED。只有「等你」會動。 */
 .bot{display:block;overflow:hidden;flex:none}
-.bot.ask .ring{animation:ringfade 1.4s ease-in-out infinite}
-.bot.sleep{opacity:.55}
+.bot-ask .ring{animation:ringfade 1.4s ease-in-out infinite}
+.bot-sleep{opacity:.55}
 @keyframes ringfade{0%,100%{opacity:.25}50%{opacity:1}}
 .notice{display:flex;align-items:flex-start;gap:12px;background:var(--surface);border:1px solid var(--border);border-left:3px solid var(--data);border-radius:var(--r);padding:10px 14px;margin-top:16px;font-size:13px;color:var(--fg-2)}
 .notice .t{font-family:var(--font-mono);font-size:11px;font-weight:600;letter-spacing:.06em;color:var(--data);white-space:nowrap;padding-top:3px}
@@ -331,7 +331,7 @@ function bot(c,size){
   else if(st==='wait')eyes=`<path d="M16 37l7-9 7 9M34 37l7-9 7 9" stroke="${col}" stroke-width="3" fill="none" stroke-linejoin="round" stroke-linecap="round"/>`;
   else eyes=`<rect x="17" y="30" width="12" height="4" rx="1.5" fill="${col}"/><rect x="35" y="30" width="12" height="4" rx="1.5" fill="${col}"/>`;
   const ring=st==='ask'?`<rect class="ring" x="6" y="10" width="52" height="44" rx="5" fill="none" stroke="${col}" stroke-width="2"/>`:'';
-  return `<svg class="bot ${st}" width="${size}" height="${size}" viewBox="0 0 64 64" role="img" aria-label="${esc(agent)}">${ring}${pins}<rect x="8" y="10" width="48" height="44" rx="4" fill="var(--pet-frame)" stroke="${col}" stroke-width="2"/><rect x="13" y="16" width="38" height="32" rx="2" fill="var(--pet-screen)"/><g><animateTransform attributeName="transform" type="translate" values="${look}" dur="${dur}" repeatCount="indefinite"/>${eyes}</g><rect x="13" y="16" width="38" height="0" fill="var(--pet-screen)"><animate attributeName="height" values="${blink}" keyTimes="0;.9;.93;.95;.98;1" dur="${dur==='1s'?'1s':'4.6s'}" repeatCount="indefinite"/></rect></svg>`;
+  return `<svg class="bot bot-${st}" width="${size}" height="${size}" viewBox="0 0 64 64" role="img" aria-label="${esc(agent)}">${ring}${pins}<rect x="8" y="10" width="48" height="44" rx="4" fill="var(--pet-frame)" stroke="${col}" stroke-width="2"/><rect x="13" y="16" width="38" height="32" rx="2" fill="var(--pet-screen)"/><g><animateTransform attributeName="transform" type="translate" values="${look}" dur="${dur}" repeatCount="indefinite"/>${eyes}</g><rect x="13" y="16" width="38" height="0" fill="var(--pet-screen)"><animate attributeName="height" values="${blink}" keyTimes="0;.9;.93;.95;.98;1" dur="${dur==='1s'?'1s':'4.6s'}" repeatCount="indefinite"/></rect></svg>`;
 }
 
 /* ---------- 列 ---------- */

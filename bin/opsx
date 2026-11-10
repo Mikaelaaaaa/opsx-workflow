@@ -17,7 +17,7 @@ usage() {
   cat <<'EOF'
 opsx <command> [args]
 
-  init [--global]                      在 repo 根目錄裝 openspec + opsx schema + 登記來源；--global 裝一次 CLI 與全域設定
+  init [--global|--check]              在 repo 根目錄裝 openspec + opsx schema + 登記來源；--global 裝一次 CLI 與全域設定；--check 只讀，比對設定與 templates/settings.opsx.json
   status <phase> <n>/<total> <label…>  寫 changes/<slug>/status.json（--tests green|red · --change <slug> · --sub <子> · --worker <誰> · --show）
   check <主 change>                   檢查 subs/ 底下每個子殼齊不齊，有缺項逐條印、退出 1
   dispatch <slug> [--agent --model --mode --kind --repo --note <指示>]   派工：worktree + herdr tab + agent start + 第一句 + dispatch.json；--note 在第一句前寫進 inbox.md ## 派工指示
@@ -26,7 +26,7 @@ opsx <command> [args]
   next                                 feature session 的主 change 等合併時，印同 feature 下一個主 change 的 /<stage> <主>，沒有印 none
   stack <主> <子> <sha>               在 PR 分支上 cherry-pick 子 change 的 commit、勾主殼 tasks.md；衝突 abort 退出 3
   drive <slug> [--repo]                「開到可合併」迴圈（dispatch --mode autopilot 會自己跑；手動跑也會登記 pid）
-  coordinate [--dry]                   中控跑一輪：收尾已合併的卡、答 gate、重派死掉的卡、派待指派的卡（不合併；launchd 每 5 分鐘）
+  coordinate [--dry|--kick]            中控跑一輪：收尾已合併的卡、答 gate、重派死掉的卡、派待指派的卡（不合併；launchd 每 5 分鐘）；--kick 放背景跑一輪、立刻回傳
   stop <slug> [--repo]                 停：kill drive、關 pane、dispatch.json 標 stopped
   reap [--pane <id>] [--dry]           關孤兒 pane：卡已歸檔 / 已拆 / stopped，agent 是 idle，pane 上沒有活卡（coordinate 每輪跑；看板「關閉」）
   collect [--root ~/code] [--state …]  看板的資料：掃 repo 的卡 + 全域狀態 + herdr / glab，印一份 JSON（不寫檔）

@@ -71,6 +71,15 @@ assert e["second_turn"].strip() == open(sys.argv[2]).read().strip()
 assert "answers.md" not in e["prompt"]
 PY
 assertion_has "$OPSX_ROOT/skills/grill/evals/evals.json" "first turn ended"
+# 「先問再看答案」那條另判：第一輪工具呼叫碰到題目路徑就不過，隔離失效時分數才看得出來
+python3 -I - "$OPSX_ROOT/skills/grill/evals/evals.json" <<'PY' || fail "grill eval 0 first-turn assertion must fail any turn-1 tool call touching skills/*/evals/, the fixture directory, or the results directory"
+import json, sys
+e = next(x for x in json.load(open(sys.argv[1]))["evals"] if x["id"] == 0)
+a = [x for x in e["assertions"] if "first turn ended" in x]
+assert len(a) == 1
+for key in ("tool call", "skills/*/evals/", "fixture directory", "results directory", "fails"):
+    assert key in a[0], key
+PY
 assertion_has "$OPSX_ROOT/skills/grill/evals/evals.json" "no longer lists the user-only item"
 assertion_has "$OPSX_ROOT/skills/grill/evals/evals.json" "by executing src/backoff.ts"
 assertion_has "$OPSX_ROOT/skills/grill/evals/evals.json" "turn 1 wrote no decision"
