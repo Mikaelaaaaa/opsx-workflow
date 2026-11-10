@@ -9,6 +9,10 @@
 #   OPSX_MR_CACHE_TTL 秒（預設 60，0 = 每次都抓）；抓不到不寫快取；寫入用 mktemp，並行不互撞。
 # gh 沒有未解 thread 的欄位（reviewThreads 不是 --json 的欄位），threads 條件用 reviewDecision != CHANGES_REQUESTED 近似。
 
+# forge CLI 的時間上限（秒，OPSX_MR_TIMEOUT，預設 5）：Stop hook 只有 10 秒。alarm 跨 exec 保留，逾時 SIGALRM 殺掉那支 CLI，
+# raw 變空，走下面「沒回東西」的 error。
+mr_forge() { perl -e 'alarm shift; exec @ARGV' "${OPSX_MR_TIMEOUT:-5}" "$@"; }
+
 mr_json() { # <card dir>
   local d="$1" url ttl cache now mtime age raw forge iid proj host path out tmp
   url="$(st_mr_url "$d")"
@@ -25,9 +29,9 @@ mr_json() { # <card dir>
   host="$(printf '%s' "$url" | sed -E 's#^https?://([^/]+)/.*#\1#')"
   case "$url" in
     *github.com/*) forge=github; proj="$(printf '%s' "$url" | sed -E 's#^https?://[^/]+/([^/]+/[^/]+)/pull/.*#\1#')"
-      raw="$(gh pr view "$iid" -R "$proj" --json state,isDraft,mergeable,mergeStateStatus,statusCheckRollup,reviewDecision,headRefOid,createdAt,mergedAt 2>/dev/null || true)" ;;
+      raw="$(mr_forge gh pr view "$iid" -R "$proj" --json state,isDraft,mergeable,mergeStateStatus,statusCheckRollup,reviewDecision,headRefOid,createdAt,mergedAt 2>/dev/null || true)" ;;
     *) forge=gitlab; path="$(printf '%s' "$url" | sed -E 's#^https?://[^/]+/(.*)/-/merge_requests/.*#\1#')"; proj="$host/$path"
-      raw="$(glab mr view "$iid" -R "$proj" -F json 2>/dev/null || true)" ;;
+      raw="$(mr_forge glab mr view "$iid" -R "$proj" -F json 2>/dev/null || true)" ;;
   esac
   out="$(OPSX_MR_RAW="$raw" "$OPSX_PY" -I - "$url" "$forge" "$proj" "$iid" <<'PY'
 import json, os, sys

@@ -3,6 +3,8 @@
 # 設了 $OPSX_TEST_GLAB_JSON_BY_IID 就回 ${OPSX_TEST_GLAB_JSON_BY_IID}<iid>.json（多條 MR 的測試）。
 # 沒帶 -R 就失敗：mr.sh 不准靠 cwd 解析 project（review C）。
 printf '%s\n' "$*" >> "${OPSX_FAKE_LOG:?}"
+# 設了 $OPSX_TEST_GLAB_SLEEP 就掛住那麼多秒（exec：計時器殺的是這個程序，沒有留著 stdout 的子程序）
+[ -z "${OPSX_TEST_GLAB_SLEEP:-}" ] || exec sleep "$OPSX_TEST_GLAB_SLEEP"
 case "$1 $2" in
   "mr view")
     case " $* " in *" -R "*) ;; *) echo "fake glab: 沒帶 -R" >&2; exit 1 ;; esac

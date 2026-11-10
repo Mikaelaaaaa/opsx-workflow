@@ -552,6 +552,18 @@ printf '' > "$OPSX_TEST_GLAB_JSON"
 out="$(sg)"; assert_eq "$(decision "$out")" block "stop: 查不到 MR → 維持擋"
 reason "$out" | grep -q '/babysit' || fail "stop: 查不到要叫 /babysit: $(reason "$out")"
 reason "$out" | grep -q 'glab mr view 212' || fail "stop: 要帶查詢的錯誤文字: $(reason "$out")"
+# 已關閉但沒合併（merged_at 是 null）：不是 /archive
+printf '{"state":"closed","draft":false,"has_conflicts":false,"sha":"abc123","merged_at":null}' > "$OPSX_TEST_GLAB_JSON"
+out="$(sg)"; assert_eq "$(decision "$out")" block "stop: MR 已關閉未合併 → 擋"
+reason "$out" | grep -q '/babysit' || fail "stop: 已關閉未合併要叫 /babysit: $(reason "$out")"
+reason "$out" | grep -q '/archive' && fail "stop: 已關閉未合併不能叫 /archive: $(reason "$out")"
+# forge 查詢掛住：在 hook 的 10 秒之內放棄，仍 block 並帶錯誤文字
+printf '%s' "$MERGED_MR" > "$OPSX_TEST_GLAB_JSON"
+t0="$(date +%s)"; out="$(OPSX_TEST_GLAB_SLEEP=6 OPSX_MR_TIMEOUT=1 sg)"; elapsed=$(( $(date +%s) - t0 ))
+[ "$elapsed" -lt 4 ] || fail "stop: 查詢要在時限內放棄，花了 ${elapsed} 秒"
+assert_eq "$(decision "$out")" block "stop: 查詢逾時 → 擋"
+reason "$out" | grep -q '/babysit' || fail "stop: 逾時要叫 /babysit: $(reason "$out")"
+reason "$out" | grep -q 'glab mr view 212' || fail "stop: 逾時要帶錯誤文字: $(reason "$out")"
 printf '%s' "$OPEN_MR" > "$OPSX_TEST_GLAB_JSON"; done_report
 # 沒有卡的 branch 不擋
 git -C "$R" checkout -q -b scratch-x; out="$(sg)"; assert_eq "$out" "" "stop: branch 對不到卡不擋"
