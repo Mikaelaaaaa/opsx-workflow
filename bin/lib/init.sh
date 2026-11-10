@@ -92,7 +92,7 @@ init_global() {
 }
 
 # 使用者層 Claude Code settings：CLAUDE_CONFIG_DIR 優先，沒設才用 ~/.claude。
-# 沙盒不讓沒登記的目錄可寫、不讓連 herdr socket，裝完 opsx 的 session 才不用人手動開權限。
+# 沙盒不讓沒登記的目錄可寫，裝完 opsx 的 session 才不用人手動開權限（herdr socket 只給主控 session，見 write_coordinator_settings）。
 claude_settings_file() { printf '%s/settings.json' "${CLAUDE_CONFIG_DIR:-$HOME/.claude}"; }
 
 merge_claude_settings() { # <python> <claude-settings.py 的參數…>

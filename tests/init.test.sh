@@ -172,6 +172,7 @@ before="$(cat "$CS")"
 outs="$(opsx init --global 2>&1)"; assert_eq "$?" 0 "settings rerun: $outs"
 assert_eq "$(cat "$CS")" "$before" "重跑改了 settings.json"
 assert_eq "$(cat "$CO")" "$co_before" "重跑改了主控 session 的設定檔"
+case "$outs" in *"coordinator-settings.json 已有"*) ;; *) fail "內容沒變時要說已有、不重寫（沙盒內重寫會失敗）：$outs" ;; esac
 assert_no_file "$CS.opsx-bak"        # no-op 不產生備份
 
 # CLAUDE_CONFIG_DIR 沒設：寫 $HOME/.claude/settings.json
