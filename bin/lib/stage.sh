@@ -24,9 +24,10 @@ st_open_gates() { [ -f "$1/gates.md" ] || { printf 0; return; }; grep -cE '^stat
 st_open_gates_blocking() {
   [ -f "$1/gates.md" ] || { printf 0; return; }
   awk '
-    function flush() { if (open && !ask) n++; open = 0; ask = 0 }
+    function flush() { if (open && (!ask || appr)) n++; open = 0; ask = 0; appr = 0 }
     /^## / { flush() }
     /^status:[ \t]*open[ \t]*$/ { open = 1 }
+    /^type:[ \t]*approval[ \t]*$/ { appr = 1 }   # 核准只有人能答，不管問法
     /^(## |問題:).*要不要(接|派|繼續)([ ]*\/|[ ]*下一|\?|？|$)/ { ask = 1 }
     END { flush(); print n + 0 }
   ' "$1/gates.md"
