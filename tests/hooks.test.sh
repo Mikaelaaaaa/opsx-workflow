@@ -356,6 +356,17 @@ out="$(KEEP=1 sg)"; out="$(KEEP=1 sg)"; out="$(KEEP=1 sg)"
 out="$(KEEP=1 sg)"; assert_eq "$out" "" "stop: report 後有新 commit 擋滿後放行"
 assert_grep '^## 卡在接 /review' "$C/gates.md"; assert_not_grep '卡在接 /babysit' "$C/gates.md"
 rm -f "$C/gates.md"; rm -rf "$STOP_STATE"
+# reviewer 在背景跑（status.json 是 review 且步數未到最後一步）：主 agent 結束 turn 不是沒接下一站，不計次、不寫 gate
+printf '{"phase":"review","step":2,"total":7,"label":"三個 reviewer 已派出","tests":"green","at":"2026-11-10T14:28:10+08:00"}' > "$C/status.json"
+out="$(KEEP=1 sg)"; out="$(KEEP=1 sg)"; out="$(KEEP=1 sg)"; out="$(KEEP=1 sg)"; out="$(KEEP=1 sg)"
+assert_eq "$out" "" "stop: reviewer 在跑連停五次都放行"
+assert_eq "$([ -e "$C/gates.md" ] && echo y || echo n)" n "stop: reviewer 在跑不寫「卡在接 /review」gate"
+assert_eq "$([ -e "$STOP_STATE/Agentory-AI-eval-core" ] && echo y || echo n)" n "stop: reviewer 在跑不留擋的次數"
+# review 走到最後一步仍沒有 report.md：不再是「在等 reviewer」，照擋
+printf '{"phase":"review","step":7,"total":7,"label":"report.md 寫好","tests":"green","at":"2026-11-10T14:40:00+08:00"}' > "$C/status.json"
+out="$(sg)"; assert_eq "$(decision "$out")" block "stop: review 最後一步 report 後有新 commit 照擋"
+printf '{"phase":"apply","step":8,"total":8,"label":"x","tests":"green","at":"2026-11-05T15:00:00+08:00"}' > "$C/status.json"
+rm -f "$C/gates.md"; rm -rf "$STOP_STATE"
 # 卡在 linked worktree：只算卡自己 branch 的 commit，主 checkout 是別的 session 在用
 sgw() { [ -n "${KEEP:-}" ] || rm -rf "$STOP_STATE"; printf '{"cwd":"%s","stop_hook_active":false}' "$WT" | bash "$H/openspec-stop-gate.sh" 2>/dev/null; true; }
 done_report; sleep 1

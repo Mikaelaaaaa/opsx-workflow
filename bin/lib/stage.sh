@@ -11,6 +11,7 @@ st_card_dir() { # <top> <slug>
 }
 st_card_kind() { local d="$1"; [ -f "$d/.openspec.yaml" ] && sed -n 's/^kind: *//p' "$d/.openspec.yaml" | head -1 || true; }
 st_status_tests() { local d="$1"; [ -f "$d/status.json" ] && jq -r '.tests // "unknown"' "$d/status.json" 2>/dev/null || printf 'unknown'; }
+st_review_running() { local d="$1"; [ -f "$d/status.json" ] && jq -e '.phase == "review" and .step < .total' "$d/status.json" >/dev/null 2>&1; }
 st_tasks_open() { [ -f "$1/tasks.md" ] || { printf 0; return; }; grep -cE '^\s*- \[ \]' "$1/tasks.md" || true; }
 st_tasks_done() { [ -f "$1/tasks.md" ] || { printf 0; return; }; grep -cE '^\s*- \[x\]' "$1/tasks.md" || true; }
 st_pending_nonempty() {

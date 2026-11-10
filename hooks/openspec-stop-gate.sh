@@ -33,6 +33,8 @@ $missing
       printf '%s' "apply|opsx：$slug tasks 全勾，但 status.json 的 tests 不是 green（$(status_tests "$d")）。跑 test agent 把整張卡的測試跑到綠，\`opsx status apply n/n <label> --tests green\`，再停。"
       return 0
     fi
+    # review 在背景開 reviewer 時主 agent 會結束 turn：status.json 還在 review 中間步就是在等，不算沒接站
+    st_review_running "$d" && return 0
     if [ ! -f "$d/report.md" ]; then
       printf '%s' "review|opsx：$slug tasks 全勾、測試綠，但還沒 review。跑 /review $slug 產 report.md 再停。"
       return 0
