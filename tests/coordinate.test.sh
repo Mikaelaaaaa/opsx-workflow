@@ -96,6 +96,31 @@ features:
         changes:
           - name: af
             status: pending
+      - name: loose             # 不在 workplan 的 planned 卡是 P2 不自動派；派工案例的卡要在這裡（沒設 milestone，照 D8 是 P1）
+        branch: feat/loose/m
+        status: pending
+        depends-on: []
+        changes:
+          - name: s1
+            status: pending
+          - name: s2
+            status: pending
+          - name: s3
+            status: pending
+          - name: s4
+            status: pending
+          - name: s5
+            status: pending
+          - name: s6
+            status: pending
+          - name: s7
+            status: pending
+          - name: s8
+            status: pending
+          - name: x
+            status: pending
+          - name: p1
+            status: pending
 EOF
 WP0="$FX/workplan.orig"; cp "$R/openspec/workplan.yaml" "$WP0"
 mkcard d
@@ -395,4 +420,116 @@ sleep 0 & dead=$!; wait "$dead"
 cards '[{"slug":"u","section":"進行中","dispatch":{"mode":"autopilot","agent":"claude","pane":"w1:p1","drive_pid":'"$dead"'},"agent_status":"idle"}]'
 round || fail "rc: $(cat "$FX/out")"
 assert_grep "^opsx dispatch u --agent claude" "$OPSX_FAKE_LOG"
+rm -f "$MEMO" "$DISP"
+
+# --- 派工照等級（priority-dispatch）---
+# incident <slug> <impact> <evidence>：收件卡的事實；evidence 給空字串就是沒證據
+incident() { printf -- '---\nkind_of_work: incident\nimpact: %s\nevidence: %s\n---\n' "$2" "$3" > "$R/openspec/changes/$1/inbox.md"; }
+dispatched() { grep '^opsx dispatch' "$OPSX_FAKE_LOG" | cut -d' ' -f3; }
+cat > "$R/openspec/workplan.yaml" <<'EOF'
+milestones:
+  - name: "1.0"
+    goal: 能開單
+  - name: "1.1"
+    goal: 能退貨
+features:
+  - name: later               # 1.1 的 feature 寫在前面：順序要照 milestones，不是照 workplan
+    milestone: "1.1"
+    prs:
+      - name: card-b
+        branch: feat/card-b/m
+        status: pending
+        depends-on: []
+        changes:
+          - name: card-b
+            status: pending
+  - name: first
+    milestone: "1.0"
+    prs:
+      - name: card-a
+        branch: feat/card-a/m
+        status: pending
+        depends-on: []
+        changes:
+          - name: card-a
+            status: pending
+      - name: card-p1
+        branch: feat/card-p1/m
+        status: pending
+        depends-on: []
+        changes:
+          - name: card-p1
+            status: pending
+EOF
+WP1="$FX/workplan.milestones"; cp "$R/openspec/workplan.yaml" "$WP1"
+mkcard card-p0 card-p1 card-p2 card-a card-b card-bad card-old card-zz q1 q2 q3 q4 q5 q6 q7 r1 r2 r3 r4 r5 r6
+incident card-p0 security "tests/auth.test.sh 第 3 案：未登入可讀 /admin"
+incident card-bad security ""
+for s in q1 q2 q3 q4 q5 q6 q7 r1 r2 r3 r4 r5 r6; do incident "$s" workaround_exists "手動重跑可過"; done
+
+# P0 先派：collect 的順序是 P1 在前
+cards '[{"slug":"card-p1"},{"slug":"card-p0"}]'
+round || fail "rc: $(cat "$FX/out")"
+assert_eq "$(dispatched)" "card-p0
+card-p1" "P0 先派：$(cat "$OPSX_FAKE_LOG")"
+
+# P2 不自動派（不在 workplan 的 planned 卡）
+cards '[{"slug":"card-p2"}]'
+round || fail "rc: $(cat "$FX/out")"
+assert_eq "$(count '^opsx dispatch')" 0 "P2 不自動派：$(cat "$OPSX_FAKE_LOG")"
+grep -- 'card-p2' "$LOG" | grep -q 'P2' || fail "P2 要記一行含卡名與 P2：$(cat "$LOG")"
+
+# P1 依 milestone 順序：card-b 在 1.1、card-a 在 1.0，沒設 current_milestone 兩張都是 P1
+cards '[{"slug":"card-b"},{"slug":"card-a"}]'
+round || fail "rc: $(cat "$FX/out")"
+assert_eq "$(dispatched)" "card-a
+card-b" "P1 依 milestone 順序：$(cat "$OPSX_FAKE_LOG")"
+
+# P0 不受每輪上限擋：七張 P1 加一張 P0，派 P0 與六張 P1，第七張記派滿
+cards '[{"slug":"q1"},{"slug":"q2"},{"slug":"q3"},{"slug":"q4"},{"slug":"q5"},{"slug":"q6"},{"slug":"q7"},{"slug":"card-p0"}]'
+round || fail "rc: $(cat "$FX/out")"
+assert_eq "$(count '^opsx dispatch')" 7 "P0 加六張 P1：$(cat "$OPSX_FAKE_LOG")"
+assert_grep '^opsx dispatch card-p0 ' "$OPSX_FAKE_LOG"
+assert_eq "$(count '^opsx dispatch q7 ')" 0 "第七張 P1 不派"
+grep '派滿' "$LOG" | grep -q q7 || fail "第七張 P1 要記派滿：$(cat "$LOG")"
+
+# 進行中滿了先停 P2：六張進行中，card-zz 與 card-old 是 P2，停 slug 字母序第一張 card-old
+busy() { printf '{"slug":"%s","section":"進行中","dispatch":%s,"agent_status":"working"}' "$1" "$D"; }
+cards "[$(busy r1),$(busy r2),$(busy r3),$(busy r4),$(busy card-zz),$(busy card-old),{\"slug\":\"card-p0\"}]"
+round || fail "rc: $(cat "$FX/out")"
+got="$(grep -E '^opsx (stop|dispatch)' "$OPSX_FAKE_LOG")"
+assert_eq "$got" "opsx stop card-old --repo $R
+opsx dispatch card-p0 --agent claude --mode autopilot --kind dev --repo $R" "先停 P2 再派 P0：$(cat "$OPSX_FAKE_LOG")"
+grep '!!' "$LOG" | grep 'card-old' | grep -q 'P0' || fail "停 P2 要記 !! 含 card-old 與 P0：$(cat "$LOG")"
+
+# 滿了但沒有 P2 可停：照派 P0、記 !!
+cards "[$(busy r1),$(busy r2),$(busy r3),$(busy r4),$(busy r5),$(busy r6),{\"slug\":\"card-p0\"}]"
+round || fail "rc: $(cat "$FX/out")"
+assert_eq "$(count '^opsx stop')" 0 "沒有 P2 不停：$(cat "$OPSX_FAKE_LOG")"
+assert_grep '^opsx dispatch card-p0 ' "$OPSX_FAKE_LOG"
+grep '!!' "$LOG" | grep -q 'card-p0' || fail "沒 P2 可停要記 !! 含 P0 的卡：$(cat "$LOG")"
+
+# 等級算不出來不派：impact 沒有 evidence；同一輪別的卡照派
+cards '[{"slug":"card-bad"},{"slug":"card-a"}]'
+round || fail "rc: $(cat "$FX/out")"
+assert_eq "$(dispatched)" "card-a" "算不出來的不派、別張照派：$(cat "$OPSX_FAKE_LOG")"
+grep '??' "$LOG" | grep 'demo/card-bad' | grep -q 'evidence' || fail "要記 ?? 含卡名與 evidence：$(cat "$LOG")"
+
+# 整個 repo 的 milestone 欄位不合格：那個 repo 的卡都記 ??、不派
+printf 'current_milestone: "9.9"\n' | cat - "$WP1" > "$R/openspec/workplan.yaml"
+cards '[{"slug":"card-a"},{"slug":"card-p0"}]'
+round || fail "rc: $(cat "$FX/out")"
+assert_eq "$(count '^opsx dispatch')" 0 "workplan 不合格整個 repo 不派：$(cat "$OPSX_FAKE_LOG")"
+grep '??' "$LOG" | grep 'demo/card-a' | grep -q 'current_milestone' || fail "要記 ?? 含卡名與欄位：$(cat "$LOG")"
+
+# parked 的 P2 卡照樣重派：人派出去、coordinate 自己停下等別張合併的，不是新派工
+cat "$WP1" > "$R/openspec/workplan.yaml"
+printf '  - name: other\n    prs:\n      - name: done-pr\n        branch: feat/done-pr/m\n        status: merged\n        depends-on: []\n        changes:\n          - name: done-pr\n            status: done\n' >> "$R/openspec/workplan.yaml"
+printf '{"_parked":{"demo/card-p2":{"at":"2026-11-10T10:00:00+08:00","gate":"g9","merged":[]}},"_redispatched":{}}' > "$MEMO"
+printf '{"demo/card-p2":{"mode":"stopped","agent":"claude","pane":"w1:p9","drive_pid":null}}' > "$DISP"
+cards '[{"slug":"card-p2","section":"待處理","open_gates":[{"id":"g9","opened_at":null}],"waiting":{"type":"等待決定","gate_id":"g9","question":"等 done-pr 合進 main 之後再做","recommended":null,"options":["等"]}}]'
+round || fail "rc: $(cat "$FX/out")"
+assert_grep '^opsx answer card-p2 --gate g9 ' "$OPSX_FAKE_LOG"
+assert_grep '^opsx dispatch card-p2 ' "$OPSX_FAKE_LOG"
+cp "$WP0" "$R/openspec/workplan.yaml"
 echo "coordinate: ok"

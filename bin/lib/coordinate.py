@@ -7,6 +7,7 @@
 """
 import datetime
 import json
+import operator
 import os
 import re
 import subprocess
@@ -14,6 +15,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import chain  # noqa: E402
+import priority  # noqa: E402
 
 MAX_DISPATCH = 6
 REDISPATCH_MINUTES = 10
@@ -46,6 +48,9 @@ class Round:
         self.memo = None
         self.dispatch_file = None
         self.plans = {}
+        self.levels = {}
+        self.level_errors = {}
+        self.orders = {}
 
     def log(self, msg):
         line = "%s %s" % (self.now.strftime("%Y-%m-%d %H:%M:%S"), msg)
@@ -95,6 +100,28 @@ class Round:
         if top not in self.plans:
             self.plans[top] = read_prs(os.path.join(top, "openspec", "workplan.yaml"))
         return self.plans[top]
+
+    def level(self, top, slug):
+        """卡的 {level, reason, overridden}，算不出來是 {error}。workplan 的 milestone 欄位不合格時那個 repo 每張卡都是 error。"""
+        if top not in self.levels and top not in self.level_errors:
+            try:
+                self.levels[top] = priority.levels(top)
+            except priority.PriorityError as e:
+                self.level_errors[top] = str(e)
+        if top in self.level_errors:
+            return {"error": self.level_errors[top]}
+        if slug not in self.levels[top]:
+            return {"error": "%s 不在 openspec/changes 也不在 workplan" % slug}
+        return self.levels[top][slug]
+
+    def rank(self, c, top):
+        """派工順序：(等級, 不在 workplan, milestone 位置, workplan 位置)；算不出等級的排最後，反正不派。"""
+        got = self.level(top, c["slug"])
+        lv = priority.LEVELS.index(got["level"]) if "level" in got else len(priority.LEVELS)
+        if top not in self.orders:
+            self.orders[top] = plan_order(os.path.join(top, "openspec", "workplan.yaml"))
+        pos = self.orders[top].get(c["slug"])
+        return (lv, 1, 0, 0) if pos is None else (lv, 0) + pos
 
     def nobody_archiving(self, c):
         """已合併但 agent 還在：歸檔、標 workplan、叫 chain 都是它自己 /archive 的事，這裡不搶。
@@ -276,7 +303,13 @@ class Round:
 
     def dispatch_new(self, cards, repo_paths):
         n = 0
-        for c in cards:
+        running = [c for c in cards if c["dispatch"]]
+        busy = len(running)
+        # P0 要位子時停的對象：slug 字母序
+        p2 = sorted((c for c in running if self.level(repo_paths[c["repo"]], c["slug"]).get("level") == "P2"),
+                    key=operator.itemgetter("slug"))
+        ranked = sorted((self.rank(c, repo_paths[c["repo"]]), i, c) for i, c in enumerate(cards))
+        for _, _, c in ranked:
             key, top = card_key(c), repo_paths[c["repo"]]
             entry = self.dispatch_file.get(key)
             parked = self.memo["_parked"].get(key)
@@ -303,9 +336,27 @@ class Round:
             if not AGENT_NAME.match(c["slug"]):
                 self.log("-- %s 不是合法的 agent 名，跳過" % key)
                 continue
-            if n >= MAX_DISPATCH:
+            got = self.level(top, c["slug"])
+            if "error" in got:
+                self.log("?? %s 等級算不出來：%s" % (key, got["error"]))
+                continue
+            # parked 的卡是這裡自己停下的，重派是接回原本的工作，不算自動派新卡
+            if got["level"] == "P2" and not parked:
+                self.log("-- %s 是 P2（%s），不自動派" % (key, got["reason"]))
+                continue
+            p0 = got["level"] == "P0"
+            if not p0 and n >= MAX_DISPATCH:
                 self.log("-- 這輪派滿 %d 張，%s 下輪" % (MAX_DISPATCH, key))
                 continue
+            if p0 and busy >= MAX_DISPATCH:
+                if p2:
+                    old = p2.pop(0)
+                    self.log("!! 停 %s（P2）讓 %s（P0）先跑" % (card_key(old), key))
+                    rc, _, _ = self.act(["opsx", "stop", old["slug"], "--repo", repo_paths[old["repo"]]])
+                    if rc == 0:
+                        busy -= 1
+                else:
+                    self.log("!! 進行中已有 %d 張、沒有 P2 可停，照派 P0 %s" % (busy, key))
             if parked and not parked.get("answered"):
                 text = "停下之後合進 main 的 PR：%s。照最新的 main 繼續；你等的那張還沒合就再開 gate。" % "、".join(newly)
                 rc, _, err = self.act(["opsx", "answer", c["slug"], "--gate", parked["gate"], "--repo", top, "--", text])
@@ -315,10 +366,12 @@ class Round:
                 parked["answered"] = True
             agent = entry["agent"] if entry and "agent" in entry else "claude"
             rc, _, err = self.act(["opsx", "dispatch", c["slug"], "--agent", agent, "--mode", "autopilot", "--kind", c["kind"], "--repo", top])
-            n += 1
+            if not p0:
+                n += 1
             if rc != 0:
                 self.log("?? %s 派不出去：%s" % (key, err[:200]))
                 continue
+            busy += 1
             self.memo["_parked"].pop(key, None)
 
 
@@ -343,6 +396,21 @@ def read_prs(path):
     if not os.path.exists(path):
         return []
     return [pr for f in chain.load_workplan(path).get("features") or [] for pr in f.get("prs") or []]
+
+
+def plan_order(path):
+    """change 名到 (所屬 feature 的 milestone 在 milestones 的位置, 在 workplan 出現的位置)。feature 沒寫 milestone 排在有寫的後面。"""
+    if not os.path.exists(path):
+        return {}
+    wp = chain.load_workplan(path)
+    names = [m.get("name") for m in wp.get("milestones") or []]
+    out = {}
+    for f in wp.get("features") or []:
+        ms = names.index(f.get("milestone")) if f.get("milestone") in names else len(names)
+        for pr in f.get("prs") or []:
+            for c in pr.get("changes") or []:
+                out.setdefault(c.get("name"), (ms, len(out)))
+    return out
 
 
 def merged_prs(prs):
