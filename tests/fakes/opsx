@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# 假 opsx（coordinate 測試用）：每個呼叫記成一行「opsx <參數>」到 $OPSX_FAKE_LOG。
+# collect 印 $OPSX_TEST_COLLECT_JSON 的內容。其他子命令在 $OPSX_TEST_FAIL_<子命令> 有值時把它印到 stderr 並退出 1。
+printf 'opsx %s\n' "$*" >> "${OPSX_FAKE_LOG:?}"
+case "$1" in
+  collect) cat "${OPSX_TEST_COLLECT_JSON:?}" ;;
+  *) var="OPSX_TEST_FAIL_$1"
+     if [ -n "${!var:-}" ]; then printf '%s\n' "${!var}" >&2; exit 1; fi ;;
+esac

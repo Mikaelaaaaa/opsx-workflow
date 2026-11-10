@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# 假 openspec（coordinate 測試用）：只記一行「openspec <參數>」到 $OPSX_FAKE_LOG。
+printf 'openspec %s\n' "$*" >> "${OPSX_FAKE_LOG:?}"
