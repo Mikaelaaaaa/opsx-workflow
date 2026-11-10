@@ -18,7 +18,7 @@ Creates a change with artifacts:
 - design.md (how)
 - tasks.md (implementation steps)
 
-When ready to implement, run `/opsx:apply`.
+When the artifacts are done it continues straight into `/apply` (`../../references/continue.md`).
 
 **Input**: The user's request should include a change name (kebab-case) OR a description of what they want to build.
 
@@ -137,7 +137,8 @@ After completing all artifacts, summarize:
 - PR group (from workplan, if exists)
 - List of artifacts created with brief descriptions
 - What's ready: "All artifacts created! Ready for implementation."
-- Prompt: "Run `/opsx:apply` to start working on the tasks."
+
+Then continue to `/apply <name>` per `../../references/continue.md`: invoke it now unless a gate is open. Apply switches to the PR's branch itself.
 
 ## Artifact Creation Guidelines
 

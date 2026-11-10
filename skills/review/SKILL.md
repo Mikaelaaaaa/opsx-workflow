@@ -109,7 +109,7 @@ Then apply the fixes, touching only the listed places. The whole fix round may a
 <commit sha> · <what was verified and how> · verdict: <green|red>
 ```
 
-`opsx status review 7/7 "report.md 寫好"`. Reply with the bucket counts, what got fixed, what the user should look at in Consider, and the two closing lines. Next step: `/pr <slug>`.
+`opsx status review 7/7 "report.md 寫好"`. Reply with the bucket counts, what got fixed, what the user should look at in Consider, and the two closing lines. Then continue to `/pr <slug>` per `../../references/continue.md`: invoke it now unless a gate is open or a Bug or Must-fix is still unfixed.
 
 ## Guardrails
 

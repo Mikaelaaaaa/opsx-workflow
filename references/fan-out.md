@@ -18,7 +18,7 @@ A subagent has no herdr agent name. `opsx answer` and the board cannot reach it,
 One Agent call per child, `isolation: "worktree"`, `run_in_background: true`. The brief must contain:
 
 - First commands: `git fetch <remote>` and `git switch --no-track -c <branch> <remote>/main` (both from the `chain:` line). Without `--no-track` git tries to write `.git/config`, the sandbox refuses, and the worktree is left half switched.
-- The workflow: call the `apply` skill for `<slug>`, then `review`, then `pr`. Name the skills; a subagent that is not told invents its own process.
+- The workflow: call the `apply` skill for `<slug>`; it continues through `review`, `pr` and `babysit` itself (`continue.md`), so do not call them again. Name the skill; a subagent that is not told invents its own process.
 - What the parent card changed: its file list (`git show --stat` of the merge) and the D-ids in its `design.md` that the child builds on. The subagent starts with none of this pane's context.
 - The report contract: finish with `DONE <slug> <MR url>`, or `NEEDS-USER <slug>` followed by the question, the options and the evidence. Commit and push before reporting, because the harness may remove the worktree once the subagent ends.
 
