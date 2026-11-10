@@ -6,6 +6,7 @@
 用法：coordinate.py <state dir> [--dry]
 """
 import datetime
+import functools
 import json
 import os
 import re
@@ -14,6 +15,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import chain  # noqa: E402
+import jsonfile  # noqa: E402
 
 MAX_DISPATCH = 6
 REDISPATCH_MINUTES = 10
@@ -139,7 +141,7 @@ class Round:
         key = card_key(c)
         entry = self.dispatch_file.get(key)
         self.log("++ %s 已在 forge 合併、agent 不在，收尾" % key)
-        shared = self.session_siblings(key, entry)
+        shared = self.session_siblings(key, entry, top)
         if entry and entry.get("mode") != "stopped" and not shared:
             self.act(["opsx", "stop", c["slug"], "--repo", top])
         if not self.mark_merged(top, c["slug"]):
@@ -149,8 +151,14 @@ class Round:
             self.log("?? %s openspec archive 失敗：%s" % (key, err[:200]))
             return False
         if shared:
-            # pane 與 worktree 是同 feature 的 session 共用的，它還在做 shared 這幾張；分支由 session 切走後自己留著
-            self.log("-- %s 的 session %s 還在做 %s，不 stop、不移除 worktree" % (key, entry["feature"], "、".join(shared)))
+            # pane 與 worktree 是同 feature 的 session 共用的，它還在做 shared 這幾張：不送 opsx stop（會打到 session），
+            # 只把這張的條目標 stopped，之後算「session 還有誰活著」、開新 session 撞名檢查才不會把它算進去
+            self.log("-- %s 的 session %s 還在做 %s，不 stop pane、不移除 worktree，只標條目 stopped" % (key, entry["feature"], "、".join(shared)))
+            entry["mode"] = "stopped"
+            if self.dry:
+                self.log("DRY dispatch.json %s 標 stopped" % key)
+            else:
+                jsonfile.update(os.path.join(self.state, "dispatch.json"), functools.partial(mark_stopped, key=key, at=self.now.isoformat(timespec="seconds")))
             return True
         # 沒記 worktree 的是早期派的卡，當時 worktree 一律開在這裡
         wt = entry["worktree"] if entry and entry.get("worktree") else os.path.join(top, ".claude", "worktrees", c["slug"])
@@ -256,13 +264,15 @@ class Round:
             return
         self.answer(c, top, w["gate_id"], pick)
 
-    def session_siblings(self, key, entry):
-        """條目帶 feature 時，同 repo、同 feature、還沒停掉的其他卡的 key。"""
+    def session_siblings(self, key, entry, top):
+        """條目帶 feature 時，同 repo、同 feature、還沒停掉、卡還沒歸檔的其他卡的 key。
+        session 共用時歸檔的卡條目不標 stopped（標了要送 stop 給共用的 pane），所以用卡的資料夾還在不在判斷。"""
         if not entry or not entry.get("feature"):
             return []
         repo = key.split("/", 1)[0]
         return [k for k, v in self.dispatch_file.items()
-                if k != key and k.startswith(repo + "/") and v.get("feature") == entry["feature"] and v.get("mode") != "stopped"]
+                if k != key and k.startswith(repo + "/") and v.get("feature") == entry["feature"] and v.get("mode") != "stopped"
+                and os.path.isdir(os.path.join(top, "openspec", "changes", k.split("/", 1)[1]))]
 
     def redispatch_feature(self, c, top, why):
         """session 的 pane 不在了：同 feature 每張沒停的卡 stop 一次，再整個 feature 重派一次。memo 以 <repo>/@<feature> 記。"""
@@ -272,12 +282,18 @@ class Round:
         if last and self.now - datetime.datetime.fromisoformat(last) < datetime.timedelta(minutes=REDISPATCH_MINUTES):
             self.log("-- %s %s，%d 分鐘內重派過，這輪不再派" % (key, why, REDISPATCH_MINUTES))
             return
+        if "agent" not in c["dispatch"]:
+            self.log("?? %s %s，但 dispatch.json 沒記 agent，不知道派給誰" % (key, why))
+            return
         self.log("!! %s %s，各卡 stop 後整個 feature 重派" % (key, why))
         mine = card_key(c)
-        for k in sorted([mine] + self.session_siblings(mine, self.dispatch_file.get(mine))):
+        for k in sorted([mine] + self.session_siblings(mine, self.dispatch_file.get(mine), top)):
             self.act(["opsx", "stop", k.split("/", 1)[1], "--repo", top])
             self.dispatch_file[k]["mode"] = "stopped"
-        self.act(["opsx", "dispatch", "--feature", feature, "--agent", c["dispatch"].get("agent", "claude"), "--mode", "autopilot", "--repo", top])
+        rc, _, err = self.act(["opsx", "dispatch", "--feature", feature, "--agent", c["dispatch"]["agent"], "--mode", "autopilot", "--repo", top])
+        if rc != 0:
+            self.log("?? %s 重派開不了 session：%s" % (key, err[:200]))
+            return
         self.memo["_redispatched"][key] = self.now.isoformat(timespec="seconds")
 
     def redispatch(self, c, top, why):
@@ -400,6 +416,12 @@ class Round:
                     self.log("?? %s 的 feature %s 開不了 session：%s" % (repo, name, err[:200]))
                     continue
                 n += 1
+
+
+def mark_stopped(d, key, at):
+    """jsonfile.update 的 mutate：條目標 stopped，不碰 pane。"""
+    d[key]["mode"] = "stopped"
+    d[key]["stopped_at"] = at
 
 
 def card_key(c):

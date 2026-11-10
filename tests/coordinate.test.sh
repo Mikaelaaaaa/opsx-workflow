@@ -462,7 +462,7 @@ assert_eq "$(wp_status m2)" merged "主 change 的 PR 要標 merged"
 assert_eq "$(wp_change t1)" done "主 change 底下的子 change 要標 done"
 
 # session 還在做別的主 change（m4）：收尾已合併的 m3 不 stop、不移除共用的 worktree，歸檔照做
-mkdir -p "$R/.claude/worktrees/g"; rm -f "$MEMO"
+mkdir -p "$R/.claude/worktrees/g"; rm -f "$MEMO"; mkcard m4
 G_SESS='"mode":"autopilot","agent":"claude","pane":"w1:p9","herdr_name":"g","via":"g","feature":"g","drive_pid":null'
 printf '{"demo/m3":{%s,"branch":"feat/m3/u","worktree":"%s"},"demo/m4":{%s,"branch":"feat/m4/u","worktree":"%s"}}' "$G_SESS" "$R/.claude/worktrees/g" "$G_SESS" "$R/.claude/worktrees/g" > "$DISP"
 cards "[$(merged m3 2026-11-07T12:00:00Z '{"mode":"autopilot","agent":"claude","pane":"w1:p9","feature":"g","drive_pid":null}' '"unknown"')]"
@@ -470,6 +470,15 @@ round || fail "rc: $(cat "$FX/out")"
 assert_grep '^openspec archive m3 -y$' "$OPSX_FAKE_LOG"
 assert_not_grep '^opsx stop m3' "$OPSX_FAKE_LOG"
 assert_not_grep 'worktree remove' "$OPSX_FAKE_LOG"
+assert_eq "$(jq -r '."demo/m3".mode' "$DISP")" stopped "歸檔的 m3 條目標 stopped（不送 stop 給 pane）"
+assert_eq "$(jq -r '."demo/m4".mode' "$DISP")" autopilot "還在做的 m4 不動"
+# 接著 m4 也合併：已歸檔的 m3（資料夾搬走了）不算還活著的兄弟，m4 要 stop、移除 worktree
+mv "$R/openspec/changes/m3" "$FX/m3-archived"
+cards "[$(merged m4 2026-11-07T12:30:00Z '{"mode":"autopilot","agent":"claude","pane":"w1:p9","feature":"g","drive_pid":null}' '"unknown"')]"
+round || fail "rc: $(cat "$FX/out")"
+assert_grep '^opsx stop m4' "$OPSX_FAKE_LOG"
+assert_grep "worktree remove $R/.claude/worktrees/g" "$OPSX_FAKE_LOG"
+mv "$FX/m3-archived" "$R/openspec/changes/m3"
 
 # session 的 pane 不在了：同 feature 各卡 stop 一次，整個 feature 重派一次，不逐卡派
 sess_wp merged; rm -f "$MEMO"

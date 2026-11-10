@@ -182,7 +182,8 @@ def session_siblings(top: str, repo: str, slug: str, dispatch_path: str) -> list
     if not feature:
         return []
     cards = [k.split("/", 1)[1] for k, v in dispatch.items()
-             if k.startswith(repo + "/") and k != "%s/%s" % (repo, slug) and v.get("feature") == feature and v.get("mode") != "stopped"]
+             if k.startswith(repo + "/") and k != "%s/%s" % (repo, slug) and v.get("feature") == feature and v.get("mode") != "stopped"
+             and os.path.isdir(os.path.join(top, "openspec", "changes", k.split("/", 1)[1]))]   # 已歸檔的卡不算
     wp_path = os.path.join(top, "openspec", "workplan.yaml")
     prs = [pr for f in load_workplan(wp_path).get("features") or [] for pr in f.get("prs") or []] if os.path.exists(wp_path) else []
     order = [pr.get("name") for pr in prs]
