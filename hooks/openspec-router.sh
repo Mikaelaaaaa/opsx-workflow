@@ -30,11 +30,17 @@ if [ -n "$card" ] && [ -f "$card/inbox.md" ]; then
   if [ "$notes" -gt 0 ]; then rule=" · 派工指示 $notes 條 · Read $card/inbox.md ## 派工指示 · 跟 D 衝突開 gate$rule"; fi
 fi
 
+pkw=""
 for kw in babysit pickup pause forensics correct reflect audit deepen dispatch; do
-  case " $lower " in *"/$kw "*|*" $kw "*|*"/$kw"*)
-    ctx "$ev" "opsx 平行流程：$kw · Read skills/$kw/SKILL.md；做完下一次 prompt 重讀主流程狀態$rule"; exit 0 ;;
-  esac
+  case " $lower " in *"/$kw "*|*" $kw "*|*"/$kw"*) pkw="$kw"; break ;; esac
 done
+case "$prompt" in
+  *反思*) pkw="${pkw:-reflect}" ;;
+  *糾正*) pkw="${pkw:-correct}" ;;
+esac
+if [ -n "$pkw" ]; then
+  ctx "$ev" "opsx 平行流程：$pkw · Read $OPSX_ROOT/skills/$pkw/SKILL.md；做完下一次 prompt 重讀主流程狀態$rule"; exit 0
+fi
 
 stage="$(card_stage)"
 case " $lower " in *" tdd "*|*"/tdd"*|*"tdd "*)

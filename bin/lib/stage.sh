@@ -81,7 +81,13 @@ stage_of() { # <top> <slug>
   local top="$1" slug="$2" d="$1/openspec/changes/$2" kind
   if [ -z "$slug" ] || [ ! -d "$d" ]; then printf 'explore · （沒有對到卡，先建殼）· — · skills/explore/SKILL.md\n'; return; fi
   kind="$(st_card_kind "$d")"; kind="${kind:-dev}"
-  local reads="skills/apply/SKILL.md · skills/apply/references/playbooks/${kind}.md · skills/tdd/SKILL.md" split
+  local pb="skills/apply/references/playbooks" reads split
+  case "$kind" in
+    chore|ops) pb="" ;;
+    experiment) pb="$pb/hillclimb.md · $pb/eval.md · " ;;
+    *) pb="$pb/${kind}.md · " ;;
+  esac
+  reads="skills/apply/SKILL.md · ${pb}skills/tdd/SKILL.md"
   split="$(st_split_into "$d")"
   if [ -n "$split" ]; then printf 'split · %s · %s · 已拆成 %s，這張不再往下做\n' "$slug" "$kind" "$split"; return; fi
   if st_workplan_merged "$top" "$slug"; then printf 'archive · %s · %s · skills/archive/SKILL.md\n' "$slug" "$kind"; return; fi
