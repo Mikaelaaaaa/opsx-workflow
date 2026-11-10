@@ -105,14 +105,20 @@ class Round:
         self.memo["_approved"][key] = mr["head_sha"]
         self.log("++ %s 五條件全綠，核准合併 %s（%s）" % (key, mr["head_sha"], mr["url"]))
 
-    def wait_for_archive(self, c):
-        """已合併但 agent 還在：歸檔、標 workplan、叫 chain 都是它自己 /archive 的事，這裡不搶。"""
+    def nobody_archiving(self, c):
+        """已合併但 agent 還在：歸檔、標 workplan、叫 chain 都是它自己 /archive 的事，這裡不搶。
+        過了寬限 agent 還 idle，代表沒人會送 /archive（例如人在網頁上合併、drive 早就結束），回傳 True 由這裡收尾。"""
         key = card_key(c)
         ago = self.now - datetime.datetime.fromisoformat(c["mr"]["merged_at"])
-        if ago > datetime.timedelta(minutes=ARCHIVE_GRACE_MINUTES):
-            self.log("?? %s 合併 %d 分鐘了還沒歸檔，agent 還在，要人看它卡在哪" % (key, ago.total_seconds() // 60))
-        else:
+        minutes = ago.total_seconds() // 60
+        if ago <= datetime.timedelta(minutes=ARCHIVE_GRACE_MINUTES):
             self.log("⏳ %s 已合併，等它自己 /archive" % key)
+            return False
+        if c["agent_status"] == "idle":
+            self.log("-- %s 合併 %d 分鐘了 agent 還 idle，沒人會 /archive，這裡收尾" % (key, minutes))
+            return True
+        self.log("?? %s 合併 %d 分鐘了還沒歸檔，agent 是 %s，要人看它卡在哪" % (key, minutes, c["agent_status"]))
+        return False
 
     def clean_up(self, top, merged):
         """agent 已經不在的已合併卡：代做 /archive 的事。回傳收尾成功的卡。"""
@@ -152,7 +158,8 @@ class Round:
         # 沒記 worktree 的是早期派的卡，當時 worktree 一律開在這裡
         wt = entry["worktree"] if entry and entry.get("worktree") else os.path.join(top, ".claude", "worktrees", c["slug"])
         if os.path.isdir(wt):
-            rc, _, err = self.act(["git", "-C", top, "worktree", "remove", "--force", wt])
+            # 不 --force：worktree 裡有沒 commit 的東西就刪不掉，留給人
+            rc, _, err = self.act(["git", "-C", top, "worktree", "remove", wt])
             if rc != 0:
                 self.log("?? %s worktree %s 刪不掉，分支也不刪：%s" % (key, wt, err[:200]))
                 return True
@@ -165,28 +172,35 @@ class Round:
         return True
 
     def mark_merged(self, top, slug):
-        """把 workplan 裡含這個 change 的 PR 標成 merged，依賴它的卡這輪就派得出去。不在 workplan 裡的卡沒東西要標。"""
+        """workplan 裡這個 change 標 done；它的 PR 每個 change 都 done 了才標 merged，依賴它的卡這輪就派得出去。
+        不在 workplan 裡的卡沒東西要標。"""
         path = os.path.join(top, "openspec", "workplan.yaml")
         pr = pr_of(self.workplan(top), slug)
         if pr is None:
             self.log("-- %s 不在 %s，沒有 PR 要標 merged" % (slug, path))
             return True
+        pending = [x.get("name") for x in pr.get("changes") or [] if x.get("name") != slug and x.get("status") != "done"]
+        marks = [("changes", slug, "done")] + ([] if pending else [("prs", pr["name"], "merged")])
         if self.dry:
-            self.log("DRY workplan %s 的 PR %s 標 merged" % (path, pr["name"]))
+            self.log("DRY workplan %s 標 %s" % (path, "、".join("%s %s" % (n, v) for _, n, v in marks)))
             return True
         with open(path, encoding="utf-8") as f:
             lines = f.read().split("\n")
-        i = status_line(lines, pr["name"])
-        if i is None:
-            self.log("?? %s 找不到 PR %s 的 status 行，不收尾" % (path, pr["name"]))
-            return False
-        lines[i] = re.sub(r"status:.*$", "status: merged", lines[i])
+        for key, name, value in marks:
+            i = status_line(lines, key, name)
+            if i is None:
+                self.log("?? %s 找不到 %s 的 status 行，不收尾" % (path, name))
+                return False
+            lines[i] = re.sub(r"status:.*$", "status: " + value, lines[i])
         tmp = path + ".coordinate.tmp"
         with open(tmp, "w", encoding="utf-8") as f:
             f.write("\n".join(lines))
         os.replace(tmp, path)
         self.plans.pop(top, None)
-        self.log("ok   workplan 的 PR %s 標 merged" % pr["name"])
+        if pending:
+            self.log("ok   workplan 的 change %s 標 done；PR %s 還有 %s 沒 done，不標 merged" % (slug, pr["name"], "、".join(pending)))
+        else:
+            self.log("ok   workplan 的 change %s 標 done、PR %s 標 merged" % (slug, pr["name"]))
         return True
 
     def answer(self, c, top, gate, text, grant=False):
@@ -246,6 +260,21 @@ class Round:
         self.act(["opsx", "dispatch", c["slug"], "--agent", c["dispatch"]["agent"], "--mode", "autopilot", "--kind", c["kind"], "--repo", top])
         self.memo["_redispatched"][key] = self.now.isoformat(timespec="seconds")
 
+    def settle_parked(self, cards):
+        """人接手過的 parked 卡不再由這裡管：人手動重派了，或人在板上把那個 gate 答掉了。"""
+        for c in cards:
+            key = card_key(c)
+            parked = self.memo["_parked"].get(key)
+            if not parked:
+                continue
+            if c["dispatch"]:
+                self.log("-- %s 已經又派出去，不再 parked" % key)
+            elif not parked.get("answered") and parked["gate"] not in [g["id"] for g in c["open_gates"]]:
+                self.log("-- %s 等的 gate %s 已經被人答掉，不再 parked" % (key, parked["gate"]))
+            else:
+                continue
+            del self.memo["_parked"][key]
+
     def dispatch_new(self, cards, repo_paths):
         n = 0
         for c in cards:
@@ -255,10 +284,13 @@ class Round:
             newly = []
             if parked:
                 # 等的 gate 還開著，collect 把它放在「待處理」。停下之後 workplan 多了 merged 的 PR 才重派：
-                # 不管是卡自己 /archive 標的，還是這裡收尾時標的
-                newly = [p for p in merged_prs(self.workplan(top)) if p not in parked["merged"]]
-                if not newly or c["dispatch"] or c["section"] not in ("待指派", "待處理"):
+                # 不管是卡自己 /archive 標的，還是這裡收尾時標的。gate 已經答過（上一輪派失敗）就直接重試派
+                if c["section"] not in ("待指派", "待處理"):
                     continue
+                if not parked.get("answered"):
+                    newly = [p for p in merged_prs(self.workplan(top)) if p not in parked["merged"]]
+                    if not newly:
+                        continue
             elif c["section"] != "待指派":
                 continue
             elif entry and entry.get("mode") == "stopped":
@@ -275,12 +307,13 @@ class Round:
             if n >= MAX_DISPATCH:
                 self.log("-- 這輪派滿 %d 張，%s 下輪" % (MAX_DISPATCH, key))
                 continue
-            if parked:
+            if parked and not parked.get("answered"):
                 text = "停下之後合進 main 的 PR：%s。照最新的 main 繼續；你等的那張還沒合就再開 gate。" % "、".join(newly)
                 rc, _, err = self.act(["opsx", "answer", c["slug"], "--gate", parked["gate"], "--repo", top, "--", text])
                 if rc != 0:
                     self.log("?? %s parked 的 gate %s 回不了，不重派：%s" % (key, parked["gate"], err[:200]))
                     continue
+                parked["answered"] = True
             agent = entry["agent"] if entry and "agent" in entry else "claude"
             rc, _, err = self.act(["opsx", "dispatch", c["slug"], "--agent", agent, "--mode", "autopilot", "--kind", c["kind"], "--repo", top])
             n += 1
@@ -333,20 +366,20 @@ def deps_unmerged(slug, prs):
     return [d for d in pr.get("depends-on") or [] if status.get(d) != "merged"]
 
 
-def status_line(lines, pr_name):
-    """PR「pr_name」自己的 status 行的 index：PR 那行（prs: 底下的 `- name:`）之後、它的 changes: 之前。"""
-    pr_indent = None
+def status_line(lines, key, name):
+    """`key:`（prs 或 changes）底下 `- name: <name>` 那一項自己的 status 行的 index；找不到是 None。"""
+    item_indent = None
     for i, line in enumerate(lines):
-        m = re.match(r"^( *)prs:\s*$", line)
+        m = re.match(r"^( *)%s:\s*$" % key, line)
         if m:
-            pr_indent = len(m.group(1)) + 2
+            item_indent = len(m.group(1)) + 2
             continue
-        if pr_indent is None or not re.match(r"^ {%d}- name:\s*%s\s*(#.*)?$" % (pr_indent, re.escape(pr_name)), line):
+        if item_indent is None or not re.match(r"^ {%d}- name:\s*%s\s*(#.*)?$" % (item_indent, re.escape(name)), line):
             continue
         for j in range(i + 1, len(lines)):
-            if re.match(r"^ {%d}status:" % (pr_indent + 2), lines[j]):
+            if re.match(r"^ {%d}status:" % (item_indent + 2), lines[j]):
                 return j
-            if lines[j].strip() and len(lines[j]) - len(lines[j].lstrip(" ")) <= pr_indent:
+            if lines[j].strip() and len(lines[j]) - len(lines[j].lstrip(" ")) <= item_indent:
                 return None
         return None
     return None
@@ -371,7 +404,8 @@ def is_merged(c):
 
 
 def owner_gone(c):
-    return not c["dispatch"] or c["agent_status"] == "unknown" or drive_dead(c["dispatch"])
+    """已合併的卡的 agent 不在了。drive pid 死掉不算：/archive 是 pane 裡的 agent 做的，不是 drive。"""
+    return not c["dispatch"] or c["agent_status"] == "unknown"
 
 
 def main():
@@ -387,10 +421,12 @@ def main():
     cards = [c for c in data["cards"] if not c["archived"]]
 
     merged = [c for c in cards if is_merged(c)]
-    orphans = [c for c in merged if owner_gone(c)]
+    orphans = []
     for c in merged:
-        if c not in orphans:
-            r.wait_for_archive(c)
+        if card_key(c) not in r.dispatch_file:
+            r.log("-- %s 已合併但從沒派過，歸檔留給人" % card_key(c))
+        elif owner_gone(c) or r.nobody_archiving(c):
+            orphans.append(c)
     for c in cards:
         if c not in merged and c["mr"] and c["mr"]["state"] == "ready":
             r.approve_merge(c, repo_paths[c["repo"]])
@@ -398,6 +434,7 @@ def main():
     for repo in sorted({c["repo"] for c in orphans}):
         done += r.clean_up(repo_paths[repo], [c for c in orphans if c["repo"] == repo])
     live = [c for c in cards if c not in merged]
+    r.settle_parked(live)
 
     for c in live:
         w = c["waiting"]

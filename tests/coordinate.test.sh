@@ -80,6 +80,22 @@ features:
         changes:
           - name: g
             status: pending
+      - name: core              # 一個 PR 兩個 change：兩個都 done 才算 merged
+        branch: feat/core/m
+        status: in-progress
+        depends-on: []
+        changes:
+          - name: ca
+            status: pending
+          - name: cb
+            status: pending
+      - name: af
+        branch: feat/af/m
+        status: pending
+        depends-on: [core]
+        changes:
+          - name: af
+            status: pending
 EOF
 WP0="$FX/workplan.orig"; cp "$R/openspec/workplan.yaml" "$WP0"
 mkcard d
@@ -145,6 +161,11 @@ wp_status() { python3 -I -c 'import sys; sys.path.insert(0, sys.argv[3]); import
 for f in chain.load_workplan(sys.argv[1])["features"]:
     for pr in f["prs"]:
         if pr["name"] == sys.argv[2]: print(pr["status"])' "$R/openspec/workplan.yaml" "$1" "$OPSX_ROOT/bin/lib"; }
+wp_change() { python3 -I -c 'import sys; sys.path.insert(0, sys.argv[3]); import chain
+for f in chain.load_workplan(sys.argv[1])["features"]:
+    for pr in f["prs"]:
+        for c in pr.get("changes") or []:
+            if c["name"] == sys.argv[2]: print(c["status"])' "$R/openspec/workplan.yaml" "$1" "$OPSX_ROOT/bin/lib"; }
 
 # --- 收尾：forge 上已合、agent 不在、主 checkout 在 main 且乾淨 ---
 mkcard g; mkdir -p "$R/.claude/worktrees/g-wt"
@@ -157,11 +178,12 @@ want="git -C $R rev-parse --abbrev-ref HEAD
 git -C $R status --porcelain
 git -C $R pull -q --ff-only
 openspec archive g -y
-git -C $R worktree remove --force $R/.claude/worktrees/g-wt
+git -C $R worktree remove $R/.claude/worktrees/g-wt
 git -C $R branch -D feat/g/m
 git -C $R worktree prune"
-assert_eq "$got" "$want" "收尾順序（不 checkout、worktree 用 dispatch.json 記的）"
+assert_eq "$got" "$want" "收尾順序（不 checkout、worktree 用 dispatch.json 記的、不 --force）"
 assert_eq "$(wp_status g)" merged "workplan 的 PR 要標 merged"
+assert_eq "$(wp_change g)" done "workplan 的 change 要標 done"
 grep '++' "$LOG" | grep -q g || fail "收尾要記 ++：$(cat "$LOG")"
 cp "$WP0" "$R/openspec/workplan.yaml"
 
@@ -181,16 +203,52 @@ assert_eq "$(count 'branch -D')" 0 "worktree 刪不掉不刪分支"
 grep '??' "$LOG" | grep -q g || fail "要記 ??：$(cat "$LOG")"
 cp "$WP0" "$R/openspec/workplan.yaml"
 
-# --- 收尾：agent 還在就交給它自己 /archive；超過 30 分鐘記 ?? ---
+# --- 收尾：agent 還在就交給它自己 /archive ---
 cards "[$(merged g "$(ago 10)" "$D" '"idle"')]"
 round || fail "rc: $(cat "$FX/out")"
 assert_eq "$(grep -cE '^(opsx stop|openspec archive|git .*worktree remove|git .*branch -D)' "$OPSX_FAKE_LOG")" 0 "agent 還在不收尾：$(cat "$OPSX_FAKE_LOG")"
 grep '⏳' "$LOG" | grep -q g || fail "要記 ⏳：$(cat "$LOG")"
 assert_eq "$(wp_status g)" pending "agent 還在不動 workplan"
-cards "[$(merged g "$(ago 40)" "$D" '"idle"')]"
+
+# --- 收尾：drive 死了但 agent 還在（可能正在 /archive）不收尾 ---
+sleep 0 & dead=$!; wait "$dead"
+cards "[$(merged g "$(ago 10)" '{"mode":"autopilot","agent":"claude","pane":"w1:p1","drive_pid":'"$dead"'}' '"working"')]"
+round || fail "rc: $(cat "$FX/out")"
+assert_eq "$(grep -cE '^(opsx stop|openspec archive)' "$OPSX_FAKE_LOG")" 0 "drive 死了不等於 agent 不在：$(cat "$OPSX_FAKE_LOG")"
+
+# --- 收尾：合併超過 30 分鐘、agent 在忙，只記 ?? ---
+cards "[$(merged g "$(ago 40)" "$D" '"working"')]"
 round || fail "rc: $(cat "$FX/out")"
 assert_eq "$(count 'openspec archive')" 0
 grep '??' "$LOG" | grep -q g || fail "超過 30 分鐘記 ??：$(cat "$LOG")"
+
+# --- 收尾：網頁上合併、agent idle 超過 30 分鐘，沒人會 /archive，coordinator 收 ---
+printf '{"demo/g":{"mode":"autopilot","agent":"claude","pane":"w1:p2","drive_pid":null,"branch":"feat/g/m"}}' > "$DISP"
+cards "[$(merged g "$(ago 40)" "$D" '"idle"')]"
+round || fail "rc: $(cat "$FX/out")"
+got="$(grep -E '^(opsx stop|openspec archive)' "$OPSX_FAKE_LOG")"
+assert_eq "$got" "opsx stop g --repo $R
+openspec archive g -y" "idle 超過 30 分鐘要 stop 再收尾：$(cat "$OPSX_FAKE_LOG")"
+cp "$WP0" "$R/openspec/workplan.yaml"
+
+# --- 收尾：沒派過的卡（dispatch.json 沒有）不收尾，留給人 ---
+rm -f "$DISP"
+cards "[$(merged g 2026-11-07T12:00:00Z null null)]"
+round || fail "rc: $(cat "$FX/out")"
+assert_eq "$(grep -cE '^(opsx stop|openspec archive|git .*worktree remove|git .*branch -D)' "$OPSX_FAKE_LOG")" 0 "沒派過不收尾：$(cat "$OPSX_FAKE_LOG")"
+grep -- '--' "$LOG" | grep -q 'demo/g' || fail "要記 --：$(cat "$LOG")"
+assert_eq "$(wp_status g)" pending "沒派過不動 workplan"
+
+# --- 收尾：一個 PR 兩個 change，只收了一個，PR 不標 merged、依賴它的不派 ---
+mkcard ca af
+printf '{"demo/ca":{"mode":"stopped","agent":"claude","pane":"w1:p5","drive_pid":null,"branch":"feat/core/m"}}' > "$DISP"
+cards "[$(merged ca 2026-11-07T12:00:00Z null null),{\"slug\":\"af\"}]"
+round || fail "rc: $(cat "$FX/out")"
+assert_eq "$(wp_change ca)" done "收尾的 change 標 done"
+assert_eq "$(wp_status core)" in-progress "cb 還沒 done，PR 不標 merged"
+assert_eq "$(count '^opsx dispatch af')" 0 "core 沒 merged，依賴它的不派：$(cat "$OPSX_FAKE_LOG")"
+assert_grep '^openspec archive ca -y$' "$OPSX_FAKE_LOG"
+cp "$WP0" "$R/openspec/workplan.yaml"; rm -f "$DISP" "$MEMO"
 
 # --- 收尾：依賴它的卡同一輪派出（PR 名跟 change 名不同） ---
 mkcard p
@@ -252,7 +310,8 @@ assert_grep "^opsx stop p1 --repo $R\$" "$OPSX_FAKE_LOG"; assert_eq "$(count '^o
 grep '⏳' "$LOG" | grep -q p1 || fail "要記 ⏳"
 
 # parked 之後 collect 真的會給的形狀：gate 還開著所以在「待處理」，stop 過所以 dispatch 是 null
-P1='{"slug":"p1","section":"待處理","dispatch":null,"waiting":{"type":"等待決定","gate_id":"g7","question":"等 a 合進 main 之後再做","recommended":null,"options":["等"]}}'
+P1='{"slug":"p1","section":"待處理","dispatch":null,"open_gates":[{"id":"g7","opened_at":null}],"waiting":{"type":"等待決定","gate_id":"g7","question":"等 a 合進 main 之後再做","recommended":null,"options":["等"]}}'
+cp "$MEMO" "$FX/memo.parked"
 
 # --- parked：沒有東西合就不重派、也不答 ---
 printf '{"demo/p1":{"mode":"stopped","agent":"codex","pane":"w1:p3","drive_pid":null},"demo/g":{"mode":"stopped","agent":"claude","pane":"w1:p2","drive_pid":null,"branch":"feat/g/m"}}' > "$DISP"
@@ -269,6 +328,32 @@ assert_eq "$got" "opsx answer p1 --gate g7 --repo $R
 opsx dispatch p1 --agent codex --mode autopilot --kind dev --repo $R" "先答 gate 再派：$(cat "$OPSX_FAKE_LOG")"
 grep '^opsx answer p1 ' "$OPSX_FAKE_LOG" | grep -q '合進 main 的 PR：g。' || fail "答案要說停下之後合了哪幾個 PR：$(cat "$OPSX_FAKE_LOG")"
 assert_eq "$(memo_get _parked demo/p1)" "" "重派後 memo 不再有 parked"
+
+# --- parked：答了 gate 但派不出去，下一輪 gate 已不是 open，只重試 dispatch ---
+cp "$FX/memo.parked" "$MEMO"
+cards "[$P1]"
+OPSX_TEST_FAIL_dispatch="dispatch: agent_pane_busy" round || fail "rc: $(cat "$FX/out")"
+assert_eq "$(count '^opsx answer p1')" 1 "第一輪答 gate"
+[ -n "$(memo_get _parked demo/p1)" ] || fail "派不出去 parked 要留著：$(cat "$MEMO")"
+cards '[{"slug":"p1","section":"待指派","dispatch":null}]'
+round || fail "rc: $(cat "$FX/out")"
+assert_eq "$(count '^opsx answer p1')" 0 "已答過不再答：$(cat "$OPSX_FAKE_LOG")"
+assert_grep "^opsx dispatch p1 --agent codex " "$OPSX_FAKE_LOG"
+assert_eq "$(memo_get _parked demo/p1)" "" "派出去後清 parked"
+
+# --- parked：人在板上答掉 gate（不是 coordinator 答的），清 parked、不派 ---
+cp "$FX/memo.parked" "$MEMO"
+cards '[{"slug":"p1","section":"待指派","dispatch":null}]'
+round || fail "rc: $(cat "$FX/out")"
+assert_eq "$(memo_get _parked demo/p1)" "" "人答掉 gate 要清 parked"
+assert_eq "$(count '^opsx (answer|dispatch) p1')" 0 "人停掉的卡不派：$(cat "$OPSX_FAKE_LOG")"
+
+# --- parked：人手動重派過，清 parked，agent 不見了照常重派 ---
+cp "$FX/memo.parked" "$MEMO"
+cards '[{"slug":"p1","section":"進行中","dispatch":'"$D"',"agent_status":"unknown"}]'
+round || fail "rc: $(cat "$FX/out")"
+assert_eq "$(memo_get _parked demo/p1)" "" "已派出要清 parked"
+assert_grep "^opsx dispatch p1 --agent claude " "$OPSX_FAKE_LOG"
 cp "$WP0" "$R/openspec/workplan.yaml"
 rm -f "$MEMO" "$DISP"
 

@@ -68,7 +68,16 @@ PY
   if [ ! -d "$wt" ]; then
     ensure_dir "$top/.claude/worktrees"
     if git -C "$top" show-ref --verify --quiet "refs/heads/$branch"; then git -C "$top" worktree add -q "$wt" "$branch"
-    else git -C "$top" worktree add -q "$wt" -b "$branch"; fi
+    else
+      # 主 checkout 可能不在 main、或還沒 pull 剛合併的依賴：有 remote 的 main 就從 fetch 後的它開。
+      # 沒有 remote 追蹤分支的（本機 repo、測試）只能從主 checkout 的 HEAD 開
+      local remote start=HEAD; remote="$(primary_remote "$top")"
+      if git -C "$top" show-ref --verify --quiet "refs/remotes/$remote/main"; then
+        git -C "$top" fetch -q "$remote" || die "dispatch: $top 的 git fetch $remote 失敗，不從舊的 $remote/main 開分支"
+        start="$remote/main"
+      fi
+      git -C "$top" worktree add -q --no-track "$wt" -b "$branch" "$start"
+    fi
   fi
 
   # workspace：workspaces.toml 記的是 label（人看的，例 agnetory-ai），herdr 的 tab create 只吃 id（w1），

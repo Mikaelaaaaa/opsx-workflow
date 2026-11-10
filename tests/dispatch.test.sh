@@ -183,6 +183,18 @@ echo "$out" | grep -q 'OPSX_USER' && echo "$out" | grep -q 'Your Name' || fail "
 assert_eq "$(cat "$OPSX_FAKE_LOG")" "" "refused dispatch must not touch herdr"
 git -C "$R3" config user.name t
 
+# --- 新分支從 fetch 後的 origin/main 開，不從主 checkout 當下的 HEAD（主 checkout 在 feat/x、origin/main 比本機新） ---
+B="$FX/upstream.git"; git init -q --bare -b main "$B"
+R5="$(mk_repo dep-card "$B")"; git -C "$R5" branch -M main; git -C "$R5" push -q origin main
+git -C "$R5" fetch -q origin
+git clone -q "$B" "$FX/other"; git -C "$FX/other" -c user.email=t@t -c user.name=t commit -q --allow-empty -m merged-dep; git -C "$FX/other" push -q origin main
+up="$(git -C "$FX/other" rev-parse HEAD)"
+git -C "$R5" switch -q -c feat/x; git -C "$R5" -c user.email=t@t -c user.name=t commit -q --allow-empty -m wip
+mkdir -p "$R5/openspec/changes/dep-card"; printf 'schema: opsx\nkind: dev\n' > "$R5/openspec/changes/dep-card/.openspec.yaml"
+printf '"dep-card" = "w1"\n' >> "$OPSX_STATE_DIR/workspaces.toml"
+out="$(cd "$R5" && opsx dispatch dep-card --agent claude --mode autopilot 2>&1)" || fail "dispatch dep-card: $out"
+assert_eq "$(git -C "$R5/.claude/worktrees/dep-card" rev-parse HEAD)" "$up" "新分支要長在 fetch 後的 origin/main"
+
 # --- stop ---
 : > "$OPSX_FAKE_LOG"; cd "$R"
 opsx stop retry-backoff >/dev/null 2>&1 || fail "stop"
