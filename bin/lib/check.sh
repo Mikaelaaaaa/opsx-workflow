@@ -50,9 +50,10 @@ check_subs() { # <主殼目錄>：印缺項，一行一個；沒有 subs/ 或全
       ' "$s/tasks.md"
     fi
     if [ -f "$s/design.md" ]; then
-      for d in $(grep -owE 'D[0-9]+' "$s/design.md" | sort -u); do
+      # LC_ALL=C：UTF-8 下中文字算 word 字元，「主殼D12」的 D12 會被 -w 漏掉
+      for d in $(LC_ALL=C grep -owE 'D[0-9]+' "$s/design.md" | sort -u); do
         if [ ! -f "$main/design.md" ]; then printf '%s/design.md: 引用 %s，但主殼沒有 design.md\n' "$rel" "$d"
-        elif ! grep -qwF "$d" "$main/design.md"; then printf '%s/design.md: 引用 %s，主殼 design.md 沒有\n' "$rel" "$d"; fi
+        elif ! LC_ALL=C grep -qwF "$d" "$main/design.md"; then printf '%s/design.md: 引用 %s，主殼 design.md 沒有\n' "$rel" "$d"; fi
       done
     fi
     parent=""; [ -f "$s/.openspec.yaml" ] && parent="$(sed -n 's/^parent: *//p' "$s/.openspec.yaml" | head -1)"

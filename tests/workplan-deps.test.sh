@@ -71,6 +71,12 @@ for s in p2 c3 c4 nope; do ! bash_fn st_workplan_merged "$R" "$s" || fail "$s �
 mkdir -p "$R/openspec/changes/c1"; printf 'schema: opsx\nkind: dev\n' > "$R/openspec/changes/c1/.openspec.yaml"
 assert_eq "$(bash_fn stage_name "$R" c1)" archive "所屬 PR merged 的子 change → archive"
 
+# --- PR 的 branch / status 寫在 changes 區塊後面也讀得到 ---
+R3="$(mk_repo late)"; mkdir -p "$R3/openspec"
+printf 'features:\n  - name: f\n    prs:\n      - name: p9\n        changes:\n          - name: c9\n            status: pending\n        branch: feat/p9/mikaela\n        status: merged\n' > "$R3/openspec/workplan.yaml"
+assert_eq "$(bash_fn workplan_branch "$R3" c9)" "feat/p9/mikaela" "changes 之後的 branch"
+bash_fn st_workplan_merged "$R3" c9 || fail "changes 之後的 status: merged 要讀到"
+
 # --- Scenario：舊格式照讀（只有 PR 層） ---
 R2="$(mk_repo old)"; mkdir -p "$R2/openspec"
 printf 'features:\n  - name: eval\n    prs:\n      - name: eval-core\n        branch: feat/eval-core-v2/mikaela\n        status: merged\n        changes:\n          - name: eval-core\n            status: pending\n' > "$R2/openspec/workplan.yaml"

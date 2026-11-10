@@ -30,12 +30,13 @@ wp_pr_field() { # <top> <slug> <field>
       if (pi >= 0 && i > pi) { pr = val(); ki = i + 2; if (hit == "" && pr == s) hit = pr; next }
       pi = -1; pr = ""; next
     }
+    ci >= 0 && $0 !~ /^ *(#|$)/ && ind() <= ci && $0 !~ /^ *- / { ci = -1 }
     pr != "" && ci < 0 && ind() == ki && index($0, k ":") == ki + 1 { f[pr] = val() }
     END { if (hit != "") print f[hit] }
   ' "$1/openspec/workplan.yaml"
 }
 st_workplan_merged() { [ "$(wp_pr_field "$1" "$2" status)" = merged ]; } # <top> <slug>
-st_split_into() { [ -f "$1/inbox.md" ] && awk 'NR==1 && !/^---/{exit} NR>1 && /^---/{exit} /^split_into:/{sub(/^split_into: */,""); print; exit}' "$1/inbox.md" || true; }
+st_split_into() { [ -f "$1/inbox.md" ] && awk 'NR==1 && !/^---/{exit} NR>1 && /^---/{exit} /^split_into:/{sub(/^split_into: */,""); sub(/\r$/,""); sub(/ +#.*$/,""); if ($0 ~ /^(\[ *\]|""|\047\047|~|null)?$/) exit; print; exit}' "$1/inbox.md" || true; }
 
 # 印「階段 · slug · kind · Read 清單」。沒卡印 explore。
 stage_of() { # <top> <slug>

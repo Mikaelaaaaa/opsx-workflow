@@ -9,7 +9,7 @@ d="$(card_dir)"
 slug="$(card_slug)"
 [ -f "$d/tasks.md" ] || exit 0          # 還沒到 apply，不擋
 
-if [ -d "$d/subs" ]; then
+if [ -d "$d/subs" ] && [ "$(st_open_gates "$d")" -eq 0 ]; then
   source "$OPSX_ROOT/bin/lib/check.sh"
   missing="$(check_subs "$d")"
   [ -z "$missing" ] || stop_block "opsx：${slug} 的子殼不齊（opsx check ${slug}）：
