@@ -42,13 +42,11 @@ opsx_answer() {
   result="$(OPSX_A_DIR="$d" OPSX_A_GATE="$gate" OPSX_A_GRANT="$grant" OPSX_A_TEXT="$answer" OPSX_A_REPO="$repo" OPSX_A_SLUG="$slug" \
             OPSX_A_SD="$OPSX_STATE_DIR" OPSX_A_NOW="$(now_iso)" OPSX_LIB="$OPSX_ROOT/bin/lib" "$OPSX_PY" -I - <<'PY'
 import os, re, sys, tomllib
-sys.path.insert(0, os.environ["OPSX_LIB"]); import authz, gatetype, jsonfile
+sys.path.insert(0, os.environ["OPSX_LIB"]); import authz, gatetype, grantactions, jsonfile
 e = os.environ
 d, gate, grant, text, repo, slug, sd, now = (e["OPSX_A_DIR"], e["OPSX_A_GATE"], e["OPSX_A_GRANT"], e["OPSX_A_TEXT"],
                                              e["OPSX_A_REPO"], e["OPSX_A_SLUG"], e["OPSX_A_SD"], e["OPSX_A_NOW"])
 key = "%s/%s" % (repo, slug)
-ACTION_RE = re.compile(r"^[a-z][a-z0-9_-]{0,31}$")   # 要當 grants.toml 的 key 與 hook 的比對字串，只准這些字元
-
 def fail(msg):
     print(msg, file=sys.stderr); sys.exit(2)
 
@@ -60,14 +58,16 @@ if not text:
 gates_path = os.path.join(d, "gates.md")
 src = open(gates_path, encoding="utf-8").read()
 parts = re.split(r"(?m)^(?=## )", src)
-idx = next((i for i, p in enumerate(parts) if p.startswith("## ") and p.split("\n", 1)[0][3:].strip() == gate), None)
-if idx is None:
+def field_of(section, name):
+    m = re.search(r"(?m)^%s:\s*(.*)$" % name, section); return m.group(1).strip() if m else ""
+named = [i for i, p in enumerate(parts) if p.startswith("## ") and p.split("\n", 1)[0][3:].strip() == gate]
+if not named:
     fail("answer: gates.md 裡沒有 gate「%s」（有：%s）" % (gate, ", ".join(p.split("\n", 1)[0][3:].strip() for p in parts if p.startswith("## ")) or "無"))
+idx = next((i for i in named if field_of(parts[i], "status") == "open"), None)
+if idx is None:
+    fail("answer: gate「%s」不是 open（status: %s），不能再回" % (gate, "、".join(field_of(parts[i], "status") or "缺" for i in named)))
 sec = parts[idx]
-def field(name):
-    m = re.search(r"(?m)^%s:\s*(.*)$" % name, sec); return m.group(1).strip() if m else ""
-if field("status") != "open":
-    fail("answer: gate「%s」不是 open（status: %s），不能再回" % (gate, field("status") or "缺"))
+def field(name): return field_of(sec, name)
 gtype, action = field("type"), field("action")
 if grant and gatetype.normalize(gtype) != gatetype.APPROVAL:
     fail("answer: --grant 只對 type: approval 的 gate 有意義，「%s」是 %s" % (gate, gtype or "沒寫 type"))
@@ -75,8 +75,8 @@ if grant == "repo" and action == "merge":
     fail("answer: merge 永遠要人，不能給「這個 repo 永遠」")
 if grant and not action:
     fail("answer: gate「%s」沒寫 action:，不知道要授權哪個動作" % gate)
-if grant and not ACTION_RE.match(action):
-    fail("answer: gate「%s」的 action「%s」不合格（只准 [a-z][a-z0-9_-]，最多 32 字），不能當授權的 key" % (gate, action))
+if grant and action not in grantactions.ACTIONS:
+    fail("answer: gate「%s」的 action「%s」不是閘門會查的動作，授權不會生效；合法值：%s" % (gate, action, ", ".join(grantactions.ACTIONS)))
 
 dispatch_path = os.path.join(sd, "dispatch.json")
 dispatch = jsonfile.load(dispatch_path)

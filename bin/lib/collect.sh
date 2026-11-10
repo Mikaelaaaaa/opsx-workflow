@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
 # opsx collect [--root <dir>] [--state <dir>]：看板唯一的資料來源，印一份 JSON，不寫檔（mr.sh 的 cache/ 除外）。
 # 讀三處：<root>/*/openspec/changes/*/（含 archive/）、<state>/{dispatch.json,grants.toml,workspaces.toml,unfiled/*.md}、
-# herdr agent list（只在 HERDR_ENV 設定時）與 glab / gh（經 mr_json）。specs/board-collect/spec.md。
+# herdr agent list（不看 HERDR_ENV，叫不通記 errors）與 glab / gh（經 mr_json）。specs/board-collect/spec.md。
 #
 # 輸出：{generated_at, scopes[{workspace, repos[]}], repo_paths{repo: 實體路徑}, cards[], unfiled[{slug, title, source, found}],
-#       last_sync（sync.log 最後一行，沒有檔時 null）， unmatched_agents[], errors[{source,message}]}
+#       last_sync（sync.log 最後一行，沒有檔時 null）， unmatched_agents[], errors[{source,message}],
+#       milestones{repo: {current, goal, remaining}}（只列設了 current_milestone 的 repo）}
 # 每張卡：{repo, slug, title, kind, stage, section, since, waiting, open_gates[{id, opened_at}], dispatch, status, agent_status, mr,
-#        source, upstream, stale, session（收進 session 的主 change 才有："<repo>/<feature>"）}
+#        source, upstream, stale, priority{level, reason, overridden}（已歸檔或算不出來時 null）,
+#        notes[{at, text}]（inbox.md ## 派工指示，舊的在前）, session（收進 session 的主 change 才有："<repo>/<feature>"）}
 # sessions[]：{repo, feature, section, main_done, main_total, sub_done, sub_total, current{slug, stage}|null,
 #   mains[{slug, pr_status, stage, section, dispatch, agent_status, open_gates, waiting, subs[{slug, status, stage, worker, open_gates, waiting}]}]}
 #   section ∈ 待處理 | 進行中 | 待指派 | 收件匣 | 已完成（收件匣＝沒派出、stage 還是 explore）；waiting.type ∈ 等待授權 | 等待決定 | type 不明 | 可以合併 | 終端機等待輸入；waiting.needs ∈ run | null
@@ -91,20 +93,20 @@ opsx_collect() {
   done
   [ -f "$work/repos" ] || : > "$work/repos"; [ -f "$work/worktrees" ] || : > "$work/worktrees"
 
-  # herdr：只在 herdr 內問；失敗記 errors，不中斷
+  # herdr：一律問（它靠 socket，不需要在 pane 裡）；失敗記 errors，不中斷
   local herdr_err=""
-  if [ -n "${HERDR_ENV:-}" ]; then
-    herdr agent list > "$work/agents.json" 2>"$work/agents.err" || herdr_err="herdr agent list 失敗：$(head -c 200 "$work/agents.err")"
-  else
-    herdr_err="不在 herdr 內（HERDR_ENV 未設），agent 狀態不可得"
-  fi
+  herdr agent list > "$work/agents.json" 2>"$work/agents.err" || herdr_err="herdr agent list 失敗：$(head -c 200 "$work/agents.err")"
 
   # 讀卡的檔與全域狀態，組 JSON
   OPSX_C_WORK="$work" OPSX_C_STATE="$state" OPSX_C_HERDR_ERR="$herdr_err" OPSX_C_NOW="$now" OPSX_C_LIB="$OPSX_ROOT/bin/lib" "$OPSX_PY" -I - <<'PY'
 import datetime, json, os, re, sys, tomllib
 sys.path.insert(0, os.environ["OPSX_C_LIB"])
 import gatetype
+import grantactions
 from chain import load_workplan
+
+sys.path.insert(0, os.path.join(os.environ["OPSX_ROOT"], "bin", "lib"))
+import priority
 
 work, state = os.environ["OPSX_C_WORK"], os.environ["OPSX_C_STATE"]
 errors = []
@@ -135,6 +137,36 @@ worktrees = [r for r in read(os.path.join(work, "worktrees")).split("\n") if r]
 workspaces = load_toml(os.path.join(state, "workspaces.toml")).get("repos", {})
 grants = load_toml(os.path.join(state, "grants.toml")).get("repos", {})
 dispatch = load_json(os.path.join(state, "dispatch.json"), {}) or {}
+
+# 等級跟 opsx priority 同一個計算，一個 repo 算一次（依賴繼承要看整個 repo）。workplan 壞了：那個 repo 的卡都沒有等級
+levels, milestones, unreadable = {}, {}, {}
+for r, top in repo_paths.items():
+    try:
+        levels[r] = priority.levels(top)
+        plan = priority.load_plan(top)
+    except priority.WorkplanUnreadable as e:
+        levels[r] = None   # sessions 那段多半也會記同一個檔；輸出前才補記它沒記到的，一個檔一筆
+        unreadable[os.path.join(top, "openspec", "workplan.yaml")] = str(e)
+        continue
+    except priority.PriorityError as e:
+        errors.append({"source": os.path.join(top, "openspec", "workplan.yaml"), "message": str(e)})
+        levels[r] = None
+        continue
+    if plan["current"]:
+        remaining = sum(1 for f in plan["features"] if f.get("milestone") == plan["current"]
+                        for pr in f.get("prs") or [] for ch in pr.get("changes") or [] if ch.get("status") != "done")
+        milestones[r] = {"current": plan["current"], "goal": plan["goals"][plan["current"]], "remaining": remaining}
+
+def priority_of(repo, slug, archived, inbox_path):
+    if archived or levels[repo] is None:
+        return None
+    got = levels[repo].get(slug)   # 掃目錄之後才算等級，中間被 archive 搬走的卡不在裡面
+    if got is None:
+        return None
+    if "error" in got:
+        errors.append({"source": inbox_path, "message": got["error"]})
+        return None
+    return got
 
 # scopes：每個 workspace 底下掛哪些 repo；沒掛的 repo 歸在 workspace null
 by_ws = {}
@@ -198,6 +230,20 @@ def frontmatter(inbox, key):
     m = re.search(r"^%s:\s*(.*)$" % key, inbox, re.M)
     return m.group(1).strip() or None if m else None
 
+# 段落範圍跟 note.sh 的 note_append 寫入時認的一樣，兩邊認定不同就會寫得進去、看板看不到
+def notes_of(inbox, slug, path):
+    lines = inbox.splitlines()
+    head = next((i for i, l in enumerate(lines) if re.fullmatch(r"## 派工指示\s*", l)), None)
+    if head is None: return []
+    notes = []
+    for l in lines[head + 1:]:
+        if l.startswith("## "): break
+        if not l.strip(): continue
+        m = re.fullmatch(r"- (\S+) (.+)", l)
+        if m: notes.append({"at": m.group(1), "text": m.group(2).strip()})
+        else: errors.append({"source": path, "message": "%s 的派工指示格式不對：%s" % (slug, l)})
+    return notes
+
 def kind_of(d):
     m = re.search(r"^kind:\s*(\S+)", read(os.path.join(d, ".openspec.yaml")), re.M)
     return m.group(1) if m else "dev"
@@ -212,8 +258,8 @@ def waiting_of(card, gates, agent_status):
         if gtype is None:
             return {"type": "type 不明", "action": None, "options": [], **base}
         if gtype == gatetype.APPROVAL:
-            opts = ["這次", "這張卡", "這個 repo 永遠", "拒絕"]
-            if g.get("action") == "merge": opts = ["這次", "這張卡", "拒絕"]   # merge 永遠不可長期授權，answer 會拒，按鈕就不要給
+            # action 不在閘門會查的動作內（含 merge、沒寫）時 answer --grant 一定失敗，授權選項就不要給
+            opts = ["這次", "這張卡", "這個 repo 永遠", "拒絕"] if g.get("action") in grantactions.ACTIONS else ["拒絕"]
             return {"type": "等待授權", "action": g.get("action"), "options": opts, **base}
         opts = [o.strip() for o in (g.get("選項") or "").split("|") if o.strip()]
         rec = base["recommended"]
@@ -272,6 +318,8 @@ for line in read(os.path.join(work, "cards.tsv")).split("\n"):
         "agent_status": agent_status, "mr": c["mr"],
         "grants_repo": grants.get(c["repo"]), "path": d,
         "source": frontmatter(inbox, "source"), "upstream": frontmatter(inbox, "upstream"), "stale": frontmatter(inbox, "stale") == "true",
+        "priority": priority_of(c["repo"], c["slug"], c["archived"], os.path.join(d, "inbox.md")),
+        "notes": notes_of(inbox, c["slug"], os.path.join(d, "inbox.md")),
     })
 
 order = {"待處理": 0, "進行中": 1, "待指派": 2, "收件匣": 3, "已完成": 4}
@@ -400,6 +448,8 @@ def orphan_reason(key, pane):
     # .claude/worktrees/ 也放別的工具自己開的 worktree：dispatch.json 沒記過、或記的不是這個 pane 的，不是 opsx 開的 pane
     entry = dispatch.get("%s/%s" % key)
     if entry is None or str(entry.get("pane")) != str(pane): return None
+    # opsx 自己已經關掉這個 pane（stop 記 pane_closed_at、reap 記 reaped_at）：同一個 id 現在是別人的 pane
+    if entry.get("pane_closed_at") or entry.get("reaped_at"): return None
     c = card_by_key.get(key)
     if c is None:
         # 卡不在 cards 裡不等於卡目錄不存在：repo 沒被這次掃描、或被當舊卡濾掉的活卡不能算
@@ -410,8 +460,18 @@ def orphan_reason(key, pane):
     if entry.get("mode") == "stopped": return "stopped"
     return None
 
+# 活卡（沒歸檔、不是 split、dispatch.json 不是 stopped）佔著的 pane：續接、代管（via）的卡共用同一個 pane 與 worktree，
+# worktree_of 又是最後一筆勝出，所以 pane 上只要還有活卡，這個 pane 就不是孤兒，不管 worktree 現在算給誰。
+live_panes = set()
+for k, e in dispatch.items():
+    key = tuple(k.split("/", 1)); c = card_by_key.get(key)
+    if c is None or c["archived"] or c["stage"] == "split" or e.get("mode") == "stopped": continue
+    live_panes.add(str(e.get("pane")))
+    if e.get("via"): live_panes.add(str((dispatch.get("%s/%s" % (key[0], e["via"])) or {}).get("pane")))
+
 orphans = []
 for a in (agents or []):
+    if str(a.get("pane_id")) in live_panes: continue
     key = next((k for k in (worktree_owner(p) for p in (a.get("cwd"), a.get("foreground_cwd")) if p) if k), None)
     reason = orphan_reason(key, a.get("pane_id")) if key else None
     if reason:
@@ -422,7 +482,9 @@ unmatched = [{"name": a.get("terminal_title_stripped") or a.get("agent") or "", 
               "agent_status": a.get("agent_status"), "cwd": a.get("cwd"), "workspace": a.get("workspace_id"),
               "orphan": str(a.get("pane_id")) in orphan_panes}
              for a in (agents or []) if str(a.get("pane_id")) not in matched_panes]
+reported = {e["source"] for e in errors}
+errors.extend({"source": p, "message": m} for p, m in unreadable.items() if p not in reported)
 print(json.dumps({"generated_at": now, "scopes": scopes, "repo_paths": repo_paths, "cards": cards, "sessions": sessions, "unfiled": unfiled, "last_sync": last_sync, "unmatched_agents": unmatched, "orphans": orphans, "errors": errors,
-                  "legacy": legacy, "worktrees_skipped": worktrees}, ensure_ascii=False))
+                  "milestones": milestones, "legacy": legacy, "worktrees_skipped": worktrees}, ensure_ascii=False))
 PY
 }

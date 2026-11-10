@@ -37,7 +37,7 @@ opsx_new() {
   local slug body source=me; slug="me-$(date '+%Y%m%d-%H%M')"; body="$(mktemp "${TMPDIR:-/tmp}/opsx-new.XXXXXX")"
   trap 'rm -f "$body"' RETURN
   [ ${#names[@]} -eq 0 ] || source=paste
-  printf -- '---\ntype: 功能\nsource: %s\nfound: %s\nrelated:\n---\n\n## 一句話\n\n%s\n\n' "$source" "$(date '+%Y-%m-%d')" "$text" > "$body"
+  printf -- '---\ntype: 功能\nsource: %s\nfound: %s\nrelated:\nkind_of_work: planned\n---\n\n## 一句話\n\n%s\n\n' "$source" "$(date '+%Y-%m-%d')" "$text" > "$body"
   if [ ${#names[@]} -gt 0 ]; then
     printf '## 附件\n\n' >> "$body"
     printf -- '- attachments/%s\n' "${names[@]}" >> "$body"
