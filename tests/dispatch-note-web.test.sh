@@ -47,4 +47,16 @@ const done = notesSection(card({notes: notes.slice(0, 1), section: '已完成'})
 assert.ok(done.includes('先跑 lint') && !done.includes('note-add'), '已完成的卡不給追加：' + done);
 assert.strictEqual(notesSection(card({section: '已完成'})), '', '已完成又沒有指示就不顯示這段');
 JS
+
+# opsx note 寫了 inbox.md 但送不進 pane 時退出非零；看板要認得這句並清掉輸入框，否則重送會重複寫同一條
+node - "$OPSX_ROOT/herdr-board/web/index.html" "$OPSX_ROOT/bin/lib/note.sh" <<'JS' || fail "已寫入的失敗要清輸入框"
+const fs = require('node:fs');
+const assert = require('node:assert');
+const html = fs.readFileSync(process.argv[2], 'utf8'), sh = fs.readFileSync(process.argv[3], 'utf8');
+const MARK = 'inbox.md 已寫';
+assert.ok(sh.includes(`die "note: ${MARK}`), `note.sh 送 pane 失敗的訊息要以「note: ${MARK}」開頭`);
+const s = html.indexOf('function submitNote('), e = html.indexOf('\n}', s);
+if (s < 0) throw new Error('index.html 找不到 function submitNote(');
+assert.ok(html.slice(s, e).includes(MARK), `submitNote 要在錯誤訊息含「${MARK}」時清掉輸入框`);
+JS
 echo ok

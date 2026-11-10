@@ -664,9 +664,14 @@ async function act(label,fn){
   catch(e){toast(label+' 失敗：'+e.message,true);}
   finally{ui.busy=false;}
 }
-/* 送成功才清輸入框：失敗時打的字留著可以重送（act 成功後重畫抽屜會保留輸入框的值，所以要在重畫前清） */
+/* 指示寫進 inbox.md 才清輸入框（重畫抽屜會保留輸入框的值，所以要在重畫前清）。
+   沒寫進去的失敗留著字可以重送；「inbox.md 已寫」是 note.sh 寫了檔、只是送不進 pane，重送會重複寫一條，所以也清 */
 function submitNote(c,text){
-  act(`opsx note ${c.slug} -- "${text}"`,async()=>{const r=await api.post('note',noteBody(c,text));const el=$('#note-add');if(el)el.value='';return r;});
+  const clear=()=>{const el=$('#note-add');if(el)el.value='';};
+  act(`opsx note ${c.slug} -- "${text}"`,async()=>{
+    try{const r=await api.post('note',noteBody(c,text));clear();return r;}
+    catch(e){if(e.message.includes('inbox.md 已寫'))clear();throw e;}
+  });
 }
 function answer(c,text,grant){
   if(!c.waiting||!c.waiting.gate_id){toast('這一項沒有 gate 可回',true);return;}
