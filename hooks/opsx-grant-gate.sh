@@ -27,7 +27,8 @@ GATE_MSG="用 Edit 或 Write 寫 gates.md（type、問題、建議、證據、�
 
 level3() { deny "opsx 授權閘門：「$1」是永遠要人的動作（第三級），任何授權蓋不掉。$GATE_MSG"; }
 
-# 合併唯一的例外：看板「合併」按鈕（opsx merge）在 dispatch.json 這張卡寫了 merge_approved = <MR head sha>。herdr-board D5。
+# 合併唯一的例外：看板「合併」按鈕（opsx merge）在受保護位置（bin/lib/authz.py）這張卡寫了 merge_approved = <MR head sha>。
+# dispatch.json 的同名欄位沙盒內寫得到，一律不看。herdr-board D5。
 # 放行條件：指令整條只有這一個 merge（沒有 && ; | $( ` 夾帶別的）、合併的 MR 號碼等於卡的 report.md
 # 那條、現在的 head sha 等於核准的 sha。核准不刪：它綁 sha，合併成功後 MR 變 merged 就自然不成立，又推了 commit 也不成立；
 # 不在執行前刪，是因為 glab 可能失敗（405 要 rebase、網路），刪了人就得重按。放行後不 exit，後面的第三級檢查照跑。
@@ -36,10 +37,10 @@ merge_gate() { # 回 0 放行；否則 deny（deny 會 exit）
   source "$OPSX_ROOT/bin/lib/mr.sh"
   local d="$top/openspec/changes/$slug" approved head want_iid cmd_iid
   printf '%s' "$c" | grep -qE '(&&|\|\||;|\||\$\(|`)' && deny "opsx 授權閘門：合併指令要單獨一條，不能跟別的指令串在一起（收到：${c}）"
-  approved="$(OPSX_KEY="$repo/$slug" OPSX_LIB="$OPSX_ROOT/bin/lib" "$OPSX_PY" -I - "$OPSX_STATE_DIR/dispatch.json" <<'PY'
+  approved="$(OPSX_KEY="$repo/$slug" OPSX_SD="$OPSX_STATE_DIR" OPSX_LIB="$OPSX_ROOT/bin/lib" "$OPSX_PY" -I - <<'PY'
 import os, sys
-sys.path.insert(0, os.environ["OPSX_LIB"]); import jsonfile
-print(jsonfile.load(sys.argv[1]).get(os.environ["OPSX_KEY"], {}).get("merge_approved") or "")
+sys.path.insert(0, os.environ["OPSX_LIB"]); import authz
+print(authz.load(os.environ["OPSX_SD"]).get(os.environ["OPSX_KEY"], {}).get("merge_approved") or "")
 PY
 )" || deny "$PY_FAIL"
   [ -n "$approved" ] || deny "opsx 授權閘門：merge 是永遠要人的動作（第三級）。要人在看板上按「合併」（opsx merge ${slug}）才會放行；在這之前把 MR 弄到五條件全綠（/babysit），不要自己合"

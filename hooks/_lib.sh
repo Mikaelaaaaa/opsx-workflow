@@ -45,13 +45,13 @@ ctx() { # 注入一段 context（PreToolUse / UserPromptSubmit / SessionStart �
 }
 stop_block() { jq -n --arg reason "$1" '{decision:"block",reason:$reason}'; exit 0; }
 
-# grants：grants.toml [repos."<repo>"] <action> = true（這個 repo 永遠）、dispatch.json 這張卡的 grants 含 action（這張卡）、
-# 或 dispatch.json 這張卡的 once 含 action（這次：用掉就刪；不記的話 agent 重試還是被 deny，等於沒答）。
-# grants.toml 壞掉時當成沒授權，不放行。
+# grants：grants.toml [repos."<repo>"] <action> = true（這個 repo 永遠）、受保護位置（bin/lib/authz.py）這張卡的 grants 含 action（這張卡）、
+# 或受保護位置這張卡的 once 含 action（這次：用掉就刪；不記的話 agent 重試還是被 deny，等於沒答）。
+# dispatch.json 的 grants / once 沙盒內寫得到，一律不看。grants.toml 壞掉時當成沒授權，不放行。
 has_grant() { # <repo> <slug> <action>：0 有授權、3 沒授權，其他值是 python 本身失敗
   OPSX_REPO="$1" OPSX_SLUG="$2" OPSX_ACTION="$3" OPSX_SD="$OPSX_STATE_DIR" OPSX_LIB="$OPSX_ROOT/bin/lib" "$OPSX_PY" -I - <<'PY'
 import os, sys, tomllib
-sys.path.insert(0, os.environ["OPSX_LIB"]); import jsonfile
+sys.path.insert(0, os.environ["OPSX_LIB"]); import authz
 sd = os.environ["OPSX_SD"]; repo = os.environ["OPSX_REPO"]; slug = os.environ["OPSX_SLUG"]; act = os.environ["OPSX_ACTION"]
 key = "%s/%s" % (repo, slug)
 try:
@@ -61,8 +61,7 @@ except FileNotFoundError:
     pass
 except tomllib.TOMLDecodeError as e:
     print("opsx: grants.toml 壞了（%s），當成沒授權" % e, file=sys.stderr)
-p = os.path.join(sd, "dispatch.json")
-card = jsonfile.load(p).get(key, {})
+card = authz.load(sd).get(key, {})
 if act in card.get("grants", []): sys.exit(0)
 if act not in card.get("once", []): sys.exit(3)
 consumed = {"ok": False}
@@ -70,7 +69,7 @@ def consume(d):
     once = d.get(key, {}).get("once", [])
     if act in once:
         once.remove(act); consumed["ok"] = True
-jsonfile.update(p, consume)
+authz.update(sd, consume)
 sys.exit(0 if consumed["ok"] else 3)
 PY
 }
