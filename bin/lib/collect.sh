@@ -286,7 +286,10 @@ def sub_stage(d, status):
 
 def sub_node(main_dir, ch):
     d = os.path.join(main_dir, "subs", ch["name"])
-    status = load_json(os.path.join(d, "status.json"), None)
+    status_path = os.path.join(d, "status.json")
+    status = load_json(status_path, None)
+    if status is not None and not isinstance(status, dict):   # 跟 JSON 壞掉同樣處理：記 errors、站點改由檔推，不讓一個檔毀掉整份
+        errors.append({"source": status_path, "message": "status.json 要是 object：%r" % (status,)}); status = None
     gates_path = os.path.join(d, "gates.md")
     gates = parse_gates(read(gates_path))
     return {"slug": ch["name"], "status": ch.get("status"), "stage": sub_stage(d, status),

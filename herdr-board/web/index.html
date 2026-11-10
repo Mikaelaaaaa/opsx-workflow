@@ -583,7 +583,8 @@ function renderTree(){
   const ans=r=>{const w=r.waiting;if(!w||!w.gate_id)return '';
     const b=(o,text,grant)=>`<button class="sm ${o===w.recommended?'primary':''}${o==='拒絕'?' ghost danger':''}" data-act="tree-answer" data-main="${esc(r.main)}" data-sub="${esc(r.sub||'')}" data-gate="${esc(w.gate_id)}" data-text="${esc(text)}" data-grant="${esc(grant||'')}">${esc(o)}</button>`;
     return `<div class="answers">${(w.options||[]).map(o=>w.type==='等待授權'&&o!=='拒絕'?b(o,'允許',GRANT_OF[o]):b(o,o)).join('')}</div>`;};
-  const rows=treeRows(s).map(r=>`<div class="tree${r.sub?' sub':''}"><span class="slug">${esc(r.sub||r.main)}</span><span class="t">${esc(r.text)}</span>${ans(r)}</div>`).join('');
+  /* 主 change 那行可開回卡片抽屜：合併、開啟 pane、停止與自由回覆都在那裡，樹上只回有選項的 gate */
+  const rows=treeRows(s).map(r=>`<div class="tree${r.sub?' sub':''}"><span class="slug">${esc(r.sub||r.main)}</span><span class="t">${esc(r.text)}</span>${r.sub?'':`<button class="sm ghost" data-act="ev-open" data-key="${esc(s.repo+'/'+r.main)}">開卡</button>`}${ans(r)}</div>`).join('');
   $('#drawer').innerHTML=`<header><div class="ttl"><h2>${esc(s.feature)}</h2><div class="flow">${esc(sessionLine(s))}</div></div><button class="x" data-act="close" aria-label="關閉">×</button></header><div class="body"><section><h3>主 change → 子 change <span class="src">workplan · subs/</span></h3>${rows}</section></div>`;
   $('#drawer').hidden=false;$('#scrim').hidden=false;
 }

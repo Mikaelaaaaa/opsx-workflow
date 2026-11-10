@@ -284,7 +284,7 @@ ROOT_SAVED="$ROOT"; ROOT="$R6"
 # bt：主 change 在 review（tasks 全勾、tests green），底下三個子殼
 D=$(mkcard s bt); printf '## 1\n\n- [x] 1.1 a\n' > "$D/tasks.md"; printf '{"phase":"review","tests":"green"}' > "$D/status.json"
 mkdir -p "$D/subs/ct" "$D/subs/as" "$D/subs/ui"
-printf '# p\n' > "$D/subs/ct/proposal.md"; printf '## 1\n\n- [ ] 1.1 a\n' > "$D/subs/ct/tasks.md"
+printf '# p\n' > "$D/subs/ct/proposal.md"; printf '## 1\n\n- [ ] 1.1 a\n' > "$D/subs/ct/tasks.md"; printf '[]' > "$D/subs/ct/status.json"   # 合法 JSON 但不是 object
 printf '## g1\ntype: decision\nstatus: open\n問題: 哪個？\n選項: A | B (Recommended)\n' > "$D/subs/as/gates.md"
 printf '# p\n' > "$D/subs/ui/proposal.md"; printf '{"phase": "apply", "tests": "unknown", "worker": "subagent-2"}' > "$D/subs/ui/status.json"
 mkcard s fx1 >/dev/null; mkcard s solo >/dev/null
@@ -376,6 +376,7 @@ print([k for k in ks if m[k]!=c[k]], m["slug"], m["pr_status"], m["stage"], m["s
 assert_eq "$(q "$F" mains.1.subs.1.open_gates)" '[{"id": "g1", "opened_at": null}]'
 assert_eq "$(q "$F" mains.1.subs.1.waiting.type) $(q "$F" mains.1.subs.1.waiting.recommended) $(q "$F" mains.1.subs.1.stage)" "等待決定 B inbox"
 assert_eq "$(q "$F" mains.1.subs.0.stage) $(q "$F" mains.1.subs.0.worker) $(q "$F" mains.1.subs.0.status)" "apply null in-progress"
+assert_eq "$(printf '%s' "$J" | python3 -I -c 'import json,sys;print(sum(1 for e in json.load(sys.stdin)["errors"] if e["source"].endswith("/subs/ct/status.json")))')" 2 "status.json 不是 object 記 errors（bt/ct 在 fb 與 fdup 各讀一次），站點改由檔推"
 assert_eq "$(q "$F" mains.1.subs.2.stage) $(q "$F" mains.1.subs.2.worker)" "apply subagent-2"
 # 1.3 一行：計數、目前站、section（子 change 的 gate 讓 session 進待處理，主 change 卡本身是進行中）
 assert_eq "$(q "$F" main_done)/$(q "$F" main_total) $(q "$F" sub_done)/$(q "$F" sub_total)" "1/2 5/7"
