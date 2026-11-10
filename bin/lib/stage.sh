@@ -21,11 +21,11 @@ st_subagent_running() { # <主殼目錄>
   for s in "$d"/subs/*/; do
     s="${s%/}"; [ -f "$s/status.json" ] || continue
     name="$(basename "$s")"
-    grep -qE "^[[:space:]]*- \[ \] [^ ]+ \`$name\`" "$d/tasks.md" || continue
+    grep -qE "^[[:space:]]*- \[ \] [0-9.]+ \`$name\`" "$d/tasks.md" || continue
     jq -e --argjson now "$now" '
       (.at | capture("^(?<t>.{19})(?<s>[+-])(?<h>[0-9]{2}):(?<m>[0-9]{2})$")) as $p
       | (($p.t + "Z" | fromdateiso8601) - (if $p.s == "+" then 1 else -1 end) * (($p.h | tonumber) * 3600 + ($p.m | tonumber) * 60)) as $at
-      | (.worker | startswith("subagent-")) and .step < .total and ($now - $at) >= 0 and ($now - $at) <= 7200
+      | (.worker | startswith("subagent-")) and (.step | type) == "number" and (.total | type) == "number" and .step < .total and ($now - $at) >= 0 and ($now - $at) <= 7200
     ' "$s/status.json" >/dev/null 2>&1 && return 0
   done
   return 1
