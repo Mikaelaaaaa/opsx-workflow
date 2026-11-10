@@ -21,7 +21,7 @@ opsx <command> [args]
   status <phase> <n>/<total> <label…>  寫 changes/<slug>/status.json（--tests green|red · --change <slug> · --show）
   dispatch <slug> [--agent --model --mode --kind --repo]   派工：worktree + herdr tab + agent start + 第一句 + dispatch.json
   drive <slug> [--repo]                「開到可合併」迴圈（dispatch --mode autopilot 會自己跑；手動跑也會登記 pid）
-  coordinate [--dry]                   中控跑一輪：核准合併、收尾、答 gate、重派死掉的卡、派待指派的卡（launchd 每 5 分鐘）
+  coordinate [--dry]                   中控跑一輪：收尾已合併的卡、答 gate、重派死掉的卡、派待指派的卡（不合併；launchd 每 5 分鐘）
   stop <slug> [--repo]                 停：kill drive、關 pane、dispatch.json 標 stopped
   collect [--root ~/code] [--state …]  看板的資料：掃 repo 的卡 + 全域狀態 + herdr / glab，印一份 JSON（不寫檔）
   answer <slug> --gate <id> [--grant this|card|repo] <text…>   回 gate：gates.md answered、授權落檔、decisions、herdr agent prompt
