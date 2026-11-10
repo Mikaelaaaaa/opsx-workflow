@@ -55,12 +55,17 @@ refuse() { # refuse <label> <runner 的 TMPDIR> <結果目錄>：runner 要非�
 # 拒跑：工作 repo 的上層目錄有 CLAUDE.md 或 .claude/，訊息指名該目錄與檔名（這幾條不需要中性 base）
 mkdir -p "$FX/anc-md/t" "$FX/anc-dot/.claude" "$FX/anc-dot/t"
 : > "$FX/anc-md/CLAUDE.md"
+# 斷言 walk 自己的訊息：測試目錄名含 test，禁用字的拒跑訊息也會出現路徑與 CLAUDE.md 字樣，只比那些字會漏掉 walk 被拿掉
 refuse anc-md "$FX/anc-md/t" "$FX/res-anc-md"
-assert_grep "$(real "$FX/anc-md")" "$FX/anc-md.err"
-assert_grep "CLAUDE.md" "$FX/anc-md.err"
+assert_grep "has $(real "$FX/anc-md")/CLAUDE.md above it, refusing" "$FX/anc-md.err"
+assert_grep "set TMPDIR to a directory with no CLAUDE.md or .claude above it" "$FX/anc-md.err"
 refuse anc-dot "$FX/anc-dot/t" "$FX/res-anc-dot"
-assert_grep "$(real "$FX/anc-dot")" "$FX/anc-dot.err"
-assert_grep "\.claude" "$FX/anc-dot.err"
+assert_grep "has $(real "$FX/anc-dot")/.claude above it, refusing" "$FX/anc-dot.err"
+
+# 拒跑：結果目錄在候選者 ls ../.. 看得到的位置（temp 目錄底下），否則 D3 搬進去的前幾次工作 repo 又變成鄰居
+mkdir -p "$FX/res-in-tmp"
+refuse res-in-tmp "$FX/res-in-tmp" "$FX/res-in-tmp/opsx-results"
+assert_grep "results dir $(real "$FX/res-in-tmp/opsx-results") is inside $(real "$FX/res-in-tmp"), refusing" "$FX/res-in-tmp.err"
 
 # 拒跑：工作 repo 落在 root 或結果目錄底下，訊息印出路徑
 rt="$(mktemp -d "$OPSX_ROOT/rc-tmp.XXXXXX")"
@@ -158,6 +163,13 @@ rc=0; OPSX_FAKE_NO_TRANSCRIPT=1 run notr grill 1 new "$res" || rc=$?
 [ "$rc" -ne 0 ] || fail "a missing transcript must make the runner fail"
 assert_grep "transcript not found at $CLAUDE_CONFIG_DIR/projects/" "$FX/notr.err"
 assert_dir "$res/$(field session "$FX/notr.out")/empty-pending/.git"
+
+# claude 啟動前就失敗（舊版 skill 目錄不存在，prepare-run 的 cp 失敗）：不留 run.*，退出碼非零，沒呼叫 claude
+res="$FX/results-prepfail"
+rc=0; OPSX_OLD_SKILLS="$FX/no-such-skills" run prepfail grill 1 old "$res" || rc=$?
+[ "$rc" -ne 0 ] || fail "a failing prepare-run must make the runner fail"
+assert_eq "$(calls)" "0" "claude must not run when the work repo could not be prepared"
+assert_eq "$(ls "$NT" | grep -c '^run\.' || true)" "0" "no run.* left in temp after a failure before claude started"
 
 # 路徑含 claude 或禁用字：拒跑、印出路徑、沒呼叫 claude
 mkdir -p "$NT/claude-tmp"

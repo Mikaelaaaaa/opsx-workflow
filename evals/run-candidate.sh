@@ -24,37 +24,16 @@ second="$(field second_turn)"
 
 mkdir -p "$results"
 results="$(cd "$results" && pwd -P)"
-parent="$(mktemp -d "${TMPDIR:-/tmp}/run.XXXXXX")"
-work="$(cd "$parent" && pwd -P)/$fixture"
-for p in "$root" "$results"; do
-  case "$work/" in "$p"/*) rm -rf "$parent"; echo "work repo $work is under $p, refusing" >&2; exit 2 ;; esac
-done
-# Claude Code 會往上載入每一層的 CLAUDE.md；上層有這些，候選者一開 session 就看得到
-d="$work"
-while [ "$d" != "/" ]; do
-  d="$(dirname "$d")"
-  for m in CLAUDE.md .claude; do
-    [ -e "$d/$m" ] || continue
-    rm -rf "$parent"
-    echo "work repo $work has $d/$m above it, refusing (set TMPDIR to a directory with no CLAUDE.md or .claude above it)" >&2
-    exit 2
-  done
-done
-if echo "$work" | grep -Eiq "$banned"; then
-  rm -rf "$parent"
-  echo "work repo path carries claude or a banned word, refusing: $work (set TMPDIR to a directory whose path has no such word and with no CLAUDE.md or .claude above it)" >&2
-  exit 2
-fi
-
-bash "$root/evals/prepare-run.sh" "$skill" "$fixture" "$variant" "$work" >/dev/null
-
-settings="$(mktemp "${TMPDIR:-/tmp}/settings.XXXXXX")"
+settings=""
 id=""
 
-finish() { # EXIT trap：claude 成不成功都把 transcript 與工作 repo 留進結果目錄、印出位置，退出碼沿用進來時的
+finish() { # EXIT trap：不論怎麼結束都清掉 temp 裡的父目錄；claude 跑過就把 transcript 與工作 repo 留進結果目錄、印出位置。退出碼沿用進來時的
   local rc=$? src
   rm -f "$settings"
-  [ -n "$id" ] || exit "$rc"
+  if [ -z "$id" ]; then
+    rm -rf "$parent"
+    exit "$rc"
+  fi
   src="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects/$(echo "$work" | sed 's/[^a-zA-Z0-9]/-/g')/$id.jsonl"
   if [ -f "$src" ]; then
     cp "$src" "$results/$id.jsonl"
@@ -70,7 +49,34 @@ finish() { # EXIT trap：claude 成不成功都把 transcript 與工作 repo 留
   [ ! -f "$results/$id.jsonl" ] || echo "transcript: $results/$id.jsonl"
   exit "$rc"
 }
+
+parent="$(mktemp -d "${TMPDIR:-/tmp}/run.XXXXXX")"
 trap finish EXIT
+work="$(cd "$parent" && pwd -P)/$fixture"
+tmp="$(cd "$(dirname "$parent")" && pwd -P)"
+for p in "$root" "$results"; do
+  case "$work/" in "$p"/*) echo "work repo $work is under $p, refusing" >&2; exit 2 ;; esac
+done
+# 結果目錄在 temp 底下，候選者 ls ../.. 就看得到搬進去的前幾次工作 repo 與 transcript
+case "$results/" in "$tmp"/*) echo "results dir $results is inside $tmp, refusing (the candidate can list it with ls ../..)" >&2; exit 2 ;; esac
+# Claude Code 會往上載入每一層的 CLAUDE.md；上層有這些，候選者一開 session 就看得到
+d="$work"
+while [ "$d" != "/" ]; do
+  d="$(dirname "$d")"
+  for m in CLAUDE.md .claude; do
+    [ -e "$d/$m" ] || continue
+    echo "work repo $work has $d/$m above it, refusing (set TMPDIR to a directory with no CLAUDE.md or .claude above it)" >&2
+    exit 2
+  done
+done
+if echo "$work" | grep -Eiq "$banned"; then
+  echo "work repo path carries claude or a banned word, refusing: $work (set TMPDIR to a directory whose path has no such word and with no CLAUDE.md or .claude above it)" >&2
+  exit 2
+fi
+
+bash "$root/evals/prepare-run.sh" "$skill" "$fixture" "$variant" "$work" >/dev/null
+
+settings="$(mktemp "${TMPDIR:-/tmp}/settings.XXXXXX")"
 # 寫入範圍由 sandbox 的預設限在 cwd（工作 repo）；不給 additionalDirectories，也不留 dangerouslyDisableSandbox 的出口。
 # /tmp/claude 是 CLI 預設可寫的共用目錄，候選者能留東西給下一次執行讀，所以明列不可寫（macOS 的 /tmp 連到 /private/tmp，兩個都列）
 printf '%s' '{"sandbox": {"enabled": true, "autoAllowBashIfSandboxed": true, "allowUnsandboxedCommands": false, "filesystem": {"denyWrite": ["/tmp/claude", "/private/tmp/claude"]}}}' > "$settings"

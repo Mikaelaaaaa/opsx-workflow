@@ -78,7 +78,7 @@ import json, sys
 e = next(x for x in json.load(open(sys.argv[1]))["evals"] if x["id"] == 0)
 a = [x for x in e["assertions"] if "first turn ended" in x]
 assert len(a) == 1
-for key in ("tool call", "skills/*/evals/", "outside the work repo", "fails"):
+for key in ("tool call", "skills/*/evals/", "outside the work repo", "fails", "scratch", "opsx status"):
     assert key in a[0], key
 for key in ("fixture directory", "results directory"):
     assert key not in a[0], key
