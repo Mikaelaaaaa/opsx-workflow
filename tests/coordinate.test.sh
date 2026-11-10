@@ -431,26 +431,20 @@ EOF
 }
 mkcard m2 m3; printf '{}' > "$DISP"; rm -f "$MEMO"
 
-# 主 change m2 的依賴 m1 沒合：不派；m3 屬於有依賴的 feature g，由 session 派、不單獨派；g 的依賴沒合也不開
+# 主 change m2 的依賴 m1 沒合：不派；m3 的 PR 沒依賴，但 feature g 等 m1：也不派
 sess_wp pending
 cards '[{"slug":"m2"},{"slug":"m3"}]'
 round || fail "rc: $(cat "$FX/out")"
-assert_eq "$(count '^opsx dispatch')" 0 "依賴沒合：主 change 不派、feature 不開：$(cat "$OPSX_FAKE_LOG")"
+assert_eq "$(count '^opsx dispatch')" 0 "依賴沒合：主 change 不派、feature 的卡不派：$(cat "$OPSX_FAKE_LOG")"
 grep '⏳' "$LOG" | grep 'm2' | grep -q 'm1' || fail "主 change m2 要記等 m1：$(cat "$LOG")"
 grep '⏳' "$LOG" | grep 'feature g' | grep -q 'm1' || fail "feature g 要記等 m1：$(cat "$LOG")"
 
-# m1 合了：m2 照舊單獨派（f 沒有依賴，不是 session feature），g 開一個 session，m3 不單獨派
+# m1 合了：m2、m3 都照單卡派；coordinate 不自動開 session（gate session-bugs-2）
 sess_wp merged
 round || fail "rc: $(cat "$FX/out")"
 assert_grep "^opsx dispatch m2 --agent claude" "$OPSX_FAKE_LOG"
-assert_grep "^opsx dispatch --feature g --agent claude --mode autopilot --repo $R" "$OPSX_FAKE_LOG"
-assert_not_grep "^opsx dispatch m3" "$OPSX_FAKE_LOG"
-
-# g 已經有 session：不再開
-printf '{"demo/m3":{"mode":"autopilot","agent":"claude","pane":"w1:p9","feature":"g","herdr_name":"g","via":"g"}}' > "$DISP"
-cards '[{"slug":"m3","section":"進行中","dispatch":{"mode":"autopilot","agent":"claude","pane":"w1:p9","feature":"g","drive_pid":null},"agent_status":"working"}]'
-round || fail "rc: $(cat "$FX/out")"
-assert_not_grep "^opsx dispatch --feature g" "$OPSX_FAKE_LOG"
+assert_grep "^opsx dispatch m3 --agent claude" "$OPSX_FAKE_LOG"
+assert_not_grep "^opsx dispatch --feature" "$OPSX_FAKE_LOG"
 
 # 主 change 合併、agent 不在：PR 標 merged，還沒 done 的子 change 一起標 done
 sess_wp merged

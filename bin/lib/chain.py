@@ -100,7 +100,7 @@ def card_of(top: str, pr: dict, todo: list) -> str:
 
 def children(top: str, repo: str, parent: str, dispatch_path: str) -> list:
     """父卡的條目有 feature（一個 session 代管整個 feature）時，同 feature 的主 change 印 session 行，
-    別的 feature 由 coordinate 依 feature 的 depends-on 開新 session，這裡不接。"""
+    別的 feature、以及有自己 depends-on 的 feature，由 coordinate 依 feature 的 depends-on 派，這裡不接。"""
     dispatch = jsonfile.load(dispatch_path)
     me = dispatch.get("%s/%s" % (repo, parent))
     if not me:
@@ -119,7 +119,7 @@ def children(top: str, repo: str, parent: str, dispatch_path: str) -> list:
     if mine is None:
         return [("skip", "workplan 裡沒有 %s" % parent)]
     session = me.get("feature")
-    gated = {f.get("name") for f in features if f.get("depends-on")}   # 由 coordinate 開 session 的 feature
+    gated = {f.get("name") for f in features if f.get("depends-on")}   # 有自己依賴的 feature，由 coordinate 照 feature 依賴派
     status = {pr.get("name"): pr.get("status") for pr in prs}
     out = []
     for pr in prs:

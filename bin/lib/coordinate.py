@@ -350,9 +350,9 @@ class Round:
                 continue   # 人在板上停掉的
             if not os.path.isfile(os.path.join(c["path"], "tasks.md")) or c["mr"]:
                 continue
-            owner = self.session_feature_of(top, c["slug"])
-            if owner:
-                self.log("-- %s 屬於 feature %s，由那個 session 做，不單獨派" % (key, owner))
+            owner, waiting = self.feature_wait(top, c["slug"])
+            if waiting:
+                self.log("⏳ %s 的 feature %s 等 %s merged 才派" % (key, owner, "、".join(waiting)))
                 continue
             missing = deps_unmerged(c["slug"], self.workplan(top))
             if missing:
@@ -378,44 +378,19 @@ class Round:
                 self.log("?? %s 派不出去：%s" % (key, err[:200]))
                 continue
             self.memo["_parked"].pop(key, None)
-        return n
 
-    def session_feature_of(self, top, slug):
-        pr = pr_of(self.workplan(top), slug)
+    def feature_wait(self, top, slug):
+        """卡所屬的 feature 名，與它 depends-on 裡還沒合併的 PR。coordinate 不自動開 session
+        （等 session-entry 卡重構 session 條目），所以有依賴的 feature 的卡等依賴合了照單卡派。"""
+        prs = self.workplan(top)
+        pr = pr_of(prs, slug)
+        if pr is None:
+            return None, []
+        status = {p.get("name"): p.get("status") for p in prs}
         for f in session_features(read_features(os.path.join(top, "openspec", "workplan.yaml"))):
-            if pr is not None and any(p.get("name") == pr.get("name") for p in f.get("prs") or []):
-                return f.get("name")
-        return None
-
-    def dispatch_features(self, repo_paths, n):
-        """feature 的 depends-on 都合了、還沒有 session、還有沒合的 PR：開一個 session（opsx dispatch --feature）。"""
-        for repo, top in sorted(repo_paths.items()):
-            prs = self.workplan(top)
-            status = {p.get("name"): p.get("status") for p in prs}
-            for f in session_features(read_features(os.path.join(top, "openspec", "workplan.yaml"))):
-                name = f.get("name")
-                if all(p.get("status") == "merged" for p in f.get("prs") or []):
-                    continue
-                missing = [d for d in f["depends-on"] if status.get(d) != "merged"]
-                if missing:
-                    self.log("⏳ %s 的 feature %s 等 %s merged 才開 session" % (repo, name, "、".join(missing)))
-                    continue
-                if any(k.startswith(repo + "/") and v.get("feature") == name and v.get("mode") != "stopped" for k, v in self.dispatch_file.items()):
-                    continue
-                last = self.memo["_redispatched"].get("%s/@%s" % (repo, name))
-                if last and self.now - datetime.datetime.fromisoformat(last) < datetime.timedelta(minutes=REDISPATCH_MINUTES):
-                    continue   # redispatch_feature 剛派過（這輪或十分鐘內）
-                if not AGENT_NAME.match(name):
-                    self.log("-- %s 的 feature %s 不是合法的 agent 名，跳過" % (repo, name))
-                    continue
-                if n >= MAX_DISPATCH:
-                    self.log("-- 這輪派滿 %d 個，feature %s 下輪" % (MAX_DISPATCH, name))
-                    continue
-                rc, _, err = self.act(["opsx", "dispatch", "--feature", name, "--agent", "claude", "--mode", "autopilot", "--repo", top])
-                if rc != 0:
-                    self.log("?? %s 的 feature %s 開不了 session：%s" % (repo, name, err[:200]))
-                    continue
-                n += 1
+            if any(p.get("name") == pr.get("name") for p in f.get("prs") or []):
+                return f.get("name"), [d for d in f["depends-on"] if status.get(d) != "merged"]
+        return None, []
 
 
 def mark_stopped(d, key, at):
@@ -462,7 +437,7 @@ def pr_of(prs, slug):
 
 
 def session_features(features):
-    """有 depends-on 的 feature 由一個 session 代管：依賴合了才由 coordinate 開 session，它的卡不單獨派。"""
+    """有 depends-on 的 feature：它的卡要等 feature 的依賴都合併才派。"""
     return [f for f in features if f.get("depends-on")]
 
 
@@ -552,7 +527,7 @@ def main():
             r.redispatch(c, repo_paths[c["repo"]], "agent 不在 herdr 裡（pane %s）" % c["dispatch"].get("pane"))
         elif drive_dead(c["dispatch"]):
             r.redispatch(c, repo_paths[c["repo"]], "drive pid %s 已經不在" % c["dispatch"]["drive_pid"])
-    r.dispatch_features(repo_paths, r.dispatch_new(live, repo_paths))
+    r.dispatch_new(live, repo_paths)
     r.save()
     r.log("== 結束：%d 張卡，收尾 %d 張" % (len(live), len(done)))
 
