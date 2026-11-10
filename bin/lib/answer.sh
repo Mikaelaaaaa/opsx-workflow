@@ -42,7 +42,7 @@ opsx_answer() {
   result="$(OPSX_A_DIR="$d" OPSX_A_GATE="$gate" OPSX_A_GRANT="$grant" OPSX_A_TEXT="$answer" OPSX_A_REPO="$repo" OPSX_A_SLUG="$slug" \
             OPSX_A_SD="$OPSX_STATE_DIR" OPSX_A_NOW="$(now_iso)" OPSX_LIB="$OPSX_ROOT/bin/lib" "$OPSX_PY" -I - <<'PY'
 import os, re, sys, tomllib
-sys.path.insert(0, os.environ["OPSX_LIB"]); import authz, gatetype, grantactions, jsonfile
+sys.path.insert(0, os.environ["OPSX_LIB"]); import authz, gatetype, grantactions, jsonfile, safefile
 e = os.environ
 d, gate, grant, text, repo, slug, sd, now = (e["OPSX_A_DIR"], e["OPSX_A_GATE"], e["OPSX_A_GRANT"], e["OPSX_A_TEXT"],
                                              e["OPSX_A_REPO"], e["OPSX_A_SLUG"], e["OPSX_A_SD"], e["OPSX_A_NOW"])
@@ -103,7 +103,7 @@ if grant == "repo":
         lines.append('\n[repos."%s"]' % r)
         for a, v in acts.items():
             lines.append("%s = %s" % (a, "true" if v else "false"))
-    tmp = gp + ".tmp"; open(tmp, "w", encoding="utf-8").write("\n".join(lines) + "\n"); os.replace(tmp, gp)
+    safefile.write_atomic(gp, "\n".join(lines) + "\n")
 elif grant == "card":
     if not dispatched:
         fail("answer: 「這張卡」的授權要有 agent 才有意義，但 %s 沒派出（不在 dispatch.json）；用 --grant repo 或不帶 --grant" % key)
@@ -119,7 +119,7 @@ sec2 += "\nanswer: %s\nanswered_at: %s\n" % (text, now)
 if grant: sec2 += "grant: %s\n" % grant
 if idx + 1 < len(parts): sec2 += "\n"
 parts[idx] = sec2
-tmp = gates_path + ".tmp"; open(tmp, "w", encoding="utf-8").write("".join(parts)); os.replace(tmp, gates_path)
+safefile.write_atomic(gates_path, "".join(parts))
 
 print("dispatched" if dispatched else "undispatched")
 PY

@@ -18,8 +18,11 @@ deny() {
   exit 0
 }
 
+# 判斷「是不是 git push / add / commit」只看會執行的部分；引號與 heredoc 內的字樣不算。旗標與署名仍讀原始 COMMAND。
+SKELETON=$(printf '%s' "$COMMAND" | perl "$(dirname "${BASH_SOURCE[0]}")/cmd-skeleton.pl") || deny "perl failed, cannot read the command skeleton. Make sure perl works."
+
 # ── Block push to main/master ──
-if echo "$COMMAND" | grep -qE '(^|\s|&&|\|\||;)git\s+push(\s|$)'; then
+if echo "$SKELETON" | grep -qE '(^|\s|&&|\|\||;)git\s+push(\s|$)'; then
   BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
   if [[ "$BRANCH" == "main" || "$BRANCH" == "master" ]]; then
     deny "Do not push directly to main/master. Create a feature branch and open a PR."
@@ -34,25 +37,30 @@ if echo "$COMMAND" | grep -qE '(^|\s|&&|\|\||;)git\s+push(\s|$)'; then
 fi
 
 # ── Block git add of .env files ──
-if echo "$COMMAND" | grep -qE '(^|\s|&&|\|\||;)git\s+add(\s|$)'; then
+if echo "$SKELETON" | grep -qE '(^|\s|&&|\|\||;)git\s+add(\s|$)'; then
   if echo "$COMMAND" | grep -E '\.(env|env\.local|env\.docker)(\s|$)' | grep -qv 'example'; then
     deny "Adding .env files is blocked. Only .env.example files should be committed."
   fi
 fi
 
 # ── Block commits with AI attribution ──
-if echo "$COMMAND" | grep -qE '(^|\s|&&|\|\||;)git\s+commit(\s|$)'; then
-  # Drop directory arguments (the word after `cd` / `-C`) and every word containing `/`, so a path
-  # like /private/tmp/claude-502/x is not mistaken for attribution.
-  # shortcut: a message word containing `/` (e.g. Claude/x) is not scanned; fine as an accident guard, go back to parsing -m values if it must resist deliberate evasion
-  SCANNED=$(echo "$COMMAND" | sed -E 's/(^|[[:space:]])(cd|-C)[[:space:]]+[^[:space:]]+/\1/g; s/[^[:space:]]*\/[^[:space:]]*//g')
-  if echo "$SCANNED" | grep -iqE '(claude|anthropic|co-authored-by.*(claude|anthropic)|Generated with.*Claude)'; then
-    deny "Commit must not reference Claude, Anthropic, or AI model names."
+if echo "$SKELETON" | grep -qE '(^|\s|&&|\|\||;)git\s+commit(\s|$)'; then
+  # Only the attribution forms count: a trailer line starting with Co-Authored-By / Generated with that names
+  # Claude or Anthropic, or --author / --trailer / GIT_AUTHOR_NAME / GIT_COMMITTER_NAME carrying those names.
+  # Prose that merely mentions them, and paths like /private/tmp/claude-502/x, are not attribution.
+  # shortcut: a trailer line is recognised by its first word right after a quote or line start; fine as an accident guard, go back to parsing -m values if it must resist deliberate evasion
+  NAMES='(claude|anthropic)'
+  VALUE='("[^"]*|'"'"'[^'"'"']*|[^[:space:]"'"'"']*)'
+  # A trailer line starts after a quote, a real newline, or a literal \n / \r (printf, echo -e, $'…'); leading blanks are allowed.
+  if echo "$COMMAND" | grep -iqE "(^|[\"']|\\\\n|\\\\r)[[:space:]]*(co-authored-by|generated with).*${NAMES}" \
+    || echo "$COMMAND" | grep -iqE "(--author|--trailer)[= ]+${VALUE}${NAMES}" \
+    || echo "$COMMAND" | grep -iqE "GIT_(AUTHOR|COMMITTER)_(NAME|EMAIL)=${VALUE}${NAMES}"; then
+    deny "Commit must not carry an AI attribution (Co-Authored-By / Generated with / author naming Claude or Anthropic)."
   fi
 fi
 
 # ── Credential leak scan on commit ──
-if echo "$COMMAND" | grep -qE '(^|\s|&&|\|\||;)git\s+commit(\s|$)'; then
+if echo "$SKELETON" | grep -qE '(^|\s|&&|\|\||;)git\s+commit(\s|$)'; then
   DIFF=$(git diff --cached --unified=0 --no-color 2>/dev/null || true)
   [[ -z "$DIFF" ]] && exit 0
 

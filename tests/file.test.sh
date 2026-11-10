@@ -36,4 +36,39 @@ assert_not_grep '失敗' "$FX/p1.err"; assert_not_grep '失敗' "$FX/p2.err"
 assert_eq "$(cat "$FX/p1.out" "$FX/p2.out" | sort -u | wc -l | tr -d ' ')" 2 "兩個 slug 要不同"
 assert_eq "$(grep -l '^待分類的那件$' "$A"/openspec/changes/me-20261106-1530*/inbox.md | wc -l | tr -d ' ')" 1
 assert_eq "$(grep -l '^另一件$' "$A"/openspec/changes/me-20261106-1530*/inbox.md | wc -l | tr -d ' ')" 1
+
+# --- 分類帶著附件 ---
+printf 'png-bytes' > "$FX/shot.png"
+export OPSX_TEST_NOW="2026-11-06 15:00"
+assert_eq "$(opsx new --attach "$FX/shot.png" -- 有附件)" me-20261106-1500
+out="$(opsx file me-20261106-1500 --repo "$A")"; assert_eq "$?" 0 "file 附件: $out"
+assert_eq "$out" me-20261106-1500
+assert_eq "$(cat "$A/openspec/changes/me-20261106-1500/attachments/shot.png")" png-bytes
+assert_no_file "$OPSX_STATE_DIR/unfiled/me-20261106-1500.md"; assert_no_file "$OPSX_STATE_DIR/unfiled/me-20261106-1500"
+
+# --- 分類撞名時附件跟著改名的殼 ---
+printf 'other' > "$FX/b.txt"
+assert_eq "$(opsx new --attach "$FX/b.txt" -- 撞名的附件)" me-20261106-1500
+assert_eq "$(opsx file me-20261106-1500 --repo "$A")" me-20261106-1500-2
+assert_eq "$(cat "$A/openspec/changes/me-20261106-1500-2/attachments/b.txt")" other
+assert_no_file "$A/openspec/changes/me-20261106-1500/attachments/b.txt"
+assert_eq "$(ls "$A/openspec/changes/me-20261106-1500/attachments")" shot.png "原本的殼不變"
+assert_no_file "$OPSX_STATE_DIR/unfiled/me-20261106-1500"
+
+# --- 待分類資料夾裡多了別的檔（Finder 的 .DS_Store）：照樣搬完，不留半張卡 ---
+export OPSX_TEST_NOW="2026-11-06 16:00"
+assert_eq "$(opsx new --attach "$FX/shot.png" -- 看過截圖)" me-20261106-1600
+printf 'finder' > "$OPSX_STATE_DIR/unfiled/me-20261106-1600/.DS_Store"
+out="$(opsx file me-20261106-1600 --repo "$A")"; assert_eq "$?" 0 "多了 .DS_Store 也要成功：$out"
+assert_eq "$out" me-20261106-1600
+assert_eq "$(cat "$A/openspec/changes/me-20261106-1600/attachments/shot.png")" png-bytes
+assert_no_file "$OPSX_STATE_DIR/unfiled/me-20261106-1600.md"; assert_no_file "$OPSX_STATE_DIR/unfiled/me-20261106-1600"
+assert_no_file "$A/openspec/changes/me-20261106-1600-2"
+# 預期外的檔：建殼前就退出，什麼都不動
+assert_eq "$(opsx new --attach "$FX/shot.png" -- 有別的檔)" me-20261106-1600
+printf 'mine' > "$OPSX_STATE_DIR/unfiled/me-20261106-1600/notes.txt"
+before="$(ls "$A/openspec/changes")"
+assert_rc 2 opsx file me-20261106-1600 --repo "$A"
+assert_eq "$(ls "$A/openspec/changes")" "$before" "不能建殼"
+assert_file "$OPSX_STATE_DIR/unfiled/me-20261106-1600.md"; assert_file "$OPSX_STATE_DIR/unfiled/me-20261106-1600/attachments/shot.png"
 echo ok

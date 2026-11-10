@@ -23,6 +23,9 @@ import sys
 import tempfile
 import tomllib
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import safefile  # noqa: E402
+
 SOURCES = ("gitlab", "github", "debt", "obsidian")
 FRONTMATTER = re.compile(r"\A---\n(.*?\n)---\n", re.S)
 
@@ -252,7 +255,7 @@ def update_debt(entry: dict, item: dict) -> bool:
     new = fm_set(fm_set(old, "line", item["extra"]["line"]), "stale", None)
     if new == old:
         return False
-    path.write_text(new, encoding="utf-8")
+    safefile.write_atomic(str(path), new)
     return True
 
 
@@ -274,7 +277,7 @@ def update_issue(entry: dict, item: dict) -> bool:
         new = fm_set(new, "upstream_updated", item["updated_at"])
     if new == old:
         return False
-    path.write_text(new, encoding="utf-8")
+    safefile.write_atomic(str(path), new)
     return True
 
 
@@ -294,7 +297,7 @@ def mark_closed(opsx_root: pathlib.Path, kind: str, index: dict, seen: set[str],
             tally.error(src, p.stderr.strip() or "%s.sh state 退出 %d" % (kind, p.returncode))
             continue
         if p.stdout.strip() == "closed":
-            entry["path"].write_text(fm_set(text, "upstream", "closed"), encoding="utf-8")
+            safefile.write_atomic(str(entry["path"]), fm_set(text, "upstream", "closed"))
             tally.updated += 1
 
 
@@ -307,7 +310,7 @@ def mark_stale(index: dict, seen: set[str], scanned: set[str], tally: Tally) -> 
         text = entry["path"].read_text(encoding="utf-8")
         if fm_get(text, "stale") == "true":
             continue
-        entry["path"].write_text(fm_set(text, "stale", "true"), encoding="utf-8")
+        safefile.write_atomic(str(entry["path"]), fm_set(text, "stale", "true"))
         tally.updated += 1
 
 
@@ -320,7 +323,7 @@ def main() -> int:
     a = ap.parse_args()
 
     a.state.mkdir(parents=True, exist_ok=True)
-    lock = open(a.state / "sync.lock", "a")
+    lock = safefile.open_lock(a.state / "sync.lock")
     try:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError:

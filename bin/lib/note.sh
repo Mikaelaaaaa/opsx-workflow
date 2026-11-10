@@ -13,7 +13,8 @@ note_oneline() { # <text>：印壓成一行、去頭尾空白的文字
 
 note_append() { # <卡目錄> <已壓成一行的文字>：追加一條 `- <時間> <文字>` 到 ## 派工指示 段尾，沒有這段就建在檔尾
   OPSX_N_FILE="$1/inbox.md" OPSX_N_LINE="- $(now_iso) $2" "$OPSX_PY" -I - <<'PY'
-import os, re
+import os, re, sys
+sys.path.insert(0, os.path.join(os.environ["OPSX_ROOT"], "bin", "lib")); import safefile
 path, line = os.environ["OPSX_N_FILE"], os.environ["OPSX_N_LINE"]
 try:
     lines = open(path, encoding="utf-8").read().splitlines()
@@ -30,9 +31,7 @@ else:
     lines.insert(last + 1, line)
     if last == head:
         lines.insert(last + 1, "")
-tmp = path + ".tmp"
-open(tmp, "w", encoding="utf-8").write("\n".join(lines) + "\n")
-os.replace(tmp, path)
+safefile.write_atomic(path, "\n".join(lines) + "\n")
 PY
 }
 

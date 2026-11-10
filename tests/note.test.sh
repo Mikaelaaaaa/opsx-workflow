@@ -14,7 +14,10 @@ notes() { awk '/^## 派工指示[[:space:]]*$/{f=1;next} /^## /{f=0} f && /^- /'
 
 # --- 段落不存在時建在檔尾，原內容不變；沒派出只寫檔 ---
 cp "$I" "$FX/orig.md"
+printf 'keep me\n' > "$FX/victim"; ln -s "$FX/victim" "$I.tmp"   # symlink-safe-writes：舊的固定暫存檔名
 out="$(opsx note x "先跑 lint" 2>&1)"; assert_eq "$?" 0 "note: $out"
+assert_eq "$(cat "$FX/victim")" "keep me" "inbox 的舊暫存檔名上的 symlink 不能被寫"
+rm -f "$I.tmp"
 head -c "$(wc -c < "$FX/orig.md")" "$I" | cmp -s - "$FX/orig.md" || fail "原有內容要原樣留在前面：$(cat "$I")"
 assert_eq "$(grep -c '^## 派工指示$' "$I")" 1 "標題一個"
 assert_eq "$(notes | wc -l | tr -d ' ')" 1 "一條"
