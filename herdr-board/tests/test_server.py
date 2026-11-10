@@ -242,6 +242,38 @@ class ServerTest(unittest.TestCase):
         status, _, body = self.req("/api/merge", {"slug": "x"}, token=self.token)
         self.assertEqual(status, 200, "只有 sync 的退出碼 3 是 409：%s" % body)
 
+    def test_priority_forwards_to_opsx(self):
+        # specs/board-web「改等級轉呼叫 opsx」
+        r = str(self.repo)
+        status, _, body = self.req("/api/priority", {"repo": r, "slug": "card-a", "level": "P0", "reason": "客戶明天上線"}, token=self.token)
+        self.assertEqual(status, 200, body)
+        out = json.loads(body)
+        self.assertTrue(out["ok"], out)
+        self.assertEqual(self.log.read_text().strip(), "priority card-a --set P0 --reason 客戶明天上線 --repo %s" % r)
+        self.assertIn("ok: priority", out["stdout"])
+
+    def test_priority_needs_reason(self):
+        # specs/board-web「沒有理由」
+        for reason in ("", "   ", None):
+            status, _, body = self.req("/api/priority", {"repo": str(self.repo), "slug": "card-a", "level": "P0", "reason": reason}, token=self.token)
+            self.assertEqual(status, 400, "%r: %s" % (reason, body))
+        self.assertEqual(self.log.read_text(), "")
+
+    def test_priority_rejects_unknown_level(self):
+        # specs/board-web「不合格的等級」
+        for level in ("P3", "p0", "", None):
+            status, _, body = self.req("/api/priority", {"repo": str(self.repo), "slug": "card-a", "level": level, "reason": "x"}, token=self.token)
+            self.assertEqual(status, 400, "%r: %s" % (level, body))
+        self.assertEqual(self.log.read_text(), "")
+
+    def test_priority_needs_token_and_real_repo(self):
+        status, _, _ = self.req("/api/priority", {"repo": str(self.repo), "slug": "card-a", "level": "P0", "reason": "x"})
+        self.assertEqual(status, 401)
+        for repo in ("/tmp", None):
+            status, _, body = self.req("/api/priority", {"repo": repo, "slug": "card-a", "level": "P0", "reason": "x"}, token=self.token)
+            self.assertEqual(status, 400, "%r: %s" % (repo, body))
+        self.assertEqual(self.log.read_text(), "")
+
     def test_index_has_the_orphan_row_and_its_buttons(self):
         _, _, body = self.req("/")
         for needle in ("孤兒 pane", 'data-act="reap"', 'data-act="reap-all"', "api.post('reap'"):

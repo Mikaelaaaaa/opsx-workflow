@@ -281,6 +281,53 @@ assert_eq "$(jq -r '."solo/c".mode' "$J")" drive
 assert_eq "$(tail -1 "$Q")" "$(printf 'drive\tc\t%s' "$R3")" "drive 模式佇列最後一行"
 cd "$R"
 
+# --- 子卡照等級（priority-dispatch）：P2 不接，其餘 P0 先 ---
+R4="$(mk_repo prio)"; mk_change "$R4" p
+cat > "$R4/openspec/workplan.yaml" <<'EOF'
+features:
+  - name: x
+    prs:
+      - name: p
+        branch: feat/p/mikaela
+        status: merged
+        changes:
+          - name: p
+            status: done
+      - name: child-a
+        branch: feat/child-a/mikaela
+        status: pending
+        depends-on: [p]
+        changes:
+          - name: child-a
+            status: pending
+      - name: child-b
+        branch: feat/child-b/mikaela
+        status: pending
+        depends-on: [p]
+        changes:
+          - name: child-b
+            status: pending
+EOF
+for s in child-a child-b; do mkdir -p "$R4/openspec/changes/$s"; printf -- '- [ ] 1.1 x\n' > "$R4/openspec/changes/$s/tasks.md"; done
+printf '{"prio/p":{"mode":"autopilot","pane":"w5:pQ","agent":"claude","grants":[]}}' > "$FX/disp4.json"
+kids() { python3 -I -B "$OPSX_ROOT/bin/lib/chain.py" children "$R4" prio p "$FX/disp4.json"; }
+
+# 多張子卡照等級排：child-a 是 P1（在 workplan、沒設 milestone），child-b 是 P0
+printf -- '---\nkind_of_work: incident\nimpact: data\nevidence: tests/x.test.sh 第 2 案\n---\n' > "$R4/openspec/changes/child-b/inbox.md"
+out="$(kids)"; assert_eq "$?" 0 "children: $out"
+assert_eq "$(echo "$out" | cut -f1,2)" "$(printf 'child\tchild-b\nchild\tchild-a')" "P0 的子卡先：$out"
+
+# P2 子卡不接：child-b 改成 P2，只剩 child-a
+printf -- '---\npriority: P2\npriority_reason: 不急\n---\n' > "$R4/openspec/changes/child-b/inbox.md"
+out="$(kids)"; assert_eq "$?" 0 "children: $out"
+assert_eq "$(echo "$out" | cut -f1,2)" "$(printf 'child\tchild-a')" "P2 子卡不接：$out"
+
+# 子卡全是 P2：skip，原因含 P2
+cp "$R4/openspec/changes/child-b/inbox.md" "$R4/openspec/changes/child-a/inbox.md"
+out="$(kids)"; assert_eq "$?" 0 "children: $out"
+echo "$out" | grep -q $'^skip\t.*P2' || fail "全是 P2 要 skip、原因含 P2：$out"
+echo "$out" | grep -q '^child' && fail "全是 P2 不能印 child：$out"
+
 # --- 主 change（殼名 = PR 名，changes[] 是子 change）：chain 用 PR 名找得到 ---
 R4="$(mk_repo sess)"; mk_change "$R4" m1
 cat > "$R4/openspec/workplan.yaml" <<'EOF'
