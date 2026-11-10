@@ -66,7 +66,7 @@ def draw(scr, rows, cur: tm.Cursor, data: dict, note: str) -> None:
         if i < top or y >= h - 2:
             continue
         if r["kind"] == "header":
-            scr.addstr(y, 0, tm.fit("%s %s · %d" % ("▸" if r.get("collapsed") else "▾", r["section"], r["count"]), w - 1), curses.A_BOLD)
+            scr.addstr(y, 0, tm.fit("%s %s · %d%s" % ("▸" if r.get("collapsed") else "▾", r["section"], r["count"], " · 孤兒 pane %d（網頁上關）" % r["orphans"] if r["orphans"] else ""), w - 1), curses.A_BOLD)
         else:
             attr = curses.A_REVERSE if i == cur.index else curses.A_NORMAL
             scr.addstr(y, 2, tm.fit("%s %s" % (r["mark"], r["text"]), w - 3), attr)

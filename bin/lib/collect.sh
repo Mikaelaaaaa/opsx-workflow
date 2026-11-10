@@ -255,7 +255,7 @@ for line in read(os.path.join(work, "cards.tsv")).split("\n"):
     else: section = "待指派"
     cards.append({
         "repo": c["repo"], "slug": c["slug"], "title": one_liner(inbox) or c["slug"], "kind": kind_of(d),
-        "stage": c["stage"], "section": section,
+        "stage": c["stage"], "section": section, "archived": c["archived"],
         "since": frontmatter(inbox, "found") or (re.search(r"^created:\s*(\S+)", read(os.path.join(d, ".openspec.yaml")), re.M) or [None, None])[1],
         "waiting": waiting, "open_gates": [{"id": g["id"], "opened_at": opened_at_of(g, gates_path, now_dt)} for g in gates if g.get("status") == "open"],
         "dispatch": disp, "status": load_json(os.path.join(d, "status.json"), None),
@@ -282,10 +282,49 @@ for line in reversed([l for l in read(os.path.join(state, "sync.log")).split("\n
     if m:
         last_sync = {"at": cols[0], "created": int(m[1]), "updated": int(m[2]), "unchanged": int(m[3]), "errors": int(m[4]), "first_error": m[5] or ""}
         break
+
+# 孤兒 pane：cwd（或 foreground_cwd）在 <repo>/.claude/worktrees/<slug>/ 底下（或 dispatch.json 記的 worktree），
+# 而且這張卡已歸檔、已拆（stage split）、dispatch.json 標 stopped、或卡目錄不在。只對 pane id 不夠：stopped 條目留著舊 pane id，
+# herdr 重用 id 時會指到別人的 pane。判斷只在這裡算一次，coordinate / reap / 看板都讀 orphans。
+# workplan 標 merged 的卡（stage archive）還沒歸檔，agent 可能正在跑 /archive，不算。
+card_by_key = {(c["repo"], c["slug"]): c for c in cards}
+worktree_of = {}
+for k, e in dispatch.items():
+    if e.get("worktree"):
+        worktree_of[e["worktree"].rstrip("/")] = tuple(k.split("/", 1))
+
+def worktree_owner(path):
+    for p in {path, os.path.realpath(path)}:
+        for wt, key in worktree_of.items():
+            if p == wt or p.startswith(wt + "/"): return key
+        for repo_, top in repo_paths.items():
+            prefix = top + "/.claude/worktrees/"
+            if p.startswith(prefix) and p[len(prefix):].split("/")[0]: return (repo_, p[len(prefix):].split("/")[0])
+    return None
+
+def orphan_reason(key):
+    # .claude/worktrees/ 也放 Claude Code 自己開的 worktree：dispatch.json 沒記過的，不是 opsx 開的 pane
+    if "%s/%s" % key not in dispatch: return None
+    c = card_by_key.get(key)
+    if c is None: return "card-missing"
+    if c["archived"]: return "archived"
+    if c["stage"] == "split": return "split"
+    if (dispatch.get("%s/%s" % key) or {}).get("mode") == "stopped": return "stopped"
+    return None
+
+orphans = []
+for a in (agents or []):
+    key = next((k for k in (worktree_owner(p) for p in (a.get("cwd"), a.get("foreground_cwd")) if p) if k), None)
+    reason = orphan_reason(key) if key else None
+    if reason:
+        orphans.append({"pane": a.get("pane_id"), "cwd": a.get("cwd"), "agent_status": a.get("agent_status"),
+                        "repo": key[0], "slug": key[1], "reason": reason})
+orphan_panes = {str(o["pane"]) for o in orphans}
 unmatched = [{"name": a.get("terminal_title_stripped") or a.get("agent") or "", "pane": a.get("pane_id"),
-              "agent_status": a.get("agent_status"), "cwd": a.get("cwd"), "workspace": a.get("workspace_id")}
+              "agent_status": a.get("agent_status"), "cwd": a.get("cwd"), "workspace": a.get("workspace_id"),
+              "orphan": str(a.get("pane_id")) in orphan_panes}
              for a in (agents or []) if str(a.get("pane_id")) not in matched_panes]
-print(json.dumps({"generated_at": now, "scopes": scopes, "repo_paths": repo_paths, "cards": cards, "unfiled": unfiled, "last_sync": last_sync, "unmatched_agents": unmatched, "errors": errors,
+print(json.dumps({"generated_at": now, "scopes": scopes, "repo_paths": repo_paths, "cards": cards, "unfiled": unfiled, "last_sync": last_sync, "unmatched_agents": unmatched, "orphans": orphans, "errors": errors,
                   "legacy": legacy, "worktrees_skipped": worktrees}, ensure_ascii=False))
 PY
 }

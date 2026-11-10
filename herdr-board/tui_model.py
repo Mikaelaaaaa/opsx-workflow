@@ -45,7 +45,8 @@ def rows(data: dict, done_open: bool, inbox_open: bool = False) -> list[dict]:
     for section in SECTIONS:
         group = [c for c in cards if c.get("section") == section]
         collapsed = not opened.get(section, True)
-        out.append({"kind": "header", "section": section, "count": len(group), "collapsed": collapsed})
+        orphans = len(data.get("orphans") or []) if section == "進行中" else 0   # 沒對上卡的 opsx pane，在網頁上關
+        out.append({"kind": "header", "section": section, "count": len(group), "collapsed": collapsed, "orphans": orphans})
         if collapsed:
             continue
         for c in group:

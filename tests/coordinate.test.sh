@@ -371,7 +371,7 @@ rm -f "$MEMO" "$DISP"
 mkcard u
 cards '[{"slug":"u","section":"進行中","dispatch":'"$D"',"agent_status":"idle"}]'
 round || fail "rc: $(cat "$FX/out")"
-assert_not_grep 'agent prompt' "$OPSX_FAKE_LOG"; assert_eq "$(count '^opsx ')" 1 "只有 collect：$(cat "$OPSX_FAKE_LOG")"
+assert_not_grep 'agent prompt' "$OPSX_FAKE_LOG"; assert_eq "$(grep -cEv '^opsx (collect|reap)' "$OPSX_FAKE_LOG" || true)" 0 "只有 collect 與 reap：$(cat "$OPSX_FAKE_LOG")"
 
 # --- agent 不見了就重派 ---
 cards '[{"slug":"u","section":"進行中","dispatch":'"$D"',"agent_status":"unknown"}]'
@@ -395,4 +395,19 @@ sleep 0 & dead=$!; wait "$dead"
 cards '[{"slug":"u","section":"進行中","dispatch":{"mode":"autopilot","agent":"claude","pane":"w1:p1","drive_pid":'"$dead"'},"agent_status":"idle"}]'
 round || fail "rc: $(cat "$FX/out")"
 assert_grep "^opsx dispatch u --agent claude" "$OPSX_FAKE_LOG"
+rm -f "$MEMO"
+
+# --- 每輪最後回收孤兒 pane：呼叫 opsx reap；dry 只記 DRY；reap 失敗不影響這一輪的結束 ---
+cards '[]'
+round || fail "rc: $(cat "$FX/out")"
+assert_eq "$(count '^opsx reap$')" 1 "每輪呼叫一次 opsx reap：$(cat "$OPSX_FAKE_LOG")"
+assert_eq "$(tail -n 1 "$OPSX_FAKE_LOG")" "opsx reap" "reap 是這一輪最後一個動作"
+round --dry || fail "dry rc: $(cat "$FX/out")"
+assert_grep "DRY opsx reap" "$LOG"
+assert_eq "$(count '^opsx reap')" 0 "dry 不呼叫 opsx reap"
+export OPSX_TEST_FAIL_reap="herdr 讀不到"
+round || fail "reap 失敗不該讓這一輪失敗：$(cat "$FX/out")"
+unset OPSX_TEST_FAIL_reap
+assert_grep "rc1 .*opsx reap" "$LOG"
+assert_grep "== 結束" "$LOG"
 echo "coordinate: ok"

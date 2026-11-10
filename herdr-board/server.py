@@ -56,7 +56,9 @@ ACTIONS = {
     "file": {"slug": True, "required": ("repo",), "flags": ("repo",), "trailing": None},
     "drop": {"slug": True, "required": ("text",), "flags": ("repo",), "trailing": "text"},
     "sync": {"slug": False, "required": (), "flags": ("source",), "trailing": None},
+    "reap": {"slug": False, "required": (), "flags": ("pane",), "trailing": None},
 }
+PANE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9:_-]{0,31}$")   # 不能以 - 開頭，免得被 herdr 當成旗標
 FLAG_RE = {
     "gate": re.compile(r"^[A-Za-z0-9_.-]{1,64}$"),
     "grant": re.compile(r"^(this|card|repo)$"),
@@ -66,8 +68,8 @@ FLAG_RE = {
     "kind": re.compile(r"^(dev|bug-fix|refactoring|perf|experiment|ops|chore)$"),
     "repo": re.compile(r"^/[^\0]{1,1024}$"),
     "source": re.compile(r"^(gitlab|github|debt)$"),
+    "pane": PANE_RE,
 }
-PANE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9:_-]{0,31}$")   # 不能以 - 開頭，免得被 herdr 當成旗標
 
 
 class Config:
@@ -291,7 +293,8 @@ class Handler(BaseHTTPRequestHandler):
         except (ValueError, json.JSONDecodeError) as e:
             self.send_json(400, {"error": str(e)}); return
         r = run(["bash", str(OPSX), *args], ACTION_TIMEOUT, self.opsx_env())
-        self.send_json(409 if action == "sync" and r["rc"] == 3 else 200, r)
+        # sync 的退出碼 3 是已有一支在跑；reap 的退出碼 2 是指定的 pane 不是孤兒
+        self.send_json(409 if action == "sync" and r["rc"] == 3 else 422 if action == "reap" and r["rc"] == 2 else 200, r)
 
 
 def serve(port: int, state: pathlib.Path, collect_file: pathlib.Path | None) -> None:
