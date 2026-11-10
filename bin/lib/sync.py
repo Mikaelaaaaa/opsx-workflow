@@ -27,6 +27,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import safefile  # noqa: E402
 
 SOURCES = ("gitlab", "github", "debt", "obsidian")
+CUSTOMER_NOTICE = "customer 來源尚未支援（on-hold），不會同步"
 FRONTMATTER = re.compile(r"\A---\n(.*?\n)---\n", re.S)
 
 
@@ -106,6 +107,17 @@ def source_paths(state: pathlib.Path) -> list[pathlib.Path]:
     if not f.exists():
         return []
     return [pathlib.Path(s["path"]) for s in tomllib.loads(f.read_text(encoding="utf-8")).get("source", []) if "path" in s]
+
+
+def has_customer(state: pathlib.Path) -> bool:
+    f = state / "sources.toml"
+    return f.exists() and "customer" in tomllib.loads(f.read_text(encoding="utf-8"))
+
+
+def log_sync_row(opsx_root: pathlib.Path, state: pathlib.Path, source: str, created: int, text: str) -> subprocess.CompletedProcess:
+    # sync.log 的格式只在 opsx log --sync（bin/lib/log.sh）
+    return subprocess.run(["bash", str(opsx_root / "bin" / "opsx"), "log", "--sync", source, str(created), text],
+                          capture_output=True, text=True, env=dict(os.environ, OPSX_STATE_DIR=str(state)))
 
 
 def opsx_repos(root: pathlib.Path, state: pathlib.Path) -> dict[str, pathlib.Path]:
@@ -382,12 +394,16 @@ def main() -> int:
     if "debt" in wanted:
         mark_stale(index, seen, scanned, tally)
 
-    # sync.log 的格式只在 opsx log --sync（bin/lib/log.sh）；一次同步一列，source 是 sync
-    p = subprocess.run(["bash", str(a.opsx_root / "bin" / "opsx"), "log", "--sync", "sync", str(tally.created), tally.summary()],
-                       capture_output=True, text=True, env=dict(os.environ, OPSX_STATE_DIR=str(a.state)))
-    if p.returncode != 0:
-        print("opsx sync: 寫 sync.log 失敗：%s" % p.stderr.strip(), file=sys.stderr)
-        return 1
+    # 一次同步一列，source 是 sync；customer 的提示是另一列，collect 只認 sync 那列
+    rows = [("sync", tally.created, tally.summary())]
+    if has_customer(a.state):
+        print("opsx sync: " + CUSTOMER_NOTICE)
+        rows.insert(0, ("customer", 0, CUSTOMER_NOTICE))
+    for source, created, text in rows:
+        p = log_sync_row(a.opsx_root, a.state, source, created, text)
+        if p.returncode != 0:
+            print("opsx sync: 寫 sync.log 失敗：%s" % p.stderr.strip(), file=sys.stderr)
+            return 1
     print("opsx sync: 新建 %d · 更新 %d · 沒變 %d · 錯誤 %d%s" % (
         tally.created, tally.updated, tally.unchanged, tally.errors, "（%s）" % tally.first_error if tally.first_error else ""))
     return 0
