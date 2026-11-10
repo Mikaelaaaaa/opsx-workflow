@@ -460,5 +460,29 @@ round || fail "rc: $(cat "$FX/out")"
 assert_grep '^openspec archive m2 -y$' "$OPSX_FAKE_LOG"
 assert_eq "$(wp_status m2)" merged "主 change 的 PR 要標 merged"
 assert_eq "$(wp_change t1)" done "主 change 底下的子 change 要標 done"
+
+# session 還在做別的主 change（m4）：收尾已合併的 m3 不 stop、不移除共用的 worktree，歸檔照做
+mkdir -p "$R/.claude/worktrees/g"; rm -f "$MEMO"
+G_SESS='"mode":"autopilot","agent":"claude","pane":"w1:p9","herdr_name":"g","via":"g","feature":"g","drive_pid":null'
+printf '{"demo/m3":{%s,"branch":"feat/m3/u","worktree":"%s"},"demo/m4":{%s,"branch":"feat/m4/u","worktree":"%s"}}' "$G_SESS" "$R/.claude/worktrees/g" "$G_SESS" "$R/.claude/worktrees/g" > "$DISP"
+cards "[$(merged m3 2026-11-07T12:00:00Z '{"mode":"autopilot","agent":"claude","pane":"w1:p9","feature":"g","drive_pid":null}' '"unknown"')]"
+round || fail "rc: $(cat "$FX/out")"
+assert_grep '^openspec archive m3 -y$' "$OPSX_FAKE_LOG"
+assert_not_grep '^opsx stop m3' "$OPSX_FAKE_LOG"
+assert_not_grep 'worktree remove' "$OPSX_FAKE_LOG"
+
+# session 的 pane 不在了：同 feature 各卡 stop 一次，整個 feature 重派一次，不逐卡派
+sess_wp merged; rm -f "$MEMO"
+printf '{"demo/m3":{%s,"branch":"feat/m3/u"},"demo/m4":{%s,"branch":"feat/m4/u"}}' "$G_SESS" "$G_SESS" > "$DISP"
+GD='{"mode":"autopilot","agent":"claude","pane":"w1:p9","feature":"g","drive_pid":null}'
+cards '[{"slug":"m3","section":"進行中","dispatch":'"$GD"',"agent_status":"unknown"},{"slug":"m4","section":"進行中","dispatch":'"$GD"',"agent_status":"unknown"}]'
+round || fail "rc: $(cat "$FX/out")"
+got="$(grep -E '^opsx (stop|dispatch)' "$OPSX_FAKE_LOG")"
+assert_eq "$got" "opsx stop m3 --repo $R
+opsx stop m4 --repo $R
+opsx dispatch --feature g --agent claude --mode autopilot --repo $R" "session 死掉：各卡 stop、feature 重派一次"
+round || fail "rc: $(cat "$FX/out")"
+assert_eq "$(count '^opsx dispatch')" 0 "十分鐘內不再重派這個 feature"
+rm -f "$MEMO"
 cp "$WP0" "$R/openspec/workplan.yaml"; printf '{}' > "$DISP"
 echo "coordinate: ok"

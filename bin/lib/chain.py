@@ -175,6 +175,24 @@ def feature_plan(top: str, feature: str) -> list:
     return out
 
 
+def session_siblings(top: str, repo: str, slug: str, dispatch_path: str) -> list:
+    """opsx next：<slug> 的條目帶 feature 時，同 feature、沒停掉的其他卡，依 workplan 的 PR 順序；不是 session 代管回空。"""
+    dispatch = jsonfile.load(dispatch_path)
+    feature = (dispatch.get("%s/%s" % (repo, slug)) or {}).get("feature")
+    if not feature:
+        return []
+    cards = [k.split("/", 1)[1] for k, v in dispatch.items()
+             if k.startswith(repo + "/") and k != "%s/%s" % (repo, slug) and v.get("feature") == feature and v.get("mode") != "stopped"]
+    wp_path = os.path.join(top, "openspec", "workplan.yaml")
+    prs = [pr for f in load_workplan(wp_path).get("features") or [] for pr in f.get("prs") or []] if os.path.exists(wp_path) else []
+    order = [pr.get("name") for pr in prs]
+    rank = {}
+    for c in cards:
+        pr = find_pr(prs, c)
+        rank[c] = order.index(pr["name"]) if pr else len(order)   # workplan 裡沒有的排最後
+    return sorted(cards, key=rank.__getitem__)
+
+
 def sub_deps(top: str, main: str, sub: str) -> list:
     """opsx stack：主 change <main> 的 PR 底下子 change <sub> 的 depends-on。workplan 沒有這個 PR 或子 change 就 exit。"""
     wp_path = os.path.join(top, "openspec", "workplan.yaml")
@@ -246,6 +264,8 @@ if __name__ == "__main__":
         old_name, mode = me.get("herdr_name") or os.environ["OPSX_PARENT"], me.get("mode")
         jsonfile.update(sys.argv[2], register_continue)
         print(old_name, mode)   # 寫成功才印：chain.sh 靠退出碼判斷寫入成敗
+    elif len(sys.argv) == 6 and sys.argv[1] == "siblings":
+        print("\n".join(session_siblings(*sys.argv[2:])))
     elif len(sys.argv) == 5 and sys.argv[1] == "deps":
         print("\n".join(sub_deps(*sys.argv[2:])))
     elif len(sys.argv) == 4 and sys.argv[1] == "feature":

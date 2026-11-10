@@ -20,3 +20,5 @@ How:
 3. Otherwise invoke the next skill with the Skill tool (`opsx-workflow:<next>`, args `<slug>`) in this turn. Do not ask "shall I continue", do not just name the next step.
 
 Merging is never part of this chain. The flow stops at "waiting for merge".
+
+A feature session (`opsx dispatch --feature`, the card's dispatch.json entry has `feature`) runs several main changes in one pane. When babysit stops at "waiting for merge", run `opsx next` on that card's branch. It prints `/<stage> <主>` for the next main change of the same feature that has no MR yet, or `none`. On a command, invoke it now: switch to that main change's PR branch (apply step 2 does) and continue. On `none`, stop. Main changes that wait on a merge are woken by `opsx chain` later.

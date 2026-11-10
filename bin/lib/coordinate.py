@@ -139,7 +139,8 @@ class Round:
         key = card_key(c)
         entry = self.dispatch_file.get(key)
         self.log("++ %s 已在 forge 合併、agent 不在，收尾" % key)
-        if entry and entry.get("mode") != "stopped":
+        shared = self.session_siblings(key, entry)
+        if entry and entry.get("mode") != "stopped" and not shared:
             self.act(["opsx", "stop", c["slug"], "--repo", top])
         if not self.mark_merged(top, c["slug"]):
             return False
@@ -147,6 +148,10 @@ class Round:
         if rc != 0:
             self.log("?? %s openspec archive 失敗：%s" % (key, err[:200]))
             return False
+        if shared:
+            # pane 與 worktree 是同 feature 的 session 共用的，它還在做 shared 這幾張；分支由 session 切走後自己留著
+            self.log("-- %s 的 session %s 還在做 %s，不 stop、不移除 worktree" % (key, entry["feature"], "、".join(shared)))
+            return True
         # 沒記 worktree 的是早期派的卡，當時 worktree 一律開在這裡
         wt = entry["worktree"] if entry and entry.get("worktree") else os.path.join(top, ".claude", "worktrees", c["slug"])
         if os.path.isdir(wt):
@@ -251,7 +256,34 @@ class Round:
             return
         self.answer(c, top, w["gate_id"], pick)
 
+    def session_siblings(self, key, entry):
+        """條目帶 feature 時，同 repo、同 feature、還沒停掉的其他卡的 key。"""
+        if not entry or not entry.get("feature"):
+            return []
+        repo = key.split("/", 1)[0]
+        return [k for k, v in self.dispatch_file.items()
+                if k != key and k.startswith(repo + "/") and v.get("feature") == entry["feature"] and v.get("mode") != "stopped"]
+
+    def redispatch_feature(self, c, top, why):
+        """session 的 pane 不在了：同 feature 每張沒停的卡 stop 一次，再整個 feature 重派一次。memo 以 <repo>/@<feature> 記。"""
+        feature = c["dispatch"]["feature"]
+        key = "%s/@%s" % (c["repo"], feature)
+        last = self.memo["_redispatched"].get(key)
+        if last and self.now - datetime.datetime.fromisoformat(last) < datetime.timedelta(minutes=REDISPATCH_MINUTES):
+            self.log("-- %s %s，%d 分鐘內重派過，這輪不再派" % (key, why, REDISPATCH_MINUTES))
+            return
+        self.log("!! %s %s，各卡 stop 後整個 feature 重派" % (key, why))
+        mine = card_key(c)
+        for k in sorted([mine] + self.session_siblings(mine, self.dispatch_file.get(mine))):
+            self.act(["opsx", "stop", k.split("/", 1)[1], "--repo", top])
+            self.dispatch_file[k]["mode"] = "stopped"
+        self.act(["opsx", "dispatch", "--feature", feature, "--agent", c["dispatch"].get("agent", "claude"), "--mode", "autopilot", "--repo", top])
+        self.memo["_redispatched"][key] = self.now.isoformat(timespec="seconds")
+
     def redispatch(self, c, top, why):
+        if c["dispatch"].get("feature"):
+            self.redispatch_feature(c, top, why)
+            return
         key = card_key(c)
         last = self.memo["_redispatched"].get(key)
         if last and self.now - datetime.datetime.fromisoformat(last) < datetime.timedelta(minutes=REDISPATCH_MINUTES):
@@ -354,6 +386,9 @@ class Round:
                     continue
                 if any(k.startswith(repo + "/") and v.get("feature") == name and v.get("mode") != "stopped" for k, v in self.dispatch_file.items()):
                     continue
+                last = self.memo["_redispatched"].get("%s/@%s" % (repo, name))
+                if last and self.now - datetime.datetime.fromisoformat(last) < datetime.timedelta(minutes=REDISPATCH_MINUTES):
+                    continue   # redispatch_feature 剛派過（這輪或十分鐘內）
                 if not AGENT_NAME.match(name):
                     self.log("-- %s 的 feature %s 不是合法的 agent 名，跳過" % (repo, name))
                     continue

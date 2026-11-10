@@ -23,6 +23,9 @@ check_node pr '/babysit <slug>'
 
 assert_not_grep 'Do not run the review yourself' "$OPSX_ROOT/skills/apply/SKILL.md"
 
+# feature session：babysit 停在等合併時先跑 opsx next，印出指令就接著做（apply-fanout session-dispatch）
+awk '/^\| babysit /{f=1} f' "$CONT" | grep -qF 'opsx next' || fail "continue.md 的 babysit 列之後要寫 feature session 跑 opsx next"
+
 for row in '| explore | `/grill <slug>`' '| explore | `/propose <slug>`' '| grill | `/propose <slug>`' \
            '| propose | `/apply <slug>`' '| apply | `/review <slug>`' '| review | `/pr <slug>`' \
            '| pr | `/babysit <slug>`' '| babysit | stop'; do
