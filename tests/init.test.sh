@@ -120,6 +120,9 @@ RS="$(mk_repo sp)"; cd "$RS"
 mkdir -p "$RS/state"; cp "$OPSX_STATE_DIR/python" "$RS/state/python"
 outh="$(OPSX_STATE_DIR="$RS/state" opsx init 2>&1)" && fail "repo 是 state 目錄的上層時 opsx init 要失敗：$outh"
 case "$outh" in *"$RS"*上層*) ;; *) fail "要由守衛拒絕並點名路徑：$outh" ;; esac
+cd "$RP"
+outh="$(HOME="$RP/home" opsx init --check 2>&1)" && fail "repo 是 \$HOME 的上層時 --check 也要失敗：$outh"
+case "$outh" in *"$RP"*上層*) ;; *) fail "--check 要由守衛拒絕並點名路徑：$outh" ;; esac
 dirs="$(cj "$CR" permissions.additionalDirectories)"
 for r in "$RH" "$RP" "$RS"; do
   case "$dirs" in *"\"$r\""*) fail "$r 不該進可寫目錄：$dirs" ;; esac

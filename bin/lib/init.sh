@@ -134,7 +134,7 @@ refuse_broad_writable() { # <repo 主 checkout 根>
   done
   # opsx 自己的 repo 本來就要登記，所以這裡只警告：登記後所有 session 都能改 opsx 程式碼，之後在沙盒外跑它就是執行被改過的程式
   case "$(cd "$OPSX_ROOT" && pwd -P)/" in
-    "$top"/*) warn "$top 裡有 opsx 程式碼（OPSX_ROOT=${OPSX_ROOT}）：登記後所有 session 都能改它，之後在沙盒外跑 opsx（看板、opsx answer --grant）就是執行被改過的程式碼；這是 opsx 自己的 repo 就照做，否則請確認" ;;
+    "$top"/*) warn "$top 裡有 opsx 程式碼（OPSX_ROOT=${OPSX_ROOT}）：登記後所有 session 都能改它，之後在沙盒外跑 opsx（看板、opsx answer --grant、每 5 分鐘的 launchd coordinate）就是執行被改過的程式碼；這是 opsx 自己的 repo 就照做，否則請確認" ;;
   esac
 }
 
@@ -143,6 +143,7 @@ init_check() {
   local file out rc=0 top args=()
   file="$(claude_settings_file)"
   top="$(git_toplevel)"
+  [ -z "$top" ] || refuse_broad_writable "$top"
   [ -z "$top" ] || args+=(--add-dir "$top")
   out="$("$OPSX_PY" -I "$OPSX_ROOT/bin/lib/claude-settings.py" --file "$file" --template "$OPSX_ROOT/templates/settings.opsx.json" ${args[@]+"${args[@]}"} --check)" || rc=$?
   case "$rc" in
