@@ -6,25 +6,27 @@ HOOK="$OPSX_ROOT/hooks/opsx-grant-gate.sh"
 
 # 每個 level2 呼叫的第一個字；函式定義是 level2() {，後面沒有空白，不會被抽到
 calls_of() { grep -oE 'level2 +[^ (]+' "$1" | awk '{print $2}'; }
-# 不是純小寫字母的動作字（連字號、數字、變數、引號），代表這份檢查看不懂那個呼叫
-bad_calls_of() { calls_of "$1" | grep -vE '^[a-z]+$' || true; }
+# 動作字是小寫字母、字與字之間單一連字號；其他寫法（底線、數字、變數、引號）代表這份檢查看不懂那個呼叫
+bad_calls_of() { calls_of "$1" | grep -vE '^[a-z]+(-[a-z]+)*$' || true; }
 
 hook_actions="$(calls_of "$HOOK" | sort -u | tr '\n' ' ')"
 [ -n "$hook_actions" ] || fail "hook 裡抽不到任何 level2 呼叫"
 case " $hook_actions" in *" env "*) ;; *) fail "抽到的動作要含 env：$hook_actions" ;; esac
-assert_eq "$(bad_calls_of "$HOOK")" "" "hook 裡每個 level2 動作都要是純小寫字母"
+assert_eq "$(bad_calls_of "$HOOK")" "" "hook 裡每個 level2 動作都要是小寫字母加連字號"
+case " $hook_actions" in *" test-path "*) ;; *) fail "抽到的動作要含 test-path：$hook_actions" ;; esac
 
 py_actions="$(OPSX_LIB="$OPSX_ROOT/bin/lib" python3 -I -c '
 import os, sys
 sys.path.insert(0, os.environ["OPSX_LIB"]); import grantactions
 print(" ".join(sorted(grantactions.ACTIONS)))')"
 assert_eq "${hook_actions% }" "$py_actions" "hook 的 level2 動作集合要等於 grantactions.ACTIONS"
-assert_eq "$(printf '%s' "$py_actions" | wc -w | tr -d ' ')" 8 "八個動作"
+assert_eq "$(printf '%s' "$py_actions" | wc -w | tr -d ' ')" 9 "九個動作"
 
-# 抽取要抓得到壞呼叫：帶連字號、數字、變數的動作字，不能被默默略過
+# 抽取要抓得到壞呼叫：帶底線、數字、變數的動作字，不能被默默略過；連字號是合法寫法
 BAD="$FX/hook-bad.sh"; cp "$HOOK" "$BAD"
-printf 'level2 db-seed "seed"\nlevel2 npm2 "x"\nlevel2 "$act" "dyn"\n' >> "$BAD"
+printf 'level2 db_seed "seed"\nlevel2 npm2 "x"\nlevel2 "$act" "dyn"\nlevel2 test-path "ok"\n' >> "$BAD"
 assert_eq "$(bad_calls_of "$BAD" | wc -l | tr -d ' ')" 3 "三個壞呼叫都要被抓到"
+bad_calls_of "$BAD" | grep -qx 'test-path' && fail "帶連字號的合法動作不算壞呼叫"
 
 # 抽屜的授權按鈕要看 waiting.options 才畫：沒有授權選項的 gate（merge、表外 action）不能出現必失敗的按鈕
 WEB="$OPSX_ROOT/herdr-board/web/index.html"

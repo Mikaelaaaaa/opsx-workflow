@@ -72,6 +72,12 @@ assert_eq "$(tail -1 "$C/decisions.tsv" | cut -f2-5)" $'你\t已允許\t允許\t
 assert_eq "$(cat "$FX/victim")" "keep me" "grants.toml 與 gates.md 的舊暫存檔名上的 symlink 不能被寫"
 rm -f "$C/gates.md.tmp" "$OPSX_STATE_DIR/grants.toml.tmp"
 
+# --- 授權：這個 repo 永遠，帶連字號的 action（grant-test-path）：寫出合法 TOML，閘門用同樣的讀法讀得到 ---
+gates; sed -i.bak 's/^action: push$/action: test-path/' "$C/gates.md"; rm -f "$C/gates.md.bak"
+out="$(opsx answer x --gate g1 --grant repo "允許" 2>&1)"; assert_eq "$?" 0 "answer test-path repo: $out"
+assert_grep '^test-path = true$' "$OPSX_STATE_DIR/grants.toml"
+python3 -I -c 'import tomllib,sys;g=tomllib.load(open(sys.argv[1],"rb"));r=g["repos"]["Agentory-AI"];assert r.get("test-path") is True and r.get("push") is True, g' "$OPSX_STATE_DIR/grants.toml" || fail "grants.toml 要有 test-path = true 且留著 push：$(cat "$OPSX_STATE_DIR/grants.toml")"
+
 # --- 授權：這張卡 ---
 gates; printf '# grants\n' > "$OPSX_STATE_DIR/grants.toml"
 out="$(opsx answer x --gate g1 --grant card "允許" 2>&1)"; assert_eq "$?" 0 "answer g1 card: $out"
@@ -111,12 +117,12 @@ gates; sed -i.bak 's/^action: push$/action: git push/' "$C/gates.md"; rm -f "$C/
 out="$(opsx answer x --gate g1 --grant repo "允許" 2>&1)"; [ $? -ne 0 ] || fail "壞 action 要拒絕"; echo "$out" | grep -q 'git push' || fail "要印出 action: $out"
 python3 -I -c 'import tomllib,sys;tomllib.load(open(sys.argv[1],"rb"))' "$OPSX_STATE_DIR/grants.toml" || fail "grants.toml 被寫壞了"
 
-# --- 字元合法但不在八個動作內（grant-action）：拒絕、點名 gate / 原值 / 合法值，三個檔都不動 ---
+# --- 字元合法但不在九個動作內（grant-action）：拒絕、點名 gate / 原值 / 合法值，三個檔都不動 ---
 gates; sed -i.bak 's/^action: push$/action: external-api/' "$C/gates.md"; rm -f "$C/gates.md.bak"
 cp "$C/gates.md" "$FX/before-ext.md"; cp "$OPSX_STATE_DIR/grants.toml" "$FX/before-grants.toml"; cat "$PD/authz.json" > "$FX/before-authz.json" 2>/dev/null || : > "$FX/before-authz.json"
 for g in card repo this; do
-  out="$(opsx answer x --gate g1 --grant "$g" "允許" 2>&1)"; [ $? -ne 0 ] || fail "${g}: 不在八個內的 action 要拒絕"
-  for want in g1 external-api push mr migrate delete install rebase external env; do echo "$out" | grep -qF "$want" || fail "${g}: 訊息要含 ${want}: $out"; done
+  out="$(opsx answer x --gate g1 --grant "$g" "允許" 2>&1)"; [ $? -ne 0 ] || fail "${g}: 不在九個內的 action 要拒絕"
+  for want in g1 external-api push mr migrate delete install rebase external env test-path; do echo "$out" | grep -qF "$want" || fail "${g}: 訊息要含 ${want}: $out"; done
 done
 cmp -s "$C/gates.md" "$FX/before-ext.md" || fail "拒絕時 gates.md 不該變"
 cmp -s "$OPSX_STATE_DIR/grants.toml" "$FX/before-grants.toml" || fail "拒絕時 grants.toml 不該變"

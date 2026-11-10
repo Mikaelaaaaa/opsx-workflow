@@ -130,5 +130,22 @@ if [ "$tool" = "Edit" ] || [ "$tool" = "Write" ]; then
     *.env.example) exit 0 ;;
     *.env|*.env.*) [ "$UNMAPPED" = 1 ] && exit 0; level2 env "寫 $file"; allow ;;
   esac
+  # 測試檔放非慣例位置：所在那一層（不含子目錄）在 cwd 所在 worktree 的追蹤檔裡沒有測試檔。
+  # 先看檔名，git 只在像測試時才跑。
+  case "${file##*/}" in *.test.*|*.spec.*|test_*.py|*_test.*) ;; *) exit 0 ;; esac
+  [ "$UNMAPPED" = 1 ] && exit 0
+  wtop="$(git -C "$(hook_cwd)" rev-parse --show-toplevel 2>/dev/null || true)"
+  [ -n "$wtop" ] || exit 0
+  # 目錄還不存在時往上找最近存在的那層，用它判斷屬於哪個 worktree；pwd -P 讓 /tmp 與 /private/tmp 這類 symlink 對得上
+  base="${file%/*}"; missing=0
+  while [ -n "$base" ] && [ ! -d "$base" ]; do base="${base%/*}"; missing=1; done
+  base="$(cd "${base:-/}" && pwd -P)"
+  [ "$(git -C "$base" rev-parse --show-toplevel 2>/dev/null || true)" = "$wtop" ] || exit 0
+  if [ "$missing" = 0 ]; then
+    tracked="$(git -C "$base" -c core.quotepath=off ls-files)" || deny "opsx 授權閘門：git ls-files 失敗（${base}），分不出這一層有沒有既有測試，先擋下"
+    printf '%s\n' "$tracked" | grep -qE '^([^/]*\.(test|spec)\.[^/]*|test_[^/]*\.py|[^/]*_test\.[^/]*)$' && exit 0
+  fi
+  level2 test-path "測試檔寫進沒有既有測試的目錄（${file}）"
+  allow
 fi
 exit 0
