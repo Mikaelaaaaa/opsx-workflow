@@ -81,8 +81,13 @@ main{flex:1;min-width:0;padding-left:max(16px,env(safe-area-inset-left,0px));pad
 .errors{margin-top:12px;font-family:var(--font-mono);font-size:11px;color:var(--fg-3);display:flex;flex-direction:column;gap:2px}
 .row.gone{opacity:.5}
 .syncline{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px;font-size:12px;color:var(--fg-2);font-family:var(--font-mono)}
-.newbar{display:flex;align-items:center;gap:10px;margin-top:14px}
-.newbar input{flex:1;min-width:0}
+.newbar{display:flex;flex-wrap:wrap;align-items:flex-start;gap:10px;margin-top:14px;border-radius:var(--r)}
+.newbar.drag{outline:2px dashed var(--accent);outline-offset:4px}
+.newbar textarea{flex:1;min-width:0;font-family:var(--font-sans);font-size:14px;color:var(--fg);background:var(--bg);border:1px solid var(--border);border-radius:var(--r);padding:8px 10px;outline:none;resize:vertical}
+.newbar textarea:focus{border-color:var(--accent)}
+.newbar .side{display:flex;flex-direction:column;align-items:flex-start;gap:6px}
+.new-files{flex-basis:100%;display:flex;flex-wrap:wrap;gap:6px;margin:0;padding:0;list-style:none}
+.new-files li{display:flex;align-items:center;gap:4px;font-size:12px;border:1px solid var(--border);border-radius:var(--r);padding:0 0 0 8px}
 .repo-grants{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:14px;padding:8px 12px;border:1px solid var(--border-soft);border-radius:var(--r);font-size:13px;color:var(--fg-2);background:var(--surface)}
 .repo-grants .h2{font-size:11px}
 .repo-grants .on{color:var(--fg)}
@@ -250,7 +255,7 @@ main{flex:1;min-width:0;padding-left:max(16px,env(safe-area-inset-left,0px));pad
   </div>
   <main>
     <div id="errors" class="errors" hidden></div>
-    <div id="newbar" class="newbar" hidden><input type="text" id="new-text" aria-label="新增一件事" placeholder="一句話，Enter 送出，Esc 取消"><span class="faint mono" id="new-where" style="font-size:11px"></span></div>
+    <div id="newbar" class="newbar" hidden><textarea id="new-text" rows="3" aria-label="新增一件事" placeholder="一句話，或貼上多行文字、連結；檔案可以拖進來。Ctrl/⌘+Enter 送出，Esc 取消"></textarea><div class="side"><button class="sm" data-act="new-attach">附檔</button><input type="file" id="new-file" multiple hidden><span class="faint mono" id="new-where" style="font-size:11px"></span></div><ul id="new-files" class="new-files" aria-label="附檔"></ul></div>
     <div id="repo-grants" class="repo-grants" hidden></div>
     <div id="view"><div class="empty">載入中…</div></div>
   </main>
@@ -733,12 +738,56 @@ function focusAgent(agent){
 
 /* ＋新增：範圍選到單一 repo 就建在那個 repo，否則進待分類（board-inbox D6） */
 const newRepo=()=>ui.scope==='ws'&&ui.repo?(data.repo_paths||{})[ui.repo]||null:null;
+const MAX_ATTACH=10*1024*1024;
+/* 只有一行字而且沒有檔走 /api/new（source: me，跟以前一樣）；多行或有檔走 /api/paste，由 server 拆出一句話並把全文存成 paste.md */
+function newRequest(text,files,repo){
+  const lines=text.split(/\r\n|\r|\n/).filter(l=>l.trim());
+  if(!lines.length&&!files.length)return null;
+  const where=repo?{repo}:{};
+  if(lines.length===1&&!files.length)return {path:'new',body:{text:lines[0].trim(),...where}};
+  return {path:'paste',body:{text:text.trim(),files:files.map(f=>({name:f.name,data:f.data})),...where}};
+}
+function splitBySize(files){return [files.filter(f=>f.size<=MAX_ATTACH),files.filter(f=>f.size>MAX_ATTACH)];}
+let newFiles=[];  /* {name, size, data(base64)}，加進清單時就讀好 */
+/* newGen 在 closeNew 時加一，關掉之後才讀完的檔對不上就丟掉；newReading 是還在讀的批數，讀完前不准送出 */
+let newGen=0,newReading=0;
 function openNew(){$('#newbar').hidden=false;$('#new-where').textContent=newRepo()?'建在 '+ui.repo:'進待分類（範圍選到單一 repo 才直接建殼）';$('#new-text').focus();}
-function closeNew(){$('#newbar').hidden=true;$('#new-text').value='';}
+function closeNew(){$('#newbar').hidden=true;$('#new-text').value='';newFiles=[];newGen++;renderNewFiles();}
+function renderNewFiles(){$('#new-files').innerHTML=newFiles.map((f,i)=>`<li><span class="mono">${esc(f.name)}</span><button class="ghost sm" data-act="new-unattach" data-i="${i}" aria-label="移除 ${esc(f.name)}">×</button></li>`).join('');}
+function readBase64(file){
+  return new Promise((ok,bad)=>{const r=new FileReader();r.onload=()=>ok(r.result.slice(r.result.indexOf(',')+1));r.onerror=()=>bad(r.error);r.readAsDataURL(file);});
+}
+async function addFiles(list){
+  const [fit,big]=splitBySize([...list]);
+  if(big.length)toast(big.map(f=>f.name).join('、')+' 超過單檔 10 MB 上限，沒有加進清單',true);
+  const gen=newGen;newReading++;
+  try{
+    for(const f of fit){
+      /* 空檔的 data URL 是 "data:"，沒有逗號可切 */
+      try{const data=f.size?await readBase64(f):'';if(gen!==newGen)return;newFiles.push({name:f.name,size:f.size,data});}
+      catch(e){toast(f.name+' 讀不到：'+e.message,true);}
+    }
+  }finally{newReading--;}
+  renderNewFiles();
+}
+/* 送成功才清空，而且只清送出的那份：失敗、忙碌時全留著；送出期間新打的字與新加的檔也留著。
+   送出後關掉又開了新草稿（newGen 變了）就完全不動 */
 function submitNew(){
-  const text=$('#new-text').value.trim();if(!text)return;
-  const repo=newRepo();closeNew();
-  act(`opsx new${repo?' --repo '+repo:''} -- ${text}`,()=>api.post('new',repo?{text,repo}:{text}));
+  if(newReading){toast('附件還在讀，讀完再送',true);return;}
+  if(ui.busy){toast('上一個動作還在跑，輸入先留著，等一下再送',true);return;}
+  const text=$('#new-text').value,sent=newFiles.slice(),gen=newGen;
+  const req=newRequest(text,sent,newRepo());if(!req)return;
+  const where=req.body.repo?' --repo '+req.body.repo:'';
+  const label=req.path==='new'?`opsx new${where} -- ${req.body.text}`:`opsx new${where}${req.body.files.map(f=>' --attach '+f.name).join('')}（貼上）`;
+  act(label,async()=>{
+    const r=await api.post(req.path,req.body);
+    if(gen===newGen){
+      newFiles=newFiles.filter(f=>!sent.includes(f));
+      if($('#new-text').value===text)$('#new-text').value='';
+      if(!newFiles.length&&!$('#new-text').value)closeNew();else renderNewFiles();
+    }
+    return r;
+  });
 }
 
 /* 先 explore：互動模式派出，第一句由 dispatch 從 stage 推，收件卡一定是 /explore（board-inbox D5） */
@@ -831,6 +880,8 @@ document.addEventListener('click',e=>{
     if(a==='file'){fileUnfiled(btn.closest('[data-unfiled]'));return;}
     if(a==='drop-open'){ui.drop=btn.dataset.drop;ui.dropText='';render();const i=$('.drop-reason');if(i)i.focus();return;}
     if(a==='banner-close'){closeBanner();return;}
+    if(a==='new-attach'){$('#new-file').click();return;}
+    if(a==='new-unattach'){newFiles.splice(Number(btn.dataset.i),1);renderNewFiles();return;}
     if(a==='scope-all'){$('#scope-all').click();return;}
     if(a==='logf'){setLogFilter(btn.dataset.f);render();return;}
     if(a==='log-more'){logMore();render();return;}
@@ -870,6 +921,12 @@ document.addEventListener('change',e=>{
   const r=e.target.closest('[data-unfiled]');if(r&&e.target.matches('select'))ui.fileRepo[r.dataset.unfiled]=e.target.value;
 });
 document.addEventListener('keydown',e=>{
+  if(e.target.id==='new-text'){
+    if(e.isComposing)return;
+    if((e.ctrlKey||e.metaKey)&&e.key==='Enter'){e.preventDefault();submitNew();}
+    else if(e.key==='Escape')closeNew();
+    return;
+  }
   if(e.target.matches('input,select')){
     if(e.target.classList.contains('drop-reason')){
       if(e.key==='Escape'){ui.drop=null;ui.dropText='';render();}
@@ -879,7 +936,6 @@ document.addEventListener('keydown',e=>{
       if(e.key==='Escape'){ui.prio=null;ui.prioText='';ui.prioLevel=null;render();}
       else if(e.key==='Enter'){const c=byKey(ui.prio);if(c)submitPriority(c);}
       return;}
-    if(e.target.id==='new-text'){if(e.key==='Enter')submitNew();else if(e.key==='Escape')closeNew();return;}
     if(e.key==='Enter'&&e.target.id==='reply'){const c=byKey(ui.open);const v=e.target.value.trim();if(c&&v)answer(c,v,null);}
     if(e.key==='Enter'&&e.target.id==='note-add'){const c=byKey(ui.open);const v=e.target.value.trim();if(c&&v)submitNote(c,v);}
     return;
@@ -896,6 +952,10 @@ function move(d){
   const el=document.querySelector(`#view .row[data-key="${CSS.escape(ui.sel)}"]`);if(el)el.scrollIntoView({block:'nearest'});
 }
 $('#new-open').onclick=openNew;
+$('#new-file').addEventListener('change',e=>{addFiles(e.target.files);e.target.value='';});
+$('#newbar').addEventListener('dragover',e=>{e.preventDefault();$('#newbar').classList.add('drag');});
+$('#newbar').addEventListener('dragleave',e=>{if(!$('#newbar').contains(e.relatedTarget))$('#newbar').classList.remove('drag');});
+$('#newbar').addEventListener('drop',e=>{e.preventDefault();$('#newbar').classList.remove('drag');addFiles(e.dataTransfer.files);});
 $('#scope-all').onclick=()=>{setScope('all',ui.ws,null);closeMenu();render();};
 $('#scope-ws').onclick=e=>{e.stopPropagation();if($('#menu').hidden)openMenu(e.currentTarget);else closeMenu();};
 
