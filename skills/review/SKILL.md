@@ -23,7 +23,7 @@ Read `openspec/changes/<slug>/tasks.md` and `status.json`. For every checked tas
 
 A main change with `subs/`: also run `opsx check <slug>`. Any line it prints is a sub-change shell that is incomplete; stop the same way and name the lines.
 
-Read the round from report.md: its title is `# Review · <slug> · 第 <N> 輪 · …`; no report.md means N is 0, and this run is round N+1. When N is already 2, two rounds are done: review does not start a reviewer. Write a gate in `gates.md` that lists the Bug and Must-fix items still open in report.md, and stop.
+Read the round from report.md: its title is `# Review · <slug> · 第 <N> 輪 · …`; no report.md means N is 0, and this run is round N+1. When N is already 2, two rounds are done: review does not start a reviewer. If report.md still lists an open Bug or Must-fix, write a gate in `gates.md` that lists those items and stop; if none is open, say the review budget is used up and continue to the next node.
 
 Decide small or not by `../../references/continue.md`, "Light flow" (kind chore or bug-fix, at most 3 tasks, one first path component outside tests). A small card runs one merged reviewer in step 2; any other card runs three.
 
@@ -81,7 +81,7 @@ Evidence you cannot verify downgrades the finding one level. Only BUG and MUST_F
 
 Seed the report's D 對照 table from Agent A's `D_TABLE` (followed → 照做, violated → 偏離) and keep every row, followed ones included. After bucketing, a row whose finding you dismissed becomes 照做, and a row that a B or C finding in Act on or Consider contradicts becomes 偏離. Cite file:line, not a finding number. Agents B and C write `d_id: none`.
 
-A BUG of the kind 「task 已勾但沒實作」 is always Consider, never Act on: fixing it is redoing `/apply`. Before routing it there, read the diff yourself and confirm the task has no code at all; if it has code that contradicts a D, it is a MUST_FIX against that D and takes the normal Act on path. The report line says 回 `/apply <slug>` 做完; review changes no code and does not touch tasks.md for it.
+A BUG of the kind 「task 已勾但沒實作」 is always Consider, never Act on: fixing it is redoing `/apply`. Before routing it there, read the diff yourself and confirm the task has no code at all; if it has code that contradicts a D, it is a MUST_FIX against that D and takes the normal Act on path. The report line says 回 `/apply <slug>` 做完; review changes no code and does not touch tasks.md for it. This is the one Consider that Step 5's 「Consider never … sends the card back to apply」 does not cover: it is a BUG that stays unfixed, so the unfixed-Bug condition in Step 5 stops the flow before `/pr`.
 
 ## Step 4: fix once
 
@@ -115,6 +115,8 @@ Then apply the fixes, touching only the listed places. The whole fix round may a
 ## Ledger
 <commit sha> · <what was verified and how> · verdict: <green|red>
 ```
+
+A later round rewrites the file from this template but keeps an existing `## MR` section verbatim: `/pr` appends it, and the router and merge read the URL from it.
 
 `opsx status review 7/7 "report.md 寫好"`. Reply with the bucket counts, what got fixed, what the user should look at in Consider, and the two closing lines. Then continue to `/pr <slug>` per `../../references/continue.md`: invoke it now unless a gate is open or a Bug or Must-fix is still unfixed. Consider never opens a gate and never sends the card back to apply. Only when this was round 2 and a Bug or Must-fix is still unfixed, write the gate described in step 0's round rule and stop.
 

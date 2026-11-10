@@ -57,4 +57,8 @@ assert_fixed 'Read the round from report.md' "$FX/sec-step0"
 assert_fixed 'two rounds' "$FX/sec-step0"
 assert_fixed 'does not start a reviewer' "$FX/sec-step0"
 assert_fixed 'Consider never opens a gate' "$REV"
+
+# --- review 回歸：後面幾輪重寫 report.md 時保留 pr 附加的 ## MR ---
+awk 'index($0,"## Step 5")==1{on=1;print;next} /^## (Step|Guardrails)/{on=0} on' "$REV" > "$FX/sec-step5"; [ -s "$FX/sec-step5" ] || fail "review has no '## Step 5' section"
+assert_fixed 'keeps an existing `## MR` section verbatim' "$FX/sec-step5"
 assert_fixed 'Consider never opens a gate' "$CONT"

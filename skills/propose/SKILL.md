@@ -50,7 +50,7 @@ Do NOT proceed without understanding what the user wants to build.
 openspec new change "<name>" --schema opsx
 ```
 
-Usually the shell already exists (收件 made it, explore and grill wrote into it). Then skip this and read what is there: `inbox.md`, `explore.md` (已知 / 待決 / 不做), `grill.md` (D1…Dn). If `explore.md` has a non-empty 待決 and no `grill.md`, stop: `/grill <name>` first; the router says the same. The exception is a card whose kind is chore or bug-fix (`../../references/continue.md`, "Light flow"): do not stop; write each open 待決 item as one 假設 sentence at the end of proposal.md's What Changes, and carry on.
+Usually the shell already exists (收件 made it, explore and grill wrote into it). Then skip this and read what is there: `inbox.md`, `explore.md` (已知 / 待決 / 不做), `grill.md` (D1…Dn). If `explore.md` has a non-empty 待決 and no `grill.md`, stop: `/grill <name>` first; the router says the same. The exception is a card whose kind is chore or bug-fix (`../../references/continue.md`, "Light flow"): do not stop; write each open 待決 item as one 假設 sentence at the end of proposal.md's What Changes, and carry on. Confirm the kind in 2b first: if 2b changes it to anything else while 待決 is non-empty and there is no `grill.md`, stop and route to `/grill <name>`.
 
 ### 2b. Confirm the kind
 
