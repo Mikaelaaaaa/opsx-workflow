@@ -414,7 +414,7 @@ class ServerTest(unittest.TestCase):
         self.assertEqual(self.open_log.read_text(), "")
 
     def test_focus_config_without_usable_terminal_app_hints(self):
-        for text in ('# terminal_app = "Warp"\n', 'other = 1\n', 'terminal_app = ""\n', 'terminal_app = 1\n'):
+        for text in ('# terminal_app = "Warp"\n', 'other = 1\n', 'terminal_app = ""\n', 'terminal_app = 1\n', 'terminal_app = "War\\u0000p"\n'):
             self.config.write_text(text)
             out = self.focus()
             self.assertTrue(out["ok"], text)
