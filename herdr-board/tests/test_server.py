@@ -139,6 +139,17 @@ class ServerTest(unittest.TestCase):
         self.assertEqual(self.log.read_text().strip(), "answer x --gate g1 --grant repo --repo %s -- 允許" % r)
         self.assertIn("ok: answer", out["stdout"])
 
+    def test_answer_forwards_sub(self):
+        status, _, body = self.req("/api/answer", {"slug": "bt", "sub": "as", "gate": "g1", "text": "ok"}, token=self.token)
+        self.assertEqual(status, 200)
+        self.assertTrue(json.loads(body)["ok"], body)
+        self.assertEqual(self.log.read_text().strip(), "answer bt --sub as --gate g1 -- ok")
+
+    def test_answer_rejects_bad_sub(self):
+        status, _, _ = self.req("/api/answer", {"slug": "bt", "sub": "../x", "gate": "g1", "text": "ok"}, token=self.token)
+        self.assertEqual(status, 400)
+        self.assertEqual(self.log.read_text(), "")
+
     def test_merge_and_stop_and_dispatch(self):
         r = str(self.repo)
         self.req("/api/merge", {"slug": "x", "repo": r}, token=self.token)
