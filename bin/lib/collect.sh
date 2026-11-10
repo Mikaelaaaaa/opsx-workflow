@@ -429,8 +429,9 @@ for line in reversed([l for l in read(os.path.join(state, "sync.log")).split("\n
 # 同一個 slug 先歸檔後又建活卡時活卡優先，所以歸檔的先放、活的後蓋。
 card_by_key = {(c["repo"], c["slug"]): c for c in cards if c["archived"]}
 card_by_key.update({(c["repo"], c["slug"]): c for c in cards if not c["archived"]})
+# session 條目（key <repo>/@<feature>）與它的成員共用一棵 worktree：worktree 一律算給 session 條目，pane 上沒有活成員時它才是孤兒
 worktree_of = {}
-for k, e in dispatch.items():
+for k, e in sorted(dispatch.items(), key=lambda kv: kv[0].split("/", 1)[1].startswith("@")):
     if e.get("worktree"):
         worktree_of[e["worktree"].rstrip("/")] = tuple(k.split("/", 1))
 
@@ -449,6 +450,8 @@ def orphan_reason(key, pane):
     if entry is None or str(entry.get("pane")) != str(pane): return None
     # opsx 自己已經關掉這個 pane（stop 記 pane_closed_at、reap 記 reaped_at）：同一個 id 現在是別人的 pane
     if entry.get("pane_closed_at") or entry.get("reaped_at"): return None
+    # session 條目不是卡：走到這裡代表 pane 上已沒有活成員（live_panes 先擋掉了）
+    if key[1].startswith("@"): return "session-done"
     c = card_by_key.get(key)
     if c is None:
         # 卡不在 cards 裡不等於卡目錄不存在：repo 沒被這次掃描、或被當舊卡濾掉的活卡不能算

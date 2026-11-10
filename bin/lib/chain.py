@@ -198,9 +198,9 @@ def feature_plan(top: str, feature: str) -> list:
     return out
 
 
-def session_siblings(top: str, repo: str, slug: str, dispatch_path: str) -> list:
-    """opsx next：<slug> 的條目帶 feature 時，同 feature、沒停掉的其他卡，依 workplan 的 PR 順序；不是 session 代管回空。"""
-    dispatch = jsonfile.load(dispatch_path)
+def session_siblings(top: str, repo: str, slug: str, dispatch: dict) -> list:
+    """<slug> 的條目帶 feature 時，同 repo、同 feature、沒停掉、卡還沒歸檔的其他卡，依 workplan 的 PR 順序；不是 session 代管回空。
+    opsx next 與 coordinate 共用。session 共用時歸檔的卡條目不一定標 stopped，所以用卡的資料夾還在不在判斷。"""
     feature = (dispatch.get("%s/%s" % (repo, slug)) or {}).get("feature")
     if not feature:
         return []
@@ -251,13 +251,19 @@ def register_continue(d: dict) -> None:
 
 
 def register_session(d: dict) -> None:
-    """jsonfile.update 的 mutate：feature session 接下一個主 change。pane、herdr 名、feature 沿用父主 change 的條目，父主 change 不記交接。"""
+    """jsonfile.update 的 mutate：feature session 接下一個主 change。pane 層的欄位取自 session 條目 <repo>/@<feature>，
+    herdr 名、feature、mode 沿用父主 change 的條目，父主 change 不記交接。"""
     e = os.environ
     me = d[e["OPSX_KEY"]]
     repo = e["OPSX_KEY"].split("/", 1)[0]
+    session_key = "%s/@%s" % (repo, me["feature"])
+    if session_key not in d:
+        sys.exit("chain: %s 帶 feature %s，但 dispatch.json 沒有 session 條目 %s" % (e["OPSX_KEY"], me["feature"], session_key))
+    session = d[session_key]
     slug, branch, kind, model = e["OPSX_PLAN"].split("\t")
-    entry = _child_entry(me, slug, branch, kind, model, me.get("mode"), me.get("worktree"), e["OPSX_AT"])
-    entry["herdr_name"] = entry["via"] = entry["feature"] = me["feature"]
+    entry = _child_entry(session, slug, branch, kind, model, me.get("mode"), session.get("worktree"), e["OPSX_AT"])
+    entry["herdr_name"] = entry["feature"] = me["feature"]
+    entry["via"] = "@" + me["feature"]
     d["%s/%s" % (repo, slug)] = entry
 
 
@@ -289,7 +295,7 @@ if __name__ == "__main__":
         jsonfile.update(sys.argv[2], register_continue)
         print(old_name, mode)   # 寫成功才印：chain.sh 靠退出碼判斷寫入成敗
     elif len(sys.argv) == 6 and sys.argv[1] == "siblings":
-        print("\n".join(session_siblings(*sys.argv[2:])))
+        print("\n".join(session_siblings(sys.argv[2], sys.argv[3], sys.argv[4], jsonfile.load(sys.argv[5]))))
     elif len(sys.argv) == 5 and sys.argv[1] == "deps":
         print("\n".join(sub_deps(*sys.argv[2:])))
     elif len(sys.argv) == 4 and sys.argv[1] == "feature":

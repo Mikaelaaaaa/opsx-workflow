@@ -90,4 +90,18 @@ archive ar3; printf '{"o/ar3":{"pane":"w1:p9","mode":"autopilot"}}' > "$OPSX_STA
 out="$(OPSX_TEST_PANE_CLOSE_FAIL=pane_not_found opsx reap --root "$ROOT" 2>&1)"; assert_eq "$?" 0 "pane 已不在: $out"
 python3 -I -c 'import json,sys;assert json.load(open(sys.argv[1]))["o/ar3"]["reaped_at"]' "$OPSX_STATE_DIR/dispatch.json" || fail "pane 已不在也算 reaped"
 
+# session 條目 o/@g：成員 m5 的 pane 是舊值，靠 via 查到 session 的 pane w1:pG 保護；m5 歸檔後關 pane，記在 session 條目上
+mkcard m5
+printf '{"o/@g":{"pane":"w1:pG","mode":"autopilot","worktree":"%s/.claude/worktrees/g"},"o/m5":{"pane":"w1:pOld","mode":"autopilot","worktree":"%s/.claude/worktrees/g","feature":"g","via":"@g","herdr_name":"g"}}' "$O" "$O" > "$OPSX_STATE_DIR/dispatch.json"
+{ printf '{"id":"cli:agent:list","result":{"agents":['; agent w1:pG idle "$O/.claude/worktrees/g"; printf '],"type":"agent_list"}}'; } > "$FX/agents.json"
+: > "$OPSX_FAKE_LOG"
+out="$(opsx reap --root "$ROOT" 2>&1)"; assert_eq "$?" 0 "reap session 有活成員: $out"
+assert_eq "$(closed w1:pG)" 0 "session pane 上還有活成員 m5，不關"
+rm -rf "$ROOT/o/openspec/changes/m5"; archive m5
+: > "$OPSX_FAKE_LOG"
+out="$(opsx reap --root "$ROOT" 2>&1)"; assert_eq "$?" 0 "reap session 收完: $out"
+assert_eq "$(closed w1:pG)" 1 "成員都收完，session pane 要關"
+python3 -I -c 'import json,sys;d=json.load(open(sys.argv[1]));assert d["o/@g"]["reaped_at"] and "reaped_at" not in d["o/m5"],d' "$OPSX_STATE_DIR/dispatch.json" || fail "reaped_at 記在 session 條目"
+assert_grep "o/@g w1:pG.*session-done" "$OPSX_STATE_DIR/reap.log"
+
 echo "ok reap"

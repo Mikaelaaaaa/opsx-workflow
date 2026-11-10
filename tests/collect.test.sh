@@ -459,6 +459,30 @@ J="$(OPSX_TEST_HERDR_AGENTS="$FX/agents9.json" opsx collect --root "$RP9")"; ass
 assert_eq "$(q "$J" orphans)" '[]' "共用 worktree 與 pane 的活卡（kid）還在，不能列成孤兒"
 export HERDR_ENV=""
 
+# ---------- session 條目 <repo>/@<feature> 不是卡（specs/session-dispatch「session 條目不是卡」） ----------
+RPS="$FX/code-sess"; mkdir -p "$RPS/o/.git" "$RPS/o/openspec/changes/m3" "$RPS/o/openspec/changes/archive"
+OS="$(cd "$RPS/o" && pwd -P)"
+printf 'schema: opsx\nkind: dev\n' > "$RPS/o/openspec/changes/m3/.openspec.yaml"; printf '## 一句話\n\nm3\n' > "$RPS/o/openspec/changes/m3/inbox.md"
+printf '{"o/@g":{"pane":"w1:p7","mode":"autopilot","worktree":"%s/.claude/worktrees/g"},"o/m3":{"pane":"w1:p7","mode":"autopilot","worktree":"%s/.claude/worktrees/g","feature":"g","via":"@g","herdr_name":"g"}}' "$OS" "$OS" > "$OPSX_STATE_DIR/dispatch.json"
+{ printf '{"id":"cli:agent:list","result":{"agents":['
+  agent6 w1:p7 idle "$OS/.claude/worktrees/g"
+  printf '],"type":"agent_list"}}'; } > "$FX/agents-sess.json"
+export HERDR_ENV=1
+J="$(OPSX_TEST_HERDR_AGENTS="$FX/agents-sess.json" opsx collect --root "$RPS")"; assert_eq "$?" 0 "session collect: $J"
+assert_eq "$(q "$J" orphans)" '[]' "session pane 上還有活成員 m3，不是孤兒"
+assert_eq "$(printf '%s' "$J" | python3 -I -c 'import json,sys;print(" ".join(c["slug"] for c in json.load(sys.stdin)["cards"]))')" "m3" "cards 只有成員 m3，沒有 @g"
+# 成員 m3 歸檔了（條目還在、排在 session 條目之後）：pane 是孤兒，算給 session 條目，原因 session-done
+mv "$RPS/o/openspec/changes/m3" "$RPS/o/openspec/changes/archive/2026-11-10-m3"
+J="$(OPSX_TEST_HERDR_AGENTS="$FX/agents-sess.json" opsx collect --root "$RPS")"; assert_eq "$?" 0 "session collect 2: $J"
+assert_eq "$(printf '%s' "$J" | python3 -I -c 'import json,sys;print(json.dumps([[o["pane"],o["slug"],o["reason"]] for o in json.load(sys.stdin)["orphans"]]))')" \
+  '[["w1:p7", "@g", "session-done"]]' "成員都收完時 session pane 是孤兒，原因 session-done"
+# 成員條目已經不在 dispatch.json：同樣是 session-done，不是 card-missing
+printf '{"o/@g":{"pane":"w1:p7","mode":"autopilot","worktree":"%s/.claude/worktrees/g"}}' "$OS" > "$OPSX_STATE_DIR/dispatch.json"
+J="$(OPSX_TEST_HERDR_AGENTS="$FX/agents-sess.json" opsx collect --root "$RPS")"; assert_eq "$?" 0 "session collect 3: $J"
+assert_eq "$(printf '%s' "$J" | python3 -I -c 'import json,sys;print(json.dumps([[o["pane"],o["slug"],o["reason"]] for o in json.load(sys.stdin)["orphans"]]))')" \
+  '[["w1:p7", "@g", "session-done"]]' "只剩 session 條目時原因是 session-done"
+export HERDR_ENV=""
+
 # ---------- gate type 同義詞、type 不明、needs: run（gate-type-normalize） ----------
 R7="$FX/code7"; mkdir -p "$R7/r6/.git"
 gcard() { # <slug> <gates.md 內容>

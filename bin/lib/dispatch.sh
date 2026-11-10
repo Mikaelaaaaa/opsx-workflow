@@ -177,7 +177,8 @@ $(herdr pane read "$pane" 2>/dev/null | tail -20)"
   done
 
   # dispatch.json
-  # 一般卡一筆；feature session 每個能開工的主 change 一筆，共用 pane，herdr_name / via / feature 都是 feature 名
+  # 一般卡一筆。feature session 另有自己的條目 <repo>/@<feature>（pane 層的欄位），每個能開工的主 change 再各一筆：
+  # pane 照抄 session 的，herdr_name / feature 是 feature 名，via 指向 @<feature>
   [ -n "$plan" ] || plan="$card"$'\t'"$branch"$'\t'"$kind"
   OPSX_REPO="$repo" OPSX_FEATURE="$feature" OPSX_PLAN="$plan" OPSX_WS="$ws" OPSX_WSID="$ws_id" OPSX_TAB="$tab" OPSX_PANE="$pane" OPSX_AGENT="$agent" OPSX_MODEL="$model" OPSX_MODE="$mode" OPSX_WT="$wt" OPSX_AT="$(now_iso)" OPSX_LIB="$OPSX_ROOT/bin/lib" \
   "$OPSX_PY" -I - "$OPSX_STATE_DIR/dispatch.json" <<'PY'
@@ -185,13 +186,16 @@ import os, sys
 sys.path.insert(0, os.environ["OPSX_LIB"]); import jsonfile
 e = os.environ
 def put(d):
+    pane_part = {"workspace": e["OPSX_WS"], "workspace_id": e["OPSX_WSID"], "tab": e["OPSX_TAB"], "pane": e["OPSX_PANE"], "agent": e["OPSX_AGENT"],
+                 "model": e["OPSX_MODEL"], "mode": e["OPSX_MODE"], "worktree": e["OPSX_WT"], "started_at": e["OPSX_AT"], "drive_pid": None}
+    if e["OPSX_FEATURE"]:
+        d["%s/@%s" % (e["OPSX_REPO"], e["OPSX_FEATURE"])] = dict(pane_part)
     for line in e["OPSX_PLAN"].splitlines():
         card, branch, kind = line.split("\t")
-        entry = {"workspace": e["OPSX_WS"], "workspace_id": e["OPSX_WSID"], "tab": e["OPSX_TAB"], "pane": e["OPSX_PANE"], "agent": e["OPSX_AGENT"],
-                 "model": e["OPSX_MODEL"], "mode": e["OPSX_MODE"], "kind": kind, "worktree": e["OPSX_WT"], "branch": branch,
-                 "grants": [], "once": [], "started_at": e["OPSX_AT"], "drive_pid": None}
+        entry = dict(pane_part, kind=kind, branch=branch, grants=[], once=[])
         if e["OPSX_FEATURE"]:
-            entry["herdr_name"] = entry["via"] = entry["feature"] = e["OPSX_FEATURE"]
+            entry["herdr_name"] = entry["feature"] = e["OPSX_FEATURE"]
+            entry["via"] = "@" + e["OPSX_FEATURE"]
         d["%s/%s" % (e["OPSX_REPO"], card)] = entry
 jsonfile.update(sys.argv[1], put)
 PY
