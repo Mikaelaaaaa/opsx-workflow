@@ -11,6 +11,13 @@
   },
   "sandbox": {
     "network": {"allowUnixSockets": ["${HOME}/.config/herdr/herdr.sock"]},
-    "excludedCommands": ["gh pr *"]
+    "excludedCommands": ["gh pr *"],
+    "filesystem": {
+      "denyWrite": [
+        "${OPSX_STATE_DIR}/grants.toml",
+        "${OPSX_STATE_DIR}/dispatch.json",
+        "${OPSX_STATE_DIR}/dispatch.json.lock"
+      ]
+    }
   }
 }
