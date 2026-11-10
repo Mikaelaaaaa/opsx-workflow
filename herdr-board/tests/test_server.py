@@ -351,7 +351,7 @@ class ServerTest(unittest.TestCase):
 
 
 class NoHerdrTest(unittest.TestCase):
-    """server 不在 herdr 裡（HERDR_ENV 沒設）：最後輸出回 ok false，不叫 herdr（specs/board-log「herdr 不可用」）。"""
+    """server 不在 herdr pane 裡（HERDR_ENV 沒設）：最後輸出照樣叫 herdr（specs/board-log「server 不在 herdr pane 裡」）。"""
 
     @classmethod
     def setUpClass(cls):
@@ -383,9 +383,9 @@ class NoHerdrTest(unittest.TestCase):
         with urllib.request.urlopen(r, timeout=5) as resp:
             self.assertEqual(resp.status, 200)
             out = json.loads(resp.read().decode())
-        self.assertFalse(out["ok"])
-        self.assertIn("HERDR_ENV", out["error"])
-        self.assertFalse(self.herdr_log.exists(), "不在 herdr 裡就不該叫 herdr")
+        self.assertTrue(out["ok"], out)
+        self.assertEqual(out["text"], "line\n")
+        self.assertIn("agent read w5:pH --lines 10 --format text", self.herdr_log.read_text())
 
 
 if __name__ == "__main__":

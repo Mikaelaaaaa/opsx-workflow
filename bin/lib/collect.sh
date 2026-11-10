@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # opsx collect [--root <dir>] [--state <dir>]：看板唯一的資料來源，印一份 JSON，不寫檔（mr.sh 的 cache/ 除外）。
 # 讀三處：<root>/*/openspec/changes/*/（含 archive/）、<state>/{dispatch.json,grants.toml,workspaces.toml,unfiled/*.md}、
-# herdr agent list（只在 HERDR_ENV 設定時）與 glab / gh（經 mr_json）。specs/board-collect/spec.md。
+# herdr agent list（不看 HERDR_ENV，叫不通記 errors）與 glab / gh（經 mr_json）。specs/board-collect/spec.md。
 #
 # 輸出：{generated_at, scopes[{workspace, repos[]}], repo_paths{repo: 實體路徑}, cards[], unfiled[{slug, title, source, found}],
 #       last_sync（sync.log 最後一行，沒有檔時 null）， unmatched_agents[], errors[{source,message}]}
@@ -91,13 +91,9 @@ opsx_collect() {
   done
   [ -f "$work/repos" ] || : > "$work/repos"; [ -f "$work/worktrees" ] || : > "$work/worktrees"
 
-  # herdr：只在 herdr 內問；失敗記 errors，不中斷
+  # herdr：一律問（它靠 socket，不需要在 pane 裡）；失敗記 errors，不中斷
   local herdr_err=""
-  if [ -n "${HERDR_ENV:-}" ]; then
-    herdr agent list > "$work/agents.json" 2>"$work/agents.err" || herdr_err="herdr agent list 失敗：$(head -c 200 "$work/agents.err")"
-  else
-    herdr_err="不在 herdr 內（HERDR_ENV 未設），agent 狀態不可得"
-  fi
+  herdr agent list > "$work/agents.json" 2>"$work/agents.err" || herdr_err="herdr agent list 失敗：$(head -c 200 "$work/agents.err")"
 
   # 讀卡的檔與全域狀態，組 JSON
   OPSX_C_WORK="$work" OPSX_C_STATE="$state" OPSX_C_HERDR_ERR="$herdr_err" OPSX_C_NOW="$now" OPSX_C_LIB="$OPSX_ROOT/bin/lib" "$OPSX_PY" -I - <<'PY'
