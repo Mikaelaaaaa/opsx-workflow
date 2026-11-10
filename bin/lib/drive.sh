@@ -28,6 +28,12 @@ opsx_drive() {
     dispatched "$repo" "$slug" || { say "drive: $repo/$slug 不在 dispatch.json（停了或被清掉），結束"; return 0; }
     # dispatch 送完第一句不等就起 drive；herdr 不分辨是哪一輪，agent 還在跑時送同一句會排在後面，之後每句都差一輪
     if [ "$settled" = 0 ]; then herdr_step "$slug" agent wait "$slug" || return 0; settled=1; fi
+    # 啟動時目錄在，所以現在不在只會是歸檔或被刪；stage_of 分不出這兩種和「還沒建殼」，不能靠它。放在 settle 之後：agent 跑 /archive 的那一輪也要看得到
+    if [ ! -d "$d" ]; then
+      if compgen -G "$top/openspec/changes/archive/????-??-??-$slug" >/dev/null; then say "drive: $slug 已歸檔，結束"
+      else say "drive: $slug 卡目錄不見了（${d}），結束"; fi
+      return 0
+    fi
     if [ "$(st_open_gates "$d")" -gt 0 ]; then
       say "drive: $slug 有 $(st_open_gates "$d") 個 gate 等人，等板上回覆"
       # 回 gate 時 opsx answer 自己會 prompt agent，所以等它開工再等它做完，才輪到 drive 送下一句。
