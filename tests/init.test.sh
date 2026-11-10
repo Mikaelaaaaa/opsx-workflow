@@ -209,6 +209,12 @@ assert_eq "$(obsidian_of "$ST")" "/Users/me/vault|01-Projects/inbox"
 assert_eq "$(obsidian_of "$ST")" "/Users/me/notes|Inbox"
 : > "$ST"; printf '\n\n' | ask "$ST" >/dev/null
 assert_not_grep '^\[obsidian\]' "$ST"
+# 子資料夾空答案：不登記，免得整個 vault 變收件夾
+: > "$ST"; printf '/Users/me/vault\n\n\n' | ask "$ST" >/dev/null
+assert_not_grep '^\[obsidian\]' "$ST"
+# 引號與反斜線（拖進終端機的路徑會有 \ ）：寫出的 TOML 解析得回原字串
+: > "$ST"; printf '%s\n%s\n\n' '/Users/me/My "V"\x' 'in\box' | ask "$ST" >/dev/null
+assert_eq "$(obsidian_of "$ST")" '/Users/me/My "V"\x|in\box'
 printf '[obsidian]\nvault = "/v"\nfolder = "f"\n' > "$ST"; cp "$ST" "$FX/st-before"
 outa="$(printf '\n' | ask "$ST")"
 assert_eq "$(cat "$ST")" "$(cat "$FX/st-before")" "已登記不改"

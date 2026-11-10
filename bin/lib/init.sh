@@ -151,8 +151,12 @@ ask_global_sources() {
     if [ -n "$ans" ]; then
       printf 'vault 裡當收件夾的子資料夾（例 01-Projects/inbox）：'
       read -r folder
-      printf '\n[obsidian]\nvault = "%s"\nfolder = "%s"\n' "$ans" "$folder" >> "$f"
-      say "init --global: obsidian 已登記"
+      if [ -z "$folder" ]; then
+        say "init --global: 沒給子資料夾，obsidian 沒登記（整個 vault 不當收件夾）"
+      else
+        printf '\n[obsidian]\nvault = "%s"\nfolder = "%s"\n' "$(toml_escape "$ans")" "$(toml_escape "$folder")" >> "$f"
+        say "init --global: obsidian 已登記"
+      fi
     fi
   fi
   if ! grep -q '^\[customer\]' "$f"; then
@@ -166,6 +170,12 @@ ask_global_sources() {
       say "init --global: customer 已登記"
     fi
   fi
+}
+
+# TOML basic string 裡的 \ 與 " 要跳脫，不然拖進終端機的路徑（Mobile\ Documents）會寫出解析不了的 sources.toml
+toml_escape() { # <text>
+  local s="${1//\\/\\\\}"
+  printf '%s' "${s//\"/\\\"}"
 }
 
 write_if_missing() { # <file> <content>

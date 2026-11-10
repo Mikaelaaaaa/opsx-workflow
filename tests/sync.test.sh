@@ -367,4 +367,25 @@ sync_ob >/dev/null 2>&1
 assert_eq "$(cat "$FI")" "$(cat "$FX/fi.md")" "搬進 repo 後不依筆記改寫"
 assert_eq "$(logcols | cut -f2,4)" "$(printf '0\t0')"
 
+# --- 一篇不是 UTF-8 的筆記只記一筆錯誤，其他照建；U+2028 不會切斷 JSON ---
+printf '\xa4\xa4\xa4\xe5\n' > "$V/inbox/big5.md"
+printf '# 正常\n' > "$V/inbox/ok.md"
+printf '# 分隔\nline\342\200\250two\n' > "$V/inbox/sep.md"
+out="$(sync_ob 2>&1)"; assert_eq "$?" 0 "壞筆記不拖垮來源: $out"
+assert_file "$(ob inbox/ok.md)"; assert_file "$(ob inbox/sep.md)"
+assert_eq "$(logcols | cut -f1,4)" "$(printf '2\t1')"
+logcols | cut -f5 | grep -qF "$V/inbox/big5.md" || fail "錯誤要含壞檔路徑：$(lastsync)"
+rm "$V/inbox/big5.md"
+
+# --- folder 空或絕對路徑：記錯，不把整個 vault 當收件夾 ---
+printf '# 根目錄的\n' > "$V/root.md"
+cp "$OPSX_STATE_DIR/sources.toml" "$FX/sources.bak"
+sed -i '' 's|^folder = "inbox"$|folder = ""|' "$OPSX_STATE_DIR/sources.toml"
+sync_ob >/dev/null 2>&1
+assert_eq "$(logcols | cut -f1,4)" "$(printf '0\t1')"; assert_no_file "$(ob root.md)"
+sed -i '' "s|^folder = \"\"\$|folder = \"$V\"|" "$OPSX_STATE_DIR/sources.toml"
+sync_ob >/dev/null 2>&1
+assert_eq "$(logcols | cut -f1,4)" "$(printf '0\t1')"; assert_no_file "$(ob root.md)"
+cp "$FX/sources.bak" "$OPSX_STATE_DIR/sources.toml"
+
 echo ok

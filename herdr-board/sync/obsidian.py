@@ -42,12 +42,20 @@ def main(toml: pathlib.Path) -> None:
     if conf is None:
         return
     vault = pathlib.Path(conf["vault"])
+    # 空的 folder 會讓整個 vault 變收件夾，絕對路徑會跑到 vault 外面
+    if not conf["folder"] or pathlib.PurePath(conf["folder"]).is_absolute():
+        print(json.dumps({"error": "folder 要是 vault 裡的相對子資料夾，收到 %r" % conf["folder"]}, ensure_ascii=False))
+        return
     folder = vault / conf["folder"]
     if not folder.is_dir():
         print(json.dumps({"error": "%s 不是資料夾" % folder}, ensure_ascii=False))
         return
     for note in notes(folder):
-        print(json.dumps(item(vault, note), ensure_ascii=False))
+        try:
+            row = item(vault, note)
+        except UnicodeDecodeError:
+            row = {"error": "%s 不是 UTF-8" % note}
+        print(json.dumps(row, ensure_ascii=False))
 
 
 if __name__ == "__main__":

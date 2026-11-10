@@ -197,7 +197,8 @@ def obsidian_items(opsx_root: pathlib.Path, state: pathlib.Path, tally: Tally) -
         tally.error("obsidian", p.stderr.strip() or "obsidian.py 退出 %d" % p.returncode)
         return []
     items = []
-    for raw in p.stdout.splitlines():
+    # 只按 \n 切：splitlines 也會在 U+2028 等字元切，筆記內文裡有就會切斷一行 JSON
+    for raw in filter(None, p.stdout.split("\n")):
         row = json.loads(raw)
         if "error" in row:
             tally.error("obsidian", row["error"])
