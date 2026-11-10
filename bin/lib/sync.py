@@ -1,7 +1,8 @@
 """opsx sync 的本體：撈來源、以 inbox.md 的 source 去重、建殼或更新、寫 sync.log。由 bin/lib/sync.sh 叫。
 
 每個來源產生一串 item（dict），欄位統一：source、repo、path（repo 根）、slug、type、title、body（## 內文，debt 沒有）、
-evidence（## 證據）、extra（寫進 frontmatter 的欄位）。gitlab / github 由 herdr-board/sync/{gitlab,github}.sh 撈，debt 由 debt.sh。
+evidence（## 證據）、extra（寫進 frontmatter 的欄位）。gitlab / github 由 herdr-board/sync/{gitlab,github}.sh 撈，debt 由 debt.sh，
+obsidian 由 obsidian.py。
 去重索引：所有 repo 的 openspec/changes/*/inbox.md 與 archive/*/inbox.md，加上 <state>/unfiled/ 與 unfiled/dropped/，source → 檔。
 沒有 repo 的 item（path 為 None）不建殼，寫進待分類 <state>/unfiled/<slug>.md，等 opsx file 選 repo。
 上游變動只標記不動作（board-inbox D4）：已歸檔的卡不改；issue 關閉寫 upstream: closed，註解不見了寫 stale: true，再出現就拿掉；
@@ -22,7 +23,7 @@ import sys
 import tempfile
 import tomllib
 
-SOURCES = ("gitlab", "github", "debt")
+SOURCES = ("gitlab", "github", "debt", "obsidian")
 FRONTMATTER = re.compile(r"\A---\n(.*?\n)---\n", re.S)
 
 
@@ -186,6 +187,25 @@ def issue_items(opsx_root: pathlib.Path, kind: str, state: pathlib.Path, repos: 
     return items, listed
 
 
+def obsidian_items(opsx_root: pathlib.Path, state: pathlib.Path, tally: Tally) -> list[dict]:
+    """herdr-board/sync/obsidian.py 撈 [obsidian] 收件夾；筆記沒有 repo，交給待分類出口。"""
+    toml = state / "sources.toml"
+    if not toml.exists():
+        return []
+    p = subprocess.run([sys.executable, "-I", str(opsx_root / "herdr-board" / "sync" / "obsidian.py"), str(toml)], capture_output=True, text=True)
+    if p.returncode != 0:
+        tally.error("obsidian", p.stderr.strip() or "obsidian.py 退出 %d" % p.returncode)
+        return []
+    items = []
+    for raw in p.stdout.splitlines():
+        row = json.loads(raw)
+        if "error" in row:
+            tally.error("obsidian", row["error"])
+        else:
+            items.append(dict(row, repo=None, path=None, type="功能", body=demote_headings(row["body"]), extra={}))
+    return items
+
+
 def inbox_text(item: dict, today: str) -> str:
     fm = "".join("%s: %s\n" % kv for kv in item["extra"].items())
     body = "## 內文\n\n%s\n\n" % item["body"].strip() if item["body"] is not None else ""
@@ -319,6 +339,8 @@ def main() -> int:
     if "debt" in wanted:
         got, scanned = debt_items(a.opsx_root, repos, tally)
         items += got
+    if "obsidian" in wanted:
+        items += obsidian_items(a.opsx_root, a.state, tally)
 
     seen: set[str] = set()
     for item in items:
@@ -339,7 +361,8 @@ def main() -> int:
             index[src] = {"path": item["path"] / "openspec" / "changes" / slug / "inbox.md", "frozen": False}
             tally.created += 1
             continue
-        if entry["frozen"]:
+        # obsidian 筆記建卡後不更新（sync-obsidian D2），搬進 repo 之後也一樣
+        if entry["frozen"] or src.startswith("obsidian:"):
             tally.unchanged += 1
             continue
         try:

@@ -144,13 +144,15 @@ EOF
 }
 
 ask_global_sources() {
-  local f="$1" ans
+  local f="$1" ans folder
   if ! grep -q '^\[obsidian\]' "$f"; then
-    printf 'obsidian 要掃的資料夾（vault 絕對路徑/子資料夾，直接 Enter 跳過）：'
+    printf 'obsidian vault 的絕對路徑（直接 Enter 跳過）：'
     read -r ans
     if [ -n "$ans" ]; then
-      printf '\n[obsidian]\nvault = "%s"\nfolder = "%s"\n' "${ans%%/[0-9]*}" "${ans#*/}" >> "$f"
-      say "init --global: obsidian 已登記（請打開檔案確認 vault / folder 切得對）"
+      printf 'vault 裡當收件夾的子資料夾（例 01-Projects/inbox）：'
+      read -r folder
+      printf '\n[obsidian]\nvault = "%s"\nfolder = "%s"\n' "$ans" "$folder" >> "$f"
+      say "init --global: obsidian 已登記"
     fi
   fi
   if ! grep -q '^\[customer\]' "$f"; then

@@ -67,7 +67,7 @@ assert_eq "$(cards)" "" "已歸檔的 source 不能再建殼"
 assert_eq "$(cat "$CH/archive/2026-11-01-debt-$H/inbox.md")" "$(cat "$FX/archived.md")" "歸檔的卡不動"
 
 # --- 不合格的來源 ---
-assert_rc 2 opsx sync --root "$ROOT" --source obsidian
+assert_rc 2 opsx sync --root "$ROOT" --source customer
 
 # --- launchd 與按鈕同時觸發：拿不到鎖就退出 3，sync.log 不多行 ---
 n="$(wc -l < "$LOG" | tr -d ' ')"
@@ -313,5 +313,58 @@ files="$(unfiled_files)"
 sync_unrepo '[{"source":"x:1","slug":"ob-1234abcd","title":"收件夾的筆記"}]' >/dev/null 2>&1
 assert_eq "$(unfiled_files)" "$files" "dropped 裡有同 source 就不再寫"
 assert_eq "$(logcols | cut -f1)" 0
+
+# ========== obsidian 收件夾（sync-obsidian / obsidian-source）==========
+sync_ob() { opsx sync --root "$ROOT" --source obsidian; }
+firstline() { awk -v h="## $1" '$0==h{f=1;next} f&&NF{print;exit}' "$2"; }
+sect() { awk -v h="## $1" '$0==h{f=1;next} /^## /{f=0} f' "$2"; }
+ob() { printf '%s/ob-%s.md' "$UF" "$(printf '%s' "$1" | shasum -a 1 | cut -c1-8)"; }
+
+# --- 沒設定就不啟用 ---
+files="$(unfiled_files)"
+out="$(sync_ob 2>&1)"; assert_eq "$?" 0 "沒有 [obsidian]: $out"
+assert_eq "$(logcols)" "$(printf '0\t0\t0\t0\t')"; assert_eq "$(unfiled_files)" "$files"
+
+# --- 收件夾不存在：記一筆錯誤，含拼好的路徑 ---
+V="$FX/vault"
+printf '\n[obsidian]\nvault = "%s"\nfolder = "inbox"\n' "$V" >> "$OPSX_STATE_DIR/sources.toml"
+out="$(sync_ob 2>&1)"; assert_eq "$?" 0 "收件夾不存在仍退出 0: $out"
+assert_eq "$(logcols | cut -f4)" 1; logcols | cut -f5 | grep -qF "$V/inbox" || fail "錯誤要含拼好的路徑：$(lastsync)"
+
+# --- 新筆記 · 子資料夾 · 隱藏的不收 · 沒有標題用檔名 · frontmatter 不進內文 · 只跑 obsidian ---
+mkdir -p "$V/inbox/a" "$V/inbox/.trash"
+printf '# 看板要能貼圖\n\n細節\n' > "$V/inbox/想法.md"
+printf '子資料夾的\n' > "$V/inbox/a/b.md"
+printf '# x\n' > "$V/inbox/.trash/x.md"; printf '# y\n' > "$V/inbox/.y.md"
+printf '只有內文\n' > "$V/inbox/待辦.md"
+printf -- '---\ntags: [x]\n---\n# 標題\n' > "$V/inbox/n.md"
+printf 'x\n' > "$V/inbox/c.txt"
+: > "$OPSX_FAKE_LOG"
+out="$(sync_ob 2>&1)"; assert_eq "$?" 0 "sync obsidian: $out"
+assert_eq "$(cat "$OPSX_FAKE_LOG")" "" "--source obsidian 不呼叫 glab、gh"
+OI="$(ob inbox/想法.md)"
+assert_file "$OI"; assert_grep '^source: obsidian:inbox/想法.md$' "$OI"; assert_grep '^type: 功能$' "$OI"
+assert_eq "$(firstline 一句話 "$OI")" 看板要能貼圖
+sect 內文 "$OI" | grep -q '^細節$' || fail "內文要含細節：$(cat "$OI")"
+sect 證據 "$OI" | grep -qF "$V/inbox/想法.md" || fail "證據要有筆記的絕對路徑：$(cat "$OI")"
+assert_grep '^source: obsidian:inbox/a/b.md$' "$(ob inbox/a/b.md)"
+! grep -l -e '^source: .*\.trash' -e '^source: .*\.y\.md' -e '^source: .*c\.txt' "$UF"/*.md || fail "隱藏的與非 .md 不收"
+assert_eq "$(firstline 一句話 "$(ob inbox/待辦.md)")" 待辦
+NI="$(ob inbox/n.md)"; assert_not_grep 'tags' "$NI"; assert_eq "$(firstline 一句話 "$NI")" 標題
+assert_eq "$(logcols)" "$(printf '4\t0\t0\t0\t')"
+
+# --- 筆記改了不更新 ---
+cp "$OI" "$FX/oi.md"; printf '# 改過了\n' > "$V/inbox/想法.md"
+sync_ob >/dev/null 2>&1
+assert_eq "$(cat "$OI")" "$(cat "$FX/oi.md")" "待分類不依筆記改寫"; assert_eq "$(logcols | cut -f2)" 0
+
+# --- 搬進 repo 後不更新也不記錯 ---
+OS="$(basename "$OI" .md)"
+out="$(opsx file "$OS" --repo "$A" 2>&1)" || fail "opsx file: $out"
+FI="$CH/$OS/inbox.md"; assert_file "$FI"; cp "$FI" "$FX/fi.md"
+printf '# 又改了\n' > "$V/inbox/想法.md"
+sync_ob >/dev/null 2>&1
+assert_eq "$(cat "$FI")" "$(cat "$FX/fi.md")" "搬進 repo 後不依筆記改寫"
+assert_eq "$(logcols | cut -f2,4)" "$(printf '0\t0')"
 
 echo ok

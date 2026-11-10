@@ -68,7 +68,7 @@ FLAG_RE = {
     "mode": re.compile(r"^(interactive|autopilot|drive)$"),
     "kind": re.compile(r"^(dev|bug-fix|refactoring|perf|experiment|ops|chore)$"),
     "repo": re.compile(r"^/[^\0]{1,1024}$"),
-    "source": re.compile(r"^(gitlab|github|debt)$"),
+    "source": re.compile(r"^(gitlab|github|debt|obsidian)$"),
     "pane": PANE_RE,
 }
 

@@ -197,4 +197,20 @@ mkdir -p "$FX/baselink"; ln -s "$PY" "$FX/baselink/python3"
 outg="$(PATH="$FX/fakevenv:$PATH" FAKE_PREFIX=/fake/venv FAKE_BASE="$FX/baselink/python3" opsx init --global 2>&1)"
 assert_eq "$?" 0 "base 是 symlink 時 init --global: $outg"
 assert_eq "$(cat "$OPSX_STATE_DIR/python")" "$FX/baselink/python3" "base 要原樣記，不解 symlink"
+
+# --- --global 問 obsidian 收件夾：vault 與子資料夾分兩題，原樣寫入（sync-obsidian / obsidian-source）---
+# 互動模式要 tty，測試直接叫 ask_global_sources，stdin 依序答 vault、子資料夾、customer（Enter 跳過）
+ask() { ( source "$OPSX_ROOT/bin/lib/common.sh"; source "$OPSX_ROOT/bin/lib/init.sh"; ask_global_sources "$1" ); }
+obsidian_of() { python3 -I -c 'import sys,tomllib;o=tomllib.load(open(sys.argv[1],"rb"))["obsidian"];print(o["vault"]+"|"+o["folder"])' "$1"; }
+ST="$FX/sources-ask.toml"
+: > "$ST"; printf '/Users/me/vault\n01-Projects/inbox\n\n' | ask "$ST" >/dev/null
+assert_eq "$(obsidian_of "$ST")" "/Users/me/vault|01-Projects/inbox"
+: > "$ST"; printf '/Users/me/notes\nInbox\n\n' | ask "$ST" >/dev/null
+assert_eq "$(obsidian_of "$ST")" "/Users/me/notes|Inbox"
+: > "$ST"; printf '\n\n' | ask "$ST" >/dev/null
+assert_not_grep '^\[obsidian\]' "$ST"
+printf '[obsidian]\nvault = "/v"\nfolder = "f"\n' > "$ST"; cp "$ST" "$FX/st-before"
+outa="$(printf '\n' | ask "$ST")"
+assert_eq "$(cat "$ST")" "$(cat "$FX/st-before")" "已登記不改"
+case "$outa" in *obsidian*) fail "已登記不再問 obsidian：$outa" ;; esac
 echo ok
