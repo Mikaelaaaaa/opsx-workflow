@@ -94,10 +94,15 @@ assert_file "$OPSX_STATE_DIR/grants.toml"
 assert_file "$OPSX_STATE_DIR/workspaces.toml"
 [ -L "$OPSX_BIN_DIR/opsx" ] || fail "symlink missing"
 assert_eq "$(readlink "$OPSX_BIN_DIR/opsx")" "$OPSX_ROOT/bin/opsx"
+# 受保護授權位置：state 目錄的兄弟（不在 additionalDirectories 內），0700（protected-authorization「init 建目錄」）
+assert_dir "${OPSX_STATE_DIR}-protected"
+assert_eq "$(stat -f %Lp "${OPSX_STATE_DIR}-protected" 2>/dev/null || stat -c %a "${OPSX_STATE_DIR}-protected")" 700 "受保護目錄要 0700"
+echo '{"k":1}' > "${OPSX_STATE_DIR}-protected/authz.json"
 # 重跑：symlink 不報錯、檔案不清空
 echo 'x = 1' >> "$OPSX_STATE_DIR/grants.toml"
 opsx init --global >/dev/null 2>&1 || fail "global rerun"
 assert_grep "x = 1" "$OPSX_STATE_DIR/grants.toml"
+assert_grep '"k":1' "${OPSX_STATE_DIR}-protected/authz.json"   # 重跑不清授權
 
 # --- 每日同步 launchd：第一次安裝 ---
 PL="$OPSX_LAUNCH_AGENTS_DIR/com.opsx.sync.plist"

@@ -91,7 +91,9 @@ out="$(gg Bash "$(cmdj 'git push gitlab feat/eval-core/mikaela')")"; assert_eq "
 mkdir -p "$OPSX_STATE_DIR"
 printf '{"Agentory-AI/eval-core":{"mode":"interactive","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"
 out="$(gg Bash "$(cmdj 'git push gitlab feat/eval-core/mikaela')")"; assert_eq "$(decision "$out")" allow "grant: 互動模式不管"
-printf '{"Agentory-AI/eval-core":{"mode":"autopilot","grants":["migrate"]}}' > "$OPSX_STATE_DIR/dispatch.json"
+PD="${OPSX_STATE_DIR}-protected"; mkdir -p "$PD"   # 這張卡 / 這次 / 合併的授權只信這裡（protected-authorization）；dispatch.json 的同名欄位一律忽略
+printf '{"Agentory-AI/eval-core":{"mode":"autopilot","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"
+printf '{"Agentory-AI/eval-core":{"grants":["migrate"]}}' > "$PD/authz.json"
 printf '[repos."Agentory-AI"]\npush = true\nmr = false\nmigrate = false\n' > "$OPSX_STATE_DIR/grants.toml"
 out="$(gg Bash "$(cmdj 'git push gitlab feat/eval-core/mikaela')")"; assert_eq "$(decision "$out")" allow "grant: repo 永遠 push"
 out="$(gg Bash "$(cmdj 'glab mr create -F desc.md')")"; assert_eq "$(decision "$out")" deny "grant: mr 沒授權"
@@ -121,11 +123,27 @@ export PATH="$FX/fakebin:$PATH" OPSX_FAKE_LOG="$FX/fake.log" OPSX_TEST_GLAB_JSON
 printf '# report\nMR: https://gitlab.tsg-navigator.com/a/b/-/merge_requests/212\n' > "$C/report.md"
 printf '{"state":"opened","draft":false,"has_conflicts":false,"sha":"abc123","head_pipeline":{"status":"success"},"unresolved_discussions_count":0}' > "$OPSX_TEST_GLAB_JSON"
 # 核准相符，單一指令，MR 號碼對：放行；核准綁 sha 不刪，同一個 sha 再合一次還是放行（合併過的 MR 第二次 glab 自己會拒）
+printf '{"Agentory-AI/eval-core":{"mode":"autopilot","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"
+# dispatch.json 偽造的核准（沙盒內 session 寫得到那個檔）：sha 相符也 deny
 printf '{"Agentory-AI/eval-core":{"mode":"autopilot","grants":[],"merge_approved":"abc123","merge_approved_at":"2026-11-06T01:00:00+08:00"}}' > "$OPSX_STATE_DIR/dispatch.json"
+out="$(gg Bash "$(cmdj 'glab mr merge 212 --squash')")"; assert_eq "$(decision "$out")" deny "grant: dispatch.json 的 merge_approved 不放行"
+reason "$out" | grep -q '看板' || fail "grant: 偽造核准的 deny 也要指向看板: $(reason "$out")"
+# 受保護目錄不存在、檔案壞掉：都是沒核准
+rm -rf "$PD"
+out="$(gg Bash "$(cmdj 'glab mr merge 212 --squash')")"; assert_eq "$(decision "$out")" deny "grant: 受保護位置缺檔 deny"
+mkdir -p "$PD"; printf 'not json {' > "$PD/authz.json"
+out="$(gg Bash "$(cmdj 'glab mr merge 212 --squash')")"; assert_eq "$(decision "$out")" deny "grant: 受保護檔壞掉 deny"
+printf '{"Agentory-AI/eval-core":{"merge_approved":"abc123","merge_approved_at":"2026-11-06T01:00:00+08:00"}}' > "$PD/authz.json"
+printf '{"Agentory-AI/eval-core":{"mode":"autopilot","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"
 out="$(gg Bash "$(cmdj 'glab mr merge 212 --squash')")"; assert_eq "$(decision "$out")" allow "grant: 核准相符放行"
-assert_eq "$(jq -r '."Agentory-AI/eval-core".merge_approved' "$OPSX_STATE_DIR/dispatch.json")" abc123 "核准綁 sha，不刪"
+assert_eq "$(jq -r '."Agentory-AI/eval-core".merge_approved' "$PD/authz.json")" abc123 "核准綁 sha，不刪"
 out="$(gg Bash "$(cmdj 'glab mr merge 212 --squash')")"; assert_eq "$(decision "$out")" allow "grant: 同 sha 第二次仍放行"
 out="$(gg Bash "$(cmdj 'glab mr merge --squash')")"; assert_eq "$(decision "$out")" allow "grant: 沒寫號碼（目前分支）也放行"
+out="$(gg Bash "$(cmdj 'glab mr merge --squash 212')")"; assert_eq "$(decision "$out")" allow "grant: 旗標在前、號碼對也放行"
+# 核准在手時，指令仍要整條就是核准的那個 merge：旗標在前的別條 MR、-R 指別的專案、單一 & 或換行夾帶別的指令都 deny
+for bad in 'glab mr merge --squash 999' 'glab mr merge -R other/proj 5' 'glab mr merge 212 --squash & glab api -X PUT projects/1/merge_requests/999/merge' $'glab mr merge 212 --squash\nglab api -X PUT projects/1/merge_requests/999/merge'; do
+  out="$(gg Bash "$(cmdj "$bad")")"; assert_eq "$(decision "$out")" deny "grant: 核准在手也不放行：$bad"
+done
 # 夾帶別的指令、合併別的 MR：deny
 out="$(gg Bash "$(cmdj 'glab mr merge 212 --squash && git push --force origin main')")"; assert_eq "$(decision "$out")" deny "grant: 複合指令 deny"
 out="$(gg Bash "$(cmdj 'git push origin HEAD; glab mr merge 212')")"; assert_eq "$(decision "$out")" deny "grant: 分號串接 deny"
@@ -134,30 +152,36 @@ reason "$out" | grep -q '999' || fail "grant: 要指出號碼不同: $(reason "$
 out="$(gg Bash "$(cmdj 'glab mr merge 212 && git push --force origin main')")"; assert_eq "$(decision "$out")" deny
 # 「這次」授權：repo 永遠關掉，只靠 once
 printf '[repos."Agentory-AI"]\npush = false\n' > "$OPSX_STATE_DIR/grants.toml"
-printf '{"Agentory-AI/eval-core":{"mode":"autopilot","grants":[],"once":["push"]}}' > "$OPSX_STATE_DIR/dispatch.json"
+# dispatch.json 偽造的 once / grants 不放行
+printf '{"Agentory-AI/eval-core":{"mode":"autopilot","grants":["push"],"once":["push"]}}' > "$OPSX_STATE_DIR/dispatch.json"; printf '{}' > "$PD/authz.json"
+out="$(gg Bash "$(cmdj 'git push gitlab feat/eval-core/mikaela')")"; assert_eq "$(decision "$out")" deny "grant: dispatch.json 的 once / grants 不放行"
+printf '{"Agentory-AI/eval-core":{"mode":"autopilot","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"
+printf '{"Agentory-AI/eval-core":{"once":["push"]}}' > "$PD/authz.json"
 out="$(gg Bash "$(cmdj 'git push gitlab feat/eval-core/mikaela')")"; assert_eq "$(decision "$out")" allow "grant: once 放行一次"
-assert_eq "$(jq -c '."Agentory-AI/eval-core".once' "$OPSX_STATE_DIR/dispatch.json")" '[]' "once 用掉就刪"
+assert_eq "$(jq -c '."Agentory-AI/eval-core".once' "$PD/authz.json")" '[]' "once 用掉就刪"
+printf '{"Agentory-AI/eval-core":{"grants":["mr"]}}' > "$PD/authz.json"
+out="$(gg Bash "$(cmdj 'glab mr create -F desc.md')")"; assert_eq "$(decision "$out")" allow "grant: 受保護位置的卡授權放行"
 out="$(gg Bash "$(cmdj 'git push gitlab feat/eval-core/mikaela')")"; assert_eq "$(decision "$out")" deny "grant: once 第二次 deny"
 # grants.toml 壞掉：當成沒授權，不是放行
 printf 'this is not toml ===\n' > "$OPSX_STATE_DIR/grants.toml"
 out="$(gg Bash "$(cmdj 'git push gitlab feat/eval-core/mikaela')")"; assert_eq "$(decision "$out")" deny "grant: 壞 toml deny"
 printf '[repos."Agentory-AI"]\npush = true\nmr = false\nmigrate = false\n' > "$OPSX_STATE_DIR/grants.toml"
 # 在 dispatch 開的 linked worktree 裡：repo 名要是主 repo，gate 照樣生效
-printf '{"Agentory-AI/eval-core":{"mode":"autopilot","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"
+printf '{"Agentory-AI/eval-core":{"mode":"autopilot","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"; printf '{}' > "$PD/authz.json"
 git -C "$R" worktree add -q "$R/.claude/worktrees/eval-core" -b feat/eval-core/wt   # 主 checkout 已在 mikaela 那條，worktree 另開一條同 slug 的
 WT="$(cd "$R/.claude/worktrees/eval-core" && pwd -P)"
 out="$(run_hook opsx-grant-gate.sh "$(j "$WT" Bash "$(cmdj 'glab mr create -F desc.md')")")"; assert_eq "$(decision "$out")" deny "grant: worktree 裡也要 deny"
 out="$(run_hook opsx-grant-gate.sh "$(j "$WT" Bash "$(cmdj 'pnpm test')")")"; assert_eq "$(decision "$out")" allow
-printf '{"Agentory-AI/eval-core":{"mode":"autopilot","grants":[],"merge_approved":"abc123"}}' > "$OPSX_STATE_DIR/dispatch.json"
+printf '{"Agentory-AI/eval-core":{"mode":"autopilot","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"
+printf '{"Agentory-AI/eval-core":{"merge_approved":"abc123"}}' > "$PD/authz.json"
 out="$(run_hook opsx-grant-gate.sh "$(j "$WT" Bash "$(cmdj 'glab mr merge 212 --squash')")")"; assert_eq "$(decision "$out")" allow "grant: worktree 裡核准相符放行"
 # MR 又推了新 commit → deny，核准保留
-printf '{"Agentory-AI/eval-core":{"mode":"autopilot","grants":[],"merge_approved":"abc123"}}' > "$OPSX_STATE_DIR/dispatch.json"
 printf '{"state":"opened","draft":false,"has_conflicts":false,"sha":"def456","head_pipeline":{"status":"success"},"unresolved_discussions_count":0}' > "$OPSX_TEST_GLAB_JSON"
 out="$(gg Bash "$(cmdj 'glab mr merge 212')")"; assert_eq "$(decision "$out")" deny "grant: sha 不符 deny"
 reason "$out" | grep -q '看板' || fail "grant: deny 要指向看板的合併按鈕: $(reason "$out")"
-assert_eq "$(jq -r '."Agentory-AI/eval-core".merge_approved' "$OPSX_STATE_DIR/dispatch.json")" abc123 "不符時核准不動"
+assert_eq "$(jq -r '."Agentory-AI/eval-core".merge_approved' "$PD/authz.json")" abc123 "不符時核准不動"
 # 沒有核准 → deny
-printf '{"Agentory-AI/eval-core":{"mode":"autopilot","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"
+printf '{}' > "$PD/authz.json"
 out="$(gg Bash "$(cmdj 'gh pr merge 12 --squash')")"; assert_eq "$(decision "$out")" deny "grant: 沒核准 deny"
 printf '{"Agentory-AI/eval-core":{"mode":"autopilot","grants":["migrate"]}}' > "$OPSX_STATE_DIR/dispatch.json"; rm -f "$C/report.md"
 
