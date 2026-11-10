@@ -42,6 +42,8 @@ opsx_drive() {
     case "$stage" in
       archive)
         say "drive: $slug 已 merged，結束"; return 0 ;;
+      split)
+        say "drive: $slug 已拆成別的卡，結束"; return 0 ;;
       babysit)
         local mr; mr="$(OPSX_MR_CACHE_TTL=0 mr_state "$d")"   # 剛 /babysit 過，要看新值，不吃看板的 60 秒快取
         case "$mr" in

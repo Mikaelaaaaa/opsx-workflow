@@ -171,10 +171,7 @@ PY
   fi
 }
 
-workplan_branch() { # <top> <slug>：印 workplan 裡這張卡的 branch，沒有就空
-  [ -f "$1/openspec/workplan.yaml" ] || return 0
-  awk -v s="$2" '$0 ~ "name: *"s"$"{f=1;next} f && /branch:/{sub(/.*branch: */,""); print; exit} f && /^ *- name:/{exit}' "$1/openspec/workplan.yaml"
-}
+workplan_branch() { wp_pr_field "$1" "$2" branch; } # <top> <slug>：印 workplan 裡這張卡所屬 PR 的 branch，沒有就空
 workspace_for() { # <repo>：印 workspaces.toml 記的 label（或 id），沒有就空
   [ -f "$OPSX_STATE_DIR/workspaces.toml" ] || return 0
   OPSX_REPO="$1" "$OPSX_PY" -I - "$OPSX_STATE_DIR/workspaces.toml" <<'PY'
