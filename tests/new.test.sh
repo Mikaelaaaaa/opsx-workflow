@@ -71,4 +71,32 @@ PATH="$FX/failspec:$PATH" opsx new --repo "$A" -- 有字 > /dev/null 2> "$FX/fai
 assert_grep 'boom' "$FX/fail.err"
 assert_eq "$(count < "$FX/spec.calls")" 1 "openspec 失敗不能換 slug 重試"
 assert_eq "$(snap)" "$before"; assert_eq "$(ls -A "$A/openspec")" "$spec_before" "失敗後不能留保留殘渣"
+
+# --- 保留剛被別人放掉：mkdir 失敗但保留目錄已不在，不能誤判成建不了，要換下一號（review R1.1）---
+export OPSX_TEST_NOW="2026-11-06 15:40"
+mkdir -p "$FX/failmkdir"
+printf '#!/usr/bin/env bash\ncase "$*" in *.reserve-*) [ -e "%s/mkdir.once" ] || { : > "%s/mkdir.once"; exit 1; };; esac\nexec /bin/mkdir "$@"\n' "$FX" "$FX" > "$FX/failmkdir/mkdir"; chmod +x "$FX/failmkdir/mkdir"
+spec_before="$(ls -A "$A/openspec")"
+out="$(PATH="$FX/failmkdir:$PATH" opsx new --repo "$A" -- 保留剛被放掉 2>/dev/null)"; assert_eq "$?" 0 "new: $out"
+assert_eq "$out" me-20261106-1540-2
+assert_grep '^保留剛被放掉$' "$A/openspec/changes/me-20261106-1540-2/inbox.md"
+assert_eq "$(ls -A "$A/openspec")" "$spec_before" "保留用的東西不能留在 openspec/ 下"
+
+# --- openspec/ 不可寫：退出非零、說原因，不無限換號 ---
+export OPSX_TEST_NOW="2026-11-06 15:50"
+chmod a-w "$A/openspec"; before="$(snap)"
+opsx new --repo "$A" -- 唯讀 > /dev/null 2> "$FX/ro.err"; rc=$?
+chmod u+w "$A/openspec"
+[ "$rc" -ne 0 ] || fail "openspec/ 不可寫時 opsx new 要退出非零"
+assert_grep '保留' "$FX/ro.err"
+assert_eq "$(snap)" "$before"
+
+# --- 待分類寫入失敗：退出非零、不換號、不留 0 byte 的檔（review R1.2）---
+export OPSX_TEST_NOW="2026-11-06 16:00"
+mkdir -p "$FX/failcat"
+printf '#!/usr/bin/env bash\ncase "$1" in *opsx-new.*) echo x >> "%s/cat.calls"; [ "$(wc -l < "%s/cat.calls")" -gt 3 ] || exit 1;; esac\nexec /bin/cat "$@"\n' "$FX" "$FX" > "$FX/failcat/cat"; chmod +x "$FX/failcat/cat"
+PATH="$FX/failcat:$PATH" opsx new -- 寫不進去 > /dev/null 2> "$FX/cat.err"; rc=$?
+[ "$rc" -ne 0 ] || fail "待分類寫入失敗時 opsx new 要退出非零"
+assert_eq "$(ls "$OPSX_STATE_DIR/unfiled" | grep -c 'me-20261106-1600')" 0 "寫入失敗不能留檔（含 0 byte）"
+assert_eq "$(count < "$FX/cat.calls")" 1 "寫入失敗不能換號重試"
 echo ok

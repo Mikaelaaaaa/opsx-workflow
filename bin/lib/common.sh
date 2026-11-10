@@ -88,8 +88,8 @@ new_shell() { # <top> <slug> <inbox 內容檔>
     if mkdir "$res" 2>/dev/null; then
       [ -e "$top/openspec/changes/$slug" ] || break
       rmdir "$res"
-    elif [ ! -e "$res" ]; then
-      die "建不了保留目錄 $res"
+    elif [ ! -w "$top/openspec" ]; then
+      die "建不了保留目錄 ${res}（${top}/openspec 不可寫）"
     fi
     n=$((n+1)); slug="$2-$n"
     [ ${#slug} -gt 32 ] || continue

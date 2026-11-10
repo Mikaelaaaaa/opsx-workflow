@@ -25,9 +25,10 @@ opsx_new() {
   local dir="$OPSX_STATE_DIR/unfiled" s="$slug" n=1
   mkdir -p "$dir"
   # set -C 讓重導向以 O_EXCL 建檔：建成功就是拿到這個 slug，並行的另一個呼叫只會建失敗再試下一號
-  until ( set -C; cat "$body" > "$dir/$s.md" ) 2>/dev/null; do
-    [ -e "$dir/$s.md" ] || die "new: 寫不進 $dir/$s.md"
+  until ( set -C; : > "$dir/$s.md" ) 2>/dev/null; do
+    [ -e "$dir/$s.md" ] || die "new: 建不了 $dir/$s.md"
     n=$((n+1)); s="$slug-$n"
   done
+  cat "$body" > "$dir/$s.md" || { rm -f "$dir/$s.md"; die "new: 寫不進 $dir/$s.md"; }
   printf '%s\n' "$s"
 }
