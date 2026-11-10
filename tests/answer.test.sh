@@ -67,14 +67,29 @@ assert_eq "$(tail -1 "$C/decisions.tsv" | cut -f2-5)" $'你\t已允許\t允許\t
 # --- 授權：這張卡 ---
 gates; printf '# grants\n' > "$OPSX_STATE_DIR/grants.toml"
 out="$(opsx answer x --gate g1 --grant card "允許" 2>&1)"; assert_eq "$?" 0 "answer g1 card: $out"
-assert_eq "$(jq -c '."Agentory-AI/x".grants' "$OPSX_STATE_DIR/dispatch.json")" '["push"]'
+PD="${OPSX_STATE_DIR}-protected"   # 這張卡 / 這次的授權只落受保護位置，dispatch.json 不寫（protected-authorization）
+assert_eq "$(jq -c '."Agentory-AI/x".grants' "$PD/authz.json")" '["push"]'
+assert_eq "$(jq -c '."Agentory-AI/x".grants' "$OPSX_STATE_DIR/dispatch.json")" '[]' "card 授權不該寫進 dispatch.json"
 assert_not_grep 'push' "$OPSX_STATE_DIR/grants.toml"
 
 # --- 授權：這次 → 記進 once（閘門用掉就刪），grants 與 grants.toml 都不動 ---
-gates; printf '{"Agentory-AI/x":{"mode":"autopilot","pane":"p4","agent":"x","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"
+gates; printf '{"Agentory-AI/x":{"mode":"autopilot","pane":"p4","agent":"x","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"; rm -rf "$PD"
 out="$(opsx answer x --gate g1 --grant this "允許" 2>&1)"; assert_eq "$?" 0 "answer g1 this: $out"
 assert_eq "$(jq -c '."Agentory-AI/x".grants' "$OPSX_STATE_DIR/dispatch.json")" '[]'; assert_not_grep 'push' "$OPSX_STATE_DIR/grants.toml"
-assert_eq "$(jq -c '."Agentory-AI/x".once' "$OPSX_STATE_DIR/dispatch.json")" '["push"]'
+assert_eq "$(jq -c '."Agentory-AI/x".once' "$PD/authz.json")" '["push"]'
+assert_eq "$(jq -r '."Agentory-AI/x" | has("once")' "$OPSX_STATE_DIR/dispatch.json")" false "once 不該寫進 dispatch.json"
+
+# --- 受保護位置寫不進去（沙盒內）：非零退出、訊息含路徑，gates.md / decisions / dispatch.json 都不動，不送 prompt ---
+gates; rm -rf "$PD"; mkdir -p "$PD"; chmod 500 "$PD"; : > "$OPSX_FAKE_LOG"
+cp "$C/gates.md" "$FX/before.md"; cp "$C/decisions.tsv" "$FX/before.tsv"; cp "$OPSX_STATE_DIR/dispatch.json" "$FX/dispatch.before"
+for g in card this; do
+  out="$(opsx answer x --gate g1 --grant "$g" "允許" 2>&1)"; [ $? -ne 0 ] || fail "$g：受保護位置唯讀要非零退出"
+  echo "$out" | grep -qF "$PD" || fail "$g：訊息要含受保護路徑: $out"
+  cmp -s "$C/gates.md" "$FX/before.md" || fail "$g：gates.md 不該變"; cmp -s "$C/decisions.tsv" "$FX/before.tsv" || fail "$g：decisions 不該變"
+  cmp -s "$OPSX_STATE_DIR/dispatch.json" "$FX/dispatch.before" || fail "$g：dispatch.json 不該變"
+done
+assert_eq "$(cat "$OPSX_FAKE_LOG")" "" "寫不進去不該送 prompt"
+chmod 700 "$PD"
 
 # --- 答案含換行：壓成一行，不能變成新欄位把 gate 重開 ---
 gates
@@ -119,7 +134,7 @@ assert_grep '^agent prompt x 選 B$' "$OPSX_FAKE_LOG"
 
 # --- 舊寫法的授權 gate 可以 --grant；type 不明不行（gate-type-normalize） ---
 printf '{"Agentory-AI/x":{"mode":"autopilot","pane":"p4","agent":"x","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"
-printf '# grants\n' > "$OPSX_STATE_DIR/grants.toml"
+printf '# grants\n' > "$OPSX_STATE_DIR/grants.toml"; rm -rf "$PD"
 printf '## g1\ntype: authorization\naction: push\nstatus: open\n問題: push？\n\n## g2\ntype: approval-ish\naction: push\nstatus: open\n問題: ？\n\n## g3\naction: push\nstatus: open\n問題: 沒寫 type\n\n## g4\ntype: 等待授權\naction: push\nstatus: open\n問題: push？\n' > "$C/gates.md"
 cp "$C/gates.md" "$FX/before.md"
 out="$(opsx answer x --gate g2 --grant card "允許" 2>&1)"; [ $? -ne 0 ] || fail "表外的 type 不能 --grant"
@@ -127,8 +142,9 @@ echo "$out" | grep -q 'approval-ish' || fail "訊息要印原始值：$out"
 out="$(opsx answer x --gate g3 --grant card "允許" 2>&1)"; [ $? -ne 0 ] || fail "沒寫 type 不能 --grant"
 echo "$out" | grep -q '沒寫 type' || fail "訊息要說沒寫 type：$out"
 cmp -s "$C/gates.md" "$FX/before.md" || fail "拒絕時 gates.md 不該變"
-assert_eq "$(jq -c '."Agentory-AI/x".grants' "$OPSX_STATE_DIR/dispatch.json")" '[]' "拒絕時不該有授權寫入"
+assert_no_file "$PD/authz.json"   # 拒絕時不該有授權寫入（受保護位置連檔都不該出現）
 out="$(opsx answer x --gate g1 --grant card "允許" 2>&1)"; assert_eq "$?" 0 "authorization 要能授權：$out"
+assert_eq "$(jq -c '."Agentory-AI/x".grants' "$PD/authz.json")" '["push"]' "authorization 的授權要落在受保護位置"
 out="$(opsx answer x --gate g4 --grant card "允許" 2>&1)"; assert_eq "$?" 0 "等待授權 要能授權：$out"
-assert_eq "$(jq -c '."Agentory-AI/x".grants' "$OPSX_STATE_DIR/dispatch.json")" '["push"]'
+assert_eq "$(jq -c '."Agentory-AI/x".grants' "$PD/authz.json")" '["push"]'
 echo ok

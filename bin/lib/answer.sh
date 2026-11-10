@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # opsx answer <slug> --gate <id> [--grant this|card|repo] [--repo <top>] <text…>：回一個 gate。
-# 先驗 gate，再把授權落檔（repo 寫 grants.toml；card 寫 dispatch.json 的 grants；this 寫 dispatch.json 的 once，閘門用掉就刪），
+# 先驗 gate，再把授權落檔（repo 寫 grants.toml；card 與 this 寫受保護位置 bin/lib/authz.py 的 grants / once，閘門用掉 once 就刪），
 # 把 gates.md 那段改成 answered，在 decisions.tsv 記一行（log_row），最後 herdr agent prompt 送給 agent。卡沒派出就不送，agent 派出時會讀 gates.md。
 # 看板的「回它」按鈕背後就是這支；終端機打也一樣。specs/board-actions/spec.md、要求檔 §3.6 授權三級。
 
@@ -35,7 +35,7 @@ opsx_answer() {
   result="$(OPSX_A_DIR="$d" OPSX_A_GATE="$gate" OPSX_A_GRANT="$grant" OPSX_A_TEXT="$answer" OPSX_A_REPO="$repo" OPSX_A_SLUG="$slug" \
             OPSX_A_SD="$OPSX_STATE_DIR" OPSX_A_NOW="$(now_iso)" OPSX_LIB="$OPSX_ROOT/bin/lib" "$OPSX_PY" -I - <<'PY'
 import os, re, sys, tomllib
-sys.path.insert(0, os.environ["OPSX_LIB"]); import gatetype, jsonfile
+sys.path.insert(0, os.environ["OPSX_LIB"]); import authz, gatetype, jsonfile
 e = os.environ
 d, gate, grant, text, repo, slug, sd, now = (e["OPSX_A_DIR"], e["OPSX_A_GATE"], e["OPSX_A_GRANT"], e["OPSX_A_TEXT"],
                                              e["OPSX_A_REPO"], e["OPSX_A_SLUG"], e["OPSX_A_SD"], e["OPSX_A_NOW"])
@@ -74,8 +74,8 @@ if grant and not ACTION_RE.match(action):
 dispatch_path = os.path.join(sd, "dispatch.json")
 dispatch = jsonfile.load(dispatch_path)
 dispatched = key in dispatch and dispatch[key].get("mode") != "stopped"
-def add_card_grant(dd): gl = dd[key].setdefault("grants", []); action in gl or gl.append(action)
-def add_once(dd): ol = dd[key].setdefault("once", []); action in ol or ol.append(action)
+def add_card_grant(dd): gl = dd.setdefault(key, {}).setdefault("grants", []); action in gl or gl.append(action)
+def add_once(dd): ol = dd.setdefault(key, {}).setdefault("once", []); action in ol or ol.append(action)
 if grant == "repo":
     gp = os.path.join(sd, "grants.toml")
     try:
@@ -99,13 +99,13 @@ if grant == "repo":
     tmp = gp + ".tmp"; open(tmp, "w", encoding="utf-8").write("\n".join(lines) + "\n"); os.replace(tmp, gp)
 elif grant == "card":
     if not dispatched:
-        fail("answer: 「這張卡」的授權記在 dispatch.json，但 %s 沒派出；用 --grant repo 或不帶 --grant" % key)
-    jsonfile.update(dispatch_path, add_card_grant)
+        fail("answer: 「這張卡」的授權要有 agent 才有意義，但 %s 沒派出（不在 dispatch.json）；用 --grant repo 或不帶 --grant" % key)
+    authz.update(sd, add_card_grant)
 elif grant == "this":
     # 「這次」也要留痕，不然 agent 重試還是被 deny：寫進 once，閘門用掉就刪
     if not dispatched:
-        fail("answer: 「這次」的授權記在 dispatch.json 的 once，但 %s 沒派出" % key)
-    jsonfile.update(dispatch_path, add_once)
+        fail("answer: 「這次」的授權要有 agent 才有意義，但 %s 沒派出（不在 dispatch.json）" % key)
+    authz.update(sd, add_once)
 
 sec2 = re.sub(r"(?m)^status:\s*open\s*$", "status: answered", sec, count=1).rstrip("\n")
 sec2 += "\nanswer: %s\nanswered_at: %s\n" % (text, now)
