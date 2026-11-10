@@ -861,8 +861,15 @@ got="$(grep -E '^opsx (stop|dispatch)' "$OPSX_FAKE_LOG")"
 assert_eq "$got" "opsx stop m3 --repo $R
 opsx stop m4 --repo $R
 opsx dispatch --feature g --agent claude --mode autopilot --repo $R" "session 死掉：各卡 stop、feature 重派一次"
+assert_eq "$(notes)" 0 "session 重派成功（含同一輪第二張卡）不通知：$(cat "$OPSX_FAKE_LOG")"
 round || fail "rc: $(cat "$FX/out")"
 assert_eq "$(count '^opsx dispatch')" 0 "十分鐘內不再重派這個 feature"
+# 十分鐘內第二次掛掉：兩張卡一件事，通知一次，鍵綁 feature 與上次重派時間
+assert_eq "$(notes)" 1 "feature session 十分鐘內第二次掛掉要通知一次：$(cat "$OPSX_FAKE_LOG")"
+last="$(memo_get _redispatched demo/@g)"
+[ -n "$(memo_get _notified "demo/@g/dead/$last")" ] || fail "_notified 要有 demo/@g/dead/<上次重派時間>：$(cat "$MEMO")"
+round || fail "rc: $(cat "$FX/out")"
+assert_eq "$(notes)" 0 "同一次重派只通知一次"
 rm -f "$MEMO"
 cp "$WP0" "$R/openspec/workplan.yaml"; printf '{}' > "$DISP"
 echo "coordinate: ok"

@@ -54,6 +54,7 @@ class Round:
         self.levels = {}
         self.level_errors = {}
         self.orders = {}
+        self.redispatched_now = set()
 
     def log(self, msg):
         line = "%s %s" % (self.now.strftime("%Y-%m-%d %H:%M:%S"), msg)
@@ -255,10 +256,11 @@ class Round:
         elif rc != 0:
             self.log("?? %s gate %s 回不了：%s" % (card_key(c), gate, err[:200]))
 
-    def notify(self, c, kind, ident, event, body):
+    def notify(self, c, kind, ident, event, body, scope=None):
         """這裡處理不了、要人去處理的事。每輪從狀態重算，送過的鍵記在 _notified，所以事件觸發那輪漏掉的由定時那輪補，也不會重送。
+        scope 是去重鍵的前綴，預設是這張卡；feature session 的事屬於整個 session，傳 <repo>/@<feature>。
         herdr 的通知沒有點擊動作，內文要寫去哪裡處理。"""
-        key = "%s/%s/%s" % (card_key(c), kind, ident)
+        key = "%s/%s/%s" % (scope or card_key(c), kind, ident)
         if key in self.memo["_notified"]:
             return
         rc, out, err = self.act(["herdr", "notification", "show", "[%s] %s" % (card_key(c), event),
@@ -352,6 +354,10 @@ class Round:
         last = self.memo["_redispatched"].get(key)
         if last and self.now - datetime.datetime.fromisoformat(last) < datetime.timedelta(minutes=REDISPATCH_MINUTES):
             self.log("-- %s %s，%d 分鐘內重派過，這輪不再派" % (key, why, REDISPATCH_MINUTES))
+            # 這一輪剛重派過（同 feature 的第二張卡走到這裡）不算又掛了
+            if key not in self.redispatched_now:
+                self.notify(c, "dead", last, "重派後 %d 分鐘內又掛了" % REDISPATCH_MINUTES,
+                            "pane %s：%s；看板上重派或停掉" % (c["dispatch"].get("pane"), why), scope=key)
             return
         if "agent" not in c["dispatch"]:
             self.log("?? %s %s，但 dispatch.json 沒記 agent，不知道派給誰" % (key, why))
@@ -366,6 +372,7 @@ class Round:
             self.log("?? %s 重派開不了 session：%s" % (key, err[:200]))
             return
         self.memo["_redispatched"][key] = self.now.isoformat(timespec="seconds")
+        self.redispatched_now.add(key)
 
     def redispatch(self, c, top, why):
         if c["dispatch"].get("feature"):
