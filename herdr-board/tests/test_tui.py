@@ -18,6 +18,10 @@ def card(slug, section, pane=None, waiting=None, status=None, repo="a"):
             "agent_status": "working" if pane else None, "mr": None}
 
 
+def in_progress_header(data):
+    return next(r for r in tm.rows(data, done_open=False) if r["kind"] == "header" and r["section"] == "進行中")
+
+
 DATA = {"generated_at": "t", "scopes": [], "errors": [], "unmatched_agents": [],
         "cards": [
             card("done1", "已完成"),
@@ -48,6 +52,10 @@ class RowsTest(unittest.TestCase):
     def test_done_open_lists_done_cards(self):
         slugs = [r["card"]["slug"] for r in tm.rows(DATA, done_open=True) if r["kind"] == "card"]
         self.assertEqual(slugs[-1], "done1")
+
+    def test_in_progress_header_counts_orphans(self):
+        self.assertEqual(in_progress_header({**DATA, "orphans": [{"pane": "w1:p1"}, {"pane": "w1:p2"}]})["orphans"], 2)
+        self.assertEqual(in_progress_header(DATA)["orphans"], 0, "舊資料沒有 orphans 這個鍵")
 
     def test_card_line_text(self):
         rows = tm.rows(DATA, done_open=False)

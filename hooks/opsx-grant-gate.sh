@@ -6,18 +6,41 @@ source "$(dirname "${BASH_SOURCE[0]}")/_lib.sh"
 
 top="$(repo_top)"; slug="$(card_slug)"
 slug="${slug%%--*}"   # 子殼分支 <主>--<子> 沒有自己的 dispatch.json 條目，照主 change 的模式與授權
-[ -n "$top" ] && [ -n "$slug" ] || exit 0
+wt="$(wt_name)"; wt="${wt%%--*}"
+[ -n "$top" ] || exit 0
 repo="$(repo_name)"
-# dispatch.json 壞掉時讀不到模式，就退回比對檔案原文：裡面有這張卡的 key 才擋。
-# 原文也讀不到時，$(<…) 會是空字串、比對不到，所以要先擋。
-if ! mode="$(card_mode "$repo" "$slug")"; then
-  [ -r "$OPSX_STATE_DIR/dispatch.json" ] || deny "opsx 授權閘門：讀不到 $OPSX_STATE_DIR/dispatch.json，分不出這張卡的模式，先擋下。檢查這個檔案的權限"
-  [[ $(<"$OPSX_STATE_DIR/dispatch.json") == *"\"$repo/$slug\""* ]] || exit 0
-  deny "opsx 授權閘門：$OPSX_STATE_DIR/dispatch.json 不是合法 JSON，讀不到這張卡的模式，先擋下。修好這個檔案"
+# 對不到卡（分支不是三段，或 key 不在 dispatch.json，例如 subagent 的 worktree-agent-<id>、fanout 子分支）：
+# repo 有 autopilot / drive 的卡在跑時只管第三級；第二級沒有卡可查授權，放行。
+UNMAPPED=0
+mode=""
+# dispatch.json 壞掉時讀不到模式，就退回比對檔案原文：有 slug 的分支，裡面有這張卡的 key 才擋；
+# 沒有 slug 的分支（對不到任何卡），裡面有這個 repo 的卡（key 前綴）才擋。沒有就不管。
+# 讀不到檔時，$(<…) 會是空字串、比對不到，所以要先擋。
+dispatch_broken() {
+  local needle="\"$repo/$slug"; [ -n "$slug" ] && needle="$needle\""
+  [ -r "$OPSX_STATE_DIR/dispatch.json" ] || deny "opsx 授權閘門：讀不到 $OPSX_STATE_DIR/dispatch.json，分不出 $repo 的卡的模式，先擋下。檢查這個檔案的權限"
+  [[ $(<"$OPSX_STATE_DIR/dispatch.json") == *"$needle"* ]] || exit 0
+  deny "opsx 授權閘門：$OPSX_STATE_DIR/dispatch.json 不是合法 JSON，讀不到 $repo 的卡的模式，先擋下。修好這個檔案"
+}
+if [ -n "$slug" ]; then
+  mode="$(card_mode "$repo" "$slug")" || dispatch_broken
 fi
-case "$mode" in autopilot|drive) ;; *) exit 0 ;; esac
+# dispatch.json 的 key 是派工時的名字，也就是 worktree 名（feature session 是 feature 名），可以跟 branch 的卡不同：兩個有一個受管就照受管的那個
+case "$mode" in autopilot|drive) ;; *)
+  if [ -n "$wt" ] && [ "$wt" != "$slug" ]; then
+    wmode="$(card_mode "$repo" "$wt" || true)"
+    case "$wmode" in autopilot|drive) slug="$wt"; mode="$wmode" ;; esac
+  fi ;;
+esac
+if [ -z "$mode" ]; then
+  rc=0; repo_has_live_card "$repo" || rc=$?
+  case "$rc" in 0) UNMAPPED=1 ;; 1) exit 0 ;; *) dispatch_broken ;; esac
+else
+  case "$mode" in autopilot|drive) ;; *) exit 0 ;; esac
+fi
 # 查授權要 python。沒有就明確 deny，因為 hook 非 0 結束 Claude Code 會當成放行。修法那一條指令本身放行。
-if [ -z "$OPSX_PY" ]; then
+# 對不到卡時第三級不用查授權，不需要 python。
+if [ -z "$OPSX_PY" ] && [ "$UNMAPPED" = 0 ]; then
   [ "$(hook_cmd)" = "opsx init --global" ] && exit 0
   deny "opsx 授權閘門：讀不到授權，先擋下。$OPSX_PY_ERR"
 fi
@@ -67,7 +90,7 @@ level2() { # <action> <label>
   local rc=0
   has_grant "$repo" "$slug" "$1" || rc=$?
   case "$rc" in 0) GRANTED=1; return 0 ;; 3) ;; *) deny "$PY_FAIL" ;; esac
-  deny "opsx 授權閘門：「$2」要授權（第二級），$repo 沒有長期授權、這張卡也沒有。$GATE_MSG"
+  deny "opsx 授權閘門：「$2」要授權（第二級），$repo 沒有長期授權、這張卡也沒有。gate 寫 action: $1。$GATE_MSG"
 }
 
 if [ "$tool" = "Bash" ]; then
@@ -78,12 +101,16 @@ if [ "$tool" = "Bash" ]; then
   l3="$(cmd_l3text "$cmd" | tr '\n' ' ')" || deny "opsx 授權閘門：perl 執行失敗，讀不到指令內容，先擋下。確認 perl 可用"
   sk="$(cmd_skeleton "$cmd" | tr '\n' ' ')" || deny "opsx 授權閘門：perl 執行失敗，讀不到指令骨架，先擋下。確認 perl 可用"
   # 第三級（merge 放行後不 exit，其餘檢查照跑）
-  printf '%s' "$l3" | grep -qE '(glab mr merge|gh pr merge)' && merge_gate && GRANTED=1
+  if printf '%s' "$l3" | grep -qE '(glab mr merge|gh pr merge)'; then
+    [ "$UNMAPPED" = 1 ] && level3 "merge"
+    merge_gate && GRANTED=1
+  fi
   printf '%s' "$l3" | grep -qE 'git\s+push.*(--force|-f\b|\+[a-zA-Z])' && level3 "force-push"
   printf '%s' "$l3" | grep -qE 'git\s+push.*\b(main|master)\b' && level3 "push main"
   printf '%s' "$l3" | grep -qiE '(^|\s|/)deploy(\.sh)?(\s|$)' && level3 "deploy"
   printf '%s' "$l3" | grep -qiE 'drop\s+(table|database|schema)|truncate\s+table|db:reset' && level3 "刪資料"
   printf '%s' "$l3" | grep -qE 'sops\s+(-e|--encrypt|edit)|\.gitlab-ci\.yml|\.github/workflows' && level3 "改 CI / secrets"
+  [ "$UNMAPPED" = 1 ] && exit 0
   # 第二級
   printf '%s' "$sk" | grep -qE '(^|\s|&&|;)git\s+push(\s|$)' && level2 push "git push"
   printf '%s' "$sk" | grep -qE '(glab mr (create|update)|gh pr (create|edit))' && level2 mr "開 / 改 MR"
@@ -101,7 +128,7 @@ if [ "$tool" = "Edit" ] || [ "$tool" = "Write" ]; then
   case "$file" in
     *.gitlab-ci.yml|*/.github/workflows/*|*secrets*|*.sops.*|*/sops/*) level3 "改 CI / secrets（${file}）" ;;
     *.env.example) exit 0 ;;
-    *.env|*.env.*) level2 env "寫 $file"; allow ;;
+    *.env|*.env.*) [ "$UNMAPPED" = 1 ] && exit 0; level2 env "寫 $file"; allow ;;
   esac
 fi
 exit 0

@@ -32,7 +32,23 @@ repo_top() {
 }
 repo_name() { basename "$(repo_top)"; }
 branch() { git -C "$(hook_cwd)" rev-parse --abbrev-ref HEAD 2>/dev/null || true; }
-card_slug() { local b; b="$(branch)"; case "$b" in */*/*) printf '%s' "$b" | cut -d/ -f2 ;; *) printf '' ;; esac; }
+# dispatch 開的 worktree 根是 <top>/.claude/worktrees/<名>，名是派工時的 slug 或 feature 名；不在那種 worktree 裡印空
+wt_name() {
+  local t w; t="$(repo_top)"
+  w="$(git -C "$(hook_cwd)" rev-parse --show-toplevel 2>/dev/null || true)"
+  [ -n "$t" ] && [ -n "$w" ] && w="$(cd "$w" && pwd -P)" && [ "${w%/*}" = "$t/.claude/worktrees" ] && printf '%s' "${w##*/}"
+  true
+}
+# branch 對得到卡就用 branch：feature session 的 worktree 用 feature 名，同一個 worktree 會切換多個主 change 的 branch。
+# branch 對不到卡（PR 名 ≠ 卡名）才用 worktree 名。
+card_slug() {
+  local t s w; t="$(repo_top)"
+  s="$(branch)"; case "$s" in */*/*) s="$(printf '%s' "$s" | cut -d/ -f2)" ;; *) s='' ;; esac
+  [ -n "$t" ] && [ -n "$s" ] && [ -d "$(st_card_dir "$t" "$s")" ] && { printf '%s' "$s"; return 0; }
+  w="$(wt_name)"
+  [ -n "$w" ] && [ -d "$(st_card_dir "$t" "$w")" ] && { printf '%s' "$w"; return 0; }
+  printf '%s' "$s"
+}
 card_dir() { local t s d; t="$(repo_top)"; s="$(card_slug)"; [ -n "$t" ] && [ -n "$s" ] && d="$(st_card_dir "$t" "$s")" && [ -d "$d" ] && printf '%s' "$d" || printf ''; }
 card_kind() { st_card_kind "$1"; }
 status_tests() { st_status_tests "$1"; }
@@ -76,6 +92,12 @@ def consume(d):
 authz.update(sd, consume)
 sys.exit(0 if consumed["ok"] else 3)
 PY
+}
+# repo 有沒有 autopilot / drive 的卡：0 有、1 沒有（含沒有 dispatch.json）、其他值是 dispatch.json 讀不了
+repo_has_live_card() { # <repo>
+  local f="$OPSX_STATE_DIR/dispatch.json"
+  [ -f "$f" ] || return 1
+  jq -e --arg p "$1/" 'any(to_entries[]; (.key | startswith($p)) and (.value | type == "object") and (.value.mode == "autopilot" or .value.mode == "drive"))' "$f" >/dev/null 2>&1
 }
 # 用 jq 不用 python：python 沒記或壞掉時，閘門仍要分得出哪些卡歸它管。
 card_mode() { # <repo> <slug>：印 interactive、autopilot、drive、stopped，沒派過就空；dispatch.json 不是合法 JSON 時回非 0

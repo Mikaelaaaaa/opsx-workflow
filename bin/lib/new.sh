@@ -17,7 +17,7 @@ opsx_new() {
   text="$(printf '%s' "$text" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')"
   local slug body; slug="me-$(date '+%Y%m%d-%H%M')"; body="$(mktemp "${TMPDIR:-/tmp}/opsx-new.XXXXXX")"
   trap 'rm -f "$body"' RETURN
-  printf -- '---\ntype: 功能\nsource: me\nfound: %s\nrelated:\n---\n\n## 一句話\n\n%s\n\n## 證據\n\n' "$(date '+%Y-%m-%d')" "$text" > "$body"
+  printf -- '---\ntype: 功能\nsource: me\nfound: %s\nrelated:\nkind_of_work: planned\n---\n\n## 一句話\n\n%s\n\n## 證據\n\n' "$(date '+%Y-%m-%d')" "$text" > "$body"
   if [ -n "$top" ]; then
     new_shell "$top" "$slug" "$body"
     return

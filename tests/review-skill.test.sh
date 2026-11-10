@@ -28,22 +28,26 @@ assert_fixed '照做 / 偏離' "$STEP5"
 assert_fixed '修前清單' "$STEP5"
 n=$(grep -cF 'D-id <Dn|none>' "$STEP5"); [ "$n" -ge 4 ] || fail "D-id slot in all four buckets: found $n of 4"
 
-# --- 2.1 task 已勾但沒實作：進 Consider，回 /apply，review 不修；分類 tie-break ---
-assert_fixed '已勾但沒實作」 is always Consider, never Act on' "$STEP3"
-assert_not_fixed 'always Act on' "$STEP3"
-assert_fixed '回 `/apply <slug>`' "$STEP3"
-assert_fixed 'read the diff yourself' "$STEP3"
+# --- 2.1 範圍：因果判準，退回看 diff 行；task 已勾但沒實作屬範圍內 ---
+assert_fixed 'cannot happen on main' "$STEP3"
+assert_fixed 'a caller this change broke' "$STEP3"
+assert_fixed 'git diff -U0 main...HEAD' "$STEP3"
+assert_fixed 'happens on main too' "$STEP3"
+assert_not_fixed 'always Consider, never Act on' "$STEP3"
 assert_fixed 'BUG = task checked and the diff has no code for it' "$STEP2"
 assert_fixed 'Review never implements a task' "$GUARD"
 
-# --- 2.2 step 4：範圍限制與清單在修改之前；清單綁定 finding 引用的位置；測試整輪一個 ---
-assert_fixed 'Scope first, before any edit' "$STEP4"
-assert_fixed "the finding's cited file:line" "$STEP4"
-assert_fixed 'change nothing for it' "$STEP4"
-assert_fixed 'at most 一個 回歸測試 in total' "$STEP4"
-assert_not_fixed 'per fix' "$STEP4"
-scope_ln=$(line_of 'Scope first, before any edit' "$STEP4"); fix_ln=$(line_of 'Then apply the fixes' "$STEP4")
-[ -n "$scope_ln" ] && [ -n "$fix_ln" ] && [ "$scope_ln" -lt "$fix_ln" ] || fail "scope rule must come before 'Then apply the fixes' (scope=$scope_ln fix=$fix_ln)"
+# --- 2.2 step 4：範圍內寫成 task 回 apply，範圍外開卡，驗不了的降 Consider ---
+assert_fixed '## R<N>. review 退回' "$STEP4"
+assert_fixed '待修（範圍內）' "$STEP4"
+assert_fixed '/apply <slug>' "$STEP4"
+assert_fixed 'opsx new' "$STEP4"
+assert_fixed '優先度 P2' "$STEP4"
+assert_fixed 'review changes no code' "$STEP4"
+assert_not_fixed 'at most 一個 回歸測試 in total' "$STEP4"
+assert_fixed '確認: <sha>' "$STEP4"
+assert_fixed '待修（範圍內）' "$STEP5"
+assert_fixed '確認: <sha>' "$STEP5"
 
 # --- 2.3 hook 擋下：引用的共用文件要解析得到，不在本文重寫 ---
 assert_fixed '../../references/harness-claude-code.md' "$STEP4"

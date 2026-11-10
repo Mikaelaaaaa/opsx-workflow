@@ -132,6 +132,11 @@ For each finding, run 收 once, in the audited repo:
    <path:Lstart-end>, and the lines that show the problem, quoted.
    ```
 
+4. Add the facts to that frontmatter: `kind_of_work` (a live bug or hole is
+   `incident`, with `impact` and `evidence`; the rest are `planned`), then run
+   `opsx priority <slug>`. If it prints P0 without a user override, write the
+   `p0-review` gate per `references/priority.md`.
+
 `Verdict:` (one line: healthy, or what to fix first), `Lean: -<N> lines,
 -<M> dependencies possible.` when lean findings exist, and `Not checked:`
 (the parts you did not read or could not run) go in the chat reply only, not
