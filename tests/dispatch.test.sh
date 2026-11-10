@@ -139,7 +139,10 @@ python3 -I -c 'import json,sys;d=json.load(open(sys.argv[1]))["Agentory-CS/retry
 # interactive 的 claude 也要 --add-dir（互動模式一樣在沙盒裡）
 opsx stop retry-backoff >/dev/null 2>&1 || fail "stop before redispatch"
 : > "$OPSX_FAKE_LOG"
+# symlink-safe-writes：settings 檔名被換成 symlink → 換成一般檔、目標不變
+mkdir -p "$OPSX_STATE_DIR/settings"; printf 'keep me\n' > "$FX/victim"; rm -f "$OPSX_STATE_DIR/settings/Agentory-CS-retry-backoff-interactive.json"; ln -s "$FX/victim" "$OPSX_STATE_DIR/settings/Agentory-CS-retry-backoff-interactive.json"
 opsx dispatch retry-backoff --agent claude --mode interactive >/dev/null 2>&1 || fail "redispatch interactive claude"
+assert_eq "$(cat "$FX/victim")" "keep me" "settings 檔名上的 symlink 不能被寫到目標"
 assert_grep "^agent start retry-backoff --kind claude --pane w1:pE -- --model claude-sonnet-5-5 --settings $OPSX_STATE_DIR/settings/Agentory-CS-retry-backoff-interactive.json --add-dir $R/openspec --add-dir $OPSX_STATE_DIR\$" "$OPSX_FAKE_LOG"   # kind 已是 bug-fix → sonnet
 assert_not_grep '--permission-mode' "$OPSX_FAKE_LOG"
 python3 -I -c 'import json,sys;d=json.load(open(sys.argv[1]))["permissions"];assert d=={"additionalDirectories":[sys.argv[2],sys.argv[3]]},d' "$OPSX_STATE_DIR/settings/Agentory-CS-retry-backoff-interactive.json" "$R/openspec" "$OPSX_STATE_DIR" || fail "interactive settings 只該有 additionalDirectories"
