@@ -71,6 +71,7 @@ input::placeholder{color:var(--fg-3)}
 .topbar .right{margin-left:auto;display:flex;align-items:center;gap:10px}
 .counter{font-family:var(--font-mono);font-size:12px;color:var(--fg-2);margin-left:auto}
 .counter b{color:var(--data);font-weight:700}
+.counter .link{border:0;background:none;padding:0;min-height:0;margin:0;color:var(--accent);font:inherit;cursor:pointer}
 .stamp{font-family:var(--font-mono);font-size:11px;color:var(--fg-3)}
 
 main{flex:1;min-width:0;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:0 48px;max-width:1200px;width:100%;margin:0 auto}
@@ -300,6 +301,12 @@ function inScope(c){
 }
 function scopeLabel(){if(ui.repo)return ui.repo;if(ui.scope!=='ws')return 'workspace';return ui.ws||'沒掛的';}
 const sect=name=>data.cards.filter(c=>c.section===name&&inScope(c));
+/* 範圍視圖下其他 repo 也有卡在等時，多列全部範圍的總數；那些卡在首頁別處都看不到 */
+function counterHtml(cards,inScope){
+  const all=cards.filter(c=>c.section==='待處理'),here=all.filter(inScope).length;
+  const own=here?`待處理 <b>${here}</b>`:'<span class="faint">無待處理</span>';
+  return all.length>here?`${own} · <button class="link" data-act="scope-all">全部 <b>${all.length}</b></button>`:own;
+}
 
 /* ---------- 精靈 ---------- */
 function bot(c,size){
@@ -511,7 +518,7 @@ function showTab(t){ui.tab=t;ui.sel=null;history.replaceState(null,'','#'+t);ren
 
 function render(){
   const A=sect('待處理');
-  $('#counter').innerHTML=A.length?`待處理 <b>${A.length}</b>`:'<span class="faint">無待處理</span>';
+  $('#counter').innerHTML=counterHtml(data.cards,inScope);
   $('#home-n').textContent=A.length||'';
   $('#inbox-n').textContent=sect('收件匣').length+(data.unfiled||[]).length||'';
   for(const t of ['home','inbox','log'])$('#tab-'+t).setAttribute('aria-selected',ui.tab===t);
@@ -690,6 +697,7 @@ document.addEventListener('click',e=>{
     if(a==='file'){fileUnfiled(btn.closest('[data-unfiled]'));return;}
     if(a==='drop-open'){ui.drop=btn.dataset.drop;ui.dropText='';render();const i=$('.drop-reason');if(i)i.focus();return;}
     if(a==='banner-close'){closeBanner();return;}
+    if(a==='scope-all'){$('#scope-all').click();return;}
     if(a==='logf'){setLogFilter(btn.dataset.f);render();return;}
     if(a==='log-more'){logMore();render();return;}
     if(a==='ev-open'){if(!byKey(btn.dataset.key)){toast(btn.dataset.key+' 不在首頁（archive 只列最新的幾張）',true);return;}showTab('home');openDrawer(btn.dataset.key);return;}
