@@ -14,6 +14,8 @@ compatibility: Requires glab (GitLab repos) or gh (GitHub repos). Push and MR cr
 
 # /pr
 
+**Steps in TodoWrite.** First action after loading: put this skill's steps into TodoWrite verbatim; a step you will not do stays in the list as `skip: <reason>`, never deleted.
+
 Turn a reviewed change into a merge request the reviewer and the PM can both read.
 
 ## Where you are

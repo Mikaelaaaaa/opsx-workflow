@@ -14,6 +14,8 @@ argument-hint: "[change slug]"
 
 # /grill
 
+**Steps in TodoWrite.** First action after loading: put this skill's steps into TodoWrite verbatim; a step you will not do stays in the list as `skip: <reason>`, never deleted.
+
 The change has questions that explore could not close. Close them, cheaply, in the right order, and leave a record propose can build on without renumbering.
 
 ## Where you are

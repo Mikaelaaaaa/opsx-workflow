@@ -15,6 +15,8 @@ compatibility: Spawns three Agent subagents (A and B on claude-sonnet-5-5, C on 
 
 # /review
 
+**Steps in TodoWrite.** First action after loading: put this skill's steps into TodoWrite verbatim; a step you will not do stays in the list as `skip: <reason>`, never deleted.
+
 Three readers who do not share context, one lead who decides. The report they leave is what `/pr` and the board build on.
 
 ## Step 0: the gate

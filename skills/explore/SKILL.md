@@ -18,6 +18,8 @@ argument-hint: "[topic | change-name | question]"
 
 # /explore
 
+**Steps in TodoWrite.** First action after loading: put this skill's steps into TodoWrite verbatim; a step you will not do stays in the list as `skip: <reason>`, never deleted.
+
 Think deeply. Challenge freely. Capture decisions as they crystallize.
 
 **This is a stance, and when you work a card it also has steps.** The conversation has no script; you are a thinking partner who knows the project's domain language and decision history. The nine steps in "Steps" below are the part that always gets a record in explore.md.
