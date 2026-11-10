@@ -202,4 +202,20 @@ assert_eq "$(jq -c '."Agentory-AI/bt".grants // []' "$PD/authz.json")" '[]' "這
 assert_eq "$(jq -c 'keys' "$PD/authz.json")" '["Agentory-AI/bt"]' "子 change 沒有自己的授權條目"
 assert_eq "$(jq -c 'keys' "$OPSX_STATE_DIR/dispatch.json")" '["Agentory-AI/bt"]' "子 change 不進 dispatch.json"
 assert_no_file "$B/decisions.tsv"
+
+# --- 同名 gate：回 open 的那個，其他段原樣不動（驗收：board-actions「同名 gate 回 open 的」）---
+dupgates() { printf '## 卡在接 /review\ntype: decision\nstatus: answered\nanswer: 先前的答案\n\n## 卡在接 /review\ntype: decision\nstatus: open\n問題: 卡在哪\n' > "$C/gates.md"; }
+dupgates; cd "$R"
+out="$(opsx answer x --gate '卡在接 /review' 重做 2>&1)"; assert_eq "$?" 0 "同名 gate 回 open 的: $out"
+assert_eq "$(grep -c '^status: answered' "$C/gates.md")" 2 "兩段都 answered"
+assert_eq "$(grep -c '^answer: ' "$C/gates.md")" 2
+assert_eq "$(sed -n '1,4p' "$C/gates.md" | grep -c '先前的答案')" 1 "第一段原樣"
+awk '/^## /{n++} n==2' "$C/gates.md" | grep -q '^answer: 重做$' || fail "第二段才該拿到答案: $(cat "$C/gates.md")"
+
+# --- 同名 gate 全都不是 open：非 0 退出、列出每段 status、gates.md 不變 ---
+cp "$C/gates.md" "$FX/before.md"
+out="$(opsx answer x --gate '卡在接 /review' 再答 2>&1)"; rc=$?; [ $rc -ne 0 ] || fail "同名 gate 全 answered 要退出非零"
+echo "$out" | grep -q '不是 open' || fail "訊息要含「不是 open」: $out"
+assert_eq "$(printf '%s' "$out" | grep -o 'answered' | wc -l | tr -d ' ')" 2 "兩段各自的 status: $out"
+cmp -s "$C/gates.md" "$FX/before.md" || fail "gates.md 不該變"
 echo ok
