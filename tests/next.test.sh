@@ -113,5 +113,12 @@ git -C "$R" worktree add -q -b scratch "$O"
 cd "$O"
 assert_eq "$(opsx next)" "none" "不在 .claude/worktrees 底下"
 
+# --- 單卡的 worktree 名剛好等於某個 feature 名：session 條目記的 worktree 不是這棵，就不是這個 session ---
+printf '{"nx/@lone":{"mode":"autopilot","pane":"w1:p1","agent":"claude","worktree":"%s/.claude/worktrees/fs"},%s,%s}' "$R" "$(entry m1 lone)" "$(entry m2 lone)" > "$J"
+cd "$R/.claude/worktrees/lone"
+assert_eq "$(opsx next)" "none" "worktree 名撞 feature 名，但 session 記的是別棵"
+cd "$R/.claude/worktrees/fs"
+assert_eq "$(opsx next)" "/apply m2" "照 session 條目記下的 worktree 認，不照目錄名"
+
 assert_rc 2 opsx next extra
 echo ok

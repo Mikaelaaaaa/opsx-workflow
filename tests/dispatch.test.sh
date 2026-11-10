@@ -339,6 +339,53 @@ out="$(opsx dispatch m2 --agent claude --mode interactive 2>&1)"; assert_eq "$?"
 assert_grep '^agent start m2 ' "$OPSX_FAKE_LOG"
 assert_not_grep '^agent prompt fs' "$OPSX_FAKE_LOG"
 
+# 單卡派過再停掉的條目（沒有 via）不是這個 session 的成員：--feature 照常寫它、可以給它第一句
+out="$(opsx stop m2 2>&1)" || fail "stop m2: $out"
+: > "$OPSX_FAKE_LOG"
+out="$(opsx dispatch --feature fs --agent claude --mode autopilot 2>&1)"; assert_eq "$?" 0 "單卡留下的 stopped 不算人停的成員: $out"
+assert_grep '^agent prompt fs /apply m2$' "$OPSX_FAKE_LOG"
+assert_eq "$(jq -r '."Feat-Repo/m2" | [.mode, .via] | join(" ")' "$J")" "autopilot @fs" "m2 寫成 session 成員"
+assert_eq "$(jq -r '."Feat-Repo/m1".mode' "$J")" stopped "via @fs 的人停成員照樣跳過"
+
+# 等合併的成員（不在 plan 裡、沒停）在 session 重派後 pane 改抄新 session，collect 不會拿舊 pane 判它 agent 不在
+python3 -I -c 'import sys;p=sys.argv[1];t=open(p).read().replace("name: a1\n            status: pending","name: a1\n            status: done");open(p,"w").write(t)' "$RF/openspec/workplan.yaml"
+python3 -I -c 'import json,sys;p=sys.argv[1];d=json.load(open(p));d["Feat-Repo/m1"].update(mode="autopilot",pane="w1:pOLD");json.dump(d,open(p,"w"))' "$J"
+out="$(opsx stop @fs 2>&1)" || fail "stop @fs: $out"
+out="$(opsx dispatch --feature fs --agent claude --mode autopilot 2>&1)"; assert_eq "$?" 0 "重派: $out"
+assert_eq "$(jq -r '[."Feat-Repo/m1".pane, ."Feat-Repo/m1".mode] | join(" ")' "$J")" "$(jq -r '."Feat-Repo/@fs".pane' "$J") autopilot" "等合併的 m1 的 pane 等於新 session"
+python3 -I -c 'import sys;p=sys.argv[1];t=open(p).read().replace("name: a1\n            status: done","name: a1\n            status: pending");open(p,"w").write(t)' "$RF/openspec/workplan.yaml"
+
+# 重派途中人按停止（判斷之後、寫入之前）：寫入時再查一次，人停的 m1 不被蓋回，第一句改給 m2
+out="$(opsx stop @fs 2>&1)" || fail "stop @fs: $out"
+printf '%s\n' "python3 -I -c 'import json,sys;p=sys.argv[1];d=json.load(open(p));d[\"Feat-Repo/m1\"][\"mode\"]=\"stopped\";json.dump(d,open(p,\"w\"))' \"$J\"" > "$FX/stop-m1-on-wait.sh"
+export OPSX_TEST_NOT_READY_ONCE="$FX/not-ready-once"; : > "$OPSX_TEST_NOT_READY_ONCE"
+export OPSX_TEST_PANE_TEXT='Yes, I trust this folder'
+export OPSX_TEST_ON_WAIT="$FX/stop-m1-on-wait.sh"
+: > "$OPSX_FAKE_LOG"
+out="$(opsx dispatch --feature fs --agent claude --mode autopilot 2>&1)"; assert_eq "$?" 0 "重派途中有人停: $out"
+unset OPSX_TEST_NOT_READY_ONCE OPSX_TEST_PANE_TEXT OPSX_TEST_ON_WAIT
+assert_eq "$(jq -r '."Feat-Repo/m1".mode' "$J")" stopped "途中人停的 m1 不被蓋回"
+assert_grep '^agent prompt fs /apply m2$' "$OPSX_FAKE_LOG"
+assert_not_grep '^agent prompt fs /.* m1$' "$OPSX_FAKE_LOG"
+
+# session 條目被 reap 收掉（mode 還是 autopilot、有 reaped_at）：當作 session 不在，人停的成員照單卡派
+out="$(opsx stop m2 2>&1)" || fail "stop m2: $out"
+python3 -I -c 'import json,sys;p=sys.argv[1];d=json.load(open(p));d["Feat-Repo/@fs"]["reaped_at"]="2026-11-10T16:00:00+08:00";json.dump(d,open(p,"w"))' "$J"
+: > "$OPSX_FAKE_LOG"
+out="$(opsx dispatch m2 --agent claude --mode autopilot 2>&1)"; assert_eq "$?" 0 "session 被 reap 後重派 m2: $out"
+assert_grep '^agent start m2 ' "$OPSX_FAKE_LOG"
+assert_not_grep '^agent prompt fs' "$OPSX_FAKE_LOG"
+
+# 交回 session 時卡的 stage 不在可送的那幾站（例如已拆）：拒絕並寫出 stage，不改送 /explore
+out="$(opsx stop m2 2>&1)" || fail "stop m2: $out"
+python3 -I -c 'import json,sys;p=sys.argv[1];d=json.load(open(p));s=d["Feat-Repo/@fs"];s.pop("reaped_at");s["mode"]="autopilot";m=d["Feat-Repo/m2"];m.update(feature="fs",via="@fs",herdr_name="fs");json.dump(d,open(p,"w"))' "$J"
+printf -- '---\nsplit_into: m2a\n---\n' > "$RF/openspec/changes/m2/inbox.md"
+: > "$OPSX_FAKE_LOG"
+out="$(opsx dispatch m2 --agent claude --mode autopilot 2>&1)"; [ $? -eq 2 ] || fail "stage split 不能交回 session: $out"
+echo "$out" | grep -q split || fail "訊息要寫出 stage: $out"
+assert_eq "$(cat "$OPSX_FAKE_LOG")" "" "拒絕時不碰 herdr"
+rm "$RF/openspec/changes/m2/inbox.md"
+
 # --- dispatch --note：送第一句之前寫進 inbox.md 的 ## 派工指示（specs/dispatch-note「opsx dispatch --note 在第一句之前寫入」） ---
 cd "$R"
 N="$R/openspec/changes/note-card"; mkdir -p "$N"; printf 'schema: opsx\nkind: dev\n' > "$N/.openspec.yaml"

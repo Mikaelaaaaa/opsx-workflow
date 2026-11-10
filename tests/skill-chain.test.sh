@@ -25,10 +25,11 @@ assert_not_grep 'Do not run the review yourself' "$OPSX_ROOT/skills/apply/SKILL.
 
 # feature session：babysit 停在等合併時先跑 opsx next，印出指令就接著做（apply-fanout session-dispatch）
 awk '/^\| babysit /{f=1} f' "$CONT" | grep -qF 'opsx next' || fail "continue.md 的 babysit 列之後要寫 feature session 跑 opsx next"
-# feature session 收到 [<slug>] stop：停在下一個 commit 邊界前、不 commit 半成品、跑 opsx next 接下一張（session-stop）
+# feature session 收到 [<slug>] stop：未 commit 的改動先在那張的 branch 做 wip: commit，worktree 乾淨才切 branch，跑 opsx next 接下一張
 stop_line="$(awk '/^\| babysit /{f=1} f' "$CONT" | grep -F '`[<slug>] stop`')"
 [ -n "$stop_line" ] || fail "continue.md 的 feature session 段要寫收到 [<slug>] stop 怎麼做"
-for w in 'commit' 'opsx next' 'opsx dispatch <slug>'; do
+printf '%s' "$stop_line" | grep -qF 'leave it in the worktree' && fail "半成品留在 worktree 會被帶到下一張的 branch：$stop_line"
+for w in '`wip:` commit' 'clean' 'opsx next' 'opsx dispatch <slug>'; do
   printf '%s' "$stop_line" | grep -qF -- "$w" || fail "收到 [<slug>] stop 那段要提到 $w：$stop_line"
 done
 

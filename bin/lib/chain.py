@@ -222,6 +222,16 @@ def session_members(top: str, repo: str, feature: str, dispatch: dict) -> list:
     return sorted(cards, key=rank.__getitem__)
 
 
+def session_alive(entry: dict) -> bool:
+    """session 條目還代表一個活的 pane：沒停、pane 沒被 opsx stop 關掉、沒被 reap 收掉（reap 只記 reaped_at，不改 mode）。"""
+    return entry.get("mode") != "stopped" and not entry.get("pane_closed_at") and not entry.get("reaped_at")
+
+
+def human_stopped(entry, feature: str) -> bool:
+    """這個 session 的成員條目被人停了。單卡派過再停掉的舊條目（沒有 via @<feature>）不算：它不是這個 session 的成員。"""
+    return bool(entry) and entry.get("mode") == "stopped" and entry.get("via") == "@" + feature
+
+
 def sub_deps(top: str, main: str, sub: str) -> list:
     """opsx stack：主 change <main> 的 PR 底下子 change <sub> 的 depends-on。workplan 沒有這個 PR 或子 change 就 exit。"""
     wp_path = os.path.join(top, "openspec", "workplan.yaml")
@@ -300,9 +310,12 @@ if __name__ == "__main__":
         jsonfile.update(sys.argv[2], register_continue)
         print(old_name, mode)   # 寫成功才印：chain.sh 靠退出碼判斷寫入成敗
     elif len(sys.argv) == 6 and sys.argv[1] == "siblings":
-        top, repo, feature, d = sys.argv[2], sys.argv[3], sys.argv[4], jsonfile.load(sys.argv[5])
-        if "%s/@%s" % (repo, feature) in d:   # 沒有 session 條目就不是 session，不列成員
-            print("\n".join(session_members(top, repo, feature, d)))
+        top, repo, wt, d = sys.argv[2], sys.argv[3], os.path.realpath(sys.argv[4]), jsonfile.load(sys.argv[5])
+        # 單卡與 session 的 worktree 都在 .claude/worktrees/<名>，名字會撞：認 session 條目記下的 worktree，不認目錄名
+        hit = [k.split("/@", 1)[1] for k, v in d.items()
+               if k.startswith(repo + "/@") and v.get("worktree") and os.path.realpath(v["worktree"]) == wt]
+        if hit:
+            print("\n".join(session_members(top, repo, hit[0], d)))
     elif len(sys.argv) == 5 and sys.argv[1] == "deps":
         print("\n".join(sub_deps(*sys.argv[2:])))
     elif len(sys.argv) == 4 and sys.argv[1] == "feature":
@@ -315,4 +328,4 @@ if __name__ == "__main__":
         print(jsonfile.load(sys.argv[2])[os.environ["OPSX_KEY"]].get("mode"))
         jsonfile.update(sys.argv[2], register_fan_out)
     else:
-        sys.exit("用法：chain.py children <top> <repo> <父卡 slug> <dispatch.json> | chain.py feature <top> <feature> | chain.py deps <top> <主> <子> | chain.py siblings <top> <repo> <feature> <dispatch.json> |chain.py continue|session|fan-out <dispatch.json>")
+        sys.exit("用法：chain.py children <top> <repo> <父卡 slug> <dispatch.json> | chain.py feature <top> <feature> | chain.py deps <top> <主> <子> | chain.py siblings <top> <repo> <worktree> <dispatch.json> | chain.py continue|session|fan-out <dispatch.json>")
