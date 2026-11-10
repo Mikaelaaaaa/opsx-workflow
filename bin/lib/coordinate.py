@@ -32,9 +32,7 @@ GRANT_WORDS = ("授權", "開 PR", "開 / 改 MR", "gh pr create", "push", "推�
 # 建議或選項裡有這些字，代表要人動手；不替人承諾
 HUMAN_WORDS = ("你", "使用者", "沙盒外", "自己跑", "本人", "人工", "跑指令", "跑腳本", "錄", "貼路徑")
 HUMAN_QUESTION = ("只有你能做", "誰來跑")
-# 卡在等別張卡合併：不答，答了它查完又會開一個 gate
 MERGE_WORDS = ("合併", "merge")
-WAIT_WORDS = ("合進 main", "merge 之後", "merged 之後", "merge 之前", "之後再派", "合併後", "等它 merge", "等 .* 合")
 VERIFY_ANSWER = "這個要真機跑的驗證使用者之後自己做：把它標成「等使用者驗」寫進 report.md 的 Consider，不要再開 gate，繼續做完剩下的 task 到 /review、/pr。"
 GRANT_ANSWER = "允許。長期授權在 grants.toml，直接做。"
 
@@ -312,9 +310,9 @@ class Round:
         q = w.get("question") or ""
         pick = w.get("recommended") or (w.get("options") or [None])[0]
         text = q + " " + (pick or "")
-        # 等別張卡的字本身含「合併後」「等 X 合」，要先認出來，不然會被下面的合併類規則吃掉
-        if any(re.search(k, text) for k in WAIT_WORDS):
-            self.log("⏳ %s gate %s 在等別張卡，先停 pane，有卡合進 main 那輪再派：%s" % (key, w["gate_id"], q[:100]))
+        # gate 明寫 waits-on 才算等別張卡：不答，答了它查完又會開一個 gate。要先認，不然會被下面的合併類規則吃掉
+        if w.get("waits_on"):
+            self.log("⏳ %s gate %s 等 %s，先停 pane，有卡合進 main 那輪再派：%s" % (key, w["gate_id"], w["waits_on"], q[:100]))
             rc, _, _ = self.act(["opsx", "stop", c["slug"], "--repo", top])
             if rc == 0:
                 self.memo["_parked"][key] = {"at": self.now.isoformat(timespec="seconds"), "gate": w["gate_id"],
