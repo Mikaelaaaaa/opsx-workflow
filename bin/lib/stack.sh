@@ -34,8 +34,9 @@ opsx_stack() {
     exit 3
   fi
 
-  local tmp="$d/tasks.md.stack.tmp"
-  awk -v s="\`$sub\`" '!done && match($0, /^[[:space:]]*- \[ \] [0-9.]+ /) && substr($0, RSTART + RLENGTH, length(s)) == s { sub(/- \[ \] /, "- [x] "); done = 1 } { print }' "$d/tasks.md" > "$tmp" && mv "$tmp" "$d/tasks.md"
+  local ticked
+  ticked="$(awk -v s="\`$sub\`" '!done && match($0, /^[[:space:]]*- \[ \] [0-9.]+ /) && substr($0, RSTART + RLENGTH, length(s)) == s { sub(/- \[ \] /, "- [x] "); done = 1 } { print }' "$d/tasks.md")" || die "stack: 勾 $d/tasks.md 失敗，檔案沒動"
+  printf '%s\n' "$ticked" | opsx_replace "$d/tasks.md" || die "stack: 寫不了 $d/tasks.md（上面有原因）"
   say "stack: ${sub} 疊回 ${branch}（$(git rev-parse --short HEAD)），主殼 tasks.md 已勾"
 }
 

@@ -20,6 +20,7 @@ import chain  # noqa: E402
 import grantactions  # noqa: E402
 import jsonfile  # noqa: E402
 import priority  # noqa: E402
+import safefile  # noqa: E402
 
 MAX_DISPATCH = 6
 REDISPATCH_MINUTES = 10
@@ -60,7 +61,7 @@ class Round:
     def log(self, msg):
         line = "%s %s" % (self.now.strftime("%Y-%m-%d %H:%M:%S"), msg)
         print(line)
-        with open(self.log_path, "a", encoding="utf-8") as f:
+        with safefile.open_append(self.log_path) as f:
             f.write(line + "\n")
 
     def run(self, args, cwd=None):
@@ -96,10 +97,7 @@ class Round:
     def save(self):
         if self.dry:
             return
-        tmp = self.memo_path + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(self.memo, f, ensure_ascii=False, indent=1)
-        os.replace(tmp, self.memo_path)
+        safefile.write_atomic(self.memo_path, json.dumps(self.memo, ensure_ascii=False, indent=1))
 
     def workplan(self, top):
         if top not in self.plans:
@@ -236,10 +234,7 @@ class Round:
                 self.log("?? %s 找不到 %s 的 status 行，不收尾" % (path, name))
                 return False
             lines[i] = re.sub(r"status:.*$", "status: " + value, lines[i])
-        tmp = path + ".coordinate.tmp"
-        with open(tmp, "w", encoding="utf-8") as f:
-            f.write("\n".join(lines))
-        os.replace(tmp, path)
+        safefile.write_atomic(path, "\n".join(lines))
         self.plans.pop(top, None)
         if archived:
             self.log("ok   workplan 的 change %s 已歸檔、沒更新，跟著標 done" % "、".join(archived))
@@ -636,13 +631,13 @@ def main():
     state, dry = sys.argv[1], "--dry" in sys.argv[2:]
     rerun = os.path.join(state, "coordinator.rerun")
     # process 死掉時 kernel 會放掉 flock，所以不用處理殘留的 lock 檔
-    with open(os.path.join(state, "coordinator.lock"), "a", encoding="utf-8") as lock:
+    with safefile.open_lock(os.path.join(state, "coordinator.lock")) as lock:
         try:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             # 不等也不搶：同時跑兩輪會答同一個 gate、重派同一張卡兩次。拿著 lock 的那輪結束前會看到記號補跑
             if not dry:
-                with open(rerun, "w", encoding="utf-8"):
+                with safefile.open_lock(rerun):
                     pass
             Round(state, dry).log("-- 另一輪 coordinator 在跑，留下重跑記號")
             return 0

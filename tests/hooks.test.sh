@@ -101,6 +101,11 @@ git -C "$R" checkout -q main
 out="$(cg 'git commit -m "chore: bump"')"; assert_eq "$(decision "$out")" deny "commit: branch 對不到卡要擋"
 out="$(cg 'git commit -m "chore: bump [no-change] 只是改 README"')"; assert_eq "$(decision "$out")" allow "commit: [no-change] 放行"
 assert_grep "Agentory-AI" "$OPSX_STATE_DIR/bypass.log"
+# symlink-safe-writes：bypass.log 是 symlink → 不寫到目標
+rm -f "$OPSX_STATE_DIR/bypass.log"; printf 'keep me\n' > "$FX/victim"; ln -s "$FX/victim" "$OPSX_STATE_DIR/bypass.log"
+cg 'git commit -m "chore: bump [no-change] 再一次"' >/dev/null 2>&1 || true
+assert_eq "$(cat "$FX/victim")" "keep me" "commit: bypass.log 不能附加到 symlink 的目標"
+rm -f "$OPSX_STATE_DIR/bypass.log"
 out="$(cg 'ls -la')"; assert_eq "$out" "" "commit: 非 commit 指令不出聲"
 # 子殼分支 <主>--<子>：看子殼的 tasks.md，不看主殼
 mkdir -p "$C/subs/s1"; printf '## 1. x\n\n- [ ] 1.1 a\n' > "$C/subs/s1/tasks.md"
@@ -321,6 +326,12 @@ rm -f "$G"; out="$(gt "$G")"; assert_eq "$out" "rc=0" "gate-ts: 檔案不存在�
 printf '## g1\nstatus: open\n' > "$G"
 printf '{"tool_name":"Write","tool_input":{"file_path":"%s"}}' "$G" | CLAUDE_PLUGIN_ROOT="$GP" env -u OPSX_NOW bash "$H/gate-timestamp.sh" >/dev/null 2>&1
 grep -Eq '^opened_at: [0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}[+-][0-9]{2}:[0-9]{2}$' "$G" || fail "gate-ts: 真時間要是帶冒號 offset 的 ISO：$(cat "$G")"
+# symlink-safe-writes：暫存檔與 warn 檔名帶 pid（可猜）。exec 保留 pid，所以在同一個 pid 下先放好 symlink
+printf '## g1\ntype: decision\nstatus: open\n' > "$G"; printf 'keep me\n' > "$FX/victim"
+printf '{"tool_name":"Write","tool_input":{"file_path":"%s"}}' "$G" | CLAUDE_PLUGIN_ROOT="$GP" OPSX_NOW=2026-11-06T14:05:00+08:00 bash -c 'ln -s "$1" "$2.tmp.$$"; ln -s "$1" "$2.warn.$$"; exec bash "$3"' _ "$FX/victim" "$G" "$H/gate-timestamp.sh" >/dev/null 2>&1
+assert_eq "$(cat "$FX/victim")" "keep me" "gate-ts: 帶 pid 的舊檔名上的 symlink 不能被寫"
+assert_grep '^opened_at: 2026-11-06T14:05:00+08:00$' "$G"
+rm -f "$G".tmp.* "$G".warn.*
 
 # gate type：同義詞改正、表外與沒寫只提醒（gate-type-normalize）。提醒走 PostToolUse 的 additionalContext，退出碼永遠 0
 gts() { printf '{"cwd":"%s","tool_name":"Write","tool_input":{"file_path":"%s"},"hook_event_name":"PostToolUse"}' "$R" "$1" | CLAUDE_PLUGIN_ROOT="$GP" OPSX_NOW=2026-11-06T14:05:00+08:00 bash "$H/gate-timestamp.sh" 2>/dev/null; }
@@ -487,10 +498,18 @@ rm -f "$C/gates.md" "$C/tasks.md"
 
 # 擋的次數：同一站 3 次，第 4 次 hook 寫 gate 放行；第 5 次不寫第二個
 rm -rf "$STOP_STATE"
+# symlink-safe-writes：擋次數的狀態檔是 symlink → 換成一般檔，目標不變（內容是合法的舊狀態，讀它不出錯）
+mkdir -p "$STOP_STATE"; printf 'none 0 - x\n' > "$FX/victim"; ln -s "$FX/victim" "$STOP_STATE/Agentory-AI-$(basename "$C")"
 out="$(KEEP=1 sg)"; assert_eq "$(decision "$out")" block "stop: 第 1 次擋"
+assert_eq "$(cat "$FX/victim")" "none 0 - x" "stop: 狀態檔上的 symlink 不能被寫到目標"
 out="$(KEEP=1 sg)"; assert_eq "$(decision "$out")" block "stop: 第 2 次擋"
 out="$(KEEP=1 sg)"; assert_eq "$(decision "$out")" block "stop: 第 3 次擋"
 assert_no_file "$C/gates.md"
+# gates.md 是 symlink 時，第 4 次要寫的自動 gate 不能附加到目標；次數沒推進，下面的真第 4 次照常寫
+printf 'keep me\n' > "$FX/victim"; ln -s "$FX/victim" "$C/gates.md"
+out="$(KEEP=1 sg)"
+assert_eq "$(cat "$FX/victim")" "keep me" "stop: 自動 gate 不能附加到 symlink 的目標"
+rm -f "$C/gates.md"
 out="$(KEEP=1 sg)"; assert_eq "$out" "" "stop: 第 4 次放行"
 assert_grep '^## 卡在接 /propose' "$C/gates.md"; assert_grep '^status: open$' "$C/gates.md"; assert_grep '^opened_at: ' "$C/gates.md"
 assert_grep '^type: decision$' "$C/gates.md"; assert_grep '^問題: ' "$C/gates.md"; assert_grep '^選項: ' "$C/gates.md"
@@ -654,6 +673,14 @@ assert_not_grep '^agent prompt' "$OPSX_FAKE_LOG"
 assert_no_file "$QD/Agentory-AI-qc.tsv"; assert_file "$QD/Agentory-AI-qc.tsv.failed"
 assert_grep 'rename' "$CD/decisions.tsv"; assert_grep 'agent_not_found' "$CD/decisions.tsv"
 printf '%s' "$out" | jq -r '.hookSpecificOutput.additionalContext' | grep -q '失敗' || fail "要用 additionalContext 說失敗: $out"
+# symlink-safe-writes：drive 的 log 是 symlink → 這一步失敗（佇列留 .failed），目標不變
+rm -f "$QD/Agentory-AI-qc.tsv.failed"; printf 'drive\tqc\t%s\n' "$R" > "$QD/Agentory-AI-qc.tsv"; : > "$OPSX_FAKE_LOG"
+DL="$OPSX_STATE_DIR/drive-Agentory-AI-qc.log"; rm -f "$DL"; printf 'keep me\n' > "$FX/victim"; ln -s "$FX/victim" "$DL"
+out="$(post "opsx chain p")"
+sleep 1
+assert_eq "$(cat "$FX/victim")" "keep me" "queue: drive log 不能附加到 symlink 的目標"
+assert_file "$QD/Agentory-AI-qc.tsv.failed"
+rm -f "$DL" "$QD/Agentory-AI-qc.tsv.failed"
 
 # ---------- 當前卡：dispatch worktree 根優先，否則 branch 第二段 ----------
 K="$(mk_repo Cards)"
