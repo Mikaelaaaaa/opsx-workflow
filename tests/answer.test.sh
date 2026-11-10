@@ -237,4 +237,22 @@ out="$(opsx answer x --gate '卡在接 /review' 再答 2>&1)"; rc=$?; [ $rc -ne 
 echo "$out" | grep -q '不是 open' || fail "訊息要含「不是 open」: $out"
 assert_eq "$(printf '%s' "$out" | grep -o 'answered' | wc -l | tr -d ' ')" 2 "兩段各自的 status: $out"
 cmp -s "$C/gates.md" "$FX/before.md" || fail "gates.md 不該變"
+
+# --- 標題是「id 加中文」的舊 gate：--gate 用第一個詞、不分大小寫回得到（驗收：board-actions「用第一個詞回得到、不分大小寫」）---
+printf '## G1 瀏覽器確認精靈畫出來了\ntype: decision\nstatus: open\n問題: x\n' > "$C/gates.md"
+out="$(opsx answer x --gate g1 好 2>&1)"; assert_eq "$?" 0 "第一個詞 g1 對到 G1 標題: $out"
+assert_grep '^## G1 瀏覽器確認精靈畫出來了$' "$C/gates.md"; assert_grep '^status: answered' "$C/gates.md"; assert_grep '^answer: 好$' "$C/gates.md"
+
+# --- 第一個詞不唯一：不猜，列出候選，gates.md 不變（驗收：board-actions「第一個詞不唯一不猜」）---
+printf '## G1 甲\ntype: decision\nstatus: open\n\n## G1 乙\ntype: decision\nstatus: open\n' > "$C/gates.md"
+cp "$C/gates.md" "$FX/before.md"
+out="$(opsx answer x --gate G1 好 2>&1)"; [ $? -ne 0 ] || fail "第一個詞不唯一要退出非零"
+echo "$out" | grep -q 'G1 甲' && echo "$out" | grep -q 'G1 乙' || fail "訊息要列出兩個標題: $out"
+cmp -s "$C/gates.md" "$FX/before.md" || fail "gates.md 不該變"
+
+# --- 整串全等優先：標題剛好是 g1 的那個被回，另一個仍 open（驗收：board-actions「整串全等優先」）---
+printf '## g1 另一題\ntype: decision\nstatus: open\n\n## g1\ntype: decision\nstatus: open\n' > "$C/gates.md"
+out="$(opsx answer x --gate g1 好 2>&1)"; assert_eq "$?" 0 "整串全等: $out"
+awk '/^## /{n++} n==1' "$C/gates.md" | grep -q '^status: open' || fail "g1 另一題 要還是 open: $(cat "$C/gates.md")"
+awk '/^## /{n++} n==2' "$C/gates.md" | grep -q '^answer: 好$' || fail "標題剛好 g1 的才該拿到答案: $(cat "$C/gates.md")"
 echo ok

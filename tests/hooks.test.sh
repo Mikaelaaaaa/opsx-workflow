@@ -539,6 +539,22 @@ assert_eq "$(grep -c '^type: approval-ish$' "$G")" 1 "gate-type: 表外的值原
 printf '## g1\ntype: approval-ish\nstatus: open\n' > "$G"; printf '{"tool_name":"Write","tool_input":{"file_path":"%s"}}' "$G" | CLAUDE_PLUGIN_ROOT="$GP" OPSX_NOW=2026-11-06T14:05:00+08:00 bash "$H/gate-timestamp.sh" >/dev/null 2>&1
 assert_eq "$?" 0 "gate-type: 提醒時退出碼仍是 0"
 assert_eq "$(cat "$KL")" "$(printf 'opsx coordinate --kick\nopsx coordinate --kick')" "gate-type: 有 open 的 gate 兩次寫入各 kick 一次，且只叫到假的 bin/opsx"
+# gate 標題只放 slug：open 的「slug 加其餘文字」被縮成 slug，其餘進 問題:；第一個詞不是 slug 只提醒（gate-id-slug）
+printf '## G1 瀏覽器確認精靈畫出來了\ntype: decision\nstatus: open\n\n## g2 測試跑不起來\ntype: decision\nstatus: open\n問題: 需要你在終端機跑\n' > "$G"
+out="$(gts "$G")"; assert_eq "$out" "" "gate-slug: 縮標題不出聲"
+assert_eq "$(sed -n '1,2p' "$G")" "$(printf '## G1\n問題: 瀏覽器確認精靈畫出來了')" "gate-slug: 沒有問題欄時標題縮成 slug、其餘成為 問題:"
+assert_eq "$(grep -c '^## g2$' "$G")" 1 "gate-slug: 有問題欄的 gate 標題也縮成 slug"
+assert_eq "$(grep -c '^問題: 測試跑不起來：需要你在終端機跑$' "$G")" 1 "gate-slug: 既有問題欄時其餘接在前面、用「：」分開"
+assert_eq "$(grep -c '^問題:' "$G")" 2 "gate-slug: 每個 gate 只有一行 問題:"
+cp "$G" "$FX/gs-before.md"; out="$(gts "$G")"; assert_eq "$out" "" "gate-slug: 已是 slug 再跑不出聲"
+assert_eq "$(cmp -s "$G" "$FX/gs-before.md" && echo same)" same "gate-slug: 冪等，第二次不改檔"
+printf '## G1 舊的標題\ntype: decision\nstatus: answered\nanswer: A\n' > "$G"; cp "$G" "$FX/gs-before.md"
+out="$(gts "$G")"; assert_eq "$out" "" "gate-slug: answered 的 gate 不提醒"
+assert_eq "$(cmp -s "$G" "$FX/gs-before.md" && echo same)" same "gate-slug: answered 的標題不動"
+printf '## 測試跑不起來，需要你在終端機跑\ntype: decision\nstatus: open\n' > "$G"
+out="$(gts "$G")"; ctx="$(jq -r '.hookSpecificOutput.additionalContext' <<<"$out")"
+for want in '測試跑不起來，需要你在終端機跑' slug; do case "$ctx" in *"$want"*) ;; *) fail "gate-slug: 第一個詞不是 slug 的提醒要含「${want}」：$ctx" ;; esac; done
+assert_eq "$(sed -n 1p "$G")" '## 測試跑不起來，需要你在終端機跑' "gate-slug: 第一個詞不是 slug 不改標題"
 # 兩份同義詞表一致：hook 的 SYN 與 bin/lib/gatetype.py 的 SYNONYMS
 hook_tbl="$(sed -n "s/^SYN='\(.*\)'$/\1/p" "$H/gate-timestamp.sh" | tr ' ' '\n' | sort)"
 py_tbl="$(OPSX_LIB="$OPSX_ROOT/bin/lib" python3 -I -c 'import os,sys;sys.path.insert(0,os.environ["OPSX_LIB"]);import gatetype;print("\n".join("%s=%s"%kv for kv in gatetype.SYNONYMS.items()))' | sort)"
