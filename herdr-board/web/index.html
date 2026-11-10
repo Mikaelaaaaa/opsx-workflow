@@ -185,8 +185,8 @@ main{flex:1;min-width:0;padding-left:max(16px,env(safe-area-inset-left,0px));pad
 
 /* 科技精靈：晶片外框 + LED 眼。廠商色只在接腳、邊框、LED。只有「等你」會動。 */
 .bot{display:block;overflow:hidden;flex:none}
-.bot.ask .ring{animation:ringfade 1.4s ease-in-out infinite}
-.bot.sleep{opacity:.55}
+.bot-ask .ring{animation:ringfade 1.4s ease-in-out infinite}
+.bot-sleep{opacity:.55}
 @keyframes ringfade{0%,100%{opacity:.25}50%{opacity:1}}
 .notice{display:flex;align-items:flex-start;gap:12px;background:var(--surface);border:1px solid var(--border);border-left:3px solid var(--data);border-radius:var(--r);padding:10px 14px;margin-top:16px;font-size:13px;color:var(--fg-2)}
 .notice .t{font-family:var(--font-mono);font-size:11px;font-weight:600;letter-spacing:.06em;color:var(--data);white-space:nowrap;padding-top:3px}
@@ -270,7 +270,7 @@ const api={
   async collect(){const r=await fetch('/api/collect',{headers:{'X-Opsx-Token':token()}});if(r.status===401)throw new Error('token 不對：從 herdr 的 open-board 重開一次');if(!r.ok)throw new Error('collect '+r.status+'：'+(await r.text()).slice(0,200));return r.json();},
   async log(since){const r=await fetch('/api/log'+(since?'?since='+encodeURIComponent(since):''),{headers:{'X-Opsx-Token':token()}});const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error('log '+r.status+'：'+(j.error||j.stderr||''));return j;},
   async output(pane){const r=await fetch('/api/output?pane='+encodeURIComponent(pane),{headers:{'X-Opsx-Token':token()}});const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error('output '+r.status+'：'+(j.error||''));return j;},
-  async post(action,body){const r=await fetch('/api/'+action,{method:'POST',headers:{'X-Opsx-Token':token(),'Content-Type':'application/json'},body:JSON.stringify(body)});const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(action+' '+r.status+'：'+(j.error||''));if(!j.ok)throw new Error((j.stderr||j.stdout||'opsx '+action+' 失敗').trim());return j;}
+  async post(action,body){const r=await fetch('/api/'+action,{method:'POST',headers:{'X-Opsx-Token':token(),'Content-Type':'application/json'},body:JSON.stringify(body)});const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(action+' '+r.status+'：'+(j.error||j.stderr||''));if(!j.ok)throw new Error((j.stderr||j.stdout||'opsx '+action+' 失敗').trim());return j;}
 };
 let data={generated_at:null,scopes:[],cards:[],sessions:[],unmatched_agents:[],errors:[],legacy:{},worktrees_skipped:[]};let lastRaw='';
 const ui={tab:'home',scope:'all',ws:null,repo:null,sel:null,open:null,doneOpen:false,busy:false,logFilter:'all',drop:null,dropText:'',fileRepo:{}};
@@ -325,9 +325,10 @@ function inScope(c){
 }
 function scopeLabel(){if(ui.repo)return ui.repo;if(ui.scope!=='ws')return 'workspace';return ui.ws||'沒掛的';}
 const sect=name=>data.cards.filter(c=>c.section===name&&inScope(c));
-/* 範圍視圖下其他 repo 也有卡在等時，多列全部範圍的總數；那些卡在首頁別處都看不到 */
-function counterHtml(cards,inScope){
-  const all=cards.filter(c=>c.section==='待處理'),here=all.filter(inScope).length;
+/* 範圍視圖下其他 repo 也有卡在等時，多列全部範圍的總數；那些卡在首頁別處都看不到。
+   數法跟首頁待處理區一樣：session 一筆算一個，收進 session 的主 change 卡不另算 */
+function counterHtml(cards,sessions,inScope){
+  const all=[...sessions.filter(s=>s.section==='待處理'),...cards.filter(c=>c.section==='待處理'&&!c.session)],here=all.filter(inScope).length;
   const own=here?`待處理 <b>${here}</b>`:'<span class="faint">無待處理</span>';
   return all.length>here?`${own} · <button class="link" data-act="scope-all">全部 <b>${all.length}</b></button>`:own;
 }
@@ -347,7 +348,7 @@ function bot(c,size){
   else if(st==='wait')eyes=`<path d="M16 37l7-9 7 9M34 37l7-9 7 9" stroke="${col}" stroke-width="3" fill="none" stroke-linejoin="round" stroke-linecap="round"/>`;
   else eyes=`<rect x="17" y="30" width="12" height="4" rx="1.5" fill="${col}"/><rect x="35" y="30" width="12" height="4" rx="1.5" fill="${col}"/>`;
   const ring=st==='ask'?`<rect class="ring" x="6" y="10" width="52" height="44" rx="5" fill="none" stroke="${col}" stroke-width="2"/>`:'';
-  return `<svg class="bot ${st}" width="${size}" height="${size}" viewBox="0 0 64 64" role="img" aria-label="${esc(agent)}">${ring}${pins}<rect x="8" y="10" width="48" height="44" rx="4" fill="var(--pet-frame)" stroke="${col}" stroke-width="2"/><rect x="13" y="16" width="38" height="32" rx="2" fill="var(--pet-screen)"/><g><animateTransform attributeName="transform" type="translate" values="${look}" dur="${dur}" repeatCount="indefinite"/>${eyes}</g><rect x="13" y="16" width="38" height="0" fill="var(--pet-screen)"><animate attributeName="height" values="${blink}" keyTimes="0;.9;.93;.95;.98;1" dur="${dur==='1s'?'1s':'4.6s'}" repeatCount="indefinite"/></rect></svg>`;
+  return `<svg class="bot bot-${st}" width="${size}" height="${size}" viewBox="0 0 64 64" role="img" aria-label="${esc(agent)}">${ring}${pins}<rect x="8" y="10" width="48" height="44" rx="4" fill="var(--pet-frame)" stroke="${col}" stroke-width="2"/><rect x="13" y="16" width="38" height="32" rx="2" fill="var(--pet-screen)"/><g><animateTransform attributeName="transform" type="translate" values="${look}" dur="${dur}" repeatCount="indefinite"/>${eyes}</g><rect x="13" y="16" width="38" height="0" fill="var(--pet-screen)"><animate attributeName="height" values="${blink}" keyTimes="0;.9;.93;.95;.98;1" dur="${dur==='1s'?'1s':'4.6s'}" repeatCount="indefinite"/></rect></svg>`;
 }
 
 /* ---------- 列 ---------- */
@@ -392,6 +393,13 @@ function rowDone(c){
 function rowUnmatched(a){
   return `<div class="row unmatched"><div class="avatar plain">?</div><div class="main"><div class="l1"><span class="title">${esc(a.name||'(沒名字)')}</span><span class="meta">pane ${esc(a.pane)} · ${esc(a.agent_status||'')}</span></div><div class="l2 faint">沒對到卡：不在 dispatch.json，手動開的 agent</div></div><div class="act"><button class="sm" data-act="pane-id" data-agent="${esc(a.name||'')}">開啟 pane</button></div></div>`;
 }
+const ORPHAN_WHY={archived:'卡已歸檔',split:'卡已拆開',stopped:'卡已停止','card-missing':'卡的目錄不在了'};
+function rowOrphanSummary(n){
+  return `<div class="row unmatched"><div class="avatar plain">!</div><div class="main"><div class="l1"><span class="title">孤兒 pane ${n} 個</span><span class="meta">idle 的才會關，還在做事的下一輪再看</span></div></div><div class="act"><button class="primary sm" data-act="reap-all">全部關閉</button></div></div>`;
+}
+function rowOrphan(o){
+  return `<div class="row unmatched"><div class="avatar plain">!</div><div class="main"><div class="l1"><span class="title">${esc(o.repo)}/${esc(o.slug)}</span><span class="meta">pane ${esc(o.pane)} · ${esc(o.agent_status||'')}</span></div><div class="l2 faint">孤兒 pane：${esc(ORPHAN_WHY[o.reason]||o.reason)}</div></div><div class="act"><button class="sm" data-act="reap" data-pane="${esc(o.pane)}">關閉</button></div></div>`;
+}
 /* session（subchange-fanout D7）：一筆 session 一張卡，點開是主 change → 子 change 的樹。tests/board-tree.test.sh 從這裡切到 rowSession */
 function sessionLine(s){
   const c=s.current;
@@ -425,10 +433,11 @@ function renderHome(){
   const A=H('待處理'),R=H('進行中'),Y=H('待指派'),D=H('已完成');
   const n=x=>x.sessions.length+x.cards.length;
   const list=(x,row)=>x.sessions.map(rowSession).join('')+x.cards.map(row).join('');
-  const un=ui.scope==='all'?data.unmatched_agents:[];
+  const un=ui.scope==='all'?data.unmatched_agents.filter(a=>!a.orphan):[];
+  const orph=data.orphans||[];   // 孤兒不屬於任何範圍，範圍篩選不影響
   const leg=Object.entries(data.legacy||{}).filter(([r])=>ui.scope!=='ws'||(ui.repo?r===ui.repo:wsOf(r)===ui.ws));
   let h=renderBanner()+panel('待處理',n(A),'只有你能做的：授權、決定、合併、終端機卡住',n(A)?list(A,rowAttn):'<div class="empty">沒有等你的事</div>');
-  h+=panel('進行中',n(R)+un.length,'進度 status.json · 狀態 herdr',(list(R,rowRunning)+un.map(rowUnmatched).join(''))||'<div class="empty">沒有執行中的工作</div>');
+  h+=panel('進行中',n(R)+un.length+orph.length,'進度 status.json · 狀態 herdr',(list(R,rowRunning)+un.map(rowUnmatched).join('')+(orph.length?rowOrphanSummary(orph.length)+orph.map(rowOrphan).join(''):''))||'<div class="empty">沒有執行中的工作</div>');
   h+=panel(ui.scope==='ws'?`待指派 · ${esc(scopeLabel())}`:'待指派',n(Y),'explore 過、還沒派出去的（剛收進來的在收件匣）',(n(Y)?list(Y,rowReady):'<div class="empty">沒有待指派的工作</div>')+(leg.length?`<div class="empty">舊 schema 的 change 不列（沒有 inbox.md、不是 schema: opsx）：${leg.map(([r,n])=>`${esc(r)} ${n}`).join(' · ')}</div>`:''));
   h+=`<section class="panel"><div class="panel-h"><button class="tg h2" data-act="done-toggle" aria-expanded="${ui.doneOpen}"><span class="chev"></span>已完成</button><span class="n">${n(D)}</span></div>${ui.doneOpen?(n(D)?list(D,rowDone):'<div class="empty">還沒有</div>'):''}</section>`;
   return h;
@@ -570,9 +579,9 @@ async function loadLog(){
 function showTab(t){ui.tab=t;ui.sel=null;history.replaceState(null,'','#'+t);render();if(t==='log')loadLog();}
 
 function render(){
-  const A=sect('待處理');
-  $('#counter').innerHTML=counterHtml(data.cards,inScope);
-  $('#home-n').textContent=A.length||'';
+  const A=homeSect(data.cards.filter(inScope),data.sessions.filter(inScope),'待處理');
+  $('#counter').innerHTML=counterHtml(data.cards,data.sessions,inScope);
+  $('#home-n').textContent=A.sessions.length+A.cards.length||'';
   $('#inbox-n').textContent=sect('收件匣').length+(data.unfiled||[]).length||'';
   for(const t of ['home','inbox','log'])$('#tab-'+t).setAttribute('aria-selected',ui.tab===t);
   $('#stamp').textContent=data.generated_at?'collect '+ago(data.generated_at):'';
@@ -684,6 +693,7 @@ function answerTree(s,b){
 }
 function merge(c){act(`opsx merge ${c.slug}`,()=>api.post('merge',{slug:c.slug,repo:repoTop(c)}));}
 function stop(c){act(`opsx stop ${c.slug}`,()=>api.post('stop',{slug:c.slug,repo:repoTop(c)}));}
+function reap(pane){act(`opsx reap${pane?' --pane '+pane:''}`,()=>api.post('reap',pane?{pane}:{}));}
 function focusAgent(agent){
   if(!agent){toast('這張沒有 pane',true);return;}
   act(`herdr agent focus ${agent}`,()=>api.post('focus',{agent}));
@@ -777,6 +787,8 @@ document.addEventListener('click',e=>{
     if(a==='dlg-cancel'){closeDispatch();return;}
     if(a==='dlg-go'){doDispatch();return;}
     if(a==='pane-id'){focusAgent(btn.dataset.agent);return;}
+    if(a==='reap'){reap(btn.dataset.pane);return;}
+    if(a==='reap-all'){reap('');return;}
     if(a==='sync'){syncNow();return;}
     if(a==='file'){fileUnfiled(btn.closest('[data-unfiled]'));return;}
     if(a==='drop-open'){ui.drop=btn.dataset.drop;ui.dropText='';render();const i=$('.drop-reason');if(i)i.focus();return;}

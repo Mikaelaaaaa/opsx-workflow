@@ -192,11 +192,13 @@ chmod -R u+w "$PD" 2>/dev/null; rm -rf "$PD"
 subgates; printf '{"Agentory-AI/bt":{"mode":"autopilot","pane":"p5","agent":"claude","grants":[],"herdr_name":"fb"}}' > "$OPSX_STATE_DIR/dispatch.json"
 out="$(opsx answer bt --sub as --gate g2 --grant card 允許 2>&1)"; assert_eq "$?" 0 "sub card: $out"
 assert_eq "$(jq -c '."Agentory-AI/bt".grants' "$PD/authz.json")" '["push"]'
+assert_eq "$(jq -c '."Agentory-AI/bt".once // []' "$PD/authz.json")" '[]' "card 不該寫進 once"
 assert_eq "$(jq -c '."Agentory-AI/bt".grants' "$OPSX_STATE_DIR/dispatch.json")" '[]' "card 授權不該寫進 dispatch.json"
 assert_eq "$(tail -1 "$S/decisions.tsv" | cut -f2-5)" $'你\t已允許\t允許\tg2 · card'
-subgates
+subgates; rm -rf "$PD"
 out="$(opsx answer bt --sub as --gate g2 --grant this 允許 2>&1)"; assert_eq "$?" 0 "sub this: $out"
 assert_eq "$(jq -c '."Agentory-AI/bt".once' "$PD/authz.json")" '["push"]'
+assert_eq "$(jq -c '."Agentory-AI/bt".grants // []' "$PD/authz.json")" '[]' "這次不該變成卡級授權"
 assert_eq "$(jq -c 'keys' "$PD/authz.json")" '["Agentory-AI/bt"]' "子 change 沒有自己的授權條目"
 assert_eq "$(jq -c 'keys' "$OPSX_STATE_DIR/dispatch.json")" '["Agentory-AI/bt"]' "子 change 不進 dispatch.json"
 assert_no_file "$B/decisions.tsv"

@@ -28,7 +28,23 @@ repo_top() {
 }
 repo_name() { basename "$(repo_top)"; }
 branch() { git -C "$(hook_cwd)" rev-parse --abbrev-ref HEAD 2>/dev/null || true; }
-card_slug() { local b; b="$(branch)"; case "$b" in */*/*) printf '%s' "$b" | cut -d/ -f2 ;; *) printf '' ;; esac; }
+# dispatch 開的 worktree 根是 <top>/.claude/worktrees/<名>，名是派工時的 slug 或 feature 名；不在那種 worktree 裡印空
+wt_name() {
+  local t w; t="$(repo_top)"
+  w="$(git -C "$(hook_cwd)" rev-parse --show-toplevel 2>/dev/null || true)"
+  [ -n "$t" ] && [ -n "$w" ] && w="$(cd "$w" && pwd -P)" && [ "${w%/*}" = "$t/.claude/worktrees" ] && printf '%s' "${w##*/}"
+  true
+}
+# branch 對得到卡就用 branch：feature session 的 worktree 用 feature 名，同一個 worktree 會切換多個主 change 的 branch。
+# branch 對不到卡（PR 名 ≠ 卡名）才用 worktree 名。
+card_slug() {
+  local t s w; t="$(repo_top)"
+  s="$(branch)"; case "$s" in */*/*) s="$(printf '%s' "$s" | cut -d/ -f2)" ;; *) s='' ;; esac
+  [ -n "$t" ] && [ -n "$s" ] && [ -d "$(st_card_dir "$t" "$s")" ] && { printf '%s' "$s"; return 0; }
+  w="$(wt_name)"
+  [ -n "$w" ] && [ -d "$(st_card_dir "$t" "$w")" ] && { printf '%s' "$w"; return 0; }
+  printf '%s' "$s"
+}
 card_dir() { local t s d; t="$(repo_top)"; s="$(card_slug)"; [ -n "$t" ] && [ -n "$s" ] && d="$(st_card_dir "$t" "$s")" && [ -d "$d" ] && printf '%s' "$d" || printf ''; }
 card_kind() { st_card_kind "$1"; }
 status_tests() { st_status_tests "$1"; }

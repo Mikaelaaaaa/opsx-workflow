@@ -8,6 +8,17 @@ export OPSX_FAKE_LOG="$FX/herdr.log"; : > "$OPSX_FAKE_LOG"
 export OPSX_DRIVE_POLL=0 OPSX_DRIVE_MAX=20
 
 R="$(mk_repo Agentory-CS)"; C="$R/openspec/changes/retry-backoff"; mkdir -p "$C" "$OPSX_STATE_DIR"
+# opsx coordinate 走 fake（記到 kick.log，連同當下 gates.md 有幾個 drive gate），其他子命令照常跑真的
+KL="$FX/kick.log"; : > "$KL"
+cat > "$FX/fakebin/opsx" <<EOF
+#!/usr/bin/env bash
+if [ "\$1" = coordinate ]; then
+  printf 'drive gates=%s\n' "\$(grep -c '^## drive-' "$C/gates.md" 2>/dev/null || true)" >> "$KL"
+  OPSX_FAKE_LOG="$KL" exec bash "$FAKES/opsx" "\$@"
+fi
+exec bash "$OPSX_ROOT/bin/opsx" "\$@"
+EOF
+chmod +x "$FX/fakebin/opsx"
 printf 'schema: opsx\nkind: bug-fix\n' > "$C/.openspec.yaml"
 printf '## 1\n\n- [ ] 1.1 a\n  - 驗收：R1\n  - 測試：t.py\n' > "$C/tasks.md"
 printf '{"Agentory-CS/retry-backoff":{"mode":"drive","pane":"p42","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"
@@ -35,6 +46,17 @@ assert_grep '"phase": "pr"' "$C/status.json"
 assert_eq "$(head -1 "$OPSX_FAKE_LOG")" "agent wait retry-backoff" "第一個呼叫要等 agent settle"
 assert_eq "$(grep -c '^agent wait' "$OPSX_FAKE_LOG")" 1 "沒 gate 只有起來那次 wait"
 
+# --- 可以合併時觸發一輪 coordinate，沒有任何 merge 指令 ---
+assert_eq "$(grep -c '^opsx coordinate --kick$' "$KL")" 1 "可以合併要 kick 一次: $(cat "$KL")"
+assert_not_grep merge "$OPSX_FAKE_LOG"; assert_not_grep merge "$KL"
+
+# --- kick 失敗照常走：還是以 0 結束，log 有一行 kick 失敗 ---
+: > "$KL"; : > "$OPSX_FAKE_LOG"
+out="$(OPSX_TEST_FAIL_coordinate="kick boom" opsx drive retry-backoff 2>&1)"; assert_eq "$?" 0 "kick 失敗 drive 仍要 0: $out"
+assert_grep '^opsx coordinate --kick$' "$KL"
+echo "$out" | grep 'coordinate --kick' | grep -q 'kick boom' || fail "kick 失敗要記一行: $out"
+echo "$out" | grep -q "可以合併" || fail "kick 失敗照常停在可以合併: $out"
+
 # --- gate 開著 → 不丟 prompt，agent wait --until working；人回了（gate 關）才繼續 ---
 : > "$OPSX_FAKE_LOG"
 printf '## 1\n\n- [ ] 1.1 a\n' > "$C/tasks.md"; rm -f "$C/status.json" "$C/report.md"
@@ -54,14 +76,18 @@ reset_apply() { : > "$OPSX_FAKE_LOG"; printf '## 1\n\n- [ ] 1.1 a\n' > "$C/tasks
 
 # --- herdr agent_blocked → 不再 prompt，改成等人在 pane 處理完 ---
 reset_apply; printf 'agent_blocked\n' > "$FX/perr"; export OPSX_TEST_PROMPT_ERR="$FX/perr"
+: > "$KL"
 out="$(opsx drive retry-backoff 2>&1)"; assert_eq "$?" 0 "drive blocked: $out"
+assert_eq "$(grep -c '^opsx coordinate --kick$' "$KL")" 2 "blocked 時 kick 一次（另一次是最後可以合併）: $(cat "$KL")"
 assert_eq "$(sed -n 3p "$OPSX_FAKE_LOG")" "agent wait retry-backoff --until working" "blocked 後要等 working: $(cat "$OPSX_FAKE_LOG")"
 assert_eq "$(sed -n 4p "$OPSX_FAKE_LOG")" "agent wait retry-backoff" "blocked 後要等 settle"
 echo "$out" | grep -q "終端機等待輸入" || fail "blocked 要說明在等人: $out"
 
 # --- herdr agent_not_found → pane 沒了，結束，不再碰 herdr ---
 reset_apply; printf 'agent_not_found\n' > "$FX/perr"
+: > "$KL"
 out="$(opsx drive retry-backoff 2>&1)"; assert_eq "$?" 0 "drive not_found: $out"
+assert_eq "$(grep -c '^opsx coordinate --kick$' "$KL")" 1 "pane 沒了要 kick 一次: $(cat "$KL")"
 assert_eq "$(wc -l < "$OPSX_FAKE_LOG" | tr -d ' ')" 2 "not_found 後不該再呼叫 herdr: $(cat "$OPSX_FAKE_LOG")"
 echo "$out" | grep -q "pane 沒了" || fail "not_found 要說 pane 沒了: $out"
 
@@ -113,9 +139,11 @@ cat > "$FX/on_wait.sh" <<EOF
 case "\$*" in *"--until working"*) printf '{}' > "$OPSX_STATE_DIR/dispatch.json" ;; esac
 EOF
 export OPSX_TEST_ON_WAIT="$FX/on_wait.sh"
+: > "$KL"
 out="$(opsx drive retry-backoff 2>&1)"; assert_eq "$?" 0 "drive stuck: $out"
 assert_eq "$(grep -c '^agent prompt' "$OPSX_FAKE_LOG")" 2 "卡住時只送兩次: $(cat "$OPSX_FAKE_LOG")"
 assert_grep '^## drive-apply-1$' "$C/gates.md"
+assert_eq "$(cat "$KL")" "$(printf 'drive gates=1\nopsx coordinate --kick')" "寫完 stuck gate 之後才 kick"
 assert_grep 'drive 卡在 /apply' "$C/gates.md"
 assert_grep '^type: decision$' "$C/gates.md"
 assert_grep '^status: open$' "$C/gates.md"
