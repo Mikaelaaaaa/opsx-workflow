@@ -169,4 +169,8 @@ git -C "$A" worktree add -q -b feat/real-card/mikaela "$A/.claude/worktrees/agen
 out="$(cd "$A/.claude/worktrees/agent-a1b2c3" && opsx new --kind-of-work planned --repo "$A" -- 卡名在 branch)"; assert_eq "$(src "$out")" agent:real-card
 git -C "$A" worktree add -q -b scratch/nothing/mikaela "$A/.claude/worktrees/agent-d4e5f6" || fail "第三棵 worktree 建不起來"
 out="$(cd "$A/.claude/worktrees/agent-d4e5f6" && opsx new --kind-of-work planned --repo "$A" -- branch 對不到卡)"; assert_eq "$(src "$out")" agent:agent-d4e5f6
+# 子殼 subagent 的 worktree：branch 是 <主>--<子>，卡在 changes/<主>/subs/<子>/
+mkdir -p "$A/openspec/changes/m/subs/s"; printf 'schema: opsx\n' > "$A/openspec/changes/m/.openspec.yaml"
+git -C "$A" worktree add -q -b feat/m--s/mikaela "$A/.claude/worktrees/agent-7a8b9c" || fail "第四棵 worktree 建不起來"
+out="$(cd "$A/.claude/worktrees/agent-7a8b9c" && opsx new --kind-of-work planned --repo "$A" -- 子殼 subagent 發現的)"; assert_eq "$(src "$out")" agent:m--s
 echo ok

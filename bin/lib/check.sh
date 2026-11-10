@@ -64,7 +64,7 @@ check_subs() { # <主殼目錄>：印缺項，一行一個；沒有 subs/ 或全
 
 # 事實欄位（references/priority.md）：source 是 agent:* 的卡一定要有 kind_of_work；incident 要有 impact 與 evidence。
 # 其他來源（me、paste、gitlab…）不強制，沒寫當 planned。impact 與 evidence 兩種寫法都認：同一行，或 impact: 底下縮排。
-check_facts() { # <卡目錄>：印本卡與它開出去的卡（source: agent:<本卡>）缺的欄位，一行一個
+check_facts() { # <卡目錄>：印本卡與它開出去的卡（source: agent:<本卡> 或 agent:<本卡>--<子>）缺的欄位，一行一個
   local d="$1" slug c; slug="$(basename "$1")"
   facts_of_inbox "$d/inbox.md" inbox.md ""
   for c in "$(dirname "$d")"/*/; do
@@ -92,7 +92,7 @@ facts_of_inbox() { # <inbox.md> <顯示名> <只看這個 source，空字串是�
     }
     /^[^ \t]/ { nested = 0 }
     END {
-      if (source !~ /^agent:/ || (only != "" && source != only)) exit
+      if (source !~ /^agent:/ || (only != "" && source != only && index(source, only "--") != 1)) exit   # 子殼 subagent 開的卡是 agent:<主>--<子>
       if (kind == "") { printf "%s: kind_of_work 沒填（要 incident 或 planned）\n", label; exit }
       if (kind != "incident" && kind != "planned") { printf "%s: kind_of_work 要是 incident 或 planned，拿到「%s」\n", label, kind; exit }
       if (kind == "incident" && !impact) printf "%s: incident 缺 impact\n", label

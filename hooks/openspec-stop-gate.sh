@@ -24,7 +24,7 @@ stop_reason() { # <dir> <slug> <stage>
     if [ -n "$missing" ]; then
       printf '%s' "facts|opsx：${slug} 或它開出去的卡缺事實欄位（opsx check ${slug}）：
 $missing
-開卡用 opsx new --kind-of-work …（incident 加 --impact 與 --evidence）；手寫的卡補 inbox.md 的 kind_of_work、impact、evidence。補齊再停。"
+開卡用 opsx new --kind-of-work …（incident 加 --impact 與 --evidence）；手寫的卡補 inbox.md 的 kind_of_work、impact、evidence。補齊再停；事實查不到就用 Edit 或 Write 寫 gates.md 說缺哪一欄、為什麼，不要編 evidence。"
       return 0
     fi
   fi
@@ -144,6 +144,8 @@ reason="${out#*|}"
 # 進度指紋：勾了 task 算有在做事；commit 只在 apply 站算（別的站 commit 不會把卡往前推，算的話上限永遠到不了）
 fp="$(tasks_done "$d")"
 [ "$want" = apply ] && fp="$fp-$(git -C "$(hook_cwd)" rev-parse HEAD)"
+# 事實欄位：每補好一項，擋停理由就少一行，算有在做事
+[ "$want" = facts ] && fp="$fp-$(printf '%s' "$reason" | wc -l | tr -d ' ')"
 last_stage=""; n=0; gated="-"; last_fp=""
 [ -f "$state" ] && read -r last_stage n gated last_fp < "$state"
 if [ "$last_stage" != "$want" ] || [ "$last_fp" != "$fp" ]; then n=0; gated="-"; fi

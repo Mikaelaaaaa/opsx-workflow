@@ -46,9 +46,9 @@ opsx_new() {
     case "$wt" in
       */.claude/worktrees/*/*) ;;
       */.claude/worktrees/*)
-        # 卡名比照 hooks/_lib.sh 的 card_slug：branch 對得到卡就用卡名，對不到才用資料夾名（Claude Code 自己開的 worktree 叫 agent-a<hex>）
+        # 卡名比照 hooks/_lib.sh 的 card_slug：branch 對得到卡（含子殼 <主>--<子>）就用卡名，對不到才用資料夾名（Claude Code 自己開的 worktree 叫 agent-a<hex>）
         b="$(slug_from_branch "$(git_branch)")"; mt="$(git_toplevel)"
-        [ -n "$b" ] && [ -d "$mt/openspec/changes/$b" ] || b="${wt##*/}"
+        [ -n "$b" ] && [ -d "$(st_card_dir "$mt" "$b")" ] || b="${wt##*/}"
         source="agent:$b" ;;
     esac
   fi

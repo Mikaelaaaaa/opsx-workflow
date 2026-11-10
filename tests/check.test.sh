@@ -161,4 +161,26 @@ stop >/dev/null; stop >/dev/null; stop >/dev/null; stop >/dev/null
 assert_grep '^## 卡在接 /facts #1$' "$R/openspec/changes/f-loop/gates.md"
 assert_grep '^問題: .*事實欄位' "$R/openspec/changes/f-loop/gates.md"
 assert_not_grep '沒有 invoke' "$R/openspec/changes/f-loop/gates.md"
+
+# --- review 第 2 輪退回 ---
+# 主殼掃得到子殼 subagent 開的卡（source: agent:<主>--<子>）
+mk_inbox f-m 'source: me'; mk_inbox f-m-child 'source: agent:f-m--s'
+out="$(chk f-m)" && fail "子殼 subagent 開的卡缺 kind 要非零"
+printf '%s' "$out" | grep -q 'f-m-child/inbox.md: ' || fail "要指出子殼開的卡: $out"
+# 子殼的 subagent 在跑：事實欄位不擋（只在 subagent 條件被拿掉時才會紅）
+mk_main f-sub >/dev/null; mk_inbox f-sub 'source: agent:q'   # mk_inbox 重寫 .openspec.yaml，子殼仍齊全
+printf 'schema: opsx\nkind: dev\n' > "$R/openspec/changes/f-sub/.openspec.yaml"
+printf '## 1. x\n\n- [ ] 1.1 `a`：子殼\n' > "$R/openspec/changes/f-sub/tasks.md"
+printf '{"phase":"apply","step":1,"total":3,"worker":"subagent-a","at":"%s"}' "$(date -u '+%Y-%m-%dT%H:%M:%S+00:00')" > "$R/openspec/changes/f-sub/subs/a/status.json"
+git -C "$R" checkout -q -b feat/f-sub/mikaela
+assert_eq "$(stop)" "" "stop: 子殼 subagent 在跑時事實欄位不擋"
+# 補一張缺欄位的卡算進度：擋滿 3 次後補一張，仍然 block，不寫 /facts gate
+mk_inbox f-prog 'source: me'; printf '## 1. x\n\n- [ ] 1.1 a\n' > "$R/openspec/changes/f-prog/tasks.md"
+mk_inbox f-prog-1 'source: agent:f-prog'; mk_inbox f-prog-2 'source: agent:f-prog'; mk_inbox f-prog-3 'source: agent:f-prog'
+git -C "$R" checkout -q -b feat/f-prog/mikaela
+stop >/dev/null; stop >/dev/null; stop >/dev/null
+mk_inbox f-prog-1 "source: agent:f-prog${NL}kind_of_work: planned"
+out="$(stop)"; assert_eq "$(printf '%s' "$out" | jq -r '.decision // ""')" block "stop: 補了一張就是進度，不開 gate"
+assert_no_file "$R/openspec/changes/f-prog/gates.md"
+printf '%s' "$out" | jq -r '.reason' | grep -q 'gates.md' || fail "stop: 理由要提可以寫 gates.md: $out"
 echo ok
