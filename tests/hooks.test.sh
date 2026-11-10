@@ -279,6 +279,12 @@ done_report; sleep 1
 out="$(sg)"; assert_eq "$out" "" "stop: 全齊放行"
 git -C "$R" commit -q --allow-empty -m "feat: later"   # report 之後又 commit
 out="$(sg)"; assert_eq "$(decision "$out")" block "stop: report 後有新 commit"
+# report 在、卡的階段是 babysit，但 hook 要的是 /review：擋滿後的 gate 要指 /review，不指 /babysit
+rm -f "$C/gates.md"; rm -rf "$STOP_STATE"
+out="$(KEEP=1 sg)"; out="$(KEEP=1 sg)"; out="$(KEEP=1 sg)"
+out="$(KEEP=1 sg)"; assert_eq "$out" "" "stop: report 後有新 commit 擋滿後放行"
+assert_grep '^## 卡在接 /review' "$C/gates.md"; assert_not_grep '卡在接 /babysit' "$C/gates.md"
+rm -f "$C/gates.md"; rm -rf "$STOP_STATE"
 # 卡在 linked worktree：只算卡自己 branch 的 commit，主 checkout 是別的 session 在用
 sgw() { [ -n "${KEEP:-}" ] || rm -rf "$STOP_STATE"; printf '{"cwd":"%s","stop_hook_active":false}' "$WT" | bash "$H/openspec-stop-gate.sh" 2>/dev/null; true; }
 done_report; sleep 1
@@ -313,6 +319,8 @@ printf '## propose-done\ntype: decision\nstatus: open\n問題: 要不要接 /app
 out="$(sg)"; assert_eq "$(decision "$out")" block "stop: 真實 gate 格式（問題:）問要不要接也不算 open"
 printf '## g1\ntype: decision\nstatus: open\n問題: 要不要接受舊版 API 不相容？\n' > "$C/gates.md"
 out="$(sg)"; assert_eq "$out" "" "stop: 要不要接受 X 是真的產品問題，算 open"
+printf '## merge-head-moved\ntype: approval\naction: merge\nstatus: open\n問題: MR head 變了，要不要繼續？\n' > "$C/gates.md"
+out="$(sg)"; assert_eq "$out" "" "stop: approval gate 只有人能答，問要不要繼續也算 open"
 # apply 站（tasks.md 一個都沒勾）：「要不要接 /apply」的 gate 不放行，reason 叫 /apply
 printf '## 1. x\n\n- [ ] 1.1 a\n- [ ] 1.2 b\n' > "$C/tasks.md"
 printf '## 要不要接 /apply\nstatus: open\n' > "$C/gates.md"
@@ -335,9 +343,19 @@ assert_eq "$(grep -c '^## 卡在接 /propose' "$C/gates.md")" 1 "stop: 不寫第
 sed -i.bak 's/^status: open$/status: answered/' "$C/gates.md"; rm -f "$C/gates.md.bak"
 out="$(KEEP=1 sg)"; assert_eq "$(decision "$out")" block "stop: gate 答完後重新擋"
 assert_eq "$(grep -c '^## 卡在接 /propose' "$C/gates.md")" 1 "stop: 答完後第一次擋不寫新 gate"
+# 第二輪擋滿：新 gate 的標題要跟答完的不同，opsx answer 才找得到
+out="$(KEEP=1 sg)"; out="$(KEEP=1 sg)"
+out="$(KEEP=1 sg)"; assert_eq "$out" "" "stop: 第二輪擋滿放行"
+assert_grep '^## 卡在接 /propose #1$' "$C/gates.md"; assert_grep '^## 卡在接 /propose #2$' "$C/gates.md"
 rm -f "$C/gates.md"
 # stop_hook_active 為 true 次數未滿仍擋
 out="$(sg true)"; assert_eq "$(decision "$out")" block "stop: stop_hook_active 為 true 仍擋"
+# propose 站 commit 不算進度：中間 commit 不能讓次數歸零
+rm -rf "$STOP_STATE"
+out="$(KEEP=1 sg)"; out="$(KEEP=1 sg)"
+git -C "$R" commit -q --allow-empty -m "chore: between stops"
+out="$(KEEP=1 sg)"
+assert_eq "$(cut -d' ' -f1,2 "$STOP_STATE/Agentory-AI-eval-core")" "propose 3" "stop: propose 站 commit 不算進度"
 # 站換了從 1 起算
 rm -rf "$STOP_STATE"
 out="$(KEEP=1 sg)"; out="$(KEEP=1 sg)"
