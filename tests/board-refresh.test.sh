@@ -53,15 +53,15 @@ r = refreshStep(refreshStep(refreshStep(idle, 'poll').st, 'force').st, 'poll');
 assert.strictEqual(r.st.pendingForce, true, '輪詢不清掉待補的強制');
 JS
 
-# refresh() 要照排程函式做，不能自己再判斷 inflight
-node - "$OPSX_ROOT/herdr-board/web/index.html" <<'JS' || fail "refresh 照排程函式做"
+# refresh() 交給動作接線段的 runRefresh（它照 refreshStep 跑，tests/board-pending.test.sh 用假的 collect 實際執行）
+node - "$OPSX_ROOT/herdr-board/web/index.html" <<'JS' || fail "refresh 交給 runRefresh"
 const fs = require('node:fs');
 const assert = require('node:assert');
 const html = fs.readFileSync(process.argv[2], 'utf8');
-const s = html.indexOf('async function refresh('), e = html.indexOf('\n}', s);
-if (s < 0) throw new Error('index.html 找不到 async function refresh(');
-const body = html.slice(s, e);
-assert.ok(body.includes("refreshStep(rs,'done')"), 'refresh 每輪結束要交給 refreshStep：' + body);
-assert.ok(!/if\(inflight\)return/.test(body), 'refresh 不能遇到 inflight 直接 return：' + body);
+const s = html.indexOf('function refresh('), e = html.indexOf('\n', s);
+if (s < 0) throw new Error('index.html 找不到 function refresh(');
+assert.ok(html.slice(s, e).includes('runRefresh('), 'refresh 要交給 runRefresh：' + html.slice(s, e));
+const r = html.slice(html.indexOf('async function runRefresh('), html.indexOf('/* 動作接線 end */'));
+assert.ok(r.includes("refreshStep(live.rs,'done')"), 'runRefresh 每輪結束要交給 refreshStep：' + r);
 JS
 echo ok

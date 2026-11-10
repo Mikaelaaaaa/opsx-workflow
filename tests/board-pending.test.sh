@@ -92,6 +92,15 @@ v = view(N0, pendDone(list, 8, 3));
 assert.deepStrictEqual(v.notes[1], {at: '2026-11-10 15:00:00', text: '先跑 lint', sending: false}, '成功後改一般樣式');
 assert.strictEqual(view(N0, pendDrop(list, 8)), N0, '失敗後移除');
 assert.deepStrictEqual(view(card({notes: undefined}), list).notes.map(n => n.text), ['先跑 lint'], 'collect 沒有 notes 也能加');
+// collect 已經帶回這條指示（opsx note 寫檔後才開始的 collect）：不再追加暫存列，送出中與已成功都一樣
+const N1 = {...N0, notes: [...N0.notes, {at: '2026-11-10T15:00:01+08:00', text: '先跑 lint'}]};
+const lint = st => [{id: 13, key: KX, kind: 'note', text: '先跑 lint', at: 'a', base: 0, state: st, doneAt: st === 'done' ? 1 : undefined}];
+assert.deepStrictEqual(view(N1, lint('sending')).notes.map(n => n.text), ['舊的', '先跑 lint'], '送出中、collect 已帶回：只有一列');
+assert.deepStrictEqual(view(N1, lint('done')).notes.map(n => n.text), ['舊的', '先跑 lint'], '已成功、collect 已帶回：只有一列');
+// 同一句話以前就送過一次：按下時已有 1 條（base 1），collect 只帶回舊的那條，暫存列照樣要出現
+const old = {...N0, notes: [{at: '2026-11-09T10:00:00+08:00', text: '先跑 lint'}]};
+assert.deepStrictEqual(view(old, [{...lint('sending')[0], base: 1}]).notes.map(n => n.sending), [undefined, true], '重複的舊指示不會吃掉新的暫存列');
+assert.deepStrictEqual(view({...old, notes: [...old.notes, {at: 'b', text: '先跑 lint'}]}, [{...lint('done')[0], base: 1}]).notes.length, 2, '新的那條回來後不再追加');
 
 // 指派送出中：派工中 → 已派出 → 失敗移除
 const R = card({section: '待指派', waiting: null, open_gates: []});
@@ -118,20 +127,113 @@ assert.deepStrictEqual(pendClear(list, 8).map(e => e.id), [12], '只清掉成功
 assert.deepStrictEqual(pendDone(list, 99, 1), list, '找不到 id 不改任何項目');
 JS
 
-# act() 要在送出 POST 之前畫送出中，成功與失敗各自改清單；refresh() 要在打 collect 前記下送出時間，回來後清掉
-node - "$OPSX_ROOT/herdr-board/web/index.html" <<'JS' || fail "act 與 refresh 接上清單"
+# act / refresh 的接線：把送出中、刷新排程、動作接線三段切出來，用假的 POST、collect、render 實際跑交錯順序
+node - "$OPSX_ROOT/herdr-board/web/index.html" <<'JS' || fail "act 與 refresh 的接線"
+const fs = require('node:fs');
+const assert = require('node:assert');
+const html = fs.readFileSync(process.argv[2], 'utf8');
+const cut = name => { const s = html.indexOf(`/* ${name} start */`), e = html.indexOf(`/* ${name} end */`);
+  if (s < 0 || e < s) throw new Error(`index.html 找不到標記 ${name} start / end`); return html.slice(s, e); };
+const {runAct, runRefresh, REFRESH_IDLE} = new Function(cut('送出中') + cut('刷新排程') + cut('動作接線') + ';return {runAct, runRefresh, REFRESH_IDLE};')();
+
+const deferred = () => { let res, rej; const p = new Promise((a, b) => { res = a; rej = b; }); return {p, res, rej}; };
+const tick = () => new Promise(r => setImmediate(r));
+function mk() {
+  const live = {pending: [], seq: 0, rs: REFRESH_IDLE}, ui = {busy: false}, log = [], gets = [];
+  const renv = {live, collect: () => { const d = deferred(); gets.push(d); return d.p; },
+    show: (j, force) => log.push(['show', force]), fail: e => log.push(['fail', e.message]), schedule: () => log.push(['schedule'])};
+  const aenv = {live, ui, render: () => log.push(['render']), toast: (m, bad) => log.push(['toast', !!bad]), refresh: f => runRefresh(renv, f)};
+  return {live, ui, log, gets, renv, aenv};
+}
+const P = {key: 'r/x', kind: 'answer', gate: 'g1'};
+const states = R => R.live.pending.map(e => e.state);
+
+(async () => {
+  // 點擊 → 輪詢 GET 已送出 → POST 成功 → 那個 GET 回來：已成功的項目保留（那份 collect 可能是動作前開始的）
+  let R = mk();
+  const poll = runRefresh(R.renv, false);
+  let post = deferred();
+  const a1 = runAct(R.aenv, 'x', () => post.p, P);
+  await tick();
+  assert.deepStrictEqual(states(R), ['sending'], '送出 POST 前就是送出中');
+  assert.ok(R.log.some(l => l[0] === 'render'), '送出中有重畫');
+  post.res({ok: true, stdout: ''}); await tick();
+  assert.deepStrictEqual(states(R), ['done'], 'POST 成功改 done');
+  R.gets[0].res({}); await tick();
+  assert.deepStrictEqual(states(R), ['done'], 'POST 成功前送出的 GET 回來：保留');
+  assert.strictEqual(R.gets.length, 2, '排隊的強制刷新補跑一輪');
+  R.gets[1].res({}); await poll; await a1;
+  assert.deepStrictEqual(states(R), [], 'POST 成功後送出的 GET 回來：清掉');
+  assert.deepStrictEqual(R.live.rs, REFRESH_IDLE, '刷新回到閒置');
+  assert.strictEqual(R.log.filter(l => l[0] === 'schedule').length, 1, '只排一次下一輪輪詢');
+  assert.strictEqual(R.ui.busy, false, 'busy 放開');
+
+  // 點擊 → POST 成功 → GET 送出 → 回來：清掉
+  R = mk(); post = deferred();
+  const a2 = runAct(R.aenv, 'x', () => post.p, P);
+  post.res({ok: true}); await tick();
+  assert.strictEqual(R.gets.length, 1, 'POST 成功後強制刷新');
+  assert.deepStrictEqual(states(R), ['done']);
+  R.gets[0].res({}); await a2;
+  assert.deepStrictEqual(states(R), [], '之後送出的 GET 回來就清掉');
+
+  // POST 失敗：還原、toast 失敗、不刷新
+  R = mk(); post = deferred();
+  const a3 = runAct(R.aenv, 'x', () => post.p, P);
+  post.rej(new Error('boom')); await a3;
+  assert.deepStrictEqual(states(R), [], '失敗移除項目');
+  assert.ok(R.log.some(l => l[0] === 'toast' && l[1] === true), '失敗 toast');
+  assert.strictEqual(R.gets.length, 0, '失敗不打 collect');
+  assert.strictEqual(R.ui.busy, false);
+
+  // busy 時第二個動作不加項目（ui.busy 規則不變）
+  R = mk(); post = deferred();
+  const a4 = runAct(R.aenv, 'x', () => post.p, P);
+  await runAct(R.aenv, 'y', () => Promise.resolve({ok: true}), {...P, key: 'r/y'});
+  assert.deepStrictEqual(R.live.pending.map(e => e.key), ['r/x'], 'busy 時不加第二筆');
+  post.res({ok: true}); await tick(); R.gets[0].res({}); await a4;
+
+  // POST 成功之後重畫出錯：不回滾、不報失敗、busy 放開
+  R = mk(); post = deferred();
+  let renders = 0; R.aenv.render = () => { if (++renders === 2) throw new Error('render'); };
+  const a5 = runAct(R.aenv, 'x', () => post.p, P);
+  post.res({ok: true});
+  await a5.catch(() => {});
+  assert.deepStrictEqual(states(R), ['done'], 'POST 已成功：項目維持 done');
+  assert.ok(!R.log.some(l => l[0] === 'toast' && l[1] === true), '不 toast 失敗');
+  assert.strictEqual(R.ui.busy, false);
+
+  // 有排隊的強制刷新時重畫連續出錯：刷新回到閒置並排下一輪，不會卡死
+  R = mk();
+  R.renv.show = () => { throw new Error('render'); };
+  R.renv.fail = () => { throw new Error('render again'); };
+  const r1 = runRefresh(R.renv, false);
+  await runRefresh(R.renv, true);
+  assert.deepStrictEqual(R.live.rs, {inflight: true, pendingForce: true}, '強制刷新排隊');
+  R.gets[0].res({});
+  await r1.catch(() => {});
+  assert.deepStrictEqual(R.live.rs, REFRESH_IDLE, '例外後回到閒置');
+  assert.ok(R.log.some(l => l[0] === 'schedule'), '例外後仍排下一輪輪詢');
+  // 排隊而沒有自己跑的那次呼叫不排程、不動狀態
+  R = mk();
+  const r2 = runRefresh(R.renv, false);
+  await runRefresh(R.renv, true);
+  assert.strictEqual(R.log.filter(l => l[0] === 'schedule').length, 0, '排隊的呼叫不排程');
+  R.gets[0].res({}); await tick(); R.gets[1].res({}); await r2;
+  assert.strictEqual(R.log.filter(l => l[0] === 'schedule').length, 1);
+})().catch(e => { console.error(e); process.exit(1); });
+JS
+
+# 五個呼叫點都把送出中的項目交給 act（接線本身由上面的執行型測試驗）
+node - "$OPSX_ROOT/herdr-board/web/index.html" <<'JS' || fail "呼叫點帶送出中項目"
 const fs = require('node:fs');
 const assert = require('node:assert');
 const html = fs.readFileSync(process.argv[2], 'utf8');
 const body = name => { const s = html.indexOf(name), e = html.indexOf('\n}', s); if (s < 0) throw new Error('index.html 找不到 ' + name); return html.slice(s, e); };
-const a = body('async function act(');
-assert.ok(a.indexOf('render()') >= 0 && a.indexOf('render()') < a.indexOf('await fn()'), 'act 要在 await fn() 之前重畫：' + a);
-assert.ok(a.includes('pendDone(') && a.includes('pendDrop('), 'act 成功改 done、失敗移除：' + a);
-const r = body('async function refresh(');
-assert.ok(r.includes('pendClear(') && r.indexOf('sentAt') < r.indexOf('api.collect()'), 'refresh 先記 GET 送出時間再打 collect：' + r);
 for (const f of ['function answer(', 'function answerTree(', 'function submitNote(', 'function exploreFirst(', 'function doDispatch(']) {
   assert.ok(/kind:'(answer|note|dispatch)'/.test(body(f)), f + ' 要交給 act 一筆送出中的項目');
 }
+assert.ok(/base:/.test(body('function submitNote(')), 'submitNote 要記按下時同文字的指示數');
 JS
 
 # 暫存指示的樣式（notesSection 在派工指示段）

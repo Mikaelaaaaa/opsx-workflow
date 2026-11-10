@@ -7,6 +7,7 @@ import json
 import os
 import pathlib
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -532,7 +533,9 @@ class CacheInvalidationTest(unittest.TestCase):
     """不帶 --collect：動作後的 collect 不用舊快取（specs/board-web「動作後的 collect 不用舊快取」）。
 
     每個測試起一支新 server，快取從空的開始。shim 每次 collect 記一行到 collect.log；
-    有 collect.sleep 檔就先睡檔裡的秒數；有 opsx.fail 檔就讓 collect 以外的子命令退出 2。
+    collect 一開始就建 collect.started（測試等它，不靠固定的 sleep 猜 server 什麼時候開始跑）；
+    有 collect.sleep 檔就先睡檔裡的秒數；有 opsx.fail 檔就讓 collect 以外的子命令退出 2；
+    有 action.sleep 檔就讓 collect 以外的子命令先建 action.started、再睡檔裡的秒數。
     """
 
     @classmethod
@@ -542,27 +545,36 @@ class CacheInvalidationTest(unittest.TestCase):
         cls.state.mkdir()
         cls.collect_log = cls.tmp / "collect.log"
         cls.sleep_file = cls.tmp / "collect.sleep"
+        cls.started = cls.tmp / "collect.started"
         cls.fail_flag = cls.tmp / "opsx.fail"
+        cls.action_sleep = cls.tmp / "action.sleep"
+        cls.action_started = cls.tmp / "action.started"
         cls.repo = cls.tmp / "repo"
         (cls.repo / "openspec" / "changes").mkdir(parents=True)
         shim = cls.tmp / "opsx"
         shim.write_text(
             "#!/usr/bin/env bash\n"
             'if [ "$1" = collect ]; then\n'
+            f'  : > "{cls.started}"\n'
             f'  if [ -f "{cls.sleep_file}" ]; then sleep "$(cat "{cls.sleep_file}")"; fi\n'
             f'  echo collect >> "{cls.collect_log}"\n'
             '  echo \'{"generated_at": "g", "scopes": [], "cards": [], "unmatched_agents": [], "errors": []}\'\n'
             "  exit 0\n"
             "fi\n"
+            f'if [ -f "{cls.action_sleep}" ]; then : > "{cls.action_started}"; sleep "$(cat "{cls.action_sleep}")"; fi\n'
             f'if [ -f "{cls.fail_flag}" ]; then echo "opsx: 假的失敗" >&2; exit 2; fi\n'
             'echo "ok: $1"\n'
         )
         shim.chmod(0o755)
         cls.env = dict(os.environ, OPSX_STATE_DIR=str(cls.state), OPSX_TEST_OPSX=str(shim))
 
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
     def setUp(self):
         self.collect_log.write_text("")
-        for f in (self.sleep_file, self.fail_flag):
+        for f in (self.sleep_file, self.fail_flag, self.started, self.action_sleep, self.action_started):
             if f.exists():
                 f.unlink()
         self.proc, _, port = start_server(self.env, None)
@@ -591,6 +603,16 @@ class CacheInvalidationTest(unittest.TestCase):
 
     def get_into(self, results: list) -> None:
         results.append(self.req("/api/collect"))
+
+    def stop_into(self, results: list) -> None:
+        results.append(self.req("/api/stop", {"slug": "x"}))
+
+    def wait_for(self, path: pathlib.Path) -> None:
+        deadline = time.monotonic() + 10
+        while not path.exists():
+            if time.monotonic() > deadline:
+                raise AssertionError("10 秒內沒等到 %s" % path)
+            time.sleep(0.02)
 
     def test_get_after_action_reruns_collect(self):
         self.assertEqual(self.req("/api/collect"), 200)
@@ -632,7 +654,7 @@ class CacheInvalidationTest(unittest.TestCase):
         results = []
         t = threading.Thread(target=self.get_into, args=(results,))
         t.start()
-        time.sleep(0.3)
+        self.wait_for(self.started)
         self.assertEqual(self.req("/api/stop", {"slug": "x"}), 200)
         t.join()
         self.assertEqual(results, [200], "動作前送出的 GET 照樣拿到它等的那次結果")
@@ -640,6 +662,20 @@ class CacheInvalidationTest(unittest.TestCase):
         self.sleep_file.unlink()
         self.req("/api/collect")
         self.assertEqual(self.collects(), 2, "第二個 GET 要重跑，不能拿動作前開始的那次")
+
+    def test_collect_started_during_action_is_not_fresh_cache(self):
+        # 作廢時間點要在 opsx 跑完之後記：動作跑到一半開始的 collect 可能還沒看到動作寫的檔
+        self.action_sleep.write_text("1")
+        results = []
+        t = threading.Thread(target=self.stop_into, args=(results,))
+        t.start()
+        self.wait_for(self.action_started)
+        self.assertEqual(self.req("/api/collect"), 200)
+        self.assertEqual(self.collects(), 1, "動作進行中的 GET 跑了一次 collect")
+        t.join()
+        self.assertEqual(results, [200])
+        self.req("/api/collect")
+        self.assertEqual(self.collects(), 2, "動作結束後的 GET 要重跑，不能拿動作進行中開始的那次")
 
 
 if __name__ == "__main__":
