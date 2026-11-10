@@ -60,12 +60,13 @@ class ServerTest(unittest.TestCase):
         cls.herdr_log = cls.tmp / "herdr.log"
         cls.attached = cls.tmp / "attached"   # shim 執行當下把 --attach 的檔複製到這裡，server 回應後暫存檔已刪
         cls.attached.mkdir()
+        cls.contents = cls.tmp / "attached.b64"   # 同名的檔在 attached/ 會互蓋，這裡依 --attach 順序一行一個 base64
         # server 跑的是 plugin 自己的 bin/opsx，不靠 PATH；測試用 OPSX_TEST_OPSX 指到這支假的
         shim = shim_dir / "opsx"
         shim.write_text(
             "#!/usr/bin/env bash\n"
             f'printf "%s\\n" "$*" >> "{cls.log}"\n'
-            f'prev=; for a in "$@"; do if [ "$prev" = --attach ]; then cp "$a" "{cls.attached}/"; fi; prev="$a"; done\n'
+            f'prev=; for a in "$@"; do if [ "$prev" = --attach ]; then cp "$a" "{cls.attached}/"; base64 < "$a" | tr -d "\\n" >> "{cls.contents}"; echo >> "{cls.contents}"; fi; prev="$a"; done\n'
             f'printf "OPSX_STATE_DIR=%s\\n" "${{OPSX_STATE_DIR:-}}" >> "{cls.env_log}"\n'
             f'if [ -f "{cls.fail_flag}" ]; then echo "opsx: 假的失敗" >&2; exit 2; fi\n'
             f'if [ -f "{cls.rc_file}" ]; then echo "opsx: 假的退出碼" >&2; exit "$(cat "{cls.rc_file}")"; fi\n'
@@ -114,6 +115,7 @@ class ServerTest(unittest.TestCase):
             self.rc_file.unlink()
         shutil.rmtree(self.attached)
         self.attached.mkdir()
+        self.contents.write_text("")
 
     def paste_dir(self, pattern: str) -> pathlib.Path:
         """log 這一行要整行符合 pattern（`(\\S+)` 抓暫存資料夾），回暫存資料夾。"""
@@ -143,7 +145,7 @@ class ServerTest(unittest.TestCase):
         self.log.write_text("")
         status, _, body = self.req("/api/paste", {"text": "\n  標題  \n內文", "files": [{"name": "a.txt", "data": b64(b"a")}]}, token=self.token)
         self.assertEqual(status, 200, body)
-        self.paste_dir(r"new --attach (\S+)/paste\.md --attach \1/a\.txt -- 標題")
+        self.paste_dir(r"new --attach (\S+)/paste\.md --attach \S+/a\.txt -- 標題")
 
     def test_paste_single_line_with_file_has_no_paste_md(self):
         self.req("/api/paste", {"text": "  一行  \n\n", "files": [{"name": "a.txt", "data": b64(b"a")}]}, token=self.token)
@@ -152,7 +154,7 @@ class ServerTest(unittest.TestCase):
     def test_paste_only_files(self):
         status, _, body = self.req("/api/paste", {"text": "", "files": [{"name": "log.txt", "data": b64(b"x")}, {"name": "b.txt", "data": ""}]}, token=self.token)
         self.assertEqual(status, 200, body)
-        self.paste_dir(r"new --attach (\S+)/log\.txt --attach \1/b\.txt -- 附件：log\.txt")
+        self.paste_dir(r"new --attach (\S+)/log\.txt --attach \S+/b\.txt -- 附件：log\.txt")
 
     def test_paste_with_repo(self):
         r = str(self.repo)
@@ -170,8 +172,25 @@ class ServerTest(unittest.TestCase):
         self.assertEqual([p.rsplit("/", 1)[1] for p in paths], ["paste.md"] * 3, line)
         self.assertEqual(len(set(paths)), 3, "同名的檔不能互相蓋掉：%s" % line)
 
+    def test_paste_names_like_an_index_or_differing_in_case_keep_every_file(self):
+        for names in (["a", "a", "1"], ["1", "1"], ["A.png", "a.png"]):
+            datas = [("%s-%d" % (n, i)).encode() for i, n in enumerate(names)]
+            self.contents.write_text("")
+            status, _, body = self.req("/api/paste", {"text": "x", "files": [{"name": n, "data": b64(d)} for n, d in zip(names, datas)]}, token=self.token)
+            self.assertEqual(status, 200, "%r: %s" % (names, body))
+            self.assertEqual(self.contents.read_text().split(), [b64(d) for d in datas], names)
+
+    def test_paste_long_first_line_is_cut_and_kept_in_paste_md(self):
+        text = "x" * (2 * 1024 * 1024)
+        status, _, body = self.req("/api/paste", {"text": text, "files": []}, token=self.token)
+        self.assertEqual(status, 200, body)
+        m = re.fullmatch(r"new --attach \S+/paste\.md -- (x+)", self.log.read_text().strip())
+        self.assertIsNotNone(m)
+        self.assertLessEqual(len(m.group(1)), 200)
+        self.assertEqual((self.attached / "paste.md").read_text(encoding="utf-8"), text)
+
     def test_paste_rejects_bad_names_and_data(self):
-        for bad in ("../x", ".env", "", "a\\b", "a\0b", "x" * 129, None):
+        for bad in ("../x", ".env", "", "a\\b", "a\0b", "x" * 129, None, "a\n## 派工指示", "a\rb", "a\x1fb", "a\x7fb"):
             status, _, body = self.req("/api/paste", {"text": "x", "files": [{"name": bad, "data": b64(b"1")}]}, token=self.token)
             self.assertEqual(status, 400, "%r: %s" % (bad, body))
         for bad in ("!!!", "YQ", None):

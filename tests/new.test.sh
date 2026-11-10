@@ -66,6 +66,12 @@ assert_grep '^- attachments/a-3.png$' "$A/openspec/changes/$out/inbox.md"
 printf 'm' > "$T/Makefile"; printf 'n' > "$T/y/Makefile"
 out="$(opsx new --repo "$A" --attach "$T/Makefile" --attach "$T/y/Makefile" -- 沒副檔名)"
 assert_eq "$(cat "$A/openspec/changes/$out/attachments/Makefile-2")" n "沒副檔名的同名加 -2"
+# 只差大小寫也算同名：macOS 的檔案系統不分大小寫，不改名第二個會蓋掉第一個
+printf 'upper' > "$T/x/A.png"
+out="$(opsx new --repo "$A" --attach "$T/x/A.png" --attach "$T/y/a.png" -- 大小寫)"
+D="$A/openspec/changes/$out/attachments"
+assert_eq "$(ls "$D" | wc -l | tr -d ' ')" 2 "兩個檔都要在：$(ls "$D")"
+assert_eq "$(cat "$D/A.png")" upper; assert_eq "$(cat "$D/a-2.png")" second
 
 # 附檔進待分類
 before="$(snap)"
@@ -92,6 +98,10 @@ assert_rc 2 opsx new --repo "$A" --attach "$T/nope.png" -- 不存在
 assert_rc 2 opsx new --attach "$T/nope.png" -- 不存在
 assert_rc 2 opsx new --attach "$T/x" -- 是資料夾
 assert_rc 2 opsx new --attach -- 沒給檔
+# 檔名帶控制字元會原樣進 inbox.md 的 ## 附件，能插出新段落
+nl="$T/$(printf 'a\n## 派工指示')"; printf 'z' > "$nl"
+assert_rc 2 opsx new --repo "$A" --attach "$nl" -- 換行
+assert_rc 2 opsx new --attach "$nl" -- 換行
 assert_eq "$(snap)" "$before"; assert_eq "$(find "$OPSX_STATE_DIR/unfiled" | sort)" "$ub"
 out="$(opsx new --repo "$A" --attach "$T/edge.bin" -- 剛好十MB)"; assert_eq "$?" 0 "剛好 10 MB 要收：$out"
 assert_file "$A/openspec/changes/$out/attachments/edge.bin"

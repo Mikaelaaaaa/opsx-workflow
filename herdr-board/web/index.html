@@ -689,8 +689,10 @@ function newRequest(text,files,repo){
 }
 function splitBySize(files){return [files.filter(f=>f.size<=MAX_ATTACH),files.filter(f=>f.size>MAX_ATTACH)];}
 let newFiles=[];  /* {name, size, data(base64)}，加進清單時就讀好 */
+/* newGen 在 closeNew 時加一，關掉之後才讀完的檔對不上就丟掉；newReading 是還在讀的批數，讀完前不准送出 */
+let newGen=0,newReading=0;
 function openNew(){$('#newbar').hidden=false;$('#new-where').textContent=newRepo()?'建在 '+ui.repo:'進待分類（範圍選到單一 repo 才直接建殼）';$('#new-text').focus();}
-function closeNew(){$('#newbar').hidden=true;$('#new-text').value='';newFiles=[];renderNewFiles();}
+function closeNew(){$('#newbar').hidden=true;$('#new-text').value='';newFiles=[];newGen++;renderNewFiles();}
 function renderNewFiles(){$('#new-files').innerHTML=newFiles.map((f,i)=>`<li><span class="mono">${esc(f.name)}</span><button class="ghost sm" data-act="new-unattach" data-i="${i}" aria-label="移除 ${esc(f.name)}">×</button></li>`).join('');}
 function readBase64(file){
   return new Promise((ok,bad)=>{const r=new FileReader();r.onload=()=>ok(r.result.slice(r.result.indexOf(',')+1));r.onerror=()=>bad(r.error);r.readAsDataURL(file);});
@@ -698,19 +700,24 @@ function readBase64(file){
 async function addFiles(list){
   const [fit,big]=splitBySize([...list]);
   if(big.length)toast(big.map(f=>f.name).join('、')+' 超過單檔 10 MB 上限，沒有加進清單',true);
-  for(const f of fit){
-    /* 空檔的 data URL 是 "data:"，沒有逗號可切 */
-    try{newFiles.push({name:f.name,size:f.size,data:f.size?await readBase64(f):''});}
-    catch(e){toast(f.name+' 讀不到：'+e.message,true);}
-  }
+  const gen=newGen;newReading++;
+  try{
+    for(const f of fit){
+      /* 空檔的 data URL 是 "data:"，沒有逗號可切 */
+      try{const data=f.size?await readBase64(f):'';if(gen!==newGen)return;newFiles.push({name:f.name,size:f.size,data});}
+      catch(e){toast(f.name+' 讀不到：'+e.message,true);}
+    }
+  }finally{newReading--;}
   renderNewFiles();
 }
+/* 送成功才清空：失敗或上一個動作還在跑時，貼上的文字與附檔都留著 */
 function submitNew(){
+  if(newReading){toast('附件還在讀，讀完再送',true);return;}
+  if(ui.busy){toast('上一個動作還在跑，輸入先留著，等一下再送',true);return;}
   const req=newRequest($('#new-text').value,newFiles,newRepo());if(!req)return;
-  closeNew();
   const where=req.body.repo?' --repo '+req.body.repo:'';
   const label=req.path==='new'?`opsx new${where} -- ${req.body.text}`:`opsx new${where}${req.body.files.map(f=>' --attach '+f.name).join('')}（貼上）`;
-  act(label,()=>api.post(req.path,req.body));
+  act(label,async()=>{const r=await api.post(req.path,req.body);closeNew();return r;});
 }
 
 /* 先 explore：互動模式派出，第一句由 dispatch 從 stage 推，收件卡一定是 /explore（board-inbox D5） */

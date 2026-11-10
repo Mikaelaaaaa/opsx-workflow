@@ -50,8 +50,10 @@ OUTPUT_TIMEOUT = 10
 ACTION_TIMEOUT = 120
 CACHE_S = 3
 MAX_BODY = 64 * 1024
-PASTE_MAX_BODY = 64 * 1024 * 1024   # base64 多三分之一，約夠一次帶五個 10 MB 的檔
+PASTE_MAX_BODY = 64 * 1024 * 1024   # base64 多三分之一，夠一次帶四個 10 MB 的檔（五個是 69.9 MB）
 NAME_MAX = 128
+# 一句話會進 argv，太長的一行（壓縮過的 JSON、log）會讓 exec 回 E2BIG；全文另存在 paste.md
+ONE_LINER_MAX = 200
 
 # 每個動作：有沒有 slug（有就是第一個位置參數）、必填欄位、選填 flag、尾端文字。
 ACTIONS = {
@@ -169,7 +171,7 @@ def paste_parts(body: dict) -> tuple[list[str], list[tuple[str, bytes]], str]:
             raise ValueError("files 的每一筆要是物件：%r" % f)
         name, data = f.get("name"), f.get("data")
         if (not isinstance(name, str) or not name or len(name) > NAME_MAX or name.startswith(".")
-                or any(ch in name for ch in "/\\\0")):
+                or any(ch in "/\\" or ord(ch) < 0x20 or ord(ch) == 0x7f for ch in name)):
             raise ValueError("檔名不合格：%r" % name)
         if not isinstance(data, str):
             raise ValueError("%s 的 data 要是 base64 字串：%r" % (name, data))
@@ -180,10 +182,10 @@ def paste_parts(body: dict) -> tuple[list[str], list[tuple[str, bytes]], str]:
     lines = [line.strip() for line in text.splitlines() if line.strip()]
     if not lines and not decoded:
         raise ValueError("text 與 files 至少要有一個非空")
-    # 多行時第一行當一句話，全文另存成附件，opsx new 的單行規則就不必放寬
-    if len(lines) > 1:
+    # 多行或第一行太長時，一句話取第一行開頭，全文另存成附件，opsx new 的單行規則就不必放寬
+    if len(lines) > 1 or (lines and len(lines[0]) > ONE_LINER_MAX):
         decoded.insert(0, ("paste.md", text.encode("utf-8")))
-    one_liner = lines[0] if lines else "附件：%s" % decoded[0][0]
+    one_liner = lines[0][:ONE_LINER_MAX] if lines else "附件：%s" % decoded[0][0]
     repo = body.get("repo")
     repo_args = []
     if repo is not None and repo != "":
@@ -194,13 +196,12 @@ def paste_parts(body: dict) -> tuple[list[str], list[tuple[str, bytes]], str]:
 
 
 def write_attachments(root: pathlib.Path, files: list[tuple[str, bytes]]) -> list[str]:
-    """寫進 root，回 --attach 參數。同名的第二個放進 root/<n>/，opsx new 取 basename 時再改名成 -2。"""
-    args, used = [], set()
+    """第 i 個檔寫進 root/<i>/，回 --attach 參數。同名（含只差大小寫）的檔各在自己的資料夾，opsx new 取 basename 時再改名成 -2。"""
+    args = []
     for i, (name, data) in enumerate(files):
-        d = root / str(i) if name in used else root
-        d.mkdir(exist_ok=True)
+        d = root / str(i)
+        d.mkdir()
         (d / name).write_bytes(data)
-        used.add(name)
         args += ["--attach", str(d / name)]
     return args
 

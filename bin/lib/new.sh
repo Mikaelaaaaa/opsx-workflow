@@ -6,6 +6,8 @@
 
 OPSX_ATTACH_MAX=10485760
 
+lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
+
 opsx_new() {
   local top="" text="" files=() names=() f b stem ext cand n taken=$'\n' i
   while [ $# -gt 0 ]; do
@@ -22,10 +24,13 @@ opsx_new() {
     [ -f "$f" ] || die "new: --attach 不存在或不是一般檔案：$f"
     [ "$(( $(wc -c < "$f") ))" -le "$OPSX_ATTACH_MAX" ] || die "new: --attach $f 超過 10 MB"
     b="$(basename "$f")"
+    # 檔名原樣寫進 inbox.md 的一行，帶換行就能插出新段落
+    case "$b" in *[[:cntrl:]]*) die "new: --attach 檔名不能有控制字元：$(printf '%q' "$b")" ;; esac
     case "$b" in ?*.*) stem="${b%.*}"; ext=".${b##*.}" ;; *) stem="$b"; ext="" ;; esac
     cand="$b"; n=1
-    while [[ "$taken" == *$'\n'"$cand"$'\n'* ]]; do n=$((n+1)); cand="$stem-$n$ext"; done
-    taken+="$cand"$'\n'; names+=("$cand")
+    # 不分大小寫比對：macOS 的檔案系統不分大小寫，A.png 與 a.png 會是同一個檔
+    while [[ "$taken" == *$'\n'"$(lower "$cand")"$'\n'* ]]; do n=$((n+1)); cand="$stem-$n$ext"; done
+    taken+="$(lower "$cand")"$'\n'; names+=("$cand")
   done
 
   text="$(printf '%s' "$text" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')"
