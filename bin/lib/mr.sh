@@ -7,6 +7,7 @@
 #   github 的 https://github.com/<owner>/<repo>/pull/<n> 變成 gh pr view <n> -R <owner>/<repo> --json <fields>。
 # 快取：$OPSX_STATE_DIR/cache/mr-<sha1(url) 前 12 碼>.json（鍵是 URL，不同 repo 同名卡不會串），
 #   OPSX_MR_CACHE_TTL 秒（預設 60，0 = 每次都抓）；抓不到不寫快取；寫入用 mktemp，並行不互撞。
+#   OPSX_MR_STALE_OK=1（只有 collect 帶）：過期的快取照樣回，重抓丟到背景；沒有快取時照舊同步抓。
 # gh 沒有未解 thread 的欄位（reviewThreads 不是 --json 的欄位），threads 條件用 reviewDecision != CHANGES_REQUESTED 近似。
 
 # forge CLI 的時間上限：OPSX_MR_TIMEOUT 秒，沒設就不限時（只有 Stop hook 會設，它自己只有 10 秒）。
@@ -26,17 +27,51 @@ mr_forge() {
   ' "$OPSX_MR_TIMEOUT" "$@"
 }
 
+mr_cache() { # <url>
+  printf '%s/cache/mr-%s.json\n' "$OPSX_STATE_DIR" "$(printf '%s' "$1" | shasum | cut -c1-12)"
+}
+
+mr_age() { # <path> 印距 mtime 幾秒
+  local mtime; mtime="$(stat -f %m "$1" 2>/dev/null || stat -c %Y "$1")"
+  echo $(( $(date +%s) - mtime ))
+}
+
+# 過期快取的背景重抓（只有 OPSX_MR_STALE_OK=1 的 collect 會走到）。一個 MR 同時只有一支：鎖是 <cache>.lock 目錄。
+# setsid 讓它離開 collect 的 process group（server.py 逾時會 killpg collect）；三個 fd 都接 /dev/null，collect 的 stdout 才關得掉。
+mr_refresh_bg() { # <card dir> <cache>
+  local lock="$2.lock"
+  if ! mkdir "$lock" 2>/dev/null; then
+    # shortcut: 120 s 死鎖上限，背景行程掛住時最多兩分鐘不重抓；要更準改成在 lock 目錄裡寫 pid
+    [ "$(mr_age "$lock")" -ge 120 ] || return 0
+    rmdir "$lock" 2>/dev/null; mkdir "$lock" 2>/dev/null || return 0
+  fi
+  perl -MPOSIX -e 'POSIX::setsid(); exec @ARGV' bash "$OPSX_ROOT/bin/opsx" mr "$1" --refresh </dev/null >/dev/null 2>&1 &
+}
+
+# opsx mr <card dir> [--refresh]：印 mr_json；--refresh 跳過快取重抓、寫快取、放掉 mr_refresh_bg 的鎖
+opsx_mr() {
+  local d="${1:?用法：opsx mr <card dir> [--refresh]}" lock rc=0
+  case "${2:-}" in
+    "") mr_json "$d" ;;
+    --refresh)
+      lock="$(mr_cache "$(st_mr_url "$d")").lock"
+      OPSX_MR_REFRESH=1 mr_json "$d" >/dev/null || rc=$?
+      rmdir "$lock"; return "$rc" ;;
+    *) die "opsx mr：不認得的參數 $2" ;;
+  esac
+}
+
 mr_json() { # <card dir>
-  local d="$1" url ttl cache now mtime age raw rc=0 forge iid proj host path out tmp
+  local d="$1" url ttl cache raw rc=0 forge iid proj host path out tmp
   url="$(st_mr_url "$d")"
   if [ -z "$url" ]; then
     printf '{"url": null, "state": "none", "head_sha": null, "conditions": null, "blocked_on": null, "error": null, "created_at": null, "merged_at": null}\n'; return
   fi
   ttl="${OPSX_MR_CACHE_TTL:-60}"
-  cache="$OPSX_STATE_DIR/cache/mr-$(printf '%s' "$url" | shasum | cut -c1-12).json"
-  if [ "$ttl" -gt 0 ] && [ -f "$cache" ]; then
-    now="$(date +%s)"; mtime="$(stat -f %m "$cache" 2>/dev/null || stat -c %Y "$cache")"; age=$((now - mtime))
-    if [ "$age" -lt "$ttl" ]; then cat "$cache"; return; fi
+  cache="$(mr_cache "$url")"
+  if [ "$ttl" -gt 0 ] && [ -f "$cache" ] && [ "${OPSX_MR_REFRESH:-}" != 1 ]; then
+    if [ "$(mr_age "$cache")" -lt "$ttl" ]; then cat "$cache"; return; fi
+    if [ "${OPSX_MR_STALE_OK:-}" = 1 ]; then cat "$cache"; mr_refresh_bg "$d" "$cache"; return; fi
   fi
   iid="$(printf '%s' "$url" | grep -oE '[0-9]+$')"
   host="$(printf '%s' "$url" | sed -E 's#^https?://([^/]+)/.*#\1#')"

@@ -92,6 +92,64 @@ printf '%s' "$GREEN" > "$OPSX_TEST_GLAB_JSON"
 ( OPSX_MR_CACHE_TTL=60 mr_json "$C" >/dev/null ) & ( OPSX_MR_CACHE_TTL=60 mr_json "$C" >/dev/null ) & wait
 [ "$(ls "$OPSX_STATE_DIR/cache/" | grep -c '^mr-.*\.json$')" = 1 ] || fail "並行後應只有一個快取檔：$(ls "$OPSX_STATE_DIR/cache/")"
 
+# --- OPSX_MR_STALE_OK=1（只有 collect 帶）：過期快取先回舊的、背景重抓一次；其他呼叫端照舊同步抓（collect-background / mr-fetch-off-path）---
+ms() { perl -MTime::HiRes=time -e 'printf "%d\n", time * 1000'; }
+wait_unlock() { # 背景重抓結束時會拿掉 lock 目錄；最多等 5 秒
+  local i
+  for i in $(seq 50); do [ -d "$1" ] || return 0; sleep 0.1; done
+  fail "背景重抓 5 秒內沒放掉 $1"
+}
+CACHE="$OPSX_STATE_DIR/cache/mr-$(printf '%s' "https://gitlab.tsg-navigator.com/agentory/Agentory-CS/-/merge_requests/431" | shasum | cut -c1-12).json"
+OLD='{"url": "x", "state": "ready", "head_sha": "old111"}'
+SLOWBIN="$FX/slow-glab"; mkdir -p "$SLOWBIN"
+printf '#!/usr/bin/env bash\n[ "$1 $2" = "mr view" ] && sleep 2\nexec bash "%s/tests/fakes/glab" "$@"\n' "$OPSX_ROOT" > "$SLOWBIN/glab"; chmod +x "$SLOWBIN/glab"
+printf '{"state":"opened","draft":false,"has_conflicts":false,"sha":"new222","head_pipeline":{"status":"success"},"unresolved_discussions_count":0}' > "$OPSX_TEST_GLAB_JSON"
+stale_cache() { printf '%s\n' "$OLD" > "$CACHE"; touch -t 202601010000 "$CACHE"; : > "$OPSX_FAKE_LOG"; }
+
+# 過期：1 秒內回舊內容；連叫兩次只重抓一次；重抓完快取換成新的
+stale_cache
+t0="$(ms)"; j="$(PATH="$SLOWBIN:$PATH" OPSX_MR_CACHE_TTL=60 OPSX_MR_STALE_OK=1 mr_json "$C")"; elapsed=$(( $(ms) - t0 ))
+assert_eq "$j" "$OLD" "過期快取要先回舊內容"
+[ "$elapsed" -lt 1000 ] || fail "STALE_OK 不該等 glab，花了 ${elapsed} ms"
+assert_eq "$(PATH="$SLOWBIN:$PATH" OPSX_MR_CACHE_TTL=60 OPSX_MR_STALE_OK=1 mr_json "$C")" "$OLD" "重抓還沒完成，第二次也回舊內容"
+wait_unlock "$CACHE.lock"
+assert_eq "$(grep -c '^mr view' "$OPSX_FAKE_LOG" || true)" 1 "同一個 MR 只重抓一次"
+assert_eq "$(field "$(cat "$CACHE")" head_sha)" new222 "背景重抓要寫回快取"
+# 背景重抓不在呼叫端的 process group 裡（server.py 逾時會 killpg collect）
+stale_cache
+PATH="$SLOWBIN:$PATH" perl -e 'setpgrp(0, 0); exec @ARGV' bash -c '
+  source "$OPSX_ROOT/bin/lib/common.sh"; source "$OPSX_ROOT/bin/lib/stage.sh"; source "$OPSX_ROOT/bin/lib/mr.sh"; source "$OPSX_ROOT/bin/lib/python.sh"; opsx_python_load
+  OPSX_MR_CACHE_TTL=60 OPSX_MR_STALE_OK=1 mr_json "$1" >/dev/null; sleep 5' _ "$C" &
+pg=$!; sleep 0.5; kill -TERM -- "-$pg"; wait "$pg"
+wait_unlock "$CACHE.lock"
+assert_eq "$(field "$(cat "$CACHE")" head_sha)" new222 "呼叫端的 process group 被殺，背景重抓仍要寫完快取"
+# 抓不到不寫快取，lock 照樣放掉
+stale_cache; printf '' > "$OPSX_TEST_GLAB_JSON"
+OPSX_MR_CACHE_TTL=60 OPSX_MR_STALE_OK=1 mr_json "$C" >/dev/null
+wait_unlock "$CACHE.lock"
+assert_eq "$(cat "$CACHE")" "$OLD" "抓不到時保留舊快取"
+printf '{"state":"opened","draft":false,"has_conflicts":false,"sha":"new222","head_pipeline":{"status":"success"},"unresolved_discussions_count":0}' > "$OPSX_TEST_GLAB_JSON"
+# 別支還拿著 lock：不重抓；lock 超過 120 秒當死鎖，接手重抓
+stale_cache; mkdir "$CACHE.lock"
+OPSX_MR_CACHE_TTL=60 OPSX_MR_STALE_OK=1 mr_json "$C" >/dev/null; sleep 0.5
+assert_eq "$(grep -c '^mr view' "$OPSX_FAKE_LOG" || true)" 0 "lock 被拿著時不重抓"
+touch -t 202601010000 "$CACHE.lock"
+OPSX_MR_CACHE_TTL=60 OPSX_MR_STALE_OK=1 mr_json "$C" >/dev/null
+wait_unlock "$CACHE.lock"
+assert_eq "$(grep -c '^mr view' "$OPSX_FAKE_LOG" || true)" 1 "死鎖接手後要重抓"
+# 沒帶 STALE_OK：過期照舊同步抓、回新內容
+stale_cache
+j="$(PATH="$SLOWBIN:$PATH" OPSX_MR_CACHE_TTL=60 mr_json "$C")"
+assert_eq "$(field "$j" head_sha)" new222 "其他呼叫端同步抓"
+assert_no_file "$CACHE.lock"
+# 沒有快取：STALE_OK 也同步抓
+rm -f "$CACHE"; : > "$OPSX_FAKE_LOG"
+assert_eq "$(field "$(OPSX_MR_CACHE_TTL=60 OPSX_MR_STALE_OK=1 mr_json "$C")" head_sha)" new222 "沒快取時同步抓"
+assert_file "$CACHE"
+# 除錯用的子命令：opsx mr <card dir> 印 mr_json
+assert_eq "$(field "$(OPSX_MR_CACHE_TTL=60 opsx mr "$C")" head_sha)" new222
+printf '%s' "$GREEN" > "$OPSX_TEST_GLAB_JSON"
+
 # --- forge 查詢的時間上限：OPSX_MR_TIMEOUT 沒設就不限時，設了逾時要殺掉、錯誤文字說逾時 ---
 unset OPSX_MR_TIMEOUT
 assert_eq "$(mr_forge sh -c 'sleep 2; echo ok')" ok "沒設 OPSX_MR_TIMEOUT 不限時"

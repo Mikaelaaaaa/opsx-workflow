@@ -87,7 +87,7 @@ opsx_collect() {
            archived=false; stage="$(stage_name "${repo_dir%/}" "$slug")" ;;
       esac
       mrfile=""
-      if [ "$archived" = false ] && st_mr_in_report "$d"; then n=$((n+1)); mrfile="$work/mr/$n.json"; mr_json "$d" > "$mrfile"; fi
+      if [ "$archived" = false ] && st_mr_in_report "$d"; then n=$((n+1)); mrfile="$work/mr/$n.json"; OPSX_MR_STALE_OK=1 mr_json "$d" > "$mrfile"; fi
       printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$repo" "$slug" "$d" "$archived" "$stage" "$mrfile" >> "$work/cards.tsv"
     done
   done
