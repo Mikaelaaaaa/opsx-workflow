@@ -37,6 +37,7 @@ check('last-seen 之前的事不進 banner', [{...ev('claude', '替你決定', '
 check('新開的 gate',
   [], [card({open_gates: [{id: 'G0', opened_at: BEFORE}, {id: 'G1', opened_at: T}]})],
   [{key: 'r/x', text: 'x 開了 gate G1'}]);
+check('沒有時間的 gate 不進 banner', [], [card({open_gates: [{id: 'G2', opened_at: null}]})], []);
 check('新開的 MR', [], [card({mr: {created_at: T, merged_at: null}})],
   [{key: 'r/x', text: 'x 開了 MR'}]);
 check('合併只列一次',
