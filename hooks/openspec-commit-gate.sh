@@ -5,7 +5,7 @@
 source "$(dirname "${BASH_SOURCE[0]}")/_lib.sh"
 
 cmd="$(hook_cmd)"
-printf '%s' "$cmd" | grep -qE '(^|\s|&&|\|\||;)git\s+(-C\s+\S+\s+)?commit(\s|$)' || exit 0
+cmd_skeleton "$cmd" | grep -qE '(^|\s|&&|\|\||;)git\s+(-C\s+\S+\s+)?commit(\s|$)' || exit 0
 
 top="$(repo_top)"
 [ -n "$top" ] || exit 0

@@ -73,21 +73,23 @@ level2() { # <action> <label>
 if [ "$tool" = "Bash" ]; then
   [ -n "$cmd" ] || exit 0
   c="$(printf '%s' "$cmd" | tr '\n' ' ')"
+  # 比對只看會執行的部分（骨架），引號與 heredoc 內的字樣不算；merge_gate 與訊息仍讀原文
+  sk="$(cmd_skeleton "$cmd" | tr '\n' ' ')"
   # 第三級（merge 放行後不 exit，其餘檢查照跑）
-  printf '%s' "$c" | grep -qE '(glab mr merge|gh pr merge)' && merge_gate && GRANTED=1
-  printf '%s' "$c" | grep -qE 'git\s+push.*(--force|-f\b|\+[a-zA-Z])' && level3 "force-push"
-  printf '%s' "$c" | grep -qE 'git\s+push.*\b(main|master)\b' && level3 "push main"
-  printf '%s' "$c" | grep -qiE '(^|\s|/)deploy(\.sh)?(\s|$)' && level3 "deploy"
-  printf '%s' "$c" | grep -qiE 'drop\s+(table|database|schema)|truncate\s+table|db:reset' && level3 "刪資料"
-  printf '%s' "$c" | grep -qE 'sops\s+(-e|--encrypt|edit)|\.gitlab-ci\.yml|\.github/workflows' && level3 "改 CI / secrets"
+  printf '%s' "$sk" | grep -qE '(glab mr merge|gh pr merge)' && merge_gate && GRANTED=1
+  printf '%s' "$sk" | grep -qE 'git\s+push.*(--force|-f\b|\+[a-zA-Z])' && level3 "force-push"
+  printf '%s' "$sk" | grep -qE 'git\s+push.*\b(main|master)\b' && level3 "push main"
+  printf '%s' "$sk" | grep -qiE '(^|\s|/)deploy(\.sh)?(\s|$)' && level3 "deploy"
+  printf '%s' "$sk" | grep -qiE 'drop\s+(table|database|schema)|truncate\s+table|db:reset' && level3 "刪資料"
+  printf '%s' "$sk" | grep -qE 'sops\s+(-e|--encrypt|edit)|\.gitlab-ci\.yml|\.github/workflows' && level3 "改 CI / secrets"
   # 第二級
-  printf '%s' "$c" | grep -qE '(^|\s|&&|;)git\s+push(\s|$)' && level2 push "git push"
-  printf '%s' "$c" | grep -qE '(glab mr (create|update)|gh pr (create|edit))' && level2 mr "開 / 改 MR"
-  printf '%s' "$c" | grep -qE 'db:migrate|drizzle-kit (migrate|push)|alembic upgrade' && level2 migrate "本機 migrate"
-  printf '%s' "$c" | grep -qE '(^|\s|&&|;)rm\s+-(r|f|rf|fr)\b' && level2 delete "刪檔（rm -r/-f）"
-  printf '%s' "$c" | grep -qE '(pnpm (add|install|i)\b|npm (install|i|ci)\b|uv (add|sync)|pip install|yarn add|brew install)' && level2 install "裝套件"
-  printf '%s' "$c" | grep -qE '(^|\s|&&|;)git\s+rebase(\s|$)' && level2 rebase "git rebase"
-  printf '%s' "$c" | grep -qE '(curl|wget|http)\s+' && ! printf '%s' "$c" | grep -qE 'localhost|127\.0\.0\.1|litellm\.agentory\.cc' && level2 external "呼叫外部 API"
+  printf '%s' "$sk" | grep -qE '(^|\s|&&|;)git\s+push(\s|$)' && level2 push "git push"
+  printf '%s' "$sk" | grep -qE '(glab mr (create|update)|gh pr (create|edit))' && level2 mr "開 / 改 MR"
+  printf '%s' "$sk" | grep -qE 'db:migrate|drizzle-kit (migrate|push)|alembic upgrade' && level2 migrate "本機 migrate"
+  printf '%s' "$sk" | grep -qE '(^|\s|&&|;)rm\s+-(r|f|rf|fr)\b' && level2 delete "刪檔（rm -r/-f）"
+  printf '%s' "$sk" | grep -qE '(pnpm (add|install|i)\b|npm (install|i|ci)\b|uv (add|sync)|pip install|yarn add|brew install)' && level2 install "裝套件"
+  printf '%s' "$sk" | grep -qE '(^|\s|&&|;)git\s+rebase(\s|$)' && level2 rebase "git rebase"
+  printf '%s' "$sk" | grep -qE '(curl|wget|http)\s+' && ! printf '%s' "$sk" | grep -qE 'localhost|127\.0\.0\.1|litellm\.agentory\.cc' && level2 external "呼叫外部 API"
   [ "$GRANTED" = 1 ] && allow
   exit 0
 fi

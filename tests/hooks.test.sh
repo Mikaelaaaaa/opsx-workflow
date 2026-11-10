@@ -101,6 +101,8 @@ out="$(cg 'git commit -m "chore: bump"')"; assert_eq "$(decision "$out")" deny "
 out="$(cg 'git commit -m "chore: bump [no-change] 只是改 README"')"; assert_eq "$(decision "$out")" allow "commit: [no-change] 放行"
 assert_grep "Agentory-AI" "$OPSX_STATE_DIR/bypass.log"
 out="$(cg 'ls -la')"; assert_eq "$out" "" "commit: 非 commit 指令不出聲"
+out="$(cg 'echo "之後再 git commit -m x"')"; assert_eq "$out" "" "commit: 引號內的 git commit 不出聲"
+out="$(cg 'bash -c "git commit -m x"')"; assert_eq "$(decision "$out")" deny "commit: bash -c 內的 commit 仍擋"
 # 子殼分支 <主>--<子>：看子殼的 tasks.md，不看主殼
 mkdir -p "$C/subs/s1"; printf '## 1. x\n\n- [ ] 1.1 a\n' > "$C/subs/s1/tasks.md"
 printf '## 1. x\n\n- [ ] 1.1 s1\n' > "$C/tasks.md"
@@ -146,6 +148,18 @@ out="$(gg Write '{"file_path":"/x/.env.local","content":"A=1"}')"; assert_eq "$(
 out="$(gg Write '{"file_path":"/x/.env.example","content":"A="}')"; assert_eq "$(decision "$out")" allow "grant: .env.example 可以"
 out="$(gg Edit '{"file_path":"/x/.gitlab-ci.yml","old_string":"a","new_string":"b"}')"; assert_eq "$(decision "$out")" deny "grant: 改 CI 第三級"
 out="$(gg Edit '{"file_path":"/x/src/a.ts","old_string":"a","new_string":"b"}')"; assert_eq "$(decision "$out")" allow "grant: 一般檔直接做"
+# 字樣只在引號 / heredoc 內 → 不管；字串裡真的在執行的仍照第三級擋
+out="$(gg Bash "$(cmdj 'git commit -m "docs: 說明 glab mr merge 與 gh pr merge 的核准流程"')")"; assert_eq "$out" "" "grant: commit 訊息提到 merge 不觸發"
+out="$(gg Bash "$(cmdj 'opsx answer s g1 -- "不要 git push --force origin main，也不要 pnpm add x"')")"; assert_eq "$out" "" "grant: answer 文字提到 force-push / 裝套件不觸發"
+out="$(gg Bash "$(cmdj 'cat > inbox.md <<'"'EOF'"'
+drop table users; deploy.sh; curl https://api.example.com/x; rm -rf /
+EOF')")"; assert_eq "$out" "" "grant: heredoc 內的字樣不觸發"
+out="$(gg Bash "$(cmdj 'git push gitlab "main"')")"; assert_eq "$(decision "$out")" deny "grant: 引號包住的 main 仍是 push main"
+out="$(gg Bash "$(cmdj "git push --force gitlab 'feat/x'")")"; assert_eq "$(decision "$out")" deny "grant: 單引號分支名不讓 force-push 漏掉"
+out="$(gg Bash "$(cmdj 'bash -c "glab mr merge 212"')")"; assert_eq "$(decision "$out")" deny "grant: bash -c 內的 merge 仍擋"
+out="$(gg Bash "$(cmdj 'echo "$(gh pr merge 12)"')")"; assert_eq "$(decision "$out")" deny "grant: 雙引號內 \$(…) 的 merge 仍擋"
+out="$(gg Bash "$(cmdj 'eval "git push --force gitlab main"')")"; assert_eq "$(decision "$out")" deny "grant: eval 內的 force-push 仍擋"
+out="$(gg Bash "$(cmdj 'echo ok && sh -c '"'"'pnpm add left-pad'"'"'')")"; assert_eq "$(decision "$out")" deny "grant: sh -c 單引號內的裝套件仍擋"
 
 # ---------- grant gate：合併的一次性核准（herdr-board D5 / 3.3）----------
 FAKES="$OPSX_ROOT/tests/fakes"; mkdir -p "$FX/fakebin"
@@ -249,6 +263,15 @@ out="$(mg 'gh pr create --title t --body "$(cat <<'"'EOF'"'
 just text
 EOF
 )"')"; assert_eq "$(decision "$out")" deny "mr: --body \$(cat <<EOF) 不合格仍擋"
+# 字串裡真的在執行的指令仍檢查（骨架遞迴）
+out="$(mg 'bash -c "gh pr create --fill"')"; assert_eq "$(decision "$out")" deny "mr: bash -c 內的 create 仍擋"
+out="$(mg "sh -c 'glab mr create --fill'")"; assert_eq "$(decision "$out")" deny "mr: sh -c 單引號內的 create 仍擋"
+out="$(mg 'eval "gh pr create --fill"')"; assert_eq "$(decision "$out")" deny "mr: eval 內的 create 仍擋"
+out="$(mg 'echo "$(gh pr create --fill)"')"; assert_eq "$(decision "$out")" deny "mr: 雙引號內 \$(…) 的 create 仍擋"
+out="$(mg 'echo "`gh pr create --fill`"')"; assert_eq "$(decision "$out")" deny "mr: 雙引號內反引號的 create 仍擋"
+out="$(mg 'echo "$(echo "$(echo "$(echo "$(gh pr create --fill)")")")"')"; assert_eq "$(decision "$out")" deny "mr: 超過 3 層的 create 原樣比對仍擋"
+out="$(mg 'echo "$(echo hi) 之後用 gh pr create"')"; assert_eq "$out" "" "mr: 雙引號內 \$(…) 之外的字樣不觸發"
+out="$(mg "echo 'gh pr create' | xargs -I{} echo {}")"; assert_eq "$out" "" "mr: 單引號字樣餵 xargs 不觸發"
 
 # ---------- gate-timestamp ----------
 gt() { printf '{"cwd":"%s","tool_name":"%s","tool_input":{"file_path":"%s"},"hook_event_name":"PostToolUse"}' "$R" "${2:-Write}" "$1" | OPSX_NOW=2026-11-06T14:05:00+08:00 bash "$H/gate-timestamp.sh" 2>/dev/null; echo "rc=$?"; }
@@ -321,6 +344,17 @@ feat: x
 Co-Authored-By: Claude
 EOF
 )"')"; assert_eq "$(decision "$out")" deny "guard: heredoc"
+# 字樣只在引號 / heredoc 內 → 不擋
+out="$(sd 'echo "git push origin main"')"; assert_eq "$(decision "$out")" allow "guard: 引號內的 push main"
+out="$(sd 'opsx answer s g1 -- "git add .env 之後再說"')"; assert_eq "$(decision "$out")" allow "guard: 引號內的 git add .env"
+out="$(sd 'bash -c "git push origin main"')"; assert_eq "$(decision "$out")" deny "guard: bash -c 內的 push main 仍擋"
+out="$(sd 'git push origin "main"')"; assert_eq "$(decision "$out")" deny "guard: 引號包住的 main 仍擋"
+# 署名只抓署名形式：內文提到 claude / anthropic 放行
+out="$(sd 'git commit -m "fix: claude 路徑處理"')"; assert_eq "$(decision "$out")" allow "guard: 內文提到 claude"
+out="$(sd 'git commit -m "feat: x" -m "改用 Anthropic SDK 的 retry"')"; assert_eq "$(decision "$out")" allow "guard: 第二個 -m 提到 anthropic"
+out="$(sd 'git commit -m "docs: 說明 Co-Authored-By 與 Generated with 的檢查規則"')"; assert_eq "$(decision "$out")" allow "guard: 提到署名字樣但不是署名行"
+out="$(sd 'git commit -m "x" -m "Generated with [Claude Code](https://claude.com/claude-code)"')"; assert_eq "$(decision "$out")" deny "guard: Generated with 行"
+out="$(sd 'GIT_COMMITTER_NAME=Claude git commit -m x')"; assert_eq "$(decision "$out")" deny "guard: GIT_COMMITTER_NAME"
 
 # ---------- stop gate ----------
 STOP_STATE="$OPSX_STATE_DIR/stop-chain"
