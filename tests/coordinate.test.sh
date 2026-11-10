@@ -362,11 +362,13 @@ cards '[{"slug":"a1","section":"待處理","dispatch":'"$D"',"agent_status":"idl
 round || fail "type 不明 rc: $(cat "$FX/out")"
 assert_eq "$(count '^opsx answer')" 0 "type 不明不代答：$(cat "$OPSX_FAKE_LOG")"
 grep '??' "$LOG" | grep -q 'gu' || fail "type 不明要記 ?? 給人看：$(cat "$LOG")"
+assert_grep '^notification show \[demo/a1\] gate gu ' "$OPSX_FAKE_LOG"
 : > "$OPSX_FAKE_LOG"; : > "$LOG"
 cards '[{"slug":"a1","section":"待處理","dispatch":'"$D"',"agent_status":"idle","waiting":{"type":"等待決定","needs":"run","gate_id":"gr","question":"跑一下","recommended":"ls -la /tmp","options":[]}}]'
 round || fail "needs run rc: $(cat "$FX/out")"
 assert_eq "$(count '^opsx answer')" 0 "needs: run 不代答：$(cat "$OPSX_FAKE_LOG")"
 grep '??' "$LOG" | grep -q 'gr' || fail "needs: run 要記 ?? 給人看：$(cat "$LOG")"
+assert_grep '^notification show \[demo/a1\] gate gr ' "$OPSX_FAKE_LOG"
 : > "$OPSX_FAKE_LOG"; : > "$LOG"
 cards '[{"slug":"a1","section":"待處理","dispatch":'"$D"',"agent_status":"idle","waiting":{"type":"等待授權","needs":"run","action":"external","gate_id":"ga","question":"要跑 chmod","recommended":"sudo chmod 755 x","options":["這次"]}}]'
 round || fail "approval + needs run rc: $(cat "$FX/out")"

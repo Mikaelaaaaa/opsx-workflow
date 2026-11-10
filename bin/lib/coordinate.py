@@ -284,6 +284,7 @@ class Round:
         w, key = c["waiting"], card_key(c)
         if w.get("needs") == "run":
             self.log("?? %s gate %s 要人在終端機跑指令再貼結果，不代答：%s" % (key, w["gate_id"], (w.get("recommended") or "")[:100]))
+            self.notify_gate(c, w, "要你在終端機跑指令")
             return
         if w["type"] == "等待授權":
             # 合併永遠由人按：action 不一定剛好寫成 merge（mr-merge、external 打合併 API），題目也要看
@@ -300,6 +301,7 @@ class Round:
             return
         if w["type"] == "type 不明":
             self.log("?? %s gate %s 的 type 沒寫或不在 approval | decision，不代答，要人看：%s" % (key, w["gate_id"], (w.get("question") or "")[:100]))
+            self.notify_gate(c, w, "的 type 不明")
             return
         q = w.get("question") or ""
         pick = w.get("recommended") or (w.get("options") or [None])[0]
