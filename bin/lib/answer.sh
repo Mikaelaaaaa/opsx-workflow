@@ -60,14 +60,16 @@ if not text:
 gates_path = os.path.join(d, "gates.md")
 src = open(gates_path, encoding="utf-8").read()
 parts = re.split(r"(?m)^(?=## )", src)
-idx = next((i for i, p in enumerate(parts) if p.startswith("## ") and p.split("\n", 1)[0][3:].strip() == gate), None)
-if idx is None:
+def field_of(section, name):
+    m = re.search(r"(?m)^%s:\s*(.*)$" % name, section); return m.group(1).strip() if m else ""
+named = [i for i, p in enumerate(parts) if p.startswith("## ") and p.split("\n", 1)[0][3:].strip() == gate]
+if not named:
     fail("answer: gates.md 裡沒有 gate「%s」（有：%s）" % (gate, ", ".join(p.split("\n", 1)[0][3:].strip() for p in parts if p.startswith("## ")) or "無"))
+idx = next((i for i in named if field_of(parts[i], "status") == "open"), None)
+if idx is None:
+    fail("answer: gate「%s」不是 open（status: %s），不能再回" % (gate, "、".join(field_of(parts[i], "status") or "缺" for i in named)))
 sec = parts[idx]
-def field(name):
-    m = re.search(r"(?m)^%s:\s*(.*)$" % name, sec); return m.group(1).strip() if m else ""
-if field("status") != "open":
-    fail("answer: gate「%s」不是 open（status: %s），不能再回" % (gate, field("status") or "缺"))
+def field(name): return field_of(sec, name)
 gtype, action = field("type"), field("action")
 if grant and gatetype.normalize(gtype) != gatetype.APPROVAL:
     fail("answer: --grant 只對 type: approval 的 gate 有意義，「%s」是 %s" % (gate, gtype or "沒寫 type"))

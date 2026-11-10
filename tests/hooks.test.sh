@@ -521,11 +521,38 @@ out="$(sg)"; reason "$out" | grep -q '/review' && fail "stop: 確認 sha 等於 
 git -C "$R" commit -q --allow-empty -m "fix: after confirm"
 out="$(sg)"; reason "$out" | grep -q '再跑一次 /review' || fail "stop: 確認後又有新 commit 要重審"
 printf '# report\n' > "$C/report.md"
+# babysit 站查 forge：MR 狀態來自假 glab
+use_fakes glab; export OPSX_FAKE_LOG="$FX/glab.log" OPSX_TEST_GLAB_JSON="$FX/mr.json" OPSX_MR_CACHE_TTL=0; : > "$OPSX_FAKE_LOG"
+OPEN_MR='{"state":"opened","draft":false,"has_conflicts":false,"sha":"abc123","head_pipeline":{"status":"success"},"unresolved_discussions_count":0}'
+MERGED_MR='{"state":"merged","draft":false,"has_conflicts":false,"sha":"abc123","merged_at":"2026-11-10T03:00:00.000Z"}'
+printf '%s' "$OPEN_MR" > "$OPSX_TEST_GLAB_JSON"
 # babysit 站：有 MR 沒有 babysit: 行
 printf '# report\n\n## MR\nhttps://gitlab.tsg-navigator.com/a/b/-/merge_requests/212 · opened 2026-11-10 · auto-merge: no\n' > "$C/report.md"
 out="$(sg)"; assert_eq "$(decision "$out")" block "stop: MR 已開沒 babysit → 擋"; reason "$out" | grep -q '/babysit' || fail "stop: 要叫 /babysit"
 done_report
 out="$(sg)"; assert_eq "$out" "" "stop: 有 babysit: 行放行"
+# MR 已合併、workplan 沒標 merged、沒有 babysit: 行 → 要 /archive，不要 babysit 記號
+printf '%s' "$MERGED_MR" > "$OPSX_TEST_GLAB_JSON"
+printf '# report\n\n## MR\nhttps://gitlab.tsg-navigator.com/a/b/-/merge_requests/212 · opened 2026-11-10 · auto-merge: no\n' > "$C/report.md"
+out="$(sg)"; assert_eq "$(decision "$out")" block "stop: MR 已合併 → 擋"
+reason "$out" | grep -q '/archive' || fail "stop: 已合併要叫 /archive: $(reason "$out")"
+reason "$out" | grep -q 'babysit' && fail "stop: 已合併不該提 babysit: $(reason "$out")"
+# 已合併也勝過舊的 babysit: 記號
+done_report
+out="$(sg)"; reason "$out" | grep -q '/archive' || fail "stop: 已合併且有 babysit: 行仍要 /archive: $(reason "$out")"
+# 擋滿 3 次：第 4 次寫「卡在接 /archive #1」並放行
+rm -f "$C/gates.md"; rm -rf "$STOP_STATE"
+KEEP=1 sg >/dev/null; KEEP=1 sg >/dev/null; KEEP=1 sg >/dev/null
+out="$(KEEP=1 sg)"; assert_eq "$out" "" "stop: 已合併擋 3 次後放行"
+assert_grep '^## 卡在接 /archive #1$' "$C/gates.md"; assert_not_grep '卡在接 /babysit' "$C/gates.md"
+rm -f "$C/gates.md"
+# 查不到 MR 狀態：維持 /babysit，reason 帶查詢的錯誤文字
+printf '# report\n\n## MR\nhttps://gitlab.tsg-navigator.com/a/b/-/merge_requests/212 · opened 2026-11-10 · auto-merge: no\n' > "$C/report.md"
+printf '' > "$OPSX_TEST_GLAB_JSON"
+out="$(sg)"; assert_eq "$(decision "$out")" block "stop: 查不到 MR → 維持擋"
+reason "$out" | grep -q '/babysit' || fail "stop: 查不到要叫 /babysit: $(reason "$out")"
+reason "$out" | grep -q 'glab mr view 212' || fail "stop: 要帶查詢的錯誤文字: $(reason "$out")"
+printf '%s' "$OPEN_MR" > "$OPSX_TEST_GLAB_JSON"; done_report
 # 沒有卡的 branch 不擋
 git -C "$R" checkout -q -b scratch-x; out="$(sg)"; assert_eq "$out" "" "stop: branch 對不到卡不擋"
 git -C "$R" checkout -q "feat/eval-core/mikaela"
