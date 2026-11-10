@@ -89,6 +89,12 @@ authz.update(sd, consume)
 sys.exit(0 if consumed["ok"] else 3)
 PY
 }
+# repo 有沒有 autopilot / drive 的卡：0 有、1 沒有（含沒有 dispatch.json）、其他值是 dispatch.json 讀不了
+repo_has_live_card() { # <repo>
+  local f="$OPSX_STATE_DIR/dispatch.json"
+  [ -f "$f" ] || return 1
+  jq -e --arg p "$1/" 'any(to_entries[]; (.key | startswith($p)) and (.value | type == "object") and (.value.mode == "autopilot" or .value.mode == "drive"))' "$f" >/dev/null 2>&1
+}
 # 用 jq 不用 python：python 沒記或壞掉時，閘門仍要分得出哪些卡歸它管。
 card_mode() { # <repo> <slug>：印 interactive、autopilot、drive、stopped，沒派過就空；dispatch.json 不是合法 JSON 時回非 0
   local f="$OPSX_STATE_DIR/dispatch.json"

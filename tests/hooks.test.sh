@@ -216,6 +216,33 @@ printf '{}' > "$PD/authz.json"
 out="$(gg Bash "$(cmdj 'gh pr merge 12 --squash')")"; assert_eq "$(decision "$out")" deny "grant: 沒核准 deny"
 printf '{"Agentory-AI/eval-core":{"mode":"autopilot","grants":["migrate"]}}' > "$OPSX_STATE_DIR/dispatch.json"; rm -f "$C/report.md"
 
+# ---------- grant gate：對不到卡（grant-gate-unmapped-branch）----------
+# subagent 的 worktree-agent-<id> 與 fanout 子分支 feat/<主>--<子>/<user> 對不到 dispatch.json 的卡
+git -C "$R" worktree add -q "$R/.claude/worktrees/agent-x" -b worktree-agent-x
+git -C "$R" worktree add -q "$R/.claude/worktrees/bt-as" -b feat/bt--as/u
+UW1="$(cd "$R/.claude/worktrees/agent-x" && pwd -P)"; UW2="$(cd "$R/.claude/worktrees/bt-as" && pwd -P)"
+ugg() { run_hook opsx-grant-gate.sh "$(j "$1" Bash "$(cmdj "$2")")"; }
+printf '{"Agentory-AI/eval-core":{"mode":"autopilot","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"
+out="$(ugg "$UW1" 'git push --force origin main')"; assert_eq "$(decision "$out")" deny "unmapped: worktree-agent 分支 force-push main"
+reason "$out" | grep -q '第三級' || fail "unmapped: 要說第三級: $(reason "$out")"
+out="$(ugg "$UW2" 'glab mr merge 212')"; assert_eq "$(decision "$out")" deny "unmapped: fanout 子分支 merge"
+out="$(ugg "$UW2" 'git push origin HEAD')"; assert_eq "$(decision "$out")" allow "unmapped: 第二級放行"
+out="$(run_hook opsx-grant-gate.sh "$(j "$UW1" Write '{"file_path":"/x/.gitlab-ci.yml","content":"a"}')")"; assert_eq "$(decision "$out")" deny "unmapped: 改 CI 第三級"
+out="$(run_hook opsx-grant-gate.sh "$(j "$UW1" Write '{"file_path":"/x/.env.local","content":"A=1"}')")"; assert_eq "$(decision "$out")" allow "unmapped: 寫 .env 屬第二級放行"
+printf '{"Agentory-AI/eval-core":{"mode":"stopped"},"Agentory-AI/x":{"mode":"interactive"},"Other/y":{"mode":"autopilot"}}' > "$OPSX_STATE_DIR/dispatch.json"
+out="$(ugg "$UW1" 'git push --force origin main')"; assert_eq "$(decision "$out")" allow "unmapped: repo 沒有在跑的卡就放行"
+printf '{}' > "$OPSX_STATE_DIR/dispatch.json"
+out="$(ugg "$UW1" 'git push --force origin main')"; assert_eq "$(decision "$out")" allow "unmapped: 空 dispatch.json 放行"
+rm -f "$OPSX_STATE_DIR/dispatch.json"
+out="$(ugg "$UW1" 'git push --force origin main')"; assert_eq "$(decision "$out")" allow "unmapped: 沒有 dispatch.json 放行"
+printf 'not json' > "$OPSX_STATE_DIR/dispatch.json"
+out="$(ugg "$UW1" 'git push --force origin main')"; assert_eq "$(decision "$out")" allow "unmapped: dispatch.json 壞掉且沒有這個 repo 的卡，放行"
+printf '{"Agentory-AI/eval-core":{"mode":"autopilot"' > "$OPSX_STATE_DIR/dispatch.json"
+out="$(ugg "$UW1" 'git push --force origin main')"; assert_eq "$(decision "$out")" deny "unmapped: dispatch.json 壞掉且有這個 repo 的卡，先擋"
+printf '{"Agentory-AI/bt":{"mode":"autopilot"' > "$OPSX_STATE_DIR/dispatch.json"
+out="$(ugg "$UW2" 'git push --force origin main')"; assert_eq "$(decision "$out")" deny "unmapped: 有 slug 的分支，壞掉的 dispatch.json 裡有這張卡的 key 就擋"
+printf '{"Agentory-AI/eval-core":{"mode":"autopilot","grants":["migrate"]}}' > "$OPSX_STATE_DIR/dispatch.json"
+
 # ---------- mr format gate ----------
 mg() { run_hook mr-format-gate.sh "$(j "$R" Bash "$(cmdj "$1")")"; }
 out="$(mg 'glab mr create --fill')"; assert_eq "$(decision "$out")" deny "mr: --fill 沒 description"
