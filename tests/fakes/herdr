@@ -47,7 +47,9 @@ case "$1 $2" in
   # OPSX_TEST_RENAME_FAIL 設了就回 herdr 的錯誤（auto-dispatch 的佇列 hook 用）
   "agent rename") if [ -n "${OPSX_TEST_RENAME_FAIL:-}" ]; then echo '{"error":{"code":"agent_not_found","message":"no agent named '"$3"'"},"id":"cli:agent:rename"}' >&2; exit 1; fi
                   echo '{"result":{"renamed":true}}' ;;
-  "pane close") echo '{"result":{"closed":true}}' ;;
+  # OPSX_TEST_PANE_CLOSE_FAIL 設了就回錯誤碼（pane 已經不在）
+  "pane close") if [ -n "${OPSX_TEST_PANE_CLOSE_FAIL:-}" ]; then echo '{"error":{"code":"'"$OPSX_TEST_PANE_CLOSE_FAIL"'","message":"no pane '"$3"'"},"id":"cli:pane:close"}' >&2; exit 1; fi
+                echo '{"result":{"closed":true}}' ;;
   "pane focus") echo '{"result":{"focused":true}}' ;;
   "agent focus") echo '{"result":{"focused":true}}' ;;
   "plugin list") cat "${OPSX_TEST_HERDR_PLUGINS:-/dev/null}"; echo ;;

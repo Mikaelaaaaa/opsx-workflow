@@ -15,6 +15,8 @@ Unified development workflow plugin for Claude Code. Covers the full cycle: thin
 `init --global` 會把 PATH 上 `python3` 背後真正的執行檔記在 `~/.local/state/opsx/python`，opsx 和 hooks 只用它（繞過 pyenv shim，每次省 250 ms 左右）。
 升級到有這個檔的版本後、或 pyenv 換了 python 版本後，要再跑一次 `opsx init --global`；沒跑的話 opsx 會報錯，卡的 branch 上的授權閘門會擋下 Bash 呼叫。
 
+合併核准、「這張卡」與「這次」的授權存在 `~/.local/state/opsx-protected/authz.json`（`init --global` 建，0700）。它刻意放在 `~/.local/state/opsx/` 之外，不要把它或它的父目錄加進任何 `additionalDirectories`：沙盒內的 session 寫得到 `dispatch.json`，所以閘門只信這裡。`opsx merge`、`opsx answer --grant card|this` 要在沙盒外跑（終端機或看板），在 agent 的沙盒裡會報「受保護位置寫不進去」。
+
 ## 看板
 
 資料全是投影（`opsx collect`：`openspec/changes/*/`、`~/.local/state/opsx/`、`herdr agent list`、`glab mr view`），看板自己不存狀態。

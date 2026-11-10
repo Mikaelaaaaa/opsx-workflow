@@ -16,9 +16,16 @@ rule=""
 slug="$(card_slug)"
 if [ -n "$slug" ] && [ -n "${OPSX_PY:-}" ]; then
   case "$(card_mode "$(basename "$top")" "$slug" 2>/dev/null || true)" in
-    autopilot|drive) rule=" · autopilot：要問人的事寫 gates.md（等待決定 / 等待授權），不用 AskUserQuestion、不在 pane 問；不是產品取捨、也可逆的題採 Recommended，記「自動採用」 · Bash 會被 dontAsk 拒的寫法：for / while（不寫迴圈）、把命令替換的結果賦值給變數再展開、命令替換裡放 pipe、{ } 群組、source 或 .、bash -c 跑多段、印 \$?；一個 Bash 呼叫做一件事，讀多個檔用 Read 或 cat a b c，記決定用 opsx log，路徑寫字面絕對路徑" ;;
+    autopilot|drive) rule=" · autopilot：要問人的事寫 gates.md（type: approval | decision；要使用者在終端機跑指令的另加 needs: run），不用 AskUserQuestion、不在 pane 問；不是產品取捨、也可逆的題採 Recommended，記「自動採用」 · Bash 會被 dontAsk 拒的寫法：for / while（不寫迴圈）、把命令替換的結果賦值給變數再展開、命令替換裡放 pipe、{ } 群組、source 或 .、bash -c 跑多段、印 \$?；一個 Bash 呼叫做一件事，讀多個檔用 Read 或 cat a b c，記決定用 opsx log，路徑寫字面絕對路徑" ;;
     interactive) rule=" · interactive：要授權就直接問，不寫 gate" ;;
   esac
+fi
+
+# 第二站之後由 drive 送、重派由 coordinate 送，都不帶指示；只有這裡每句都跑，所以由這裡提醒。每句都跑，只用 awk 不起 python
+card="$(card_dir)"
+if [ -n "$card" ] && [ -f "$card/inbox.md" ]; then
+  notes="$(awk '/^## 派工指示[[:space:]]*$/ { f = 1; next } /^## / { f = 0 } f && /^- / { n++ } END { print n + 0 }' "$card/inbox.md")"
+  if [ "$notes" -gt 0 ]; then rule=" · 派工指示 $notes 條 · Read $card/inbox.md ## 派工指示 · 跟 D 衝突開 gate$rule"; fi
 fi
 
 for kw in babysit pickup pause forensics correct reflect audit deepen dispatch; do

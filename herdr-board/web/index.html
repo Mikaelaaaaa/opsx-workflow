@@ -112,6 +112,12 @@ main{flex:1;min-width:0;padding-left:max(16px,env(safe-area-inset-left,0px));pad
 .bar{display:inline-block;width:64px;height:4px;background:var(--border);border-radius:2px;vertical-align:middle;margin-right:8px;overflow:hidden}
 .bar i{display:block;height:100%;background:var(--accent)}
 .bar i.warn{background:var(--warn)}
+.tree{display:flex;flex-wrap:wrap;align-items:center;gap:4px 12px;padding:8px 0;border-top:1px solid var(--border-soft);font-size:13px}
+.tree:first-of-type{border-top:0}
+.tree.sub{padding-left:22px}
+.tree .slug{font-family:var(--font-mono);color:var(--accent);min-width:140px}
+.tree .t{color:var(--fg-2);min-width:0;overflow-wrap:anywhere}
+.tree .answers{flex-basis:100%;display:flex;gap:6px;flex-wrap:wrap}
 
 .scrim{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:40}
 .drawer{position:fixed;top:0;right:0;bottom:0;width:min(720px,100%);background:var(--surface);border-left:1px solid var(--border);z-index:41;display:flex;flex-direction:column;overflow-y:auto}
@@ -262,9 +268,9 @@ const api={
   async collect(){const r=await fetch('/api/collect',{headers:{'X-Opsx-Token':token()}});if(r.status===401)throw new Error('token 不對：從 herdr 的 open-board 重開一次');if(!r.ok)throw new Error('collect '+r.status+'：'+(await r.text()).slice(0,200));return r.json();},
   async log(since){const r=await fetch('/api/log'+(since?'?since='+encodeURIComponent(since):''),{headers:{'X-Opsx-Token':token()}});const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error('log '+r.status+'：'+(j.error||j.stderr||''));return j;},
   async output(pane){const r=await fetch('/api/output?pane='+encodeURIComponent(pane),{headers:{'X-Opsx-Token':token()}});const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error('output '+r.status+'：'+(j.error||''));return j;},
-  async post(action,body){const r=await fetch('/api/'+action,{method:'POST',headers:{'X-Opsx-Token':token(),'Content-Type':'application/json'},body:JSON.stringify(body)});const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(action+' '+r.status+'：'+(j.error||''));if(!j.ok)throw new Error((j.stderr||j.stdout||'opsx '+action+' 失敗').trim());return j;}
+  async post(action,body){const r=await fetch('/api/'+action,{method:'POST',headers:{'X-Opsx-Token':token(),'Content-Type':'application/json'},body:JSON.stringify(body)});const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(action+' '+r.status+'：'+(j.error||j.stderr||''));if(!j.ok)throw new Error((j.stderr||j.stdout||'opsx '+action+' 失敗').trim());return j;}
 };
-let data={generated_at:null,scopes:[],cards:[],unmatched_agents:[],errors:[],legacy:{},worktrees_skipped:[]};let lastRaw='';
+let data={generated_at:null,scopes:[],cards:[],sessions:[],unmatched_agents:[],errors:[],legacy:{},worktrees_skipped:[]};let lastRaw='';
 const ui={tab:'home',scope:'all',ws:null,repo:null,sel:null,open:null,doneOpen:false,busy:false,logFilter:'all',drop:null,dropText:'',fileRepo:{}};
 let tl=null;let tlErr='';let bannerClosed=false;let seenAt=null;  /* 這頁最後一次送給 /api/seen 的時間 */
 const outputs={};  /* 卡 key → {ok, text} 或 {ok:false, error}；抽屜打開時才抓 */
@@ -277,7 +283,8 @@ const PHASES=['explore','grill','propose','apply','review','pr','babysit','archi
 const PHASE_LABEL={explore:'explore',grill:'grill',propose:'propose',apply:'apply',review:'review',pr:'MR',babysit:'MR',archive:'已合併'};
 const MODEL_BY_KIND={dev:'claude-opus-5-5',refactoring:'claude-opus-5-5',perf:'claude-opus-5-5',experiment:'claude-opus-5-5','bug-fix':'claude-sonnet-5-5',chore:'claude-sonnet-5-5',ops:'claude-sonnet-5-5'};
 const GRANT_LABEL={push:'push',mr:'建立 MR',migrate:'本機 migrate',delete:'刪檔',install:'裝套件',rebase:'rebase',external:'外部 API',env:'寫 .env'};
-const WAIT_BADGE={'等待授權':'data','等待決定':'data','可以合併':'ok','終端機等待輸入':'danger'};
+const GRANT_OF={'這次':'this','這張卡':'card','這個 repo 永遠':'repo'};
+const WAIT_BADGE={'等待授權':'data','等待決定':'data','type 不明':'danger','可以合併':'ok','終端機等待輸入':'danger'};
 const COND=[['opened','MR 開著'],['not_draft','不是草稿'],['no_conflicts','沒有衝突'],['pipeline','Pipeline 通過'],['threads','沒有未解的討論']];
 
 const $=(s,el=document)=>el.querySelector(s);
@@ -301,9 +308,10 @@ function inScope(c){
 }
 function scopeLabel(){if(ui.repo)return ui.repo;if(ui.scope!=='ws')return 'workspace';return ui.ws||'沒掛的';}
 const sect=name=>data.cards.filter(c=>c.section===name&&inScope(c));
-/* 範圍視圖下其他 repo 也有卡在等時，多列全部範圍的總數；那些卡在首頁別處都看不到 */
-function counterHtml(cards,inScope){
-  const all=cards.filter(c=>c.section==='待處理'),here=all.filter(inScope).length;
+/* 範圍視圖下其他 repo 也有卡在等時，多列全部範圍的總數；那些卡在首頁別處都看不到。
+   數法跟首頁待處理區一樣：session 一筆算一個，收進 session 的主 change 卡不另算 */
+function counterHtml(cards,sessions,inScope){
+  const all=[...sessions.filter(s=>s.section==='待處理'),...cards.filter(c=>c.section==='待處理'&&!c.session)],here=all.filter(inScope).length;
   const own=here?`待處理 <b>${here}</b>`:'<span class="faint">無待處理</span>';
   return all.length>here?`${own} · <button class="link" data-act="scope-all">全部 <b>${all.length}</b></button>`:own;
 }
@@ -329,11 +337,11 @@ function bot(c,size){
 /* ---------- 列 ---------- */
 function rowAttn(c){
   const w=c.waiting;let l2='',act='';
-  const rec=w.recommended?`<span class="sep">·</span>建議：${esc(w.recommended)}`:'';
+  const rec=w.recommended?`<span class="sep">·</span>${w.needs==='run'?'在終端機跑':'建議'}：${esc(w.recommended)}`:'';
   if(w.type==='等待授權'){l2=`<span class="q">${esc(w.question||w.action||'')}</span>${rec}`;
-    const G={'這次':'this','這張卡':'card','這個 repo 永遠':'repo'};
-    act=(w.options||[]).map((o,i)=>o==='拒絕'?`<button class="sm ghost danger" data-act="answer" data-text="拒絕">拒絕</button>`:`<button class="sm ${i===0?'primary':''}" data-act="answer" data-grant="${G[o]||''}" data-text="允許">${esc(o)}</button>`).join('');}
-  else if(w.type==='等待決定'){l2=`<span class="q">${esc(w.question||'')}</span>${rec}`;act=(w.recommended?`<button class="primary sm" data-act="answer" data-text="${esc(w.recommended)}">照建議</button>`:'')+`<button class="sm" data-act="open">自己選</button>`;}
+    act=(w.options||[]).map((o,i)=>o==='拒絕'?`<button class="sm ghost danger" data-act="answer" data-text="拒絕">拒絕</button>`:`<button class="sm ${i===0?'primary':''}" data-act="answer" data-grant="${GRANT_OF[o]||''}" data-text="允許">${esc(o)}</button>`).join('');}
+  else if(w.type==='等待決定'){l2=`<span class="q">${esc(w.question||'')}</span>${rec}`;act=(w.recommended&&w.needs!=='run'?`<button class="primary sm" data-act="answer" data-text="${esc(w.recommended)}">照建議</button>`:'')+`<button class="sm ${w.needs==='run'?'primary':''}" data-act="open">${w.needs==='run'?'貼結果':'自己選'}</button>`;}
+  else if(w.type==='type 不明'){l2=`<span class="q">${esc(w.question||'')}</span><span class="sep">·</span>gates.md 的 type 要寫 approval | decision`;act=`<button class="sm" data-act="open">看詳情</button>`;}
   else if(w.type==='可以合併'){l2=`<span class="q">MR 五個條件都通過</span><span class="sep">·</span><span class="mono">${esc(c.mr.head_sha||'').slice(0,8)}</span>`;act=`<button class="primary sm" data-act="merge">合併</button><a class="sm" href="${esc(c.mr.url)}" target="_blank" rel="noopener"><button class="sm">開啟 MR</button></a>`;}
   else {l2=`<span class="q">${esc(w.question)}</span>`;act=`<button class="primary sm" data-act="pane">開啟 pane</button><button class="sm" data-act="stop">停止</button>`;}
   return `<div class="row" data-key="${esc(key(c))}" role="button" tabindex="0" aria-selected="${ui.sel===key(c)}">
@@ -368,16 +376,53 @@ function rowDone(c){
 function rowUnmatched(a){
   return `<div class="row unmatched"><div class="avatar plain">?</div><div class="main"><div class="l1"><span class="title">${esc(a.name||'(沒名字)')}</span><span class="meta">pane ${esc(a.pane)} · ${esc(a.agent_status||'')}</span></div><div class="l2 faint">沒對到卡：不在 dispatch.json，手動開的 agent</div></div><div class="act"><button class="sm" data-act="pane-id" data-agent="${esc(a.name||'')}">開啟 pane</button></div></div>`;
 }
+const ORPHAN_WHY={archived:'卡已歸檔',split:'卡已拆開',stopped:'卡已停止','card-missing':'卡的目錄不在了'};
+function rowOrphanSummary(n){
+  return `<div class="row unmatched"><div class="avatar plain">!</div><div class="main"><div class="l1"><span class="title">孤兒 pane ${n} 個</span><span class="meta">idle 的才會關，還在做事的下一輪再看</span></div></div><div class="act"><button class="primary sm" data-act="reap-all">全部關閉</button></div></div>`;
+}
+function rowOrphan(o){
+  return `<div class="row unmatched"><div class="avatar plain">!</div><div class="main"><div class="l1"><span class="title">${esc(o.repo)}/${esc(o.slug)}</span><span class="meta">pane ${esc(o.pane)} · ${esc(o.agent_status||'')}</span></div><div class="l2 faint">孤兒 pane：${esc(ORPHAN_WHY[o.reason]||o.reason)}</div></div><div class="act"><button class="sm" data-act="reap" data-pane="${esc(o.pane)}">關閉</button></div></div>`;
+}
+/* session（subchange-fanout D7）：一筆 session 一張卡，點開是主 change → 子 change 的樹。tests/board-tree.test.sh 從這裡切到 rowSession */
+function sessionLine(s){
+  const c=s.current;
+  return `${s.feature} · 主 change ${s.main_done}/${s.main_total} · 子 change ${s.sub_done}/${s.sub_total} · ${c?[c.slug,c.stage].filter(Boolean).join(' '):'已合併'}`;
+}
+function treeRows(s){
+  const gate=x=>x.waiting&&x.waiting.gate_id?' · '+[x.waiting.gate_id,x.waiting.question].filter(Boolean).join(' '):x.open_gates.length?' · '+x.open_gates.map(g=>g.id).join(' '):'';
+  const stage=x=>x.stage||'—';
+  return s.mains.flatMap(m=>{
+    /* herdr agent 名：dispatch.json 的 herdr_name，沒有這個欄位就是 slug（bin/lib/route.sh） */
+    const who=m.dispatch?[m.dispatch.herdr_name||m.slug,m.agent_status].filter(Boolean).join(' '):'—';
+    return [{main:m.slug,sub:null,waiting:m.waiting,text:`${who} · ${stage(m)}${gate(m)}`},
+      ...m.subs.map(x=>({main:m.slug,sub:x.slug,waiting:x.waiting,text:`${x.worker||'—'} · ${stage(x)}${gate(x)}`}))];
+  });
+}
+const answerBody=(main,sub,gate,text)=>sub?{slug:main,sub,gate,text}:{slug:main,gate,text};
+/* 首頁一個 section 要畫的：session 照自己的 section 放，收進 session 的主 change 卡不單獨畫 */
+const homeSect=(cards,sessions,name)=>({sessions:sessions.filter(s=>s.section===name),cards:cards.filter(c=>c.section===name&&!c.session)});
+const skey=s=>'session:'+s.repo+'/'+s.feature;
+function rowSession(s){
+  const k=skey(s);
+  return `<div class="row" data-key="${esc(k)}" role="button" tabindex="0" aria-selected="${ui.sel===k}">
+    <div class="avatar plain">${s.current?'SES':'—'}</div>
+    <div class="main"><div class="l1"><span class="title">${esc(sessionLine(s))}</span><span class="meta">${esc(s.repo)}</span></div></div>
+    <div class="act"></div></div>`;
+}
 const panel=(title,n,sub,body)=>`<section class="panel"><div class="panel-h"><span class="h2">${title}</span><span class="n">${n}</span>${sub?`<span class="sub">${sub}</span>`:''}</div>${body}</section>`;
 
 function renderHome(){
-  const A=sect('待處理'),R=sect('進行中'),Y=sect('待指派'),D=sect('已完成');
-  const un=ui.scope==='all'?data.unmatched_agents:[];
+  const H=name=>homeSect(data.cards.filter(inScope),data.sessions.filter(inScope),name);
+  const A=H('待處理'),R=H('進行中'),Y=H('待指派'),D=H('已完成');
+  const n=x=>x.sessions.length+x.cards.length;
+  const list=(x,row)=>x.sessions.map(rowSession).join('')+x.cards.map(row).join('');
+  const un=ui.scope==='all'?data.unmatched_agents.filter(a=>!a.orphan):[];
+  const orph=data.orphans||[];   // 孤兒不屬於任何範圍，範圍篩選不影響
   const leg=Object.entries(data.legacy||{}).filter(([r])=>ui.scope!=='ws'||(ui.repo?r===ui.repo:wsOf(r)===ui.ws));
-  let h=renderBanner()+panel('待處理',A.length,'只有你能做的：授權、決定、合併、終端機卡住',A.length?A.map(rowAttn).join(''):'<div class="empty">沒有等你的事</div>');
-  h+=panel('進行中',R.length+un.length,'進度 status.json · 狀態 herdr',(R.map(rowRunning).join('')+un.map(rowUnmatched).join(''))||'<div class="empty">沒有執行中的工作</div>');
-  h+=panel(ui.scope==='ws'?`待指派 · ${esc(scopeLabel())}`:'待指派',Y.length,'explore 過、還沒派出去的（剛收進來的在收件匣）',(Y.length?Y.map(rowReady).join(''):'<div class="empty">沒有待指派的工作</div>')+(leg.length?`<div class="empty">舊 schema 的 change 不列（沒有 inbox.md、不是 schema: opsx）：${leg.map(([r,n])=>`${esc(r)} ${n}`).join(' · ')}</div>`:''));
-  h+=`<section class="panel"><div class="panel-h"><button class="tg h2" data-act="done-toggle" aria-expanded="${ui.doneOpen}"><span class="chev"></span>已完成</button><span class="n">${D.length}</span></div>${ui.doneOpen?(D.length?D.map(rowDone).join(''):'<div class="empty">還沒有</div>'):''}</section>`;
+  let h=renderBanner()+panel('待處理',n(A),'只有你能做的：授權、決定、合併、終端機卡住',n(A)?list(A,rowAttn):'<div class="empty">沒有等你的事</div>');
+  h+=panel('進行中',n(R)+un.length+orph.length,'進度 status.json · 狀態 herdr',(list(R,rowRunning)+un.map(rowUnmatched).join('')+(orph.length?rowOrphanSummary(orph.length)+orph.map(rowOrphan).join(''):''))||'<div class="empty">沒有執行中的工作</div>');
+  h+=panel(ui.scope==='ws'?`待指派 · ${esc(scopeLabel())}`:'待指派',n(Y),'explore 過、還沒派出去的（剛收進來的在收件匣）',(n(Y)?list(Y,rowReady):'<div class="empty">沒有待指派的工作</div>')+(leg.length?`<div class="empty">舊 schema 的 change 不列（沒有 inbox.md、不是 schema: opsx）：${leg.map(([r,n])=>`${esc(r)} ${n}`).join(' · ')}</div>`:''));
+  h+=`<section class="panel"><div class="panel-h"><button class="tg h2" data-act="done-toggle" aria-expanded="${ui.doneOpen}"><span class="chev"></span>已完成</button><span class="n">${n(D)}</span></div>${ui.doneOpen?(n(D)?list(D,rowDone):'<div class="empty">還沒有</div>'):''}</section>`;
   return h;
 }
 /* 收件匣：沒派出、還沒 explore 的卡，依 inbox.md 的 source 分組 */
@@ -517,9 +562,9 @@ async function loadLog(){
 function showTab(t){ui.tab=t;ui.sel=null;history.replaceState(null,'','#'+t);render();if(t==='log')loadLog();}
 
 function render(){
-  const A=sect('待處理');
-  $('#counter').innerHTML=counterHtml(data.cards,inScope);
-  $('#home-n').textContent=A.length||'';
+  const A=homeSect(data.cards.filter(inScope),data.sessions.filter(inScope),'待處理');
+  $('#counter').innerHTML=counterHtml(data.cards,data.sessions,inScope);
+  $('#home-n').textContent=A.sessions.length+A.cards.length||'';
   $('#inbox-n').textContent=sect('收件匣').length+(data.unfiled||[]).length||'';
   for(const t of ['home','inbox','log'])$('#tab-'+t).setAttribute('aria-selected',ui.tab===t);
   $('#stamp').textContent=data.generated_at?'collect '+ago(data.generated_at):'';
@@ -550,7 +595,18 @@ function flowLine(c){
   const cur=c.status?c.status.phase:c.stage;const ci=PHASES.indexOf(cur==='babysit'?'pr':cur);
   return PHASES.filter(p=>p!=='babysit').map((p,i)=>`<span class="${i<ci?'done':i===ci?'here':''}">${PHASE_LABEL[p]}</span>`).join(' › ');
 }
+function renderTree(){
+  const s=data.sessions.find(s=>skey(s)===ui.open);if(!s){closeDrawer();return;}
+  const ans=r=>{const w=r.waiting;if(!w||!w.gate_id)return '';
+    const b=(o,text,grant)=>`<button class="sm ${o===w.recommended?'primary':''}${o==='拒絕'?' ghost danger':''}" data-act="tree-answer" data-main="${esc(r.main)}" data-sub="${esc(r.sub||'')}" data-gate="${esc(w.gate_id)}" data-text="${esc(text)}" data-grant="${esc(grant||'')}">${esc(o)}</button>`;
+    return `<div class="answers">${(w.options||[]).map(o=>w.type==='等待授權'&&o!=='拒絕'?b(o,'允許',GRANT_OF[o]):b(o,o)).join('')}</div>`;};
+  /* 主 change 那行可開回卡片抽屜：合併、開啟 pane、停止與自由回覆都在那裡，樹上只回有選項的 gate */
+  const rows=treeRows(s).map(r=>`<div class="tree${r.sub?' sub':''}"><span class="slug">${esc(r.sub||r.main)}</span><span class="t">${esc(r.text)}</span>${r.sub?'':`<button class="sm ghost" data-act="ev-open" data-key="${esc(s.repo+'/'+r.main)}">開卡</button>`}${ans(r)}</div>`).join('');
+  $('#drawer').innerHTML=`<header><div class="ttl"><h2>${esc(s.feature)}</h2><div class="flow">${esc(sessionLine(s))}</div></div><button class="x" data-act="close" aria-label="關閉">×</button></header><div class="body"><section><h3>主 change → 子 change <span class="src">workplan · subs/</span></h3>${rows}</section></div>`;
+  $('#drawer').hidden=false;$('#scrim').hidden=false;
+}
 function renderDrawer(){
+  if(ui.open.startsWith('session:')){renderTree();return;}
   const c=byKey(ui.open);if(!c){closeDrawer();return;}
   /* 重畫前留住打到一半的回覆和焦點，畫完放回去（每 5 秒重拉會走到這裡） */
   const oldReply=$('#reply');const keep=oldReply?{v:oldReply.value,focus:document.activeElement===oldReply,s:oldReply.selectionStart}:null;
@@ -558,6 +614,8 @@ function renderDrawer(){
   if(w){
     let answers='';
     if(w.type==='等待授權')answers=`<button class="primary" data-act="answer" data-grant="this" data-text="允許">允許這次</button><button data-act="answer" data-grant="card" data-text="允許">這張卡都允許</button>${w.action==='merge'?'':`<button data-act="answer" data-grant="repo" data-text="允許">這個 repo 永遠允許</button>`}<button class="ghost danger" data-act="answer" data-text="拒絕">拒絕</button><input type="text" id="reply" aria-label="回覆" placeholder="或打字回覆，Enter 送出">`;
+    else if(w.type==='等待決定'&&w.needs==='run')answers=`<div class="mono" style="margin-bottom:8px">在終端機跑這行：<code>${esc(w.recommended||'')}</code> <button data-act="copy" data-text="${esc(w.recommended||'')}">複製</button></div><input type="text" id="reply" aria-label="貼結果" placeholder="貼上執行結果，Enter 送出">`;
+    else if(w.type==='type 不明')answers=`<div class="mono">gates.md 的 type 沒寫或不是 approval | decision，請改成其中之一：<code>${esc((c.path||'')+'/gates.md')}</code> <button data-act="copy" data-text="${esc((c.path||'')+'/gates.md')}">複製路徑</button></div>`;
     else if(w.type==='等待決定')answers=(w.options||[]).map(o=>`<button class="${o===w.recommended?'primary':''}" data-act="answer" data-text="${esc(o)}">${esc(o)}</button>`).join('')+`<input type="text" id="reply" aria-label="回覆" placeholder="或打字回覆，Enter 送出">`;
     else if(w.type==='可以合併')answers=`<button class="primary" data-act="merge">合併</button><a href="${esc(c.mr.url)}" target="_blank" rel="noopener"><button>開啟 MR</button></a>`;
     else answers=`<button class="primary" data-act="pane">開啟 pane</button><button data-act="stop">停止</button><button data-act="dispatch">重新指派</button>`;
@@ -600,8 +658,14 @@ function answer(c,text,grant){
   if(!c.waiting||!c.waiting.gate_id){toast('這一項沒有 gate 可回',true);return;}
   act(`opsx answer ${c.slug} --gate ${c.waiting.gate_id}${grant?' --grant '+grant:''} "${text}"`,()=>api.post('answer',{slug:c.slug,gate:c.waiting.gate_id,grant:grant||'',text,repo:repoTop(c)}));
 }
+function copyText(t){navigator.clipboard.writeText(t).then(()=>toast('已複製'),()=>toast('複製失敗，請手動選取',true));}
+function answerTree(s,b){
+  act(`opsx answer ${b.main}${b.sub?' --sub '+b.sub:''} --gate ${b.gate}${b.grant?' --grant '+b.grant:''} "${b.text}"`,
+    ()=>api.post('answer',{...answerBody(b.main,b.sub,b.gate,b.text),grant:b.grant,repo:(data.repo_paths||{})[s.repo]}));
+}
 function merge(c){act(`opsx merge ${c.slug}`,()=>api.post('merge',{slug:c.slug,repo:repoTop(c)}));}
 function stop(c){act(`opsx stop ${c.slug}`,()=>api.post('stop',{slug:c.slug,repo:repoTop(c)}));}
+function reap(pane){act(`opsx reap${pane?' --pane '+pane:''}`,()=>api.post('reap',pane?{pane}:{}));}
 function focusAgent(agent){
   if(!agent){toast('這張沒有 pane',true);return;}
   act(`herdr agent focus ${agent}`,()=>api.post('focus',{agent}));
@@ -693,6 +757,8 @@ document.addEventListener('click',e=>{
     if(a==='dlg-cancel'){closeDispatch();return;}
     if(a==='dlg-go'){doDispatch();return;}
     if(a==='pane-id'){focusAgent(btn.dataset.agent);return;}
+    if(a==='reap'){reap(btn.dataset.pane);return;}
+    if(a==='reap-all'){reap('');return;}
     if(a==='sync'){syncNow();return;}
     if(a==='file'){fileUnfiled(btn.closest('[data-unfiled]'));return;}
     if(a==='drop-open'){ui.drop=btn.dataset.drop;ui.dropText='';render();const i=$('.drop-reason');if(i)i.focus();return;}
@@ -701,6 +767,8 @@ document.addEventListener('click',e=>{
     if(a==='logf'){setLogFilter(btn.dataset.f);render();return;}
     if(a==='log-more'){logMore();render();return;}
     if(a==='ev-open'){if(!byKey(btn.dataset.key)){toast(btn.dataset.key+' 不在首頁（archive 只列最新的幾張）',true);return;}showTab('home');openDrawer(btn.dataset.key);return;}
+    if(a==='copy'){copyText(btn.dataset.text);return;}
+    if(a==='tree-answer'){const s=data.sessions.find(s=>skey(s)===ui.open);if(s)answerTree(s,btn.dataset);return;}
     if(!c)return;
     if(a==='open'){openDrawer(k);return;}
     if(a==='answer'){answer(c,btn.dataset.text,btn.dataset.grant);return;}

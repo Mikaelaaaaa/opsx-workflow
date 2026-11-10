@@ -23,6 +23,9 @@ check_node pr '/babysit <slug>'
 
 assert_not_grep 'Do not run the review yourself' "$OPSX_ROOT/skills/apply/SKILL.md"
 
+# feature session：babysit 停在等合併時先跑 opsx next，印出指令就接著做（apply-fanout session-dispatch）
+awk '/^\| babysit /{f=1} f' "$CONT" | grep -qF 'opsx next' || fail "continue.md 的 babysit 列之後要寫 feature session 跑 opsx next"
+
 for row in '| explore | `/grill <slug>`' '| explore | `/propose <slug>`' '| grill | `/propose <slug>`' \
            '| propose | `/apply <slug>`' '| apply | `/review <slug>`' '| review | `/pr <slug>`' \
            '| pr | `/babysit <slug>`' '| babysit | stop'; do
@@ -31,3 +34,8 @@ done
 assert_fixed 'status: open' "$CONT"
 assert_fixed 'condition in the table is not met' "$CONT"
 assert_fixed 'Merging is never part of this chain' "$CONT"
+
+# Stop hook 強制下一站（stop-hook-chain）：規則寫在 continue.md，babysit 每次 pass 留標記讓 hook 放行
+assert_fixed '要不要接' "$CONT"
+assert_fixed 'Stop hook' "$CONT"
+assert_fixed 'babysit: <ISO time>' "$OPSX_ROOT/skills/babysit/SKILL.md"
