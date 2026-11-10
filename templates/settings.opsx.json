@@ -16,7 +16,8 @@
       "denyWrite": [
         "${OPSX_STATE_DIR}/grants.toml",
         "${OPSX_STATE_DIR}/dispatch.json",
-        "${OPSX_STATE_DIR}/dispatch.json.lock"
+        "${OPSX_STATE_DIR}/dispatch.json.lock",
+        "${OPSX_STATE_DIR}/python"
       ]
     }
   }

@@ -107,7 +107,7 @@ merge_claude_settings() { # <python> <claude-settings.py 的參數…>
 }
 
 # repo 根目錄會變成每個 session 的可寫目錄：它是 $HOME、$HOME 的上層、或 state 目錄的上層（家目錄是 git repo 時就會發生）
-# 就等於把家目錄或授權檔開給所有 session，直接拒絕，什麼都還沒寫。
+# 就等於把家目錄或授權檔開給所有 session，直接拒絕。openspec/、sources.toml 與 settings 都還沒寫；state 目錄要先建好才能解析實體路徑。
 refuse_broad_writable() { # <repo 主 checkout 根>
   local top="$1" d
   for d in "$HOME" "$OPSX_STATE_DIR"; do

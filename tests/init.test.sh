@@ -149,7 +149,7 @@ assert_file "$CS"
 assert_eq "$(cj "$CS" permissions.additionalDirectories)" "[\"$OPSX_STATE_DIR\"]"
 assert_eq "$(cj "$CS" sandbox.network.allowUnixSockets)" "[\"$HOME/.config/herdr/herdr.sock\"]"
 assert_eq "$(cj "$CS" sandbox.excludedCommands)" '["gh pr *"]' "只排除 gh pr *，不是整個 gh *"
-assert_eq "$(cj "$CS" sandbox.filesystem.denyWrite)" "[\"$OPSX_STATE_DIR/grants.toml\", \"$OPSX_STATE_DIR/dispatch.json\", \"$OPSX_STATE_DIR/dispatch.json.lock\"]" "授權檔要拒絕沙盒寫入"
+assert_eq "$(cj "$CS" sandbox.filesystem.denyWrite)" "[\"$OPSX_STATE_DIR/grants.toml\", \"$OPSX_STATE_DIR/dispatch.json\", \"$OPSX_STATE_DIR/dispatch.json.lock\", \"$OPSX_STATE_DIR/python\"]" "授權檔與 hook 執行的 interpreter 路徑要拒絕沙盒寫入"
 assert_eq "$(cj "$CS" sandbox.enabled)" MISSING "不替使用者開關沙盒"
 assert_no_file "$CS.opsx-bak"        # 第一次裝，原檔不存在，沒有東西可備份
 before="$(cat "$CS")"
