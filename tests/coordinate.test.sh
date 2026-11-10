@@ -128,31 +128,14 @@ assert_grep "DRY opsx dispatch x" "$FX/out"
 assert_eq "$(count '^opsx dispatch')" 0 "dry 不能真的派"
 assert_no_file "$MEMO"
 
-# --- 合併：ready 的卡走 opsx merge，不直接合 ---
+# --- 合併永遠由人按：五條件全綠的卡，coordinator 也不呼叫 opsx merge、不直接合、memo 不記核准（D3） ---
 mkcard m
-cards '[{"slug":"m","section":"待處理","stage":"babysit","dispatch":'"$D"',"agent_status":"idle","mr":'"$READY"'}]'
-round || fail "rc: $(cat "$FX/out")"
-assert_grep "^opsx merge m --repo $R\$" "$OPSX_FAKE_LOG"
-assert_not_grep 'pr merge' "$OPSX_FAKE_LOG"; assert_not_grep 'mr merge' "$OPSX_FAKE_LOG"
-assert_eq "$(memo_get _approved demo/m)" "abc"
-grep '++' "$LOG" | grep -q m || fail "核准要記 ++：$(cat "$LOG")"
-
-# --- 合併：同一個 sha 不重複核准 ---
-round || fail "rc: $(cat "$FX/out")"
-assert_eq "$(count '^opsx merge')" 0 "同一個 sha 不重複核准"
-rm -f "$MEMO"
-
-# --- 合併：有衝突不合 ---
-cards '[{"slug":"m","section":"進行中","stage":"babysit","dispatch":'"$D"',"agent_status":"idle","mr":{"url":"https://github.com/o/r/pull/7","state":"conflicts","head_sha":"abc","conditions":{"no_conflicts":false},"merged_at":null}}]'
-round || fail "rc: $(cat "$FX/out")"
-assert_eq "$(count '^opsx merge')" 0 "有衝突不合"
-
-# --- 合併：被拒記 ??，這輪繼續 ---
 cards '[{"slug":"m","section":"待處理","stage":"babysit","dispatch":'"$D"',"agent_status":"idle","mr":'"$READY"'},{"slug":"x"}]'
-OPSX_TEST_FAIL_merge="merge: demo/m 是互動模式，沒有授權閘門" round || fail "rc: $(cat "$FX/out")"
-grep '??' "$LOG" | grep m | grep -q '互動模式' || fail "被拒要記 ?? 與原因：$(cat "$LOG")"
+round || fail "rc: $(cat "$FX/out")"
+assert_eq "$(count '^opsx merge')" 0 "coordinator 從不呼叫 opsx merge：$(cat "$OPSX_FAKE_LOG")"
+assert_not_grep 'pr merge' "$OPSX_FAKE_LOG"; assert_not_grep 'mr merge' "$OPSX_FAKE_LOG"
+assert_not_grep '_approved' "$MEMO"
 assert_grep '^opsx dispatch x ' "$OPSX_FAKE_LOG"
-assert_eq "$(memo_get _approved demo/m)" "" "被拒不算核准過"
 rm -f "$MEMO"
 
 # merged <slug> <merged_at> <dispatch JSON 或 null> <agent_status JSON 或 null>：forge 上已合的卡
@@ -276,7 +259,7 @@ cards '[{"slug":"a1","section":"待處理","dispatch":'"$D"',"agent_status":"idl
 round || fail "rc: $(cat "$FX/out")"
 assert_grep "^opsx answer a1 --gate g1 --grant this --repo $R -- 允許\$" "$OPSX_FAKE_LOG"
 
-# --- 答 gate：合併的授權題不代答（合併只走 opsx merge 的五條件核准，D3） ---
+# --- 答 gate：合併的授權題不代答（合併永遠由人按，D3） ---
 cards '[{"slug":"a1","section":"待處理","dispatch":'"$D"',"agent_status":"idle","waiting":{"type":"等待授權","gate_id":"g8","action":"merge","question":"要合併","recommended":null,"options":["這次"]}}]'
 round || fail "rc: $(cat "$FX/out")"
 assert_eq "$(count '^opsx answer')" 0 "合併的授權題不代答：$(cat "$OPSX_FAKE_LOG")"
@@ -287,6 +270,22 @@ cards '[{"slug":"a1","section":"待處理","dispatch":'"$D"',"agent_status":"idl
 round || fail "rc: $(cat "$FX/out")"
 assert_eq "$(count '^opsx answer')" 0 "要人動手的不代答"
 grep '??' "$LOG" | grep a1 | grep -q g5 || fail "要記 ?? 與 gate id：$(cat "$LOG")"
+
+# --- 答 gate：授權題的 action 或題目跟合併有關就不代答（action 不一定剛好寫成 merge） ---
+for a in 'mr-merge|forge 回 405，要授權重試嗎' 'external|用 GitLab API 合併 MR !7'; do
+  cards '[{"slug":"a1","section":"待處理","dispatch":'"$D"',"agent_status":"idle","waiting":{"type":"等待授權","gate_id":"gx","action":"'"${a%%|*}"'","question":"'"${a#*|}"'","recommended":null,"options":["這次"]}}]'
+  round || fail "rc: $(cat "$FX/out")"
+  assert_eq "$(count '^opsx answer')" 0 "跟合併有關的授權題不代答（${a}）：$(cat "$OPSX_FAKE_LOG")"
+  grep '??' "$LOG" | grep a1 | grep -q gx || fail "要記 ?? 與 gate id（${a}）：$(cat "$LOG")"
+done
+
+# --- 答 gate：合併類決定題不代答（merge 永遠人：授權綁 sha，代答「重試合併」等於替人決定） ---
+for q in '要不要合併這個 PR？|合併' 'forge 拒絕合併（pipeline 紅），要怎麼做？|重跑 pipeline 後重試合併' '要授權合併嗎？|允許' 'Ready to merge?|yes'; do
+  cards '[{"slug":"a1","section":"待處理","dispatch":'"$D"',"agent_status":"idle","waiting":{"type":"等待決定","gate_id":"gm","question":"'"${q%%|*}"'","recommended":"'"${q#*|}"'","options":["'"${q#*|}"'","停"]}}]'
+  round || fail "rc: $(cat "$FX/out")"
+  assert_eq "$(count '^opsx answer')" 0 "合併類決定題不代答（${q%%|*}）：$(cat "$OPSX_FAKE_LOG")"
+  grep '??' "$LOG" | grep a1 | grep -q gm || fail "合併類決定題要記 ?? 與 gate id（${q%%|*}）：$(cat "$LOG")"
+done
 
 # --- 答 gate：沒派出去的不答 ---
 cards '[{"slug":"a1","section":"待處理","dispatch":null,"waiting":{"type":"等待授權","gate_id":"g1","action":"push","question":"要 push","recommended":null,"options":["這次"]}}]'
