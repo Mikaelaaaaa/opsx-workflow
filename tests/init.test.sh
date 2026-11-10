@@ -108,6 +108,20 @@ for r in "$R2" "$R3" "$R4" "$R5"; do
   case "$dirs" in *"\"$r\""*) ;; *) fail "$r 沒進可寫目錄：$dirs" ;; esac
 done
 
+# --- 守衛：可寫目錄不能是 $HOME、$HOME 的上層、state 目錄的上層（家目錄是 git repo 的人跑 opsx init）---
+RH="$(mk_repo hrepo)"; cd "$RH"
+outh="$(HOME="$RH" opsx init 2>&1)" && fail "repo 就是 \$HOME 時 opsx init 要失敗：$outh"
+case "$outh" in *"$RH"*) ;; *) fail "訊息要點名路徑：$outh" ;; esac
+RP="$(mk_repo pp)"; mkdir -p "$RP/home"; cd "$RP"
+outh="$(HOME="$RP/home" opsx init 2>&1)" && fail "repo 是 \$HOME 的上層時 opsx init 要失敗：$outh"
+RS="$(mk_repo sp)"; cd "$RS"
+outh="$(OPSX_STATE_DIR="$RS/state" opsx init 2>&1)" && fail "repo 是 state 目錄的上層時 opsx init 要失敗：$outh"
+dirs="$(cj "$CR" permissions.additionalDirectories)"
+for r in "$RH" "$RP" "$RS"; do
+  case "$dirs" in *"\"$r\""*) fail "$r 不該進可寫目錄：$dirs" ;; esac
+done
+assert_no_file "$RH/openspec"   # 守衛在寫任何東西之前
+
 # --- --global ---
 export CLAUDE_CONFIG_DIR="$FX/claude-config"   # repo 層那段用 $FX/cc-repo，這裡換回乾淨的
 cd "$FX"; use_fakes herdr launchctl; export OPSX_FAKE_LOG="$FX/herdr.log"; : > "$OPSX_FAKE_LOG"

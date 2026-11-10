@@ -97,6 +97,13 @@ assert_eq "$(jget "$FX/dot/settings.json" env.TOKEN)" '"x"'
 assert_eq "$(python3 -I -c 'import os,stat,sys; print(oct(stat.S_IMODE(os.stat(sys.argv[1]).st_mode)))' "$FX/dot/settings.json")" 0o600 "權限被改了"
 assert_eq "$(ls -A "$FX/dot" | grep -c 'tmp$' || true)" 0 "留下暫存檔"
 
+# --- 並行：12 個 helper 同時各加一個路徑，全部都在、不留暫存檔 ---
+mkdir -p "$FX/par"
+for i in 1 2 3 4 5 6 7 8 9 10 11 12; do run --file "$FX/par/settings.json" --add-dir "/p/$i" >/dev/null 2>&1 & done
+wait
+assert_eq "$(jget "$FX/par/settings.json" permissions.additionalDirectories | python3 -I -c 'import json,sys; print(len(set(json.load(sys.stdin))))')" 12 "並行寫入丟了項目"
+assert_eq "$(ls -A "$FX/par" | grep -c 'tmp$' || true)" 0 "並行後留下暫存檔"
+
 # --- 壞 JSON：非 0、訊息含檔名、位元組不變、不備份 ---
 rm -f "$S.opsx-bak"
 printf '{"sandbox": ' > "$S"

@@ -106,6 +106,17 @@ merge_claude_settings() { # <python> <claude-settings.py 的參數…>
   esac
 }
 
+# repo 根目錄會變成每個 session 的可寫目錄：它是 $HOME、$HOME 的上層、或 state 目錄的上層（家目錄是 git repo 時就會發生）
+# 就等於把家目錄或授權檔開給所有 session，直接拒絕，什麼都還沒寫。
+refuse_broad_writable() { # <repo 主 checkout 根>
+  local top="$1" d
+  for d in "$HOME" "$OPSX_STATE_DIR"; do
+    case "$(cd "$d" && pwd -P)/" in
+      "$top"/*) die "init: $top 是 ${d} 的上層（或就是它），開成可寫目錄範圍太大；到更深的 repo 根目錄再跑 opsx init" ;;
+    esac
+  done
+}
+
 # opsx init --check：只讀。使用者層 settings 缺標準設定的項目就逐項印出、exit 1；在 repo 裡再看該 repo 是否在可寫目錄、有沒有信任
 init_check() {
   local file out rc=0 top args=()
@@ -199,6 +210,7 @@ init_repo() {
   [ "$(git_worktree_top)" = "$(pwd -P)" ] || die "請在 repo 根目錄跑（linked worktree 的根也可以，openspec/ 會放在主 repo）：$top"
   command -v openspec >/dev/null || die "找不到 openspec CLI（npm i -g @fission-ai/openspec）"
   ensure_dir "$OPSX_STATE_DIR"
+  refuse_broad_writable "$top"
   [ -f "$OPSX_STATE_DIR/sources.toml" ] || printf '# opsx 同步來源\n' > "$OPSX_STATE_DIR/sources.toml"
   [ -f "$OPSX_STATE_DIR/workspaces.toml" ] || printf '# repo ↔ herdr workspace\n[repos]\n' > "$OPSX_STATE_DIR/workspaces.toml"
 

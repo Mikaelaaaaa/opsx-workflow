@@ -7,6 +7,7 @@
 成功時 stdout 印 created（原檔不存在）、changed 或 unchanged。--check 只比對不寫：缺的逐行印出，有缺 exit 3。
 """
 import argparse
+import fcntl
 import json
 import os
 import re
@@ -85,6 +86,13 @@ def main():
             wants += flatten(json.load(f), (), args.template)
     wants.append((("permissions", "additionalDirectories"), args.add_dir))
 
+    real = os.path.realpath(args.file)
+    directory = os.path.dirname(real)
+    if not args.check:
+        # 鎖住設定檔所在目錄（鎖目錄不留任何檔案），整段讀 → 合併 → 寫都在鎖內，行程結束時放開；並行的 init 才不會互相覆蓋
+        os.makedirs(directory, exist_ok=True)
+        fcntl.flock(os.open(directory, os.O_RDONLY), fcntl.LOCK_EX)
+
     exists = os.path.exists(args.file)
     data = load(args.file) if exists else {}
     added = []
@@ -103,10 +111,7 @@ def main():
     if exists and not os.path.exists(bak):
         shutil.copy2(args.file, bak)
     # 寫到 symlink 指向的真檔（dotfiles），暫存檔放同一個目錄且名字唯一；沿用原檔權限，新檔 0600
-    real = os.path.realpath(args.file)
-    directory = os.path.dirname(real)
-    os.makedirs(directory, exist_ok=True)
-    mode = stat.S_IMODE(os.stat(real).st_mode) if exists else 0o600
+    mode =stat.S_IMODE(os.stat(real).st_mode) if exists else 0o600
     fd, tmp = tempfile.mkstemp(dir=directory, prefix=".settings.", suffix=".tmp")
     with os.fdopen(fd, "w", encoding="utf-8") as f:
         f.write(json.dumps(data, indent=2, ensure_ascii=False) + "\n")
