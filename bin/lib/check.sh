@@ -10,7 +10,7 @@ opsx_check() {
   [ -n "$top" ] || die "check: 不在 git repo 裡"
   local dir="$top/openspec/changes/$1"
   [ -d "$dir" ] || die "check: 沒有這張卡：$dir"
-  local out; out="$(check_explore "$dir"; check_subs "$dir")"
+  local out; out="$(check_explore "$dir"; check_blast "$top" "$dir"; check_subs "$dir")"
   [ -z "$out" ] && return 0
   printf '%s\n' "$out"
   exit 1
@@ -38,6 +38,19 @@ check_explore() { # <卡目錄>：explore.md 不存在什麼都不印；存在�
       }
     }
   ' "$1/explore.md"
+}
+
+# 步驟 3 寫 skip，而 main...HEAD 動到的檔案被別的檔案引用時，印 Must-fix 候選。grep 檔名只是線索：漏 shell 變數與 config key，
+# 也會對只被自己測試引用的檔誤報，成不成立由 review 判斷。只在 opsx check 跑，stage 與 hook 不跑。
+check_blast() { # <top> <卡目錄>
+  grep -qE '^- 3 影響範圍[：:][ 	]*skip[：:]' "$2/explore.md" 2>/dev/null || return 0
+  local changed f hits
+  changed="$(git -C "$1" diff --name-only main...HEAD)" || die "check: git diff main...HEAD 失敗，無法對照影響範圍"
+  while IFS= read -r f; do
+    [ -n "$f" ] && [ -f "$1/$f" ] || continue
+    hits="$(git -C "$1" grep -lF -- "$(basename "$f")" -- . ":!$f" ":!openspec" | paste -sd, -)"
+    [ -z "$hits" ] || printf 'explore.md 步驟 3 影響範圍: skip 但 %s 被 %s 引用（Must-fix 候選，由 review 判斷）\n' "$f" "$hits"
+  done <<< "$changed"
 }
 
 check_subs() { # <主殼目錄>：印缺項，一行一個；沒有 subs/ 或全齊什麼都不印
