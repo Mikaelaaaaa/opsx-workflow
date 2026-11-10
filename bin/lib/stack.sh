@@ -35,10 +35,10 @@ opsx_stack() {
   fi
 
   local tmp="$d/tasks.md.stack.tmp"
-  awk -v s="\`$sub\`" '!done && /^[[:space:]]*- \[ \] / && index($0, s) { sub(/- \[ \] /, "- [x] "); done = 1 } { print }' "$d/tasks.md" > "$tmp" && mv "$tmp" "$d/tasks.md"
+  awk -v s="\`$sub\`" '!done && match($0, /^[[:space:]]*- \[ \] [0-9.]+ /) && substr($0, RSTART + RLENGTH, length(s)) == s { sub(/- \[ \] /, "- [x] "); done = 1 } { print }' "$d/tasks.md" > "$tmp" && mv "$tmp" "$d/tasks.md"
   say "stack: ${sub} 疊回 ${branch}（$(git rev-parse --short HEAD)），主殼 tasks.md 已勾"
 }
 
-task_line() { # <tasks.md> <子> <勾的樣子，regex>：有這個子 change 的那一項而且是這個勾法
-  grep -qE "^[[:space:]]*- $3 .*\`$2\`" "$1"
+task_line() { # <tasks.md> <子> <勾的樣子，regex>：項目本身是這個子 change（編號後第一個反引號名），而且是這個勾法
+  grep -qE "^[[:space:]]*- $3 [0-9.]+ \`$2\`" "$1"
 }

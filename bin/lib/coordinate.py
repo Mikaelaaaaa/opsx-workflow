@@ -361,9 +361,10 @@ class Round:
                     self.log("-- 這輪派滿 %d 個，feature %s 下輪" % (MAX_DISPATCH, name))
                     continue
                 rc, _, err = self.act(["opsx", "dispatch", "--feature", name, "--agent", "claude", "--mode", "autopilot", "--repo", top])
-                n += 1
                 if rc != 0:
                     self.log("?? %s 的 feature %s 開不了 session：%s" % (repo, name, err[:200]))
+                    continue
+                n += 1
 
 
 def card_key(c):

@@ -5,6 +5,7 @@
 source "$(dirname "${BASH_SOURCE[0]}")/_lib.sh"
 
 top="$(repo_top)"; slug="$(card_slug)"
+slug="${slug%%--*}"   # 子殼分支 <主>--<子> 沒有自己的 dispatch.json 條目，照主 change 的模式與授權
 [ -n "$top" ] && [ -n "$slug" ] || exit 0
 repo="$(repo_name)"
 # dispatch.json 壞掉時讀不到模式，就退回比對檔案原文：裡面有這張卡的 key 才擋。

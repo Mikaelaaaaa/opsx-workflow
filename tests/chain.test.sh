@@ -319,7 +319,7 @@ for s in m2 m3; do mkdir -p "$R4/openspec/changes/$s"; printf 'schema: opsx\nkin
 J="$OPSX_STATE_DIR/dispatch.json"
 printf '{"sess/m1":{"mode":"autopilot","pane":"w5:pQ","tab":"w5:tJ","workspace":"opsx","workspace_id":"w5","agent":"claude","kind":"dev","grants":[],"worktree":"%s","branch":"feat/m1/u"}}' "$R4" > "$J"
 got="$(python3 -I "$OPSX_ROOT/bin/lib/chain.py" children "$R4" sess m1 "$J")"
-assert_eq "$got" "$(printf 'child\tm2\tfeat/m2/u\tdev\nchild\tm3\tfeat/m3/u\tdev')" "主 change 合併後找得到依賴它的主 change（不是 changes[0] 的 t1）"
+assert_eq "$got" "$(printf 'child\tm2\tfeat/m2/u\tdev')" "主 change 合併後找得到依賴它的主 change（不是 changes[0] 的 t1）；m3 在有 depends-on 的 feature g，由 coordinate 開 session，chain 不接"
 
 # --- feature session：m1 合併後同一個 session 接 m2（同 feature），m3 在別的 feature 留給 coordinate ---
 printf '{"sess/m1":{"mode":"autopilot","pane":"w5:pQ","tab":"w5:tJ","workspace":"opsx","workspace_id":"w5","agent":"claude","kind":"dev","grants":[],"worktree":"%s","branch":"feat/m1/u","herdr_name":"f","via":"f","feature":"f"}}' "$R4" > "$J"

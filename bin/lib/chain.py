@@ -90,8 +90,10 @@ def find_pr(prs: list, slug: str):
 
 
 def card_of(top: str, pr: dict, todo: list) -> str:
-    """PR 對到的卡：主殼 openspec/changes/<PR 名>/ 在就是它；舊的一 PR 一 change 卡是第一個還沒 done 的 change。"""
-    if os.path.isdir(os.path.join(top, "openspec", "changes", pr["name"])):
+    """PR 對到的卡：PR 名不是自己底下的 change 名、且 openspec/changes/<PR 名>/ 在，就是主殼；
+    否則是舊卡（PR 名可能等於第一個 change 名），取第一個還沒 done 的 change。"""
+    own = [c.get("name") for c in pr.get("changes") or []]
+    if pr["name"] not in own and os.path.isdir(os.path.join(top, "openspec", "changes", pr["name"])):
         return pr["name"]
     return todo[0]   # 一個 PR 一條 branch；同 PR 的其他 change 由接手的 agent 依序做
 
@@ -117,13 +119,15 @@ def children(top: str, repo: str, parent: str, dispatch_path: str) -> list:
     if mine is None:
         return [("skip", "workplan 裡沒有 %s" % parent)]
     session = me.get("feature")
+    gated = {f.get("name") for f in features if f.get("depends-on")}   # 由 coordinate 開 session 的 feature
     status = {pr.get("name"): pr.get("status") for pr in prs}
     out = []
     for pr in prs:
         deps = pr.get("depends-on") or []
         if mine.get("name") not in deps or pr.get("status") == "merged":
             continue
-        if session and feature_of.get(pr.get("name")) != session:
+        owner = feature_of.get(pr.get("name"))
+        if (session or owner in gated) and owner != session:
             continue
         if any(status.get(dep) != "merged" for dep in deps):
             continue
