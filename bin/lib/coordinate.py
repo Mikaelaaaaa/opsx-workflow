@@ -207,7 +207,8 @@ class Round:
         """派出去的卡的第一個 open gate，照固定規則答、停、或留給人。"""
         w, key = c["waiting"], card_key(c)
         if w["type"] == "等待授權":
-            if w["action"] == "merge":   # 合併永遠由人按，coordinator 不代答合併授權
+            # 合併永遠由人按：action 不一定剛好寫成 merge（mr-merge、external 打合併 API），題目也要看
+            if any(k in ((w["action"] or "") + " " + (w.get("question") or "")).lower() for k in MERGE_WORDS):
                 self.log("?? %s gate %s 要合併授權，不代答：合併由人在板上按" % (key, w["gate_id"]))
                 return
             self.answer(c, top, w["gate_id"], "允許", grant=True)

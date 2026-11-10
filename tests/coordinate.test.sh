@@ -271,6 +271,14 @@ round || fail "rc: $(cat "$FX/out")"
 assert_eq "$(count '^opsx answer')" 0 "要人動手的不代答"
 grep '??' "$LOG" | grep a1 | grep -q g5 || fail "要記 ?? 與 gate id：$(cat "$LOG")"
 
+# --- 答 gate：授權題的 action 或題目跟合併有關就不代答（action 不一定剛好寫成 merge） ---
+for a in 'mr-merge|forge 回 405，要授權重試嗎' 'external|用 GitLab API 合併 MR !7'; do
+  cards '[{"slug":"a1","section":"待處理","dispatch":'"$D"',"agent_status":"idle","waiting":{"type":"等待授權","gate_id":"gx","action":"'"${a%%|*}"'","question":"'"${a#*|}"'","recommended":null,"options":["這次"]}}]'
+  round || fail "rc: $(cat "$FX/out")"
+  assert_eq "$(count '^opsx answer')" 0 "跟合併有關的授權題不代答（${a}）：$(cat "$OPSX_FAKE_LOG")"
+  grep '??' "$LOG" | grep a1 | grep -q gx || fail "要記 ?? 與 gate id（${a}）：$(cat "$LOG")"
+done
+
 # --- 答 gate：合併類決定題不代答（merge 永遠人：授權綁 sha，代答「重試合併」等於替人決定） ---
 for q in '要不要合併這個 PR？|合併' 'forge 拒絕合併（pipeline 紅），要怎麼做？|重跑 pipeline 後重試合併' '要授權合併嗎？|允許' 'Ready to merge?|yes'; do
   cards '[{"slug":"a1","section":"待處理","dispatch":'"$D"',"agent_status":"idle","waiting":{"type":"等待決定","gate_id":"gm","question":"'"${q%%|*}"'","recommended":"'"${q#*|}"'","options":["'"${q#*|}"'","停"]}}]'
