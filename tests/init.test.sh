@@ -343,7 +343,7 @@ assert_eq "$?" 0 "base 是 symlink 時 init --global: $outg"
 assert_eq "$(cat "$OPSX_STATE_DIR/python")" "$FX/baselink/python3" "base 要原樣記，不解 symlink"
 
 # --- --global 問 obsidian 收件夾：vault 與子資料夾分兩題，原樣寫入（sync-obsidian / obsidian-source）---
-# 互動模式要 tty，測試直接叫 ask_global_sources，stdin 依序答 vault、子資料夾、customer（Enter 跳過）
+# 互動模式要 tty，測試直接叫 ask_global_sources，stdin 依序答 vault、子資料夾
 ask() { ( source "$OPSX_ROOT/bin/lib/common.sh"; source "$OPSX_ROOT/bin/lib/init.sh"; ask_global_sources "$1" ); }
 obsidian_of() { python3 -I -c 'import sys,tomllib;o=tomllib.load(open(sys.argv[1],"rb"))["obsidian"];print(o["vault"]+"|"+o["folder"])' "$1"; }
 ST="$FX/sources-ask.toml"
@@ -373,4 +373,17 @@ printf '[obsidian]\nvault = "/v"\nfolder = "f"\n' > "$ST"; cp "$ST" "$FX/st-befo
 outa="$(printf '\n' | ask "$ST")"
 assert_eq "$(cat "$ST")" "$(cat "$FX/st-before")" "已登記不改"
 case "$outa" in *obsidian*) fail "已登記不再問 obsidian：$outa" ;; esac
+
+# --- --global 不引導人設定 customer（specs/opsx-init「--global 不引導人設定 customer」）---
+: > "$ST"; outa="$(printf '/Users/me/vault\ninbox\n' | ask "$ST" 2>&1)"
+case "$outa" in *customer*) fail "不該問 customer：$outa" ;; esac
+assert_not_grep '^\[customer\]' "$ST"
+printf '[customer]\nbase_url = "u"\n' > "$ST"; cp "$ST" "$FX/st-before"
+printf '\n\n' | ask "$ST" >/dev/null 2>&1
+assert_eq "$(cat "$ST")" "$(cat "$FX/st-before")" "既有 [customer] 不動"
+outt="$(OPSX_STATE_DIR="$FX/st-tpl" opsx init --global 2>&1)"; assert_eq "$?" 0 "fresh state init --global: $outt"
+assert_eq "$(printf '%s\n' "$outt" | grep '略過' | grep -c customer)" 0 "非互動訊息不提 customer"
+assert_eq "$(printf '%s\n' "$outt" | grep -c '略過.*obsidian\|obsidian.*略過')" 1 "非互動訊息提 obsidian"
+assert_not_grep '^# \[customer\]' "$FX/st-tpl/sources.toml"
+assert_grep 'customer.*on-hold' "$FX/st-tpl/sources.toml"
 echo ok

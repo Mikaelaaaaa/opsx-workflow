@@ -42,14 +42,11 @@ init_global() {
     if [ -n "$old" ]; then say "init --global: python 從 $old 換成 $py"; else say "init --global: python 記為 $py"; fi
   fi
 
-  write_if_missing "$state/sources.toml" '# opsx 同步來源。opsx init 在每個 repo 跑時會自動補 gitlab / github；obsidian、customer 在這裡填。
+  write_if_missing "$state/sources.toml" '# opsx 同步來源。opsx init 在每個 repo 跑時會自動補 gitlab / github；obsidian 在這裡填。
+# customer 來源尚未支援（on-hold），填了 opsx sync 也不會同步。
 # [obsidian]
 # vault = "/path/to/vault"
 # folder = "01-Projects/inbox"
-# [customer]
-# base_url = ""
-# token_env = "CUSTOMER_API_TOKEN"
-# list_endpoint = "/api/reports?status=open"
 '
   write_if_missing "$state/grants.toml" '# 「這個 repo 永遠」那級的授權。每 repo 一個表：push / mr / migrate 三個布林。merge 永遠不可寫。
 # [repos."Agentory-AI"]
@@ -84,7 +81,7 @@ $term_line
   if interactive; then
     ask_global_sources "$state/sources.toml"
   else
-    say "init --global: 非互動，obsidian / customer 來源略過（之後改 $state/sources.toml）"
+    say "init --global: 非互動，obsidian 來源略過（之後改 $state/sources.toml）"
   fi
   # herdr 看板：把這個 plugin 根目錄掛進 herdr（herdr-plugin.toml 在根目錄）。沒裝 herdr 就跳過。
   if command -v herdr >/dev/null 2>&1; then
@@ -238,17 +235,6 @@ ask_global_sources() {
             [ -d "$ans/$folder" ] || warn "init --global: $ans/$folder 現在不是資料夾，同步時會記錯；路徑裡的 \\ 不會被當成跳脫，要改就編 $f" ;;
         esac
       fi
-    fi
-  fi
-  if ! grep -q '^\[customer\]' "$f"; then
-    printf 'customer 平台 base URL（直接 Enter 跳過）：'
-    read -r ans
-    if [ -n "$ans" ]; then
-      local tok ep
-      printf 'token 的環境變數名：'; read -r tok
-      printf '列表端點（例 /api/reports?status=open）：'; read -r ep
-      printf '\n[customer]\nbase_url = "%s"\ntoken_env = "%s"\nlist_endpoint = "%s"\n' "$ans" "$tok" "$ep" >> "$f"
-      say "init --global: customer 已登記"
     fi
   fi
 }
