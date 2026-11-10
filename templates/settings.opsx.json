@@ -1,0 +1,22 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(opsx status *)",
+      "Bash(opsx log *)",
+      "Bash(openspec status *)",
+      "Bash(openspec instructions *)",
+      "Bash(openspec list *)"
+    ],
+    "additionalDirectories": ["${OPSX_STATE_DIR}"]
+  },
+  "sandbox": {
+    "excludedCommands": ["gh pr *"],
+    "filesystem": {
+      "denyWrite": [
+        "${OPSX_STATE_DIR}/grants.toml",
+        "${OPSX_STATE_DIR}/python",
+        "${OPSX_STATE_DIR}/coordinator-settings.json"
+      ]
+    }
+  }
+}

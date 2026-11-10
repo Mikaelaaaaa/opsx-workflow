@@ -54,6 +54,16 @@ default_model() { # <agent> <kind>
 
 interactive() { [ -z "${OPSX_NONINTERACTIVE:-}" ] && [ -t 0 ]; }
 
+# 資料夾沒按過 Claude Code 的信任對話框時，專案層 settings 的 allow 與 additionalDirectories 不生效。
+# 只警告；信任是使用者在對話框的安全確認，opsx 不替他按。worktree 看主 checkout 的根（傳 repo 的 top）。
+warn_untrusted() { # <repo 主 checkout 根>
+  local out
+  out="$("$OPSX_PY" -I "$OPSX_ROOT/bin/lib/claude-trust.py" "$1")" || die "沒讀到 Claude Code 的信任紀錄（上面是原因）"
+  case "$out" in
+    untrusted*) warn "$1 還沒信任過 Claude Code：專案層 settings 的 allow 與 additionalDirectories 會被忽略，agent 容易卡在權限。到那個資料夾開一次 claude、在對話框按信任；opsx 不會替你改信任紀錄。opsx 自己的設定寫在使用者層，不受影響" ;;
+  esac
+}
+
 # 一句話：只准單行、去掉空白後非空（會寫進 inbox.md 的 ## 一句話）
 single_line() { # <text>，不合格就 die
   case "$1" in *$'\n'*|*$'\r'*) die "一句話不能有換行" ;; esac

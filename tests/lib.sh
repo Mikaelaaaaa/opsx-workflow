@@ -12,6 +12,8 @@ export TZ=Asia/Taipei
 # 預設當成沒有 launchctl（略過）；要測安裝的檔案自己 use_fakes launchctl 再設 OPSX_LAUNCHCTL=launchctl。
 export OPSX_LAUNCH_AGENTS_DIR="$FX/LaunchAgents"
 export OPSX_LAUNCHCTL="$FX/no-launchctl"
+# init 會改使用者層 Claude Code settings：測試永遠指到 fixture，不碰真的 settings.json。
+export CLAUDE_CONFIG_DIR="$FX/claude-config"
 trap 'rm -rf "$FX"' EXIT
 # opsx init --global 會寫的 python 路徑；opsx 和 hooks 沒有它就不跑
 mkdir -p "$OPSX_STATE_DIR"; python3 -I -c 'import sys; print(sys.executable)' > "$OPSX_STATE_DIR/python"
