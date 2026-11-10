@@ -4,7 +4,9 @@
 source "$(dirname "${BASH_SOURCE[0]}")/_lib.sh"
 
 cmd="$(hook_cmd)"
-printf '%s' "$cmd" | grep -qE '(glab mr (create|update)|gh pr (create|edit))' || exit 0
+# 只看真的要執行的指令：先剝掉 heredoc 本體與引號字串，剩下的要在命令位置（開頭，或 ; & | ( ` 換行之後）才算。
+# 引號沒配對時不剝，寧可多檢查。description 的抽取在下面仍讀原始 $cmd。
+printf '%s' "$cmd" | perl -e 'local $/; $_ = <STDIN> // ""; s/(?<!<)(<<-?\s*([\x27"]?)(\w+)\2[^\n]*)\n.*?\n[ \t]*\3[ \t]*(?:\n|\z)/$1\n/sg; s/"(?:[^"\\]|\\.)*"|\x27[^\x27]*\x27/""/sg; exit(/(?:^|[;&|(`\n])\s*(?:\w+=\S*\s+)*(?:gh\s+pr\s+(?:create|edit)|glab\s+mr\s+(?:create|update))\b/ ? 0 : 1)' || exit 0
 
 desc=""
 # -F / --description-file / --body-file <path>

@@ -41,12 +41,21 @@ PY
   say "stop: $repo/$slug 標 stopped"
 }
 
-# opsx stop --board：關看板 server（open-board.sh 起的，pid 在 board.pid）。design Risks「server 被留著跑」。
+# opsx stop --board：關看板 server（open-board.sh 起的，pid 在 board-<port>.pid，port 取 OPSX_BOARD_PORT，預設 8791）。
+# 舊版的單一 board.pid 也一併關掉清掉。design Risks「server 被留著跑」。
 stop_board() {
-  local pidfile="$OPSX_STATE_DIR/board.pid" pid
-  [ -f "$pidfile" ] || { say "stop --board: 沒有 ${pidfile}，server 沒在跑"; return 0; }
+  local port="${OPSX_BOARD_PORT:-8791}" pidfile found=""
+  for pidfile in "$OPSX_STATE_DIR/board-${port}.pid" "$OPSX_STATE_DIR/board.pid"; do
+    [ -f "$pidfile" ] || continue
+    found=1; stop_board_pidfile "$pidfile"
+  done
+  [ -n "$found" ] || say "stop --board: 沒有 $OPSX_STATE_DIR/board-${port}.pid，server 沒在跑"
+}
+
+stop_board_pidfile() {
+  local pidfile="$1" pid
   pid="$(cat "$pidfile")"
-  if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then kill "$pid" && say "stop --board: server pid ${pid} 已 kill"
-  else say "stop --board: pid ${pid:-?} 已經不在，只清 pid 檔"; fi
+  if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then kill "$pid" && say "stop --board: server pid ${pid} 已 kill（${pidfile##*/}）"
+  else say "stop --board: pid ${pid:-?} 已經不在，只清 ${pidfile##*/}"; fi
   rm -f "$pidfile"
 }

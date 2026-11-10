@@ -9,7 +9,7 @@ printf '#!/usr/bin/env bash\nprintf "xdg-open %%s\\n" "$*" >> "%s"\n' "$FX/open.
 chmod +x "$FX/fakebin/"*
 export PATH="$FX/fakebin:$PATH"
 export OPSX_FAKE_LOG="$FX/herdr.log"; : > "$OPSX_FAKE_LOG"; : > "$FX/open.log"
-trap 'kill "$(cat "$OPSX_STATE_DIR/board.pid" 2>/dev/null)" 2>/dev/null; rm -rf "$FX"' EXIT   # 斷言失敗也要把 server 收掉
+trap 'for f in "$OPSX_STATE_DIR"/board*.pid; do kill "$(cat "$f" 2>/dev/null)" 2>/dev/null; done; rm -rf "$FX"' EXIT   # 斷言失敗也要把 server 收掉（每個 port 一份 pid 檔）
 
 # --- manifest ---
 python3 -I - "$OPSX_ROOT" <<'PY' || fail "manifest"
@@ -26,6 +26,9 @@ assert p[0]["placement"] == "split", p[0]
 assert p[0]["title"] == "opsx", p[0]   # open-pane.sh 靠這個 label 認出已開的看板 pane
 assert os.path.exists(os.path.join(root, p[0]["command"][-1])), p[0]["command"]
 PY
+
+# --- herdr-board/scripts 底下每支 *.sh 都能直接執行（manifest 用 bash 呼叫，所以只有直接跑才會露餡）---
+for s in "$OPSX_ROOT"/herdr-board/scripts/*.sh; do [ -x "$s" ] || fail "script 不能直接執行: $s"; done
 
 # --- open-pane.sh：本 tab 沒有看板 pane 就在按鍵的 pane 右邊開 split，有就 focus 它 ---
 panes() { # panes <tab_id 有 opsx pane 的 tab>：寫一份 herdr pane list，w1:t1 有按鍵的 pane w1:p2
@@ -57,25 +60,47 @@ done
 port=$(python3 -I -c 'import socket;s=socket.socket();s.bind(("127.0.0.1",0));print(s.getsockname()[1]);s.close()')
 export OPSX_BOARD_PORT="$port" HERDR_PANE_ID=p1 HERDR_TAB_ID=t1 HERDR_WORKSPACE_ID=w1
 out="$(bash "$OPSX_ROOT/herdr-board/scripts/open-board.sh" 2>&1)"; rc=$?; assert_eq "$rc" 0 "open-board 第一次: $out"
-assert_file "$OPSX_STATE_DIR/board.pid"; pid1="$(cat "$OPSX_STATE_DIR/board.pid")"
+pidf="$OPSX_STATE_DIR/board-$port.pid"
+assert_file "$pidf"; pid1="$(cat "$pidf")"
+assert_no_file "$OPSX_STATE_DIR/board.pid"
 kill -0 "$pid1" || fail "server 沒在跑（pid ${pid1}）"
 tok="$(cat "$OPSX_STATE_DIR/board-token")"
 assert_grep "http://127.0.0.1:$port/#token=$tok" "$FX/open.log"   # fragment，不進 log / Referer
 curl -sf "http://127.0.0.1:$port/healthz" | grep -q '"app": *"opsx-board"' || fail "healthz 要說自己是 opsx-board"
 curl -sf "http://127.0.0.1:$port/healthz" >/dev/null || fail "healthz 不通"
 out="$(bash "$OPSX_ROOT/herdr-board/scripts/open-board.sh" 2>&1)"; assert_eq "$?" 0 "open-board 第二次: $out"
-assert_eq "$(cat "$OPSX_STATE_DIR/board.pid")" "$pid1" "第二次不該換 pid"
+assert_eq "$(cat "$pidf")" "$pid1" "第二次不該換 pid"
 assert_eq "$(grep -c '^open ' "$FX/open.log" || true)" 2 "兩次都要開瀏覽器"
 assert_eq "$(grep -c '^listening' "$OPSX_STATE_DIR/board.log" || true)" 1 "只該起過一支 server（沙盒不能 pgrep，數 log 的 listening 行）"
 # --- token 檔被刪 → 下一次 open-board 重起 server，新 token ---
 rm -f "$OPSX_STATE_DIR/board-token"
 out="$(bash "$OPSX_ROOT/herdr-board/scripts/open-board.sh" 2>&1)"; assert_eq "$?" 0 "open-board 第三次: $out"
-[ "$(cat "$OPSX_STATE_DIR/board.pid")" != "$pid1" ] || fail "token 不見了要重起 server"
+[ "$(cat "$pidf")" != "$pid1" ] || fail "token 不見了要重起 server"
 assert_file "$OPSX_STATE_DIR/board-token"
-# --- opsx stop --board 關掉它 ---
-pid2="$(cat "$OPSX_STATE_DIR/board.pid")"
+pid2="$(cat "$pidf")"
+# --- 另一個 port 再起一個：兩份 pid 紀錄並存，第一個沒被換掉也沒被殺 ---
+port2=$(python3 -I -c 'import socket;s=socket.socket();s.bind(("127.0.0.1",0));print(s.getsockname()[1]);s.close()')
+pidf2="$OPSX_STATE_DIR/board-$port2.pid"
+out="$(OPSX_BOARD_PORT="$port2" bash "$OPSX_ROOT/herdr-board/scripts/open-board.sh" 2>&1)"; assert_eq "$?" 0 "open-board 另一個 port: $out"
+assert_file "$pidf2"; pidB="$(cat "$pidf2")"
+assert_eq "$(cat "$pidf")" "$pid2" "另一個 port 不該動第一個的 pid 檔"
+kill -0 "$pid2" || fail "另一個 port 起來後第一個 server 不見了"
+kill -0 "$pidB" || fail "另一個 port 的 server 沒在跑（pid ${pidB}）"
+[ "$pidB" != "$pid2" ] || fail "兩個 port 不該共用 pid"
+# --- opsx stop --board 只關 OPSX_BOARD_PORT 那一個 ---
+out="$(OPSX_BOARD_PORT="$port2" opsx stop --board 2>&1)"; assert_eq "$?" 0 "stop --board 另一個 port: $out"
+sleep 0.3; kill -0 "$pidB" 2>/dev/null && fail "stop --board 後該 port 的 server 還活著"
+assert_no_file "$pidf2"
+kill -0 "$pid2" || fail "stop --board 關到別的 port 的 server"
+assert_file "$pidf"
+# --- 舊版留下的單一 board.pid 也要被清掉 ---
+sleep 60 & legacy=$!
+printf '%s\n' "$legacy" > "$OPSX_STATE_DIR/board.pid"
 out="$(opsx stop --board 2>&1)"; assert_eq "$?" 0 "stop --board: $out"
 sleep 0.3; kill -0 "$pid2" 2>/dev/null && fail "stop --board 後 server 還活著"
+wait "$legacy" 2>/dev/null || true
+kill -0 "$legacy" 2>/dev/null && fail "stop --board 沒關舊 board.pid 指的 server"
+assert_no_file "$pidf"
 assert_no_file "$OPSX_STATE_DIR/board.pid"
 out="$(opsx stop --board 2>&1)"; assert_eq "$?" 0 "stop --board 第二次要是 no-op: $out"
 
