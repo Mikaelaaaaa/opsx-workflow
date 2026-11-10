@@ -73,6 +73,9 @@ input::placeholder{color:var(--fg-3)}
 .counter b{color:var(--data);font-weight:700}
 .counter .link{border:0;background:none;padding:0;min-height:0;margin:0;color:var(--accent);font:inherit;cursor:pointer}
 .stamp{font-family:var(--font-mono);font-size:11px;color:var(--fg-3)}
+.milestones{display:flex;gap:14px;flex-wrap:wrap;font-family:var(--font-mono);font-size:12px;color:var(--fg-2)}
+.prio-why{font-size:13px;color:var(--fg-2);margin-left:8px}
+.row .act .prio-reason{min-width:160px}
 
 main{flex:1;min-width:0;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:0 48px;max-width:1200px;width:100%;margin:0 auto}
 .errors{margin-top:12px;font-family:var(--font-mono);font-size:11px;color:var(--fg-3);display:flex;flex-direction:column;gap:2px}
@@ -226,6 +229,7 @@ main{flex:1;min-width:0;padding-left:max(16px,env(safe-area-inset-left,0px));pad
       <button role="tab" id="tab-inbox" aria-selected="false">收件匣<span class="n" id="inbox-n"></span></button>
       <button role="tab" id="tab-log" aria-selected="false">紀錄</button>
     </nav>
+    <div class="milestones" id="milestones"></div>
     <div class="right"><button class="sm" id="new-open">＋ 新增</button><span class="stamp" id="stamp"></span></div>
   </header>
   <div class="subbar">
@@ -265,7 +269,7 @@ const api={
   async post(action,body){const r=await fetch('/api/'+action,{method:'POST',headers:{'X-Opsx-Token':token(),'Content-Type':'application/json'},body:JSON.stringify(body)});const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(action+' '+r.status+'：'+(j.error||''));if(!j.ok)throw new Error((j.stderr||j.stdout||'opsx '+action+' 失敗').trim());return j;}
 };
 let data={generated_at:null,scopes:[],cards:[],unmatched_agents:[],errors:[],legacy:{},worktrees_skipped:[]};let lastRaw='';
-const ui={tab:'home',scope:'all',ws:null,repo:null,sel:null,open:null,doneOpen:false,busy:false,logFilter:'all',drop:null,dropText:'',fileRepo:{}};
+const ui={tab:'home',scope:'all',ws:null,repo:null,sel:null,open:null,doneOpen:false,busy:false,logFilter:'all',drop:null,dropText:'',fileRepo:{},prio:null,prioText:'',prioLevel:null};
 let tl=null;let tlErr='';let bannerClosed=false;let seenAt=null;  /* 這頁最後一次送給 /api/seen 的時間 */
 const outputs={};  /* 卡 key → {ok, text} 或 {ok:false, error}；抽屜打開時才抓 */
 const REFRESH_MS=5000;
@@ -291,6 +295,20 @@ function ago(iso){
   if(s<60)return '剛剛';if(s<3600)return Math.floor(s/60)+' 分鐘';if(s<86400)return Math.floor(s/3600)+' 小時';return Math.floor(s/86400)+' 天';
 }
 const since=c=>ago(c.status&&c.status.at||c.dispatch&&c.dispatch.started_at||c.since);
+
+/* ---------- 等級與 milestone：collect 的 priority 與 milestones，tests/priority-board.test.sh 切片執行 ---------- */
+const PRIO_BADGE={P0:'danger',P1:'warn',P2:'line'};
+/* 列上只放徽章；withReason 給展開區，多放理由 */
+function priorityBadge(card,withReason){
+  const p=card.priority;if(!p)return '';
+  const b=`<span class="badge ${PRIO_BADGE[p.level]}" title="${esc(p.reason)}">${esc(p.level)}</span>`+(p.overridden?'<span class="badge accent" title="使用者改過等級">改</span>':'');
+  return withReason?`${b}<span class="prio-why">${esc(p.reason)}</span>`:b;
+}
+/* milestones 可能缺：--collect 固定檔是舊格式 */
+function milestoneLine(milestones,repos){
+  const m=milestones||{};
+  return repos.filter(r=>m[r]).map(r=>`<span class="ms"><span class="faint">${esc(r)}</span> ${esc(m[r].current)} · ${esc(m[r].goal)} · 還差 ${esc(m[r].remaining)} 張</span>`).join('');
+}
 
 /* ---------- 範圍 ---------- */
 function wsOf(repo){const s=data.scopes.find(s=>s.repos.includes(repo));return s?s.workspace:null;}
@@ -338,7 +356,7 @@ function rowAttn(c){
   else {l2=`<span class="q">${esc(w.question)}</span>`;act=`<button class="primary sm" data-act="pane">開啟 pane</button><button class="sm" data-act="stop">停止</button>`;}
   return `<div class="row" data-key="${esc(key(c))}" role="button" tabindex="0" aria-selected="${ui.sel===key(c)}">
     <div class="avatar">${bot(c,30)}</div>
-    <div class="main"><div class="l1"><span class="badge ${WAIT_BADGE[w.type]}">${esc(w.type)}</span><span class="title">${esc(c.title)}</span><span class="meta">${esc(c.repo)} · ${esc(since(c))}</span></div><div class="l2">${l2}</div></div>
+    <div class="main"><div class="l1"><span class="badge ${WAIT_BADGE[w.type]}">${esc(w.type)}</span>${priorityBadge(c)}<span class="title">${esc(c.title)}</span><span class="meta">${esc(c.repo)} · ${esc(since(c))}</span></div><div class="l2">${l2}</div></div>
     <div class="act">${act}</div></div>`;
 }
 function rowRunning(c){
@@ -350,13 +368,13 @@ function rowRunning(c){
   const badge=st==='working'?'<span class="badge ok"><span class="dot live"></span>執行中</span>':st==='done'?'<span class="badge line">完成</span>':st==='idle'?'<span class="badge line">閒置</span>':st==null?'<span class="badge line" title="不在 herdr 內，讀不到 agent 狀態">herdr —</span>':`<span class="badge line">${esc(st)}</span>`;
   return `<div class="row" data-key="${esc(key(c))}" role="button" tabindex="0" aria-selected="${ui.sel===key(c)}">
     <div class="avatar">${bot(c,30)}</div>
-    <div class="main"><div class="l1"><span class="title">${esc(c.title)}</span><span class="meta">${esc(c.repo)} · ${esc(c.dispatch.agent||'')} · ${esc(since(c))}</span></div><div class="l2">${prog}${mrNote}</div></div>
+    <div class="main"><div class="l1">${priorityBadge(c)}<span class="title">${esc(c.title)}</span><span class="meta">${esc(c.repo)} · ${esc(c.dispatch.agent||'')} · ${esc(since(c))}</span></div><div class="l2">${prog}${mrNote}</div></div>
     <div class="act">${badge}</div></div>`;
 }
 function rowReady(c){
   return `<div class="row" data-key="${esc(key(c))}" role="button" tabindex="0" aria-selected="${ui.sel===key(c)}">
     <div class="avatar plain">${c.stage==='apply'?'RDY':'NEW'}</div>
-    <div class="main"><div class="l1"><span class="badge line">${esc(KIND[c.kind]||c.kind)}</span><span class="title">${esc(c.title)}</span><span class="meta">${esc(c.repo)} · 階段 ${esc(c.stage)} · ${esc(since(c))}</span></div></div>
+    <div class="main"><div class="l1"><span class="badge line">${esc(KIND[c.kind]||c.kind)}</span>${priorityBadge(c)}<span class="title">${esc(c.title)}</span><span class="meta">${esc(c.repo)} · 階段 ${esc(c.stage)} · ${esc(since(c))}</span></div></div>
     <div class="act"><button class="primary sm" data-act="dispatch">指派</button></div></div>`;
 }
 function rowDone(c){
@@ -392,8 +410,14 @@ function rowInbox(c){
   const gone=c.upstream==='closed'?'上游已關閉':c.stale?'註解已刪':'';
   return `<div class="row${gone?' gone':''}" data-key="${esc(key(c))}" role="button" tabindex="0" aria-selected="${ui.sel===key(c)}">
     <div class="avatar plain">NEW</div>
-    <div class="main"><div class="l1"><span class="badge line">${esc(KIND[c.kind]||c.kind)}</span>${gone?`<span class="badge line">${gone}</span>`:''}<span class="title">${esc(c.title)}</span><span class="meta">${esc(c.repo)} · ${esc(c.source||'沒有 source')} · ${esc(since(c))}</span></div></div>
-    <div class="act"><button class="primary sm" data-act="dispatch">指派</button><button class="sm" data-act="explore">先 explore</button>${dropCtl(key(c))}</div></div>`;
+    <div class="main"><div class="l1"><span class="badge line">${esc(KIND[c.kind]||c.kind)}</span>${gone?`<span class="badge line">${gone}</span>`:''}${priorityBadge(c)}<span class="title">${esc(c.title)}</span><span class="meta">${esc(c.repo)} · ${esc(c.source||'沒有 source')} · ${esc(since(c))}</span></div></div>
+    <div class="act">${prioCtl(c)}<button class="primary sm" data-act="dispatch">指派</button><button class="sm" data-act="explore">先 explore</button>${dropCtl(key(c))}</div></div>`;
+}
+/* 改等級就地選等級、填理由；理由空白時送出鈕不能按（server 也會回 400）。打到一半的字存在 ui.prioText，重畫不丟 */
+function prioCtl(c){
+  if(ui.prio!==key(c))return `<button class="sm" data-act="prio-open">改等級</button>`;
+  const cur=ui.prioLevel||(c.priority&&c.priority.level);
+  return `<select class="prio-level" aria-label="等級">${['P0','P1','P2'].map(l=>`<option${l===cur?' selected':''}>${l}</option>`).join('')}</select><input type="text" class="prio-reason" aria-label="改等級的理由" placeholder="理由（必填），Enter 送出" value="${esc(ui.prioText)}"><button class="primary sm" data-act="prio-go"${ui.prioText.trim()?'':' disabled'}>送出</button>`;
 }
 /* 捨棄就地要一行理由：Enter 送出、Esc 取消；打到一半的字存在 ui.dropText，重畫不丟 */
 function dropCtl(id){
@@ -523,11 +547,12 @@ function render(){
   $('#inbox-n').textContent=sect('收件匣').length+(data.unfiled||[]).length||'';
   for(const t of ['home','inbox','log'])$('#tab-'+t).setAttribute('aria-selected',ui.tab===t);
   $('#stamp').textContent=data.generated_at?'collect '+ago(data.generated_at):'';
-  const y=window.scrollY;const typing=document.activeElement&&document.activeElement.classList.contains('drop-reason');
+  $('#milestones').innerHTML=milestoneLine(data.milestones,Object.keys(data.repo_paths||{}).filter(r=>inScope({repo:r})));
+  const y=window.scrollY;const typing=['drop-reason','prio-reason'].find(k=>document.activeElement&&document.activeElement.classList.contains(k));
   setView($('#view'),ui.tab==='inbox'?renderInbox():ui.tab==='log'?renderLog():renderHome(),ui.tab==='log');
   window.scrollTo(0,y);
-  /* 5 秒重拉會重畫：打到一半的捨棄理由把焦點還回去 */
-  if(typing){const i=$('.drop-reason');if(i){i.focus();i.setSelectionRange(i.value.length,i.value.length);}}
+  /* 5 秒重拉會重畫：打到一半的捨棄理由、改等級理由把焦點還回去 */
+  if(typing){const i=$('.'+typing);if(i){i.focus();i.setSelectionRange(i.value.length,i.value.length);}}
   const er0=data.worktrees_skipped&&data.worktrees_skipped.length?[{source:'collect',message:'跳過 worktree 目錄：'+data.worktrees_skipped.join('、')}]:[];
   data.errors=(data.errors||[]).filter(e=>e.source!=='collect').concat(er0);
   $('#scope-all').setAttribute('aria-selected',ui.scope==='all');
@@ -574,8 +599,9 @@ function renderDrawer(){
   const mine=tl?tl.events.filter(e=>e.repo===c.repo&&e.slug===c.slug):[];
   const logSec=`<section><h3>紀錄 <span class="src">decisions.tsv</span></h3>${tlErr?`<div class="faint" style="color:var(--danger)">${esc(tlErr)}</div>`:!tl?'<div class="faint">載入中…</div>':mine.length?`<div class="panel" style="margin-top:0">${mine.map(evRow).join('')}</div>`:'<div class="faint">這張卡還沒有紀錄</div>'}</section>`;
   const foot=`<div class="foot">${d.pane?`<button class="ghost sm" data-act="pane">開啟 pane ${esc(d.pane)}</button><button class="ghost sm" data-act="stop">停止</button>`:''}${c.section!=='已完成'?`<button class="ghost sm" data-act="dispatch">${d.pane?'重新指派':'指派'}</button>`:''}<span class="path">${esc(c.path||'')}</span></div>`;
+  const prioSec=c.priority?`<section><h3>等級 <span class="src">opsx priority</span></h3><div>${priorityBadge(c,true)}</div></section>`:'';
   const headBadge=w?`<span class="badge ${WAIT_BADGE[w.type]}">${esc(w.type)}</span>`:c.agent_status==='working'?'<span class="badge ok"><span class="dot live"></span>執行中</span>':'';
-  $('#drawer').innerHTML=`<header><div style="padding-top:2px">${bot(c,40)}</div><div class="ttl"><h2>${esc(c.title)}${headBadge}</h2><div class="flow">${flowLine(c)}</div></div><button class="x" data-act="close" aria-label="關閉">×</button></header><div class="body">${ask}${facts}${prog}${out}${mr}${logSec}${foot}</div>`;
+  $('#drawer').innerHTML=`<header><div style="padding-top:2px">${bot(c,40)}</div><div class="ttl"><h2>${esc(c.title)}${headBadge}</h2><div class="flow">${flowLine(c)}</div></div><button class="x" data-act="close" aria-label="關閉">×</button></header><div class="body">${ask}${prioSec}${facts}${prog}${out}${mr}${logSec}${foot}</div>`;
   $('#drawer').hidden=false;$('#scrim').hidden=false;
   const nr=$('#reply');if(nr&&keep){nr.value=keep.v;if(keep.focus){nr.focus();try{nr.setSelectionRange(keep.s,keep.s);}catch(e){}}}
 }
@@ -624,6 +650,12 @@ function submitDrop(id,text){
   if(id.startsWith('unfiled:')){const slug=id.slice(8);act(`opsx drop ${slug} -- ${text}`,()=>api.post('drop',{slug,text}));return;}
   const c=byKey(id);if(!c){render();return;}
   act(`opsx drop ${c.slug} --repo ${repoTop(c)} -- ${text}`,()=>api.post('drop',{slug:c.slug,repo:repoTop(c),text}));
+}
+function submitPriority(c){
+  const level=$('.prio-level').value,reason=ui.prioText.trim();
+  if(!reason)return;
+  ui.prio=null;ui.prioText='';ui.prioLevel=null;
+  act(`opsx priority ${c.slug} --set ${level} --reason ${reason}`,()=>api.post('priority',{repo:repoTop(c),slug:c.slug,level,reason}));
 }
 /* 立即同步：409 是另一支同步還在跑（launchd 或另一個分頁），不是錯誤 */
 async function syncNow(){
@@ -709,6 +741,8 @@ document.addEventListener('click',e=>{
     if(a==='pane'){focusAgent(c.dispatch&&c.dispatch.pane?c.slug:'');return;}
     if(a==='dispatch'){openDispatch(c);return;}
     if(a==='explore'){exploreFirst(c);return;}
+    if(a==='prio-open'){ui.prio=k;ui.prioText='';ui.prioLevel=null;render();const i=$('.prio-reason');if(i)i.focus();return;}
+    if(a==='prio-go'){submitPriority(c);return;}
     return;
   }
   const kb=e.target.closest('#dialog .kinds button');
@@ -723,13 +757,23 @@ document.addEventListener('click',e=>{
   if(e.target.id==='scrim'){if(!$('#dialog').hidden)closeDispatch();else closeDrawer();return;}
   if(!e.target.closest('#menu'))closeMenu();
 });
-document.addEventListener('input',e=>{if(e.target.classList.contains('drop-reason'))ui.dropText=e.target.value;});
-document.addEventListener('change',e=>{const r=e.target.closest('[data-unfiled]');if(r&&e.target.matches('select'))ui.fileRepo[r.dataset.unfiled]=e.target.value;});
+document.addEventListener('input',e=>{
+  if(e.target.classList.contains('drop-reason'))ui.dropText=e.target.value;
+  if(e.target.classList.contains('prio-reason')){ui.prioText=e.target.value;e.target.parentElement.querySelector('[data-act=prio-go]').disabled=!e.target.value.trim();}
+});
+document.addEventListener('change',e=>{
+  if(e.target.classList.contains('prio-level')){ui.prioLevel=e.target.value;return;}
+  const r=e.target.closest('[data-unfiled]');if(r&&e.target.matches('select'))ui.fileRepo[r.dataset.unfiled]=e.target.value;
+});
 document.addEventListener('keydown',e=>{
   if(e.target.matches('input,select')){
     if(e.target.classList.contains('drop-reason')){
       if(e.key==='Escape'){ui.drop=null;ui.dropText='';render();}
       else if(e.key==='Enter'&&e.target.value.trim())submitDrop(e.target.dataset.drop,e.target.value.trim());
+      return;}
+    if(e.target.classList.contains('prio-reason')){
+      if(e.key==='Escape'){ui.prio=null;ui.prioText='';ui.prioLevel=null;render();}
+      else if(e.key==='Enter'){const c=byKey(ui.prio);if(c)submitPriority(c);}
       return;}
     if(e.target.id==='new-text'){if(e.key==='Enter')submitNew();else if(e.key==='Escape')closeNew();return;}
     if(e.key==='Enter'&&e.target.id==='reply'){const c=byKey(ui.open);const v=e.target.value.trim();if(c&&v)answer(c,v,null);}

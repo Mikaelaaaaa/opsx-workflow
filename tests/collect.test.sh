@@ -274,4 +274,74 @@ J="$(PATH="$SLOW:$PATH" opsx collect --root "$R4")"; assert_eq "$?" 0
 grep -q '^mr view 9 ' "$OPSX_FAKE_LOG" || fail "glab 要真的被叫到，慢才有意義：$(cat "$OPSX_FAKE_LOG")"
 G="$(printf '%s' "$J" | python3 -I -c 'import datetime,json,sys;print(int(datetime.datetime.fromisoformat(json.load(sys.stdin)["generated_at"]).timestamp()))')"
 [ "$G" -le $((S + 2)) ] || fail "generated_at 要在讀來源前取：呼叫前 ${S}，generated_at ${G}"
+
+# ---------- 卡的等級與目前 milestone（workplan-priority/priority-board，specs/board-collect「卡的等級」「目前 milestone」） ----------
+R6="$FX/code6"; mkdir -p "$R6/p/.git" "$R6/q/.git" "$R6/w/.git"
+pcard() { # <repo> <slug> [frontmatter 行…]
+  local d="$R6/$1/openspec/changes/$2"; shift 2; mkdir -p "$d"
+  printf 'schema: opsx\ncreated: 2026-11-10\nkind: dev\n' > "$d/.openspec.yaml"
+  { printf -- '---\ntype: 功能\nsource: me\nfound: 2026-11-10\nrelated:\n'; printf '%s\n' "$@"; printf -- '---\n\n## 一句話\n\n%s\n' "$(basename "$d")"; } > "$d/inbox.md"
+}
+pcard p hot 'kind_of_work: incident' 'impact: security' 'evidence: tests/auth.test.sh 第 3 案'
+pcard p held 'priority: P1' 'priority_reason: 等客戶'
+pcard p bad 'kind_of_work: incident' 'impact: data'
+pcard p plain
+D="$R6/p/openspec/changes/archive/2026-11-01-gone"; mkdir -p "$D"; printf 'schema: opsx\n' > "$D/.openspec.yaml"; printf '## 一句話\n\n舊的\n' > "$D/inbox.md"
+cat > "$R6/p/openspec/workplan.yaml" <<'EOF'
+milestones:
+  - name: "1.0"
+    goal: "能開單出貨"
+  - name: "2.0"
+    goal: "能退貨"
+current_milestone: "1.0"
+features:
+  - name: order
+    milestone: "1.0"
+    prs:
+      - name: p-order
+        branch: feat/p-order/m
+        status: pending
+        depends-on: []
+        changes:
+          - name: c1
+            status: done
+          - name: c2
+            status: pending
+          - name: c3
+            status: in-progress
+  - name: refund
+    milestone: "2.0"
+    prs:
+      - name: p-refund
+        branch: feat/p-refund/m
+        status: pending
+        depends-on: []
+        changes:
+          - name: c4
+            status: pending
+EOF
+pcard q q1
+printf 'milestones:\n  - name: "1.0"\n    goal: "先上線"\nfeatures:\n  - name: f\n    milestone: "1.0"\n' > "$R6/q/openspec/workplan.yaml"
+pcard w w1 'kind_of_work: incident' 'impact: security' 'evidence: x'
+printf 'milestones:\n  - name: "1.0"\n    goal: "先上線"\ncurrent_milestone: "9.9"\n' > "$R6/w/openspec/workplan.yaml"
+J="$(opsx collect --root "$R6")"; assert_eq "$?" 0 "priority collect rc: $J"
+# 卡帶等級與理由
+C="$(card "$J" p hot)"; assert_eq "$(q "$C" priority.level)" P0; assert_eq "$(q "$C" priority.overridden)" false
+case "$(q "$C" priority.reason)" in *security*) ;; *) fail "hot 的理由要含 security：$(q "$C" priority)" ;; esac
+# 覆寫的卡
+C="$(card "$J" p held)"; assert_eq "$(q "$C" priority.level)" P1; assert_eq "$(q "$C" priority.overridden)" true
+# 算不出來：那張 null、errors 指名卡與 evidence；同 repo 其他卡照常
+assert_eq "$(q "$(card "$J" p bad)" priority)" null
+PE="$(printf '%s' "$J" | python3 -I -c 'import json,sys;print(json.dumps([e for e in json.load(sys.stdin)["errors"] if "bad" in e["message"] and "evidence" in e["message"]],ensure_ascii=False))')"
+assert_eq "$(printf '%s' "$PE" | python3 -I -c 'import json,sys;print(len(json.load(sys.stdin)))')" 1 "bad 的 error 要有一筆，含卡名與 evidence：$(q "$J" errors)"
+assert_eq "$(q "$(card "$J" p plain)" priority.level)" P2
+# 已歸檔的卡沒有等級
+assert_eq "$(q "$(card "$J" p gone)" priority)" null
+# workplan 壞了：那個 repo 的卡都 null，errors 記 workplan 路徑
+assert_eq "$(q "$(card "$J" w w1)" priority)" null
+WE="$(printf '%s' "$J" | python3 -I -c 'import json,sys;print(json.dumps([e for e in json.load(sys.stdin)["errors"] if e["source"].endswith("/w/openspec/workplan.yaml")],ensure_ascii=False))')"
+case "$WE" in *9.9*) ;; *) fail "壞 workplan 要記進 errors 並指名值：$(q "$J" errors)" ;; esac
+assert_eq "$(q "$(card "$J" q q1)" priority.level)" P2
+# 還差幾張；沒設目前 milestone 的 repo 沒有 key
+assert_eq "$(q "$J" milestones)" '{"p": {"current": "1.0", "goal": "能開單出貨", "remaining": 2}}'
 echo ok

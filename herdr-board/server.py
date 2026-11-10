@@ -11,6 +11,8 @@ GET /api/log[?since=<iso>] 回 `opsx timeline [--since …]` 的輸出（紀錄 
 GET /api/output?pane=<id> 跑 `herdr agent read <id> --lines 10 --format text`，回 {ok, text} 或 {ok: false, error}（抽屜「最後輸出」）。
 POST /api/seen {at} 把 at 寫進 <state>/last-seen（banner 按「關閉」時送）。
 POST /api/{answer,dispatch,merge,stop,new,file,drop,sync} 轉呼叫對應的 `opsx` 子命令，POST /api/focus 跑 herdr agent focus <slug>；都回 {ok, stdout, stderr}。
+POST /api/priority {repo, slug, level, reason} 轉 `opsx priority <slug> --set <level> --reason <理由> --repo <repo>`；
+                 level 不是 P0/P1/P2 或理由空白回 400，不叫 opsx。
 
 /api/* 要 header X-Opsx-Token 等於 <state>/board-token（第一次啟動時產生，之後重用）。只聽 127.0.0.1。
 opsx 用 plugin 自己的 bin/opsx（不靠 PATH），並把 --state 透過 OPSX_STATE_DIR 傳下去，兩邊讀同一份狀態。
@@ -68,6 +70,7 @@ FLAG_RE = {
     "source": re.compile(r"^(gitlab|github|debt)$"),
 }
 PANE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9:_-]{0,31}$")   # 不能以 - 開頭，免得被 herdr 當成旗標
+LEVELS = ("P0", "P1", "P2")
 
 
 class Config:
@@ -142,6 +145,22 @@ def build_args(action: str, body: dict) -> list[str]:
             raise ValueError("text 不能有換行（會變成 gates.md 的新欄位）")
         args += ["--", text]   # 答案以 -- 開頭也送得進去
     return args
+
+
+def priority_args(body: dict) -> list[str]:
+    """POST /api/priority 對成 `priority <slug> --set <level> --reason <理由> --repo <path>`。不合格 raise ValueError。"""
+    slug, level, reason, repo = body.get("slug"), body.get("level"), body.get("reason"), body.get("repo")
+    if not isinstance(slug, str) or not SLUG_RE.match(slug):
+        raise ValueError("slug 不合格：%r" % slug)
+    if level not in LEVELS:
+        raise ValueError("level 要是 P0、P1、P2：%r" % level)
+    if not isinstance(reason, str) or not reason.strip():
+        raise ValueError("改等級要寫理由")
+    if "\0" in reason:
+        raise ValueError("reason 不能有 NUL")
+    if not isinstance(repo, str) or not FLAG_RE["repo"].match(repo) or not repo_ok(repo):
+        raise ValueError("repo 不是 opsx repo 的根目錄：%r" % repo)
+    return ["priority", slug, "--set", level, "--reason", reason, "--repo", repo]
 
 
 def run(argv: list[str], timeout: int, env: dict) -> dict:
@@ -266,7 +285,7 @@ class Handler(BaseHTTPRequestHandler):
         action = path[5:]
         if action == "collect":
             self.send_json(405, {"error": "collect 是 GET"}); return
-        if action not in ACTIONS and action not in ("focus", "seen"):
+        if action not in ACTIONS and action not in ("focus", "seen", "priority"):
             self.send_json(404, {"error": "沒有這個動作：%s" % action}); return
         try:
             n = int(self.headers.get("Content-Length") or 0)
@@ -287,7 +306,7 @@ class Handler(BaseHTTPRequestHandler):
                 if not isinstance(agent, str) or not SLUG_RE.match(agent):
                     raise ValueError("agent 不合格：%r" % agent)
                 self.send_json(200, run(["herdr", "agent", "focus", agent], 10, self.opsx_env())); return
-            args = build_args(action, body)
+            args = priority_args(body) if action == "priority" else build_args(action, body)
         except (ValueError, json.JSONDecodeError) as e:
             self.send_json(400, {"error": str(e)}); return
         r = run(["bash", str(OPSX), *args], ACTION_TIMEOUT, self.opsx_env())

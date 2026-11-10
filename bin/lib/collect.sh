@@ -4,9 +4,10 @@
 # herdr agent list（只在 HERDR_ENV 設定時）與 glab / gh（經 mr_json）。specs/board-collect/spec.md。
 #
 # 輸出：{generated_at, scopes[{workspace, repos[]}], repo_paths{repo: 實體路徑}, cards[], unfiled[{slug, title, source, found}],
-#       last_sync（sync.log 最後一行，沒有檔時 null）， unmatched_agents[], errors[{source,message}]}
+#       last_sync（sync.log 最後一行，沒有檔時 null）， unmatched_agents[], errors[{source,message}],
+#       milestones{repo: {current, goal, remaining}}（只列設了 current_milestone 的 repo）}
 # 每張卡：{repo, slug, title, kind, stage, section, since, waiting, open_gates[{id, opened_at}], dispatch, status, agent_status, mr,
-#        source, upstream, stale}
+#        source, upstream, stale, priority{level, reason, overridden}（已歸檔或算不出來時 null）}
 #   section ∈ 待處理 | 進行中 | 待指派 | 收件匣 | 已完成（收件匣＝沒派出、stage 還是 explore）；waiting.type ∈ 等待授權 | 等待決定 | 可以合併 | 終端機等待輸入
 #
 # gates.md 的格式（apply 步 5 寫、answer 改）：每個 gate 一段
@@ -100,6 +101,9 @@ opsx_collect() {
   OPSX_C_WORK="$work" OPSX_C_STATE="$state" OPSX_C_HERDR_ERR="$herdr_err" OPSX_C_NOW="$now" "$OPSX_PY" -I - <<'PY'
 import datetime, json, os, re, sys, tomllib
 
+sys.path.insert(0, os.path.join(os.environ["OPSX_ROOT"], "bin", "lib"))
+import priority
+
 work, state = os.environ["OPSX_C_WORK"], os.environ["OPSX_C_STATE"]
 errors = []
 if os.environ["OPSX_C_HERDR_ERR"]:
@@ -129,6 +133,32 @@ worktrees = [r for r in read(os.path.join(work, "worktrees")).split("\n") if r]
 workspaces = load_toml(os.path.join(state, "workspaces.toml")).get("repos", {})
 grants = load_toml(os.path.join(state, "grants.toml")).get("repos", {})
 dispatch = load_json(os.path.join(state, "dispatch.json"), {}) or {}
+
+# 等級跟 opsx priority 同一個計算，一個 repo 算一次（依賴繼承要看整個 repo）。workplan 壞了：那個 repo 的卡都沒有等級
+levels, milestones = {}, {}
+for r, top in repo_paths.items():
+    try:
+        levels[r] = priority.levels(top)
+        plan = priority.load_plan(top)
+    except priority.PriorityError as e:
+        errors.append({"source": os.path.join(top, "openspec", "workplan.yaml"), "message": str(e)})
+        levels[r] = None
+        continue
+    if plan["current"]:
+        remaining = sum(1 for f in plan["features"] if f.get("milestone") == plan["current"]
+                        for pr in f.get("prs") or [] for ch in pr.get("changes") or [] if ch.get("status") != "done")
+        milestones[r] = {"current": plan["current"], "goal": plan["goals"][plan["current"]], "remaining": remaining}
+
+def priority_of(repo, slug, archived, inbox_path):
+    if archived or levels[repo] is None:
+        return None
+    got = levels[repo].get(slug)   # 掃目錄之後才算等級，中間被 archive 搬走的卡不在裡面
+    if got is None:
+        return None
+    if "error" in got:
+        errors.append({"source": inbox_path, "message": got["error"]})
+        return None
+    return got
 
 # scopes：每個 workspace 底下掛哪些 repo；沒掛的 repo 歸在 workspace null
 by_ws = {}
@@ -262,6 +292,7 @@ for line in read(os.path.join(work, "cards.tsv")).split("\n"):
         "agent_status": agent_status, "mr": c["mr"],
         "grants_repo": grants.get(c["repo"]), "path": d,
         "source": frontmatter(inbox, "source"), "upstream": frontmatter(inbox, "upstream"), "stale": frontmatter(inbox, "stale") == "true",
+        "priority": priority_of(c["repo"], c["slug"], c["archived"], os.path.join(d, "inbox.md")),
     })
 
 order = {"待處理": 0, "進行中": 1, "待指派": 2, "收件匣": 3, "已完成": 4}
@@ -286,6 +317,6 @@ unmatched = [{"name": a.get("terminal_title_stripped") or a.get("agent") or "", 
               "agent_status": a.get("agent_status"), "cwd": a.get("cwd"), "workspace": a.get("workspace_id")}
              for a in (agents or []) if str(a.get("pane_id")) not in matched_panes]
 print(json.dumps({"generated_at": now, "scopes": scopes, "repo_paths": repo_paths, "cards": cards, "unfiled": unfiled, "last_sync": last_sync, "unmatched_agents": unmatched, "errors": errors,
-                  "legacy": legacy, "worktrees_skipped": worktrees}, ensure_ascii=False))
+                  "milestones": milestones, "legacy": legacy, "worktrees_skipped": worktrees}, ensure_ascii=False))
 PY
 }
