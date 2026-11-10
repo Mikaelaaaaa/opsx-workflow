@@ -94,11 +94,10 @@ assert_no_file "$pidf2"
 kill -0 "$pid2" || fail "stop --board 關到別的 port 的 server"
 assert_file "$pidf"
 # --- 舊版留下的單一 board.pid 也要被清掉 ---
-sleep 60 & legacy=$!
+legacy="$(sleep 60 >/dev/null 2>&1 & echo $!)"   # 在子 shell 起，行程不是本 shell 的子行程：被 kill 後不留 zombie，kill -0 才分得出死活
 printf '%s\n' "$legacy" > "$OPSX_STATE_DIR/board.pid"
 out="$(opsx stop --board 2>&1)"; assert_eq "$?" 0 "stop --board: $out"
 sleep 0.3; kill -0 "$pid2" 2>/dev/null && fail "stop --board 後 server 還活著"
-wait "$legacy" 2>/dev/null || true
 kill -0 "$legacy" 2>/dev/null && fail "stop --board 沒關舊 board.pid 指的 server"
 assert_no_file "$pidf"
 assert_no_file "$OPSX_STATE_DIR/board.pid"
