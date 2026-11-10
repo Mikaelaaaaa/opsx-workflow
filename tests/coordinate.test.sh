@@ -216,6 +216,39 @@ assert_eq "$(count 'branch -D')" 0 "worktree 刪不掉不刪分支"
 grep '??' "$LOG" | grep -q g || fail "要記 ??：$(cat "$LOG")"
 cp "$WP0" "$R/openspec/workplan.yaml"
 
+# --- 收尾：合併後分支又多了 commit，不收尾、通知一次；gate 答過（acked）才收尾 ---
+LATE='late 1 abc1234 feat/g/m
+abc1234 fix: pushed after merge'
+rm -f "$MEMO"
+OPSX_TEST_LATE_RC=1 OPSX_TEST_LATE_OUT="$LATE" round || fail "rc: $(cat "$FX/out")"
+assert_grep "^opsx late g --repo $R --open-gate\$" "$OPSX_FAKE_LOG"
+assert_eq "$(grep -cE '^(opsx stop|openspec archive|git .*worktree remove|git .*branch -D)' "$OPSX_FAKE_LOG")" 0 "多出 commit 不收尾：$(cat "$OPSX_FAKE_LOG")"
+grep '??' "$LOG" | grep g | grep -q '1 個 commit' || fail "要記 ?? 含 commit 數：$(cat "$LOG")"
+assert_grep '^notification show \[demo/g\] 合併後分支又多了 1 個 commit ' "$OPSX_FAKE_LOG"
+assert_eq "$(count '^notification show')" 1 "第一輪通知一次"
+[ -n "$(memo_get _notified demo/g/late/abc1234)" ] || fail "_notified 要有 demo/g/late/abc1234：$(cat "$MEMO")"
+OPSX_TEST_LATE_RC=1 OPSX_TEST_LATE_OUT="$LATE" round || fail "rc: $(cat "$FX/out")"
+assert_eq "$(count '^notification show')" 0 "第二輪不重送"
+assert_eq "$(grep -cE '^(opsx stop|openspec archive)' "$OPSX_FAKE_LOG")" 0
+OPSX_TEST_LATE_OUT="acked abc1234" round || fail "rc: $(cat "$FX/out")"
+assert_grep '^openspec archive g -y$' "$OPSX_FAKE_LOG"
+assert_grep '^git .*branch -D feat/g/m$' "$OPSX_FAKE_LOG"
+cp "$WP0" "$R/openspec/workplan.yaml"
+
+# --- 收尾：opsx late 查不出來（退出 2），不收尾、不通知，log 帶 stderr ---
+rm -f "$MEMO"
+OPSX_TEST_LATE_RC=2 OPSX_TEST_LATE_OUT="" OPSX_TEST_LATE_ERR="opsx late: 查不出來：mr.url 的 host github.com 對到 0 個 remote" round || fail "rc: $(cat "$FX/out")"
+assert_eq "$(grep -cE '^(opsx stop|openspec archive|git .*worktree remove|git .*branch -D)' "$OPSX_FAKE_LOG")" 0 "查不出來不收尾：$(cat "$OPSX_FAKE_LOG")"
+assert_eq "$(count '^notification show')" 0 "查不出來不通知"
+grep '??' "$LOG" | grep -q 'github.com 對到 0 個 remote' || fail "log 要帶 stderr：$(cat "$LOG")"
+
+# --- 收尾：--dry 只印 DRY opsx late，不通知 ---
+rm -f "$MEMO"
+OPSX_TEST_LATE_RC=1 OPSX_TEST_LATE_OUT="$LATE" round --dry || fail "rc: $(cat "$FX/out")"
+assert_grep 'DRY opsx late g' "$FX/out"
+assert_eq "$(count '^notification show')" 0 "dry 不通知"
+assert_no_file "$MEMO"
+
 # --- 收尾：agent 還在就交給它自己 /archive ---
 cards "[$(merged g "$(ago 10)" "$D" '"idle"')]"
 round || fail "rc: $(cat "$FX/out")"

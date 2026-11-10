@@ -143,6 +143,22 @@ class Round:
         self.log("?? %s 合併 %d 分鐘了還沒歸檔，agent 是 %s，要人看它卡在哪" % (key, minutes, c["agent_status"]))
         return False
 
+    def no_late_commits(self, top, c):
+        """合併後分支沒有多出的 commit（或多出的已經有人答了 gate）才回 True，卡才收尾；收尾會刪分支，多出的 commit 本機就沒了。
+        多出 commit 時 opsx late 已在卡上開 gate，這裡通知一次；查不出來不通知（不是人能處理的事件），下一輪再查。"""
+        key = card_key(c)
+        rc, out, err = self.act(["opsx", "late", c["slug"], "--repo", top, "--open-gate"])
+        if rc == 0:
+            return True
+        m = re.match(r"late (\d+) (\w+) ", out + " ") if rc == 1 else None
+        if rc == 1 and m:
+            n, sha = m.groups()
+            self.log("?? %s 合併後分支又多了 %s 個 commit，不收尾；卡上有 gate late-%s" % (key, n, sha))
+            self.notify(c, "late", sha, "合併後分支又多了 %s 個 commit" % n, "看板：%s 的 gate late-%s" % (c["slug"], sha))
+        else:
+            self.log("?? %s opsx late 查不出來（rc %d），不收尾：%s" % (key, rc, (err or out).replace("\n", " ")[:200]))
+        return False
+
     def clean_up(self, top, merged):
         """agent 已經不在的已合併卡：代做 /archive 的事。回傳收尾成功的卡。"""
         self.update_main(top)
@@ -663,6 +679,7 @@ def one_round(state, dry):
             r.log("?? %s 已合併但從沒派過，歸檔留給人%s" % (card_key(c), "；在等它的 PR：" + "、".join(waiting) if waiting else ""))
         elif owner_gone(c) or r.nobody_archiving(c):
             orphans.append(c)
+    orphans = [c for c in orphans if r.no_late_commits(repo_paths[c["repo"]], c)]
     done = []
     for repo in sorted({c["repo"] for c in orphans}):
         done += r.clean_up(repo_paths[repo], [c for c in orphans if c["repo"] == repo])

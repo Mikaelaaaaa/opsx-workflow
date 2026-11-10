@@ -77,6 +77,10 @@ Check for delta specs at `openspec/changes/<name>/specs/`. If none exist, procee
 - If changes needed: "Sync now (recommended)", "Archive without syncing"
 - If already synced: "Archive now", "Sync anyway", "Cancel"
 
+### 4b. Check the branch for commits pushed after the merge
+
+Run `opsx late <name>`. Exit 0 (`none` or `acked <sha>`): continue. Exit 1 (`late <N> <sha> <branch>` and one line per commit): those commits are on the remote branch but not in main, since the PR merged without them. Show the output and stop: do not archive, do not touch the workplan. Exit 2: it could not tell (the message names the missing field); show it and stop. A card with no MR yet has nothing merged, so skip this step.
+
 ### 5. Perform the archive
 
 Create the archive directory if it doesn't exist:
