@@ -1,6 +1,7 @@
-"""opsx coordinate 的一輪：讀 opsx collect，依序核准合併、收尾已合併的卡、答 gate、停等依賴的卡、重派死掉的卡、派新卡。
+"""opsx coordinate 的一輪：讀 opsx collect，依序收尾已合併的卡、答 gate、停等依賴的卡、重派死掉的卡、派新卡。
 
 每個動作是一條外部指令（opsx / git / openspec）。推節點（送 /<stage>）是每張卡的 drive 的事，這裡不送。
+合併永遠由人按（板上的「合併」或 forge 網頁），這裡從不呼叫 opsx merge。
 規則見 openspec/specs/opsx-coordinate/spec.md。
 用法：coordinate.py <state dir> [--dry]
 """
@@ -76,7 +77,7 @@ class Round:
         if herdr:
             raise CoordinateError("herdr 讀不到，agent 狀態不可得，這輪不動：%s" % "；".join(herdr))
         self.memo = read_json(self.memo_path, "coordinator memo")
-        for k in ("_parked", "_redispatched", "_approved"):
+        for k in ("_parked", "_redispatched"):
             self.memo.setdefault(k, {})   # 沒有這個 key 就是還沒記過任何一張
         self.dispatch_file = read_json(os.path.join(self.state, "dispatch.json"), "dispatch.json")
         return data
@@ -93,17 +94,6 @@ class Round:
         if top not in self.plans:
             self.plans[top] = read_prs(os.path.join(top, "openspec", "workplan.yaml"))
         return self.plans[top]
-
-    def approve_merge(self, c, top):
-        key, mr = card_key(c), c["mr"]
-        if self.memo["_approved"].get(key) == mr["head_sha"]:
-            return
-        rc, _, err = self.act(["opsx", "merge", c["slug"], "--repo", top])
-        if rc != 0:
-            self.log("?? %s 核准合併被拒：%s" % (key, err[:200]))
-            return
-        self.memo["_approved"][key] = mr["head_sha"]
-        self.log("++ %s 五條件全綠，核准合併 %s（%s）" % (key, mr["head_sha"], mr["url"]))
 
     def nobody_archiving(self, c):
         """已合併但 agent 還在：歸檔、標 workplan、叫 chain 都是它自己 /archive 的事，這裡不搶。
@@ -156,7 +146,6 @@ class Round:
         if rc != 0:
             self.log("?? %s openspec archive 失敗：%s" % (key, err[:200]))
             return False
-        self.memo["_approved"].pop(key, None)
         # 沒記 worktree 的是早期派的卡，當時 worktree 一律開在這裡
         wt = entry["worktree"] if entry and entry.get("worktree") else os.path.join(top, ".claude", "worktrees", c["slug"])
         if os.path.isdir(wt):
@@ -217,8 +206,8 @@ class Round:
         """派出去的卡的第一個 open gate，照固定規則答、停、或留給人。"""
         w, key = c["waiting"], card_key(c)
         if w["type"] == "等待授權":
-            if w["action"] == "merge":   # 合併只走 approve_merge 的五條件、綁 sha 核准；這裡給「這次」會繞過它
-                self.log("?? %s gate %s 要合併授權，不代答：合併由 opsx merge 核准" % (key, w["gate_id"]))
+            if w["action"] == "merge":   # 合併永遠由人按，coordinator 不代答合併授權
+                self.log("?? %s gate %s 要合併授權，不代答：合併由人在板上按" % (key, w["gate_id"]))
                 return
             self.answer(c, top, w["gate_id"], "允許", grant=True)
             return
@@ -429,9 +418,6 @@ def main():
             r.log("-- %s 已合併但從沒派過，歸檔留給人" % card_key(c))
         elif owner_gone(c) or r.nobody_archiving(c):
             orphans.append(c)
-    for c in cards:
-        if c not in merged and c["mr"] and c["mr"]["state"] == "ready":
-            r.approve_merge(c, repo_paths[c["repo"]])
     done = []
     for repo in sorted({c["repo"] for c in orphans}):
         done += r.clean_up(repo_paths[repo], [c for c in orphans if c["repo"] == repo])
