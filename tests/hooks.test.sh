@@ -216,6 +216,26 @@ out="$(mg 'gh pr create --title t --body "## Changes
 | 1 | a | b | c |"')"; assert_eq "$(decision "$out")" allow "mr: --body 內嵌"
 out="$(mg 'gh pr create --title t --body "just text"')"; assert_eq "$(decision "$out")" deny "mr: body 不合格"
 out="$(mg 'glab mr list')"; assert_eq "$out" "" "mr: 其他 glab 指令不出聲"
+out="$(mg 'opsx answer s g1 -- "之後用 gh pr create 開 MR"')"; assert_eq "$out" "" "mr: 雙引號內的字樣不觸發"
+out="$(mg "opsx answer s g1 -- 'glab mr create 之後再開'")"; assert_eq "$out" "" "mr: 單引號內的字樣不觸發"
+out="$(mg 'echo "it'"'"'s gh pr create"')"; assert_eq "$out" "" "mr: 雙引號內含單引號的字樣不觸發"
+out="$(mg 'cat > inbox.md <<'"'EOF'"'
+用 glab mr create 開 MR
+EOF')"; assert_eq "$out" "" "mr: heredoc 內的字樣不觸發"
+out="$(mg 'cd x && glab mr create -F bad.md')"; assert_eq "$(decision "$out")" deny "mr: && 之後的 create 仍檢查"
+out="$(mg 'gh pr create --title "it'"'"'s" --body "just text"')"; assert_eq "$(decision "$out")" deny "mr: 引號內含單引號不讓真的 create 漏掉"
+out="$(mg "echo it's ok; if true; then gh pr create --fill --title 'x'; fi")"; assert_eq "$(decision "$out")" deny "mr: 未配對撇號與 then 之後的 create 不漏檢"
+out="$(mg 'gh pr create --title t --body "$(cat <<'"'EOF'"'
+## Changes
+
+| 編號 | 程式碼改動 | 業務層邏輯 | 對應測試 |
+| 1 | a | b | c |
+EOF
+)"')"; assert_eq "$(decision "$out")" allow "mr: --body \$(cat <<EOF) 合格仍放行"
+out="$(mg 'gh pr create --title t --body "$(cat <<'"'EOF'"'
+just text
+EOF
+)"')"; assert_eq "$(decision "$out")" deny "mr: --body \$(cat <<EOF) 不合格仍擋"
 
 # ---------- gate-timestamp ----------
 gt() { printf '{"cwd":"%s","tool_name":"%s","tool_input":{"file_path":"%s"},"hook_event_name":"PostToolUse"}' "$R" "${2:-Write}" "$1" | OPSX_NOW=2026-11-06T14:05:00+08:00 bash "$H/gate-timestamp.sh" 2>/dev/null; echo "rc=$?"; }

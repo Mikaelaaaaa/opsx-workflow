@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # herdr action open-board：起看板 server（已在跑就不重起）+ 開瀏覽器帶 token。herdr-board 5.1、specs/board-plugin。
-#   server：python3 herdr-board/server.py --port ${OPSX_BOARD_PORT}（預設 8791），pid 在 $OPSX_STATE_DIR/board.pid，log 在 board.log
+#   server：python3 herdr-board/server.py --port ${OPSX_BOARD_PORT}（預設 8791），pid 在 $OPSX_STATE_DIR/board-<port>.pid（每個 port 一份），log 在 board.log
 #   token：server 第一次啟動寫 $OPSX_STATE_DIR/board-token；拼進 URL，頁面讀一次存 sessionStorage 後抹掉
 set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -8,7 +8,7 @@ state="${OPSX_STATE_DIR:-$HOME/.local/state/opsx}"
 port="${OPSX_BOARD_PORT:-8791}"
 url="http://127.0.0.1:${port}/"
 mkdir -p "$state"
-pidfile="$state/board.pid"; logfile="$state/board.log"
+pidfile="$state/board-${port}.pid"; logfile="$state/board.log"
 
 alive() { # server 活著且是我們的：pid 在、healthz 回的是 opsx-board、token 檔還在（token 被刪就重起，不然新 tab 永遠 401）
   local pid; pid="$(cat "$pidfile" 2>/dev/null || true)"
