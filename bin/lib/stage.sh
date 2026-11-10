@@ -9,7 +9,14 @@ st_card_dir() { # <top> <slug>
     *) printf '%s/openspec/changes/%s' "$1" "$2" ;;
   esac
 }
-st_card_kind() { local d="$1"; [ -f "$d/.openspec.yaml" ] && sed -n 's/^kind: *//p' "$d/.openspec.yaml" | head -1 || true; }
+# 第一個 kind: 行冒號後的空白剝掉、其餘照原樣（含 \r、尾端空白）；最後一行沒有換行時印出來也不帶換行，跟 sed 一樣
+st_card_kind() {
+  local line eol
+  [ -f "$1/.openspec.yaml" ] || return 0
+  while eol=$'\n'; IFS= read -r line || { eol=; [ -n "$line" ]; }; do
+    case "$line" in kind:*) line="${line#kind:}"; printf '%s%s' "${line#"${line%%[! ]*}"}" "$eol"; return 0 ;; esac
+  done < "$1/.openspec.yaml"
+}
 st_status_tests() { local d="$1"; [ -f "$d/status.json" ] && jq -r '.tests // "unknown"' "$d/status.json" 2>/dev/null || printf 'unknown'; }
 st_review_running() { local d="$1"; [ -f "$d/status.json" ] && jq -e '.phase == "review" and .step < .total' "$d/status.json" >/dev/null 2>&1; }
 # 主殼有子 change 的 subagent 在背景做：子殼名在主殼某個未勾 task 行的編號之後、status.json 的 worker 是 subagent-* 且 step < total、at 在過去 120 分鐘內。
@@ -36,7 +43,14 @@ st_pending_nonempty() {
   [ -f "$1/explore.md" ] || return 1
   awk '/^## 待決/{f=1;next} /^## /{f=0} f' "$1/explore.md" | grep -vE '^\s*$|^\s*<!--|^\s*-\s*$|^\s*（' | grep -q .
 }
-st_mr_url() { [ -f "$1/report.md" ] && grep -oE 'https?://[^ )]+/(merge_requests|pull)/[0-9]+' "$1/report.md" | head -1 || true; }
+# 第一個 MR 網址。整檔一次比對，字元類排除換行，跟 grep 逐行找第一個相同
+st_mr_url() {
+  local c re='https?://[^ )'$'\n'']+/(merge_requests|pull)/[0-9]+'
+  [ -f "$1/report.md" ] || return 0
+  IFS= read -r -d '' c < "$1/report.md" || true # -d '' 讀到檔尾一定回 1，呼叫端多半是 set -e
+  [[ $c =~ $re ]] && printf '%s\n' "${BASH_REMATCH[0]}"
+  return 0
+}
 st_mr_in_report() { [ -n "$(st_mr_url "$1")" ]; }
 st_open_gates() { [ -f "$1/gates.md" ] || { printf 0; return; }; grep -cE '^status:[[:space:]]*open[[:space:]]*$' "$1/gates.md" || true; }
 # 會擋 Stop 的 open gate 數：標題或「問題:」行問「要不要接 /apply」「要不要繼續？」這類接站問題的不算（接站不用問，continue.md）
@@ -74,7 +88,23 @@ wp_pr_field() { # <top> <slug> <field>
   ' "$1/openspec/workplan.yaml"
 }
 st_workplan_merged() { [ "$(wp_pr_field "$1" "$2" status)" = merged ]; } # <top> <slug>
-st_split_into() { [ -f "$1/inbox.md" ] && awk 'NR==1 && !/^---/{exit} NR>1 && /^---/{exit} /^split_into:/{sub(/^split_into: */,""); sub(/\r$/,""); sub(/ +#.*$/,""); if ($0 ~ /^(\[ *\]|""|\047\047|~|null)?$/) exit; print; exit}' "$1/inbox.md" || true; }
+# 只看 frontmatter（第一行是 --- 才算有）裡第一個 split_into:；空值、[]、""、''、~、null 算沒拆
+st_split_into() {
+  local line n=0 empty='^(\[ *\]|""|'"''"'|~|null)?$'
+  [ -f "$1/inbox.md" ] || return 0
+  while IFS= read -r line || [ -n "$line" ]; do
+    n=$((n+1))
+    case "$line" in
+      ---*) [ "$n" -eq 1 ] && continue; return 0 ;;
+      *) [ "$n" -eq 1 ] && return 0 ;;
+    esac
+    case "$line" in split_into:*) ;; *) continue ;; esac
+    line="${line#split_into:}"; line="${line#"${line%%[! ]*}"}"; line="${line%$'\r'}"
+    case "$line" in *" #"*) line="${line%% #*}"; line="${line%"${line##*[! ]}"}" ;; esac
+    [[ $line =~ $empty ]] || printf '%s\n' "$line"
+    return 0
+  done < "$1/inbox.md"
+}
 
 # 印「階段 · slug · kind · Read 清單」。沒卡印 explore。
 stage_of() { # <top> <slug>
@@ -101,4 +131,4 @@ stage_of() { # <top> <slug>
   fi
   printf 'explore · %s · %s · skills/explore/SKILL.md\n' "$slug" "$kind"
 }
-stage_name() { stage_of "$1" "$2" | cut -d' ' -f1; }
+stage_name() { local s; s="$(stage_of "$1" "$2")"; printf '%s\n' "${s%% *}"; }
