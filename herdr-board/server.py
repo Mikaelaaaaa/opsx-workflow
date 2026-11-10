@@ -11,6 +11,8 @@ GET /api/log[?since=<iso>] 回 `opsx timeline [--since …]` 的輸出（紀錄 
 GET /api/output?pane=<id> 跑 `herdr agent read <id> --lines 10 --format text`，回 {ok, text} 或 {ok: false, error}（抽屜「最後輸出」）。
 POST /api/seen {at} 把 at 寫進 <state>/last-seen（banner 按「關閉」時送）。
 POST /api/{answer,dispatch,merge,stop,new,file,drop,sync} 轉呼叫對應的 `opsx` 子命令，POST /api/focus 跑 herdr agent focus <slug>；都回 {ok, stdout, stderr}。
+POST /api/paste {text, repo?, files: [{name, data(base64)}]} 把檔寫進暫存資料夾，轉呼叫 `opsx new [--repo] --attach <檔>… -- <一句話>`，
+                 跑完刪暫存。body 上限 PASTE_MAX_BODY，其他 POST 是 MAX_BODY。
 
 /api/* 要 header X-Opsx-Token 等於 <state>/board-token（第一次啟動時產生，之後重用）。只聽 127.0.0.1。
 opsx 用 plugin 自己的 bin/opsx（不靠 PATH），並把 --state 透過 OPSX_STATE_DIR 傳下去，兩邊讀同一份狀態。
@@ -20,6 +22,8 @@ sync 以退出碼 3 結束（另一支同步還在跑）回 409，這裡只做�
 from __future__ import annotations
 
 import argparse
+import base64
+import binascii
 import datetime
 import json
 import os
@@ -29,6 +33,7 @@ import secrets
 import signal
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -45,6 +50,8 @@ OUTPUT_TIMEOUT = 10
 ACTION_TIMEOUT = 120
 CACHE_S = 3
 MAX_BODY = 64 * 1024
+PASTE_MAX_BODY = 64 * 1024 * 1024   # base64 多三分之一，約夠一次帶五個 10 MB 的檔
+NAME_MAX = 128
 
 # 每個動作：有沒有 slug（有就是第一個位置參數）、必填欄位、選填 flag、尾端文字。
 ACTIONS = {
@@ -144,6 +151,57 @@ def build_args(action: str, body: dict) -> list[str]:
         if "\n" in text or "\r" in text or "\0" in text:
             raise ValueError("text 不能有換行（會變成 gates.md 的新欄位）")
         args += ["--", text]   # 答案以 -- 開頭也送得進去
+    return args
+
+
+def paste_parts(body: dict) -> tuple[list[str], list[tuple[str, bytes]], str]:
+    """把 /api/paste 的 body 拆成 (--repo 參數, [(檔名, 內容)], 一句話)。欄位不合格就 raise ValueError，呼叫端回 400。"""
+    text, files = body.get("text"), body.get("files")
+    if not isinstance(text, str):
+        raise ValueError("text 要是字串：%r" % text)
+    if "\0" in text:
+        raise ValueError("text 不能有 NUL")
+    if not isinstance(files, list):
+        raise ValueError("files 要是陣列：%r" % files)
+    decoded = []
+    for f in files:
+        if not isinstance(f, dict):
+            raise ValueError("files 的每一筆要是物件：%r" % f)
+        name, data = f.get("name"), f.get("data")
+        if (not isinstance(name, str) or not name or len(name) > NAME_MAX or name.startswith(".")
+                or any(ch in name for ch in "/\\\0")):
+            raise ValueError("檔名不合格：%r" % name)
+        if not isinstance(data, str):
+            raise ValueError("%s 的 data 要是 base64 字串：%r" % (name, data))
+        try:
+            decoded.append((name, base64.b64decode(data, validate=True)))
+        except binascii.Error as e:
+            raise ValueError("%s 的 data 不是合法 base64：%s" % (name, e)) from e
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    if not lines and not decoded:
+        raise ValueError("text 與 files 至少要有一個非空")
+    # 多行時第一行當一句話，全文另存成附件，opsx new 的單行規則就不必放寬
+    if len(lines) > 1:
+        decoded.insert(0, ("paste.md", text.encode("utf-8")))
+    one_liner = lines[0] if lines else "附件：%s" % decoded[0][0]
+    repo = body.get("repo")
+    repo_args = []
+    if repo is not None and repo != "":
+        if not isinstance(repo, str) or not FLAG_RE["repo"].match(repo) or not repo_ok(repo):
+            raise ValueError("repo 不是 opsx repo 的根目錄：%r" % repo)
+        repo_args = ["--repo", repo]
+    return repo_args, decoded, one_liner
+
+
+def write_attachments(root: pathlib.Path, files: list[tuple[str, bytes]]) -> list[str]:
+    """寫進 root，回 --attach 參數。同名的第二個放進 root/<n>/，opsx new 取 basename 時再改名成 -2。"""
+    args, used = [], set()
+    for i, (name, data) in enumerate(files):
+        d = root / str(i) if name in used else root
+        d.mkdir(exist_ok=True)
+        (d / name).write_bytes(data)
+        used.add(name)
+        args += ["--attach", str(d / name)]
     return args
 
 
@@ -257,7 +315,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json(502, {"error": "opsx timeline 回的不是 JSON：%s" % e}); return
             self.send_json(200, payload); return
         if path.startswith("/api/"):
-            self.send_json(405 if path[5:] in ACTIONS or path[5:] == "focus" else 404, {"error": path}); return
+            self.send_json(405 if path[5:] in ACTIONS or path[5:] in ("focus", "paste") else 404, {"error": path}); return
         self.send_json(404, {"error": path})
 
     def do_POST(self) -> None:  # noqa: N802
@@ -269,11 +327,13 @@ class Handler(BaseHTTPRequestHandler):
         action = path[5:]
         if action == "collect":
             self.send_json(405, {"error": "collect 是 GET"}); return
-        if action not in ACTIONS and action not in ("focus", "seen"):
+        if action not in ACTIONS and action not in ("focus", "seen", "paste"):
             self.send_json(404, {"error": "沒有這個動作：%s" % action}); return
         try:
             n = int(self.headers.get("Content-Length") or 0)
-            if n < 0 or n > MAX_BODY:
+            if action == "paste" and n > PASTE_MAX_BODY:
+                self.send_json(413, {"error": "body 超過 %d bytes：%d" % (PASTE_MAX_BODY, n)}); return
+            if n < 0 or n > (PASTE_MAX_BODY if action == "paste" else MAX_BODY):
                 raise ValueError("body 大小不合理：%d" % n)
             body = json.loads(self.rfile.read(n).decode("utf-8") or "{}")
             if not isinstance(body, dict):
@@ -290,9 +350,17 @@ class Handler(BaseHTTPRequestHandler):
                 if not isinstance(agent, str) or not SLUG_RE.match(agent):
                     raise ValueError("agent 不合格：%r" % agent)
                 self.send_json(200, run(["herdr", "agent", "focus", agent], 10, self.opsx_env())); return
-            args = build_args(action, body)
+            if action == "paste":
+                repo_args, files, one_liner = paste_parts(body)
+            else:
+                args = build_args(action, body)
         except (ValueError, json.JSONDecodeError) as e:
             self.send_json(400, {"error": str(e)}); return
+        if action == "paste":
+            with tempfile.TemporaryDirectory(prefix="opsx-paste.") as d:
+                attach = write_attachments(pathlib.Path(d), files)
+                r = run(["bash", str(OPSX), "new", *repo_args, *attach, "--", one_liner], ACTION_TIMEOUT, self.opsx_env())
+            self.send_json(200, r); return
         r = run(["bash", str(OPSX), *args], ACTION_TIMEOUT, self.opsx_env())
         # sync 的退出碼 3 是已有一支在跑；reap 的退出碼 2 是指定的 pane 不是孤兒
         self.send_json(409 if action == "sync" and r["rc"] == 3 else 422 if action == "reap" and r["rc"] == 2 else 200, r)
