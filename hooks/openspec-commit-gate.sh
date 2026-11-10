@@ -24,6 +24,6 @@ if [ -z "$d" ]; then
   deny "opsx commit 閘門：branch '$(branch)' 對不到 openspec/changes/<slug>/。先 /propose 開卡（或 /explore），或在 commit 訊息加 [no-change] 說明為什麼這個 commit 不屬於任何 change。"
 fi
 if [ "$(tasks_done "$d")" -eq 0 ]; then
-  deny "opsx commit 閘門：$(card_slug) 的 tasks.md 還沒有任何勾（$( [ -f "$d/tasks.md" ] && echo '有 tasks.md 但全未勾' || echo '沒有 tasks.md' )）。先 /apply 做完一個 task 並勾起來再 commit；不屬於 task 的改動加 [no-change]。"
+  deny "opsx commit 閘門：${d#"$top"/} 的 tasks.md 還沒有任何勾（$( [ -f "$d/tasks.md" ] && echo '有 tasks.md 但全未勾' || echo '沒有 tasks.md' )）。先 /apply 做完一個 task 並勾起來再 commit；不屬於 task 的改動加 [no-change]。"
 fi
 exit 0
