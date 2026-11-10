@@ -13,14 +13,14 @@ st_pending_nonempty() {
 st_mr_url() { [ -f "$1/report.md" ] && grep -oE 'https?://[^ )]+/(merge_requests|pull)/[0-9]+' "$1/report.md" | head -1 || true; }
 st_mr_in_report() { [ -n "$(st_mr_url "$1")" ]; }
 st_open_gates() { [ -f "$1/gates.md" ] || { printf 0; return; }; grep -cE '^status:[[:space:]]*open[[:space:]]*$' "$1/gates.md" || true; }
-# 會擋 Stop 的 open gate 數：標題或 question 行問「要不要接 / 派 / 繼續」的不算（接站不用問，continue.md）
+# 會擋 Stop 的 open gate 數：標題或「問題:」行問「要不要接 /apply」「要不要繼續？」這類接站問題的不算（接站不用問，continue.md）
 st_open_gates_blocking() {
   [ -f "$1/gates.md" ] || { printf 0; return; }
   awk '
     function flush() { if (open && !ask) n++; open = 0; ask = 0 }
     /^## / { flush() }
     /^status:[ \t]*open[ \t]*$/ { open = 1 }
-    /^(## |question:).*要不要(接|派|繼續)/ { ask = 1 }
+    /^(## |問題:).*要不要(接|派|繼續)([ ]*\/|[ ]*下一|\?|？|$)/ { ask = 1 }
     END { flush(); print n + 0 }
   ' "$1/gates.md"
 }

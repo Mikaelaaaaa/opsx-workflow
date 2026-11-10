@@ -30,7 +30,7 @@ $missing
       return 0
     fi
     if [ "$(status_tests "$d")" != green ]; then
-      printf '%s' "opsx：$slug tasks 全勾，但 status.json 的 tests 不是 green（$(status_tests "$d")）。跑 test agent 把整張卡的測試跑到綠，`opsx status apply n/n <label> --tests green`，再停。"
+      printf '%s' "opsx：$slug tasks 全勾，但 status.json 的 tests 不是 green（$(status_tests "$d")）。跑 test agent 把整張卡的測試跑到綠，\`opsx status apply n/n <label> --tests green\`，再停。"
       return 0
     fi
     if [ ! -f "$d/report.md" ]; then
@@ -66,8 +66,13 @@ titled_gate_open() { # <dir> <title>
 write_auto_gate() { # <dir> <slug> <stage>
   local f="$1/gates.md"
   [ -s "$f" ] && printf '\n' >> "$f"
-  printf '## 卡在接 /%s\nstatus: open\nopened_at: %s\nquestion: opsx：%s 連續 %s 次停在 /%s 之前沒有 invoke。需要人看一下為什麼接不下去。\n' \
-    "$3" "$(now_iso)" "$2" "$MAX_BLOCKS" "$3" >> "$f"
+  {
+    printf '## 卡在接 /%s\ntype: decision\nstatus: open\nopened_at: %s\n' "$3" "$(now_iso)"
+    printf '問題: opsx：%s 連續 %s 次停在 /%s 之前沒有 invoke，卡在哪？\n' "$2" "$MAX_BLOCKS" "$3"
+    printf '選項: 重做 /%s 一次，做不完就把卡在哪寫進 gates.md (Recommended) | 停在這裡，把卡在哪寫進 gates.md 等人\n' "$3"
+    printf '建議: 先看 pane 和 report.md 再回\n'
+    printf '預設: hook 不再擋這一站\n'
+  } >> "$f"
 }
 
 d="$(card_dir)"
@@ -86,20 +91,21 @@ if [ -z "$reason" ]; then
   exit 0
 fi
 
-last_stage=""; n=0; gated=""
-[ -f "$state" ] && read -r last_stage n gated < "$state"
-[ "$last_stage" = "$stage" ] || { n=0; gated=""; }
+# 進度指紋：勾了 task 或有新 commit 就算有在做事，不算連續卡住
+fp="$(tasks_done "$d")-$(git -C "$(hook_cwd)" rev-parse HEAD 2>/dev/null || echo none)"
+last_stage=""; n=0; gated="-"; last_fp=""
+[ -f "$state" ] && read -r last_stage n gated last_fp < "$state"
+if [ "$last_stage" != "$stage" ] || [ "$last_fp" != "$fp" ]; then n=0; gated="-"; fi
 
 if [ "$n" -ge "$MAX_BLOCKS" ]; then
-  if [ -z "$gated" ]; then
-    write_auto_gate "$d" "$slug" "$stage"
-    printf '%s %s gated\n' "$stage" "$n" > "$state"
+  titled_gate_open "$d" "卡在接 /$stage" || [ "$gated" = gated ] || write_auto_gate "$d" "$slug" "$stage"
+  if titled_gate_open "$d" "卡在接 /$stage"; then
+    printf '%s %s gated %s\n' "$stage" "$n" "$fp" > "$state"
     exit 0
   fi
-  titled_gate_open "$d" "卡在接 /$stage" && exit 0
-  n=0; gated=""   # 人答完了，重算
+  n=0; gated="-"   # gate 被回答了，重算
 fi
 
 mkdir -p "$(dirname "$state")"
-printf '%s %s\n' "$stage" "$((n + 1))" > "$state"
+printf '%s %s - %s\n' "$stage" "$((n + 1))" "$fp" > "$state"
 stop_block "$reason"
