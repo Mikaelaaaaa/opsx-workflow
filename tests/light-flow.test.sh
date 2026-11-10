@@ -62,3 +62,18 @@ assert_fixed 'Consider never opens a gate' "$REV"
 awk 'index($0,"## Step 5")==1{on=1;print;next} /^## (Step|Guardrails)/{on=0} on' "$REV" > "$FX/sec-step5"; [ -s "$FX/sec-step5" ] || fail "review has no '## Step 5' section"
 assert_fixed 'keeps an existing `## MR` section verbatim' "$FX/sec-step5"
 assert_fixed 'Consider never opens a gate' "$CONT"
+
+# --- review-fix-in-scope：範圍內退回 apply，第 2 輪後確認而不重審 ---
+assert_fixed 'confirm pass' "$FX/sec-step0"
+assert_fixed '待修（範圍內）' "$FX/sec-step0"
+assert_fixed '| review | `/apply <slug>` | `待修（範圍內）` has items |' "$CONT"
+assert_fixed '| review | `/pr <slug>` | no `待修（範圍內）` item left open (Consider does not count) |' "$CONT"
+assert_fixed '確認: <sha>' "$FX/sec-light"
+assert_not_fixed 'a gate lists the Bug and Must-fix items still open' "$CONT"
+# report.md 在、沒有 MR，但 review 退回的 R task 還沒勾 → apply，不是 pr
+mk_card c-back dev
+printf '## 1. x\n\n- [x] 1.1 a\n\n## R1. review 退回\n\n- [ ] R1.1 b\n' > "$R/openspec/changes/c-back/tasks.md"
+printf '# Review · c-back · 第 1 輪\n### 待修（範圍內）\n- a.sh:1 x\n' > "$R/openspec/changes/c-back/report.md"
+assert_eq "$(bash_fn stage_name "$R" c-back)" apply "report 在且 R task 未勾 → apply"
+printf '## 1. x\n\n- [x] 1.1 a\n\n## R1. review 退回\n\n- [x] R1.1 b\n' > "$R/openspec/changes/c-back/tasks.md"
+assert_eq "$(bash_fn stage_name "$R" c-back)" pr "report 在且 task 全勾 → pr"

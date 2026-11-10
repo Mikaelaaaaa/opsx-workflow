@@ -308,9 +308,10 @@ function inScope(c){
 }
 function scopeLabel(){if(ui.repo)return ui.repo;if(ui.scope!=='ws')return 'workspace';return ui.ws||'沒掛的';}
 const sect=name=>data.cards.filter(c=>c.section===name&&inScope(c));
-/* 範圍視圖下其他 repo 也有卡在等時，多列全部範圍的總數；那些卡在首頁別處都看不到 */
-function counterHtml(cards,inScope){
-  const all=cards.filter(c=>c.section==='待處理'),here=all.filter(inScope).length;
+/* 範圍視圖下其他 repo 也有卡在等時，多列全部範圍的總數；那些卡在首頁別處都看不到。
+   數法跟首頁待處理區一樣：session 一筆算一個，收進 session 的主 change 卡不另算 */
+function counterHtml(cards,sessions,inScope){
+  const all=[...sessions.filter(s=>s.section==='待處理'),...cards.filter(c=>c.section==='待處理'&&!c.session)],here=all.filter(inScope).length;
   const own=here?`待處理 <b>${here}</b>`:'<span class="faint">無待處理</span>';
   return all.length>here?`${own} · <button class="link" data-act="scope-all">全部 <b>${all.length}</b></button>`:own;
 }
@@ -561,9 +562,9 @@ async function loadLog(){
 function showTab(t){ui.tab=t;ui.sel=null;history.replaceState(null,'','#'+t);render();if(t==='log')loadLog();}
 
 function render(){
-  const A=sect('待處理');
-  $('#counter').innerHTML=counterHtml(data.cards,inScope);
-  $('#home-n').textContent=A.length||'';
+  const A=homeSect(data.cards.filter(inScope),data.sessions.filter(inScope),'待處理');
+  $('#counter').innerHTML=counterHtml(data.cards,data.sessions,inScope);
+  $('#home-n').textContent=A.sessions.length+A.cards.length||'';
   $('#inbox-n').textContent=sect('收件匣').length+(data.unfiled||[]).length||'';
   for(const t of ['home','inbox','log'])$('#tab-'+t).setAttribute('aria-selected',ui.tab===t);
   $('#stamp').textContent=data.generated_at?'collect '+ago(data.generated_at):'';

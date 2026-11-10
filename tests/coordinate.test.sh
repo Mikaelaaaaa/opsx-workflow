@@ -230,11 +230,17 @@ rm -f "$DISP"
 cards "[$(merged g 2026-11-07T12:00:00Z null null)]"
 round || fail "rc: $(cat "$FX/out")"
 assert_eq "$(grep -cE '^(opsx stop|openspec archive|git .*worktree remove|git .*branch -D)' "$OPSX_FAKE_LOG")" 0 "沒派過不收尾：$(cat "$OPSX_FAKE_LOG")"
-grep -- '--' "$LOG" | grep -q 'demo/g' || fail "要記 --：$(cat "$LOG")"
+grep '??' "$LOG" | grep -q 'demo/g' || fail "要記 ??：$(cat "$LOG")"
 assert_eq "$(wp_status g)" pending "沒派過不動 workplan"
 
+# --- 收尾：沒派過的卡，log 帶上 depends-on 它、還沒合的 PR ---
+cards "[$(merged p 2026-11-07T12:00:00Z null null)]"
+round || fail "rc: $(cat "$FX/out")"
+grep '??' "$LOG" | grep 'demo/p' | grep -q 'd-pr' || fail "要記 ?? 並帶上在等它的 d-pr：$(cat "$LOG")"
+assert_eq "$(wp_status p)" pending "沒派過不動 workplan"
+
 # --- 收尾：一個 PR 兩個 change，只收了一個，PR 不標 merged、依賴它的不派 ---
-mkcard ca af
+mkcard ca cb af
 printf '{"demo/ca":{"mode":"stopped","agent":"claude","pane":"w1:p5","drive_pid":null,"branch":"feat/core/m"}}' > "$DISP"
 cards "[$(merged ca 2026-11-07T12:00:00Z null null),{\"slug\":\"af\"}]"
 round || fail "rc: $(cat "$FX/out")"
@@ -242,6 +248,34 @@ assert_eq "$(wp_change ca)" done "收尾的 change 標 done"
 assert_eq "$(wp_status core)" in-progress "cb 還沒 done，PR 不標 merged"
 assert_eq "$(count '^opsx dispatch af')" 0 "core 沒 merged，依賴它的不派：$(cat "$OPSX_FAKE_LOG")"
 assert_grep '^openspec archive ca -y$' "$OPSX_FAKE_LOG"
+cp "$WP0" "$R/openspec/workplan.yaml"; rm -f "$MEMO"
+
+# --- 收尾：兄弟 change 還沒 propose（目錄不在、archive 也沒有），PR 不標 merged ---
+rm -rf "$R/openspec/changes/cb"
+round || fail "rc: $(cat "$FX/out")"
+assert_eq "$(wp_change cb)" pending "沒 propose 的兄弟不算 done"
+assert_eq "$(wp_status core)" in-progress "沒 propose 的兄弟還在，PR 不標 merged"
+assert_eq "$(count '^opsx dispatch af')" 0 "core 沒 merged，依賴它的不派：$(cat "$OPSX_FAKE_LOG")"
+cp "$WP0" "$R/openspec/workplan.yaml"; rm -f "$MEMO"
+
+# --- 收尾：archive 裡只有名字以 -cb 結尾的別的 change，沒 propose 的 cb 不算已歸檔 ---
+mkdir -p "$R/openspec/changes/archive/2026-11-07-ca-cb"
+round || fail "rc: $(cat "$FX/out")"
+assert_eq "$(wp_change cb)" pending "別的 change 的歸檔不算 cb 已歸檔"
+assert_eq "$(wp_status core)" in-progress "別的 change 的歸檔不讓 PR 標 merged"
+assert_eq "$(count '^opsx dispatch af')" 0 "core 沒 merged，依賴它的不派：$(cat "$OPSX_FAKE_LOG")"
+rm -rf "$R/openspec/changes/archive/2026-11-07-ca-cb"
+cp "$WP0" "$R/openspec/workplan.yaml"; rm -f "$MEMO"
+
+# --- 收尾：兄弟 change 已歸檔（drop 或手動 archive）、workplan 沒更新，PR 照樣標 merged、依賴它的同輪派出 ---
+mkdir -p "$R/openspec/changes/archive/2026-11-07-cb"
+round || fail "rc: $(cat "$FX/out")"
+assert_eq "$(wp_change ca)" done "收尾的 change 標 done"
+assert_eq "$(wp_change cb)" done "已歸檔的兄弟一起標 done"
+assert_eq "$(wp_status core)" merged "兄弟都 done，PR 標 merged"
+assert_grep "^opsx dispatch af --agent claude --mode autopilot --kind dev --repo $R\$" "$OPSX_FAKE_LOG"
+grep -q 'cb' "$LOG" || fail "log 要點名因已歸檔補標的 cb：$(cat "$LOG")"
+rm -rf "$R/openspec/changes/archive/2026-11-07-cb"
 cp "$WP0" "$R/openspec/workplan.yaml"; rm -f "$DISP" "$MEMO"
 
 # --- 收尾：依賴它的卡同一輪派出（PR 名跟 change 名不同） ---
