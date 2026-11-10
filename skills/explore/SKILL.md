@@ -194,7 +194,7 @@ status: open
 預設: 不建殼，等回覆
 ```
 
-Until the gate is answered, create no shell and do not touch the workplan. Interactive mode asks the same thing with AskUserQuestion instead of the gate. Once confirmed, in this order:
+A gate's `type` is `approval` (a permission) or `decision` (a choice) and nothing else; add a `needs: run` line when 建議 is a command the user must run themselves. Until the gate is answered, create no shell and do not touch the workplan. Interactive mode asks the same thing with AskUserQuestion instead of the gate. Once confirmed, in this order:
 
 1. Each main change: `openspec new change <pr> --schema opsx`, with an inbox.md that says what the whole main change does and lists its sub-changes.
 2. Each sub-change: `openspec/changes/<main>/subs/<sub>/` with `inbox.md` (frontmatter `parent: <main>`, `depends-on: [<sibling>]`) and `.openspec.yaml` (`schema: opsx`, `kind:`, `parent: <main>`). The openspec CLI does not know about these; `opsx check <main>` does.

@@ -5,6 +5,7 @@
 source "$(dirname "${BASH_SOURCE[0]}")/_lib.sh"
 
 top="$(repo_top)"; slug="$(card_slug)"
+slug="${slug%%--*}"   # 子殼分支 <主>--<子> 沒有自己的 dispatch.json 條目，照主 change 的模式與授權
 [ -n "$top" ] && [ -n "$slug" ] || exit 0
 repo="$(repo_name)"
 # dispatch.json 壞掉時讀不到模式，就退回比對檔案原文：裡面有這張卡的 key 才擋。
@@ -23,7 +24,7 @@ fi
 PY_FAIL="opsx 授權閘門：python 執行失敗（${OPSX_PY}），讀不到授權，先擋下。跑 opsx init --global"
 
 tool="$(hook_tool)"; cmd="$(hook_cmd)"; file="$(hook_file)"
-GATE_MSG="用 Edit 或 Write 寫 gates.md（type、問題、建議、證據、風險、沒回答的預設；不要用 Bash 寫，opened_at 不用寫，hook 會補），然後做能做的；人在板上回了會自動繼續"
+GATE_MSG="用 Edit 或 Write 寫 gates.md（type: approval | decision，要使用者在終端機跑指令的另加 needs: run；問題、建議、證據、風險、沒回答的預設；不要用 Bash 寫，opened_at 不用寫，hook 會補），然後做能做的；人在板上回了會自動繼續"
 
 level3() { deny "opsx 授權閘門：「$1」是永遠要人的動作（第三級），任何授權蓋不掉。$GATE_MSG"; }
 

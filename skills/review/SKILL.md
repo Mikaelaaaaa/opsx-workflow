@@ -23,7 +23,7 @@ Read `openspec/changes/<slug>/tasks.md` and `status.json`. For every checked tas
 
 A main change with `subs/`: also run `opsx check <slug>`. Any line it prints is a sub-change shell that is incomplete; stop the same way and name the lines.
 
-Read the round from report.md: its title is `# Review · <slug> · 第 <N> 輪 · …`; no report.md means N is 0, and this run is round N+1. When N is already 2, two rounds are done: review does not start a reviewer. If report.md still lists an open Bug or Must-fix, write a gate in `gates.md` that lists those items and stop; if none is open, say the review budget is used up and continue to the next node.
+Read the round from report.md: its title is `# Review · <slug> · 第 <N> 輪 · …`; no report.md means N is 0, and this run is round N+1. When N is already 2, two rounds are done: review does not start a reviewer. If report.md still lists an open Bug or Must-fix, write a gate in `gates.md` (`type: decision`) that lists those items and stop; if none is open, say the review budget is used up and continue to the next node.
 
 Decide small or not by `../../references/continue.md`, "Light flow" (kind chore or bug-fix, at most 3 tasks, one first path component outside tests). A small card runs one merged reviewer in step 2; any other card runs three.
 

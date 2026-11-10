@@ -14,7 +14,7 @@ opsx_chain() {
   local repo rows; repo="$(basename "$top")"
   rows="$("$OPSX_PY" -I "$OPSX_ROOT/bin/lib/chain.py" children "$top" "$repo" "$slug" "$OPSX_STATE_DIR/dispatch.json")" || exit 2
 
-  case "$rows" in skip*) say "chain: ${rows#skip$'\t'}"; return 0 ;; esac
+  case "$rows" in skip*) say "chain: ${rows#skip$'\t'}"; return 0 ;; session*) session_next "$top" "$repo" "$slug" "$rows"; return ;; esac
   local n; n="$(printf '%s\n' "$rows" | grep -c '^child')"
   if [ "$n" -eq 1 ]; then continue_one "$top" "$repo" "$slug" "$rows"; return; fi
   fan_out "$top" "$repo" "$slug" "$rows"
@@ -51,6 +51,23 @@ continue_one() { # <top> <repo> <父卡> <chain.py 的 child 行>
     [ "$mode" != interactive ] && printf 'drive\t%s\t%s\n' "$child" "$top"; true; } > "$q"   # autopilot 一律起 drive（drive 是舊名）
   log_row "$d" 系統 已指派 "自動派：因 ${parent} merged（同一個 pane 續接）" "${wt} · ${branch}"
   say "chain: ${parent} → ${child}：$wt 已切到 ${branch}；改名和第一句 /${stage} 交給 hook（佇列 ${q}）"
+}
+
+# feature session（一個 pane 代管整個 feature）：依賴剛合併的主 change 的下一個主 change 交給同一個 session。
+# 不開 pane、不改名、不切 branch（session 的 apply 自己切），只登記並把第一句寫進佇列，前綴 [<主>] 讓 session 知道是哪一張。
+session_next() { # <top> <repo> <父主 change> <chain.py 的 session 行>
+  local top="$1" repo="$2" parent="$3" rows="$4" agent now feature _ child branch kind out
+  now="$(now_iso)"; agent="$(jq -r --arg k "$repo/$parent" '.[$k].agent // "claude"' "$OPSX_STATE_DIR/dispatch.json")"
+  while IFS=$'\t' read -r _ child branch kind; do
+    out="$(OPSX_KEY="$repo/$parent" OPSX_PLAN="$child"$'\t'"$branch"$'\t'"$kind"$'\t'"$(default_model "$agent" "$kind")" OPSX_AT="$now" \
+      "$OPSX_PY" -I "$OPSX_ROOT/bin/lib/chain.py" session "$OPSX_STATE_DIR/dispatch.json")" || die "chain: 寫 dispatch.json 失敗（${child}）"
+    feature="$out"
+    local q="$OPSX_STATE_DIR/herdr-queue/$repo-$child.tsv" stage; ensure_dir "$(dirname "$q")"
+    stage="$(stage_name "$top" "$child")"
+    printf 'prompt\t%s\t[%s] /%s %s\n' "$feature" "$child" "$stage" "$child" > "$q"
+    log_row "$top/openspec/changes/$child" 系統 已指派 "自動派：因 ${parent} merged（同一個 session ${feature} 接著做）" "$branch"
+    say "chain: ${parent} → ${child}：交給 session ${feature}，第一句 /${stage} 交給 hook（佇列 ${q}）"
+  done <<< "$rows"
 }
 
 chain_skip() { # <子卡目錄> <原因>

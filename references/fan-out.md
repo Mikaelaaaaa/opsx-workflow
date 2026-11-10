@@ -32,6 +32,6 @@ Prompts for a fanned-out card reach this pane prefixed with the card's slug:
 | `/babysit merge <sha> <slug>` | SendMessage the subagent: run `/babysit merge <sha>` in its own worktree |
 | `[<slug>] stop` | stop that subagent (TaskStop); its branch and worktree stay |
 
-If the subagent cannot be reached (it ended and the worktree is gone), write a gate in that card's `gates.md`: the card has to be re-dispatched (`opsx stop <slug>`, then 指派 on the board).
+If the subagent cannot be reached (it ended and the worktree is gone), write a gate (`type: decision`) in that card's `gates.md`: the card has to be re-dispatched (`opsx stop <slug>`, then 指派 on the board).
 
-When a subagent reports `NEEDS-USER`, write the gate in **that card's** `gates.md`, not the parent's, then keep relaying for the others. The answer comes back as `[<slug>] …`.
+When a subagent reports `NEEDS-USER`, write the gate (`type: approval | decision`; add `needs: run` when the user must run a command) in **that card's** `gates.md`, not the parent's, then keep relaying for the others. The answer comes back as `[<slug>] …`.
