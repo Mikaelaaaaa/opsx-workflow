@@ -398,6 +398,29 @@ class ServerTest(unittest.TestCase):
         self.assertIn("config.toml", out["hint"])
         self.assertIn("壞", out["hint"])
 
+    def test_focus_unreadable_config_hints(self):
+        self.config.write_bytes(b"\xff\xfe")   # 不是 UTF-8
+        out = self.focus()
+        self.assertTrue(out["ok"])
+        self.assertIn("config.toml", out["hint"])
+        self.config.unlink()
+        self.config.mkdir()   # 是目錄：read_text 丟 IsADirectoryError
+        try:
+            out = self.focus()
+        finally:
+            self.config.rmdir()
+        self.assertTrue(out["ok"])
+        self.assertIn("config.toml", out["hint"])
+        self.assertEqual(self.open_log.read_text(), "")
+
+    def test_focus_config_without_usable_terminal_app_hints(self):
+        for text in ('# terminal_app = "Warp"\n', 'other = 1\n', 'terminal_app = ""\n', 'terminal_app = 1\n'):
+            self.config.write_text(text)
+            out = self.focus()
+            self.assertTrue(out["ok"], text)
+            self.assertIn("請切到", out["hint"], text)
+            self.assertEqual(self.open_log.read_text(), "", text)
+
     def test_focus_herdr_failure_does_not_raise_app(self):
         self.config.write_text('terminal_app = "Warp"\n')
         out = self.focus("gone")

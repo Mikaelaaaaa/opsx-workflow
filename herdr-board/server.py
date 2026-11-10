@@ -190,8 +190,8 @@ def raise_terminal(state: pathlib.Path, env: dict) -> str | None:
         app = tomllib.loads(path.read_text(encoding="utf-8")).get("terminal_app")
     except FileNotFoundError:
         app = None
-    except tomllib.TOMLDecodeError as e:
-        return "%s但 %s 壞了（%s），請切到終端機" % (where, path, e)
+    except (tomllib.TOMLDecodeError, UnicodeDecodeError, OSError) as e:
+        return "%s但 %s 壞了或讀不到（%s），請切到終端機" % (where, path, e)
     if not isinstance(app, str) or not app:
         return '%s請切到終端機。要自動帶到前景，在 %s 寫 terminal_app = "Warp"（換成你的 app）' % (where, path)
     r = run(["open", "-a", app], 10, env)
