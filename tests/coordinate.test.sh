@@ -914,6 +914,120 @@ assert_grep '^opsx stop m4' "$OPSX_FAKE_LOG"
 assert_grep "worktree remove $R/.claude/worktrees/g" "$OPSX_FAKE_LOG"
 mv "$FX/m3-archived" "$R/openspec/changes/m3"
 
+# --- session 條目就位後的收尾（session-archive-wake）：叫醒同 feature 的下一個主 change、最後一個收完關 session ---
+wake_wp() { # <m3 的 status>
+  cat > "$R/openspec/workplan.yaml" <<EOF
+features:
+  - name: g
+    depends-on: []
+    prs:
+      - name: m3
+        branch: feat/m3/u
+        status: $1
+        depends-on: []
+        changes:
+          - name: t3
+            status: pending
+      - name: m4
+        branch: feat/m4/u
+        status: pending
+        depends-on: [m3]
+        changes:
+          - name: t4
+            status: pending
+  - name: h
+    depends-on: []
+    prs:
+      - name: x9
+        branch: feat/x9/u
+        status: pending
+        depends-on: [m3]
+        changes:
+          - name: t9
+            status: pending
+EOF
+}
+# wake_disp <@g 的 mode>：session 條目、m3 是成員；m4 還沒有條目
+wake_disp() {
+  printf '{"demo/@g":{"workspace":"demo","workspace_id":"w1","tab":"w1:t9","pane":"w1:p9","agent":"claude","model":"claude-opus-5-5","mode":"%s","worktree":"%s","started_at":"2026-11-07T10:00:00+08:00","drive_pid":null},"demo/m3":{"mode":"autopilot","agent":"claude","pane":"w1:p9","herdr_name":"g","via":"@g","feature":"g","drive_pid":null,"branch":"feat/m3/u","worktree":"%s"}}' "$1" "$R/.claude/worktrees/g" "$R/.claude/worktrees/g" > "$DISP"
+}
+GM='{"mode":"autopilot","agent":"claude","pane":"w1:p9","herdr_name":"g","via":"@g","feature":"g","drive_pid":null}'
+mkcard m3 m4 x9; mkdir -p "$R/.claude/worktrees/g"; rm -f "$MEMO"
+
+# 收尾後叫醒同 feature 的下一個主 change：直接送 herdr、不寫佇列；別的 feature 不叫醒；同一輪不再單卡派 m4
+wake_wp pending; wake_disp autopilot
+cards "[$(merged m3 2026-11-07T12:00:00Z "$GM" '"idle"'),{\"slug\":\"m4\"}]"
+round || fail "rc: $(cat "$FX/out")"
+assert_grep '^openspec archive m3 -y$' "$OPSX_FAKE_LOG"
+assert_grep '^agent prompt g \[m4\] /apply m4$' "$OPSX_FAKE_LOG"
+assert_not_grep 'x9' "$OPSX_FAKE_LOG"
+assert_not_grep '^opsx stop' "$OPSX_FAKE_LOG"
+assert_not_grep '^opsx dispatch m4' "$OPSX_FAKE_LOG"
+assert_eq "$(jq -r '."demo/m4" | [.via, .feature, .herdr_name, .branch] | join(" ")' "$DISP")" "@g g g feat/m4/u" "m4 的成員條目"
+assert_eq "$(jq -r '."demo/m4".pane' "$DISP")" "$(jq -r '."demo/@g".pane' "$DISP")" "m4 的 pane 取自 session 條目"
+assert_eq "$(jq -r '."demo/x9"' "$DISP")" null "別的 feature 不寫條目"
+assert_eq "$(jq -r '."demo/m3".mode' "$DISP")" stopped "歸檔的 m3 條目標 stopped"
+assert_eq "$(jq -r '."demo/@g".mode' "$DISP")" autopilot "還有 m4，session 不關"
+assert_no_file "$OPSX_STATE_DIR/herdr-queue/demo-m4.tsv"
+
+# --dry：不寫 dispatch.json、不送 herdr
+wake_wp pending; wake_disp autopilot; cp "$DISP" "$FX/disp-before.json"
+round --dry || fail "rc: $(cat "$FX/out")"
+assert_eq "$(cat "$DISP")" "$(cat "$FX/disp-before.json")" "--dry 不改 dispatch.json"
+assert_not_grep '^agent prompt' "$OPSX_FAKE_LOG"
+
+# session 不活時不叫醒
+wake_wp pending; wake_disp stopped
+cards "[$(merged m3 2026-11-07T12:00:00Z "$GM" '"idle"')]"
+round || fail "rc: $(cat "$FX/out")"
+assert_grep '^openspec archive m3 -y$' "$OPSX_FAKE_LOG"
+assert_not_grep '^agent prompt g' "$OPSX_FAKE_LOG"
+assert_eq "$(jq -r '."demo/m4"' "$DISP")" null "session 停了不寫 m4 的條目"
+assert_eq "$(jq -r '."demo/@g".mode' "$DISP")" stopped "人停的 session 條目留著"
+
+# 最後一個成員收完關 session：m3 早就歸檔（條目 stopped），m4 是唯一的成員
+close_disp() {
+  printf '{"demo/@g":{"workspace":"demo","workspace_id":"w1","tab":"w1:t9","pane":"w1:p9","agent":"claude","model":"claude-opus-5-5","mode":"autopilot","worktree":"%s","started_at":"2026-11-07T10:00:00+08:00","drive_pid":null},"demo/m3":{"mode":"stopped","agent":"claude","pane":"w1:p9","herdr_name":"g","via":"@g","feature":"g","drive_pid":null,"branch":"feat/m3/u"},"demo/m4":{"mode":"autopilot","agent":"claude","pane":"w1:p9","herdr_name":"g","via":"@g","feature":"g","drive_pid":null,"branch":"feat/m4/u"}}' "$R/.claude/worktrees/g" > "$DISP"
+}
+wake_wp merged; close_disp; mv "$R/openspec/changes/m3" "$FX/m3-archived"
+cards "[$(merged m4 2026-11-07T12:30:00Z "$GM" '"idle"')]"
+round || fail "rc: $(cat "$FX/out")"
+got="$(grep -E '^(openspec archive|opsx stop|git -C [^ ]+ (worktree remove|branch -D))' "$OPSX_FAKE_LOG")"
+assert_eq "$got" "openspec archive m4 -y
+opsx stop @g --repo $R
+git -C $R worktree remove $R/.claude/worktrees/g
+git -C $R branch -D feat/m3/u
+git -C $R branch -D feat/m4/u" "關 session 的順序：stop、不 --force 移 worktree、刪已合併成員的分支"
+assert_eq "$(jq -r '."demo/@g"' "$DISP")" null "session 條目拿掉"
+# 之後同名 session 開得起來：真的 opsx dispatch --feature g 不因 session 條目或 agent 名被擋
+cat > "$R/openspec/workplan.yaml" <<'EOF'
+features:
+  - name: g
+    depends-on: []
+    prs:
+      - name: m5
+        branch: feat/m5/u
+        status: pending
+        depends-on: []
+        changes:
+          - name: t5
+            status: pending
+EOF
+mkcard m5
+bash "$OPSX_ROOT/bin/opsx" dispatch --feature g --agent claude --mode autopilot --repo "$R" > "$FX/dispatch-out" 2>&1
+assert_not_grep '已經派出去' "$FX/dispatch-out"
+assert_not_grep 'agent_name_taken' "$FX/dispatch-out"
+assert_grep '^agent start g ' "$OPSX_FAKE_LOG"
+
+# worktree 移不掉時留給人
+wake_wp merged; close_disp
+OPSX_TEST_GIT_FAIL=remove round || fail "rc: $(cat "$FX/out")"
+assert_grep "worktree remove $R/.claude/worktrees/g" "$OPSX_FAKE_LOG"
+assert_eq "$(count 'branch -D')" 0 "worktree 刪不掉不刪分支"
+assert_eq "$(jq -r '."demo/@g".mode' "$DISP")" autopilot "worktree 刪不掉 session 條目留著"
+grep '??' "$LOG" | grep -q '刪不掉' || fail "要記 worktree 刪不掉：$(cat "$LOG")"
+mv "$FX/m3-archived" "$R/openspec/changes/m3"; rm -rf "$R/openspec/changes/m5" "$R/openspec/changes/x9"
+
 # session 的 pane 不在了：只停 session 條目一次，整個 feature 重派一次，不逐卡 stop、不逐卡派，成員條目不動
 sess_wp merged; rm -f "$MEMO"
 G_ENTRY='"mode":"autopilot","agent":"claude","pane":"w1:p9","drive_pid":null'

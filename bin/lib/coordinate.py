@@ -57,6 +57,8 @@ class Round:
         self.level_errors = {}
         self.orders = {}
         self.redispatched_now = set()
+        self.stages = {}
+        self.woken = set()
 
     def log(self, msg):
         line = "%s %s" % (self.now.strftime("%Y-%m-%d %H:%M:%S"), msg)
@@ -92,6 +94,7 @@ class Round:
         for k in ("_parked", "_redispatched", "_notified"):
             self.memo.setdefault(k, {})   # 沒有這個 key 就是還沒記過任何一張
         self.dispatch_file = read_json(os.path.join(self.state, "dispatch.json"), "dispatch.json")
+        self.stages = {card_key(c): c["stage"] for c in data["cards"]}
         return data
 
     def save(self):
@@ -169,6 +172,9 @@ class Round:
         key = card_key(c)
         entry = self.dispatch_file.get(key)
         self.log("++ %s 已在 forge 合併、agent 不在，收尾" % key)
+        session_key = "%s/@%s" % (c["repo"], entry["feature"]) if entry and entry.get("feature") else None
+        if session_key in self.dispatch_file:
+            return self.archive_member(top, c, entry, session_key)
         shared = self.session_siblings(key, top)
         if entry and entry.get("mode") != "stopped" and not shared:
             self.act(["opsx", "stop", c["slug"], "--repo", top])
@@ -203,6 +209,94 @@ class Round:
         if rc != 0:
             self.log("?? %s 分支 %s 刪不掉：%s" % (key, entry["branch"], err[:200]))
         return True
+
+    def archive_member(self, top, c, entry, session_key):
+        """有 session 條目的成員主 change。不送 opsx stop <slug>：它會把 stop 送進共用的 session。
+        歸檔後把同 feature 接得上的主 change 交給 session，之後同 feature 沒有活成員就關掉 session。"""
+        key, feature = card_key(c), entry["feature"]
+        if not self.mark_merged(top, c["slug"]):
+            return False
+        rc, _, err = self.act(["openspec", "archive", c["slug"], "-y"], cwd=top)
+        if rc != 0:
+            self.log("?? %s openspec archive 失敗：%s" % (key, err[:200]))
+            return False
+        session = self.dispatch_file[session_key]
+        if chain.session_alive(session):
+            # chain.children 從磁碟讀這張的條目，標 stopped 之前叫醒，不然它會當成人停的而不接
+            self.wake(top, c, feature, session)
+        else:
+            self.log("-- %s 的 session %s 不活，不叫醒下一個主 change" % (key, session_key))
+        entry["mode"] = "stopped"
+        if self.dry:
+            self.log("DRY dispatch.json %s 標 stopped" % key)
+        else:
+            jsonfile.update(os.path.join(self.state, "dispatch.json"), functools.partial(mark_stopped, key=key, at=self.now.isoformat(timespec="seconds")))
+        members = chain.session_members(top, c["repo"], feature, self.dispatch_file)
+        if members:
+            self.log("-- %s 的 session %s 還在做 %s，不關 session" % (key, session_key, "、".join(members)))
+        elif session.get("mode") == "stopped":
+            self.log("-- %s 是人停的，pane、worktree、分支與條目留給人" % session_key)
+        else:
+            self.close_session(top, c["repo"], feature)
+        return True
+
+    def wake(self, top, c, feature, session):
+        """同 feature 依賴這張、依賴都合了、主殼有 tasks.md 的主 change（chain.children）：寫成員條目，直接用 herdr 送第一句。
+        coordinate 在沙盒外，不寫 herdr 佇列。"""
+        path = os.path.join(self.state, "dispatch.json")
+        try:
+            rows = chain.children(top, c["repo"], c["slug"], path)
+        except SystemExit as e:
+            self.log("?? %s 算不出同 feature 的下一個主 change，不叫醒：%s" % (card_key(c), e))
+            return
+        for row in rows:
+            if row[0] == "skip":
+                self.log("-- %s 沒有要叫醒的主 change：%s" % (card_key(c), row[1]))
+                continue
+            _, slug, branch, kind = row
+            child = "%s/%s" % (c["repo"], slug)
+            new = chain.session_member(session, feature, slug, branch, kind, session["model"], session["mode"], self.now.isoformat(timespec="seconds"))
+            if self.dry:
+                self.log("DRY dispatch.json 寫 %s（via @%s）" % (child, feature))
+            else:
+                jsonfile.update(path, functools.partial(put_entry, key=child, entry=new))
+            self.dispatch_file[child] = new
+            self.woken.add(child)
+            rc, out, err = self.act(["herdr", "agent", "prompt", feature, "[%s] /%s %s" % (slug, self.stages[child], slug)])
+            if rc != 0:
+                self.log("?? %s 送不到 session %s，條目已寫，下一輪由 session 重派接手：%s" % (child, feature, (err or out)[:200]))
+
+    def close_session(self, top, repo, feature):
+        """同 feature 沒有活成員了：停 session、移 worktree、刪已合併成員的分支、拿掉 session 條目。哪一步失敗就停在那一步，留給人。"""
+        session_key = "%s/@%s" % (repo, feature)
+        self.log("-- %s 沒有活的成員了，關 session" % session_key)
+        rc, _, err = self.act(["opsx", "stop", "@" + feature, "--repo", top])
+        if rc != 0:
+            self.log("?? %s opsx stop 失敗，worktree、分支與條目留給人：%s" % (session_key, err[:200]))
+            return
+        wt = self.dispatch_file[session_key]["worktree"]
+        if os.path.isdir(wt):
+            # 不 --force：worktree 裡有沒 commit 的東西就刪不掉，留給人
+            rc, _, err = self.act(["git", "-C", top, "worktree", "remove", wt])
+            if rc != 0:
+                self.log("?? %s 的 worktree %s 刪不掉，分支與 session 條目留給人：%s" % (session_key, wt, err[:200]))
+                return
+        prs = self.workplan(top)
+        for k, v in self.dispatch_file.items():
+            if not k.startswith(repo + "/") or v.get("via") != "@" + feature or not v.get("branch"):
+                continue
+            pr = pr_of(prs, k.split("/", 1)[1])
+            if pr is None or pr.get("status") != "merged":
+                continue
+            rc, _, err = self.act(["git", "-C", top, "branch", "-D", v["branch"]])
+            if rc != 0:
+                self.log("?? %s 分支 %s 刪不掉，session 條目留給人：%s" % (session_key, v["branch"], err[:200]))
+                return
+        if self.dry:
+            self.log("DRY dispatch.json 拿掉 %s" % session_key)
+            return
+        jsonfile.update(os.path.join(self.state, "dispatch.json"), functools.partial(drop_entry, key=session_key))
+        del self.dispatch_file[session_key]
 
     def mark_merged(self, top, slug):
         """workplan 裡這個 change 標 done；它的 PR 每個 change 都 done 了才標 merged，依賴它的卡這輪就派得出去。
@@ -426,6 +520,8 @@ class Round:
                         continue
             elif c["section"] != "待指派":
                 continue
+            elif key in self.woken:
+                continue   # 這輪收尾時已交給 session；collect 是收尾前讀的，還當它待指派
             elif entry and entry.get("mode") == "stopped":
                 continue   # 人在板上停掉的
             if not os.path.isfile(os.path.join(c["path"], "tasks.md")) or c["mr"]:
@@ -488,6 +584,16 @@ def mark_stopped(d, key, at):
     """jsonfile.update 的 mutate：條目標 stopped，不碰 pane。"""
     d[key]["mode"] = "stopped"
     d[key]["stopped_at"] = at
+
+
+def put_entry(d, key, entry):
+    """jsonfile.update 的 mutate：寫一筆條目。"""
+    d[key] = entry
+
+
+def drop_entry(d, key):
+    """jsonfile.update 的 mutate：拿掉一筆條目。"""
+    del d[key]
 
 
 def card_key(c):

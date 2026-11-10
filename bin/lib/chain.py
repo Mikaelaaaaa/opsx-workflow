@@ -274,12 +274,17 @@ def register_session(d: dict) -> None:
     session_key = "%s/@%s" % (repo, me["feature"])
     if session_key not in d:
         sys.exit("chain: %s 帶 feature %s，但 dispatch.json 沒有 session 條目 %s" % (e["OPSX_KEY"], me["feature"], session_key))
-    session = d[session_key]
     slug, branch, kind, model = e["OPSX_PLAN"].split("\t")
-    entry = _child_entry(session, slug, branch, kind, model, me.get("mode"), session.get("worktree"), e["OPSX_AT"])
-    entry["herdr_name"] = entry["feature"] = me["feature"]
-    entry["via"] = "@" + me["feature"]
-    d["%s/%s" % (repo, slug)] = entry
+    d["%s/%s" % (repo, slug)] = session_member(d[session_key], me["feature"], slug, branch, kind, model, me.get("mode"), e["OPSX_AT"])
+
+
+def session_member(session: dict, feature: str, slug: str, branch: str, kind: str, model: str, mode: str, at: str) -> dict:
+    """feature session 的成員條目：pane 層的欄位取自 session 條目，herdr 名與 feature 是 feature 名，via 指向 @<feature>。
+    chain 接下一個主 change 與 coordinate 代為收尾後叫醒下一個共用。"""
+    entry = _child_entry(session, slug, branch, kind, model, mode, session.get("worktree"), at)
+    entry["herdr_name"] = entry["feature"] = feature
+    entry["via"] = "@" + feature
+    return entry
 
 
 def register_fan_out(d: dict) -> None:
