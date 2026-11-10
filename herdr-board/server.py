@@ -48,7 +48,7 @@ MAX_BODY = 64 * 1024
 
 # 每個動作：有沒有 slug（有就是第一個位置參數）、必填欄位、選填 flag、尾端文字。
 ACTIONS = {
-    "answer": {"slug": True, "required": ("gate", "text"), "flags": ("gate", "grant", "repo"), "trailing": "text"},
+    "answer": {"slug": True, "required": ("gate", "text"), "flags": ("sub", "gate", "grant", "repo"), "trailing": "text"},
     "merge": {"slug": True, "required": (), "flags": ("repo",), "trailing": None},
     "stop": {"slug": True, "required": (), "flags": ("repo",), "trailing": None},
     "dispatch": {"slug": True, "required": (), "flags": ("agent", "model", "mode", "kind", "repo"), "trailing": None},
@@ -60,6 +60,7 @@ ACTIONS = {
 }
 PANE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9:_-]{0,31}$")   # 不能以 - 開頭，免得被 herdr 當成旗標
 FLAG_RE = {
+    "sub": SLUG_RE,   # 會拼進 changes/<slug>/subs/<sub> 路徑，不能有 / 或 ..
     "gate": re.compile(r"^[A-Za-z0-9_.-]{1,64}$"),
     "grant": re.compile(r"^(this|card|repo)$"),
     "agent": re.compile(r"^(claude|codex)$"),

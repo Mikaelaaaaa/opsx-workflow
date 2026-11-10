@@ -17,6 +17,8 @@ init_global() {
   python3 -I -c 'import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)' 2>/dev/null \
     || die "init --global: PATH 上的 python3 要 3.11 以上（有 tomllib），現在是 $(python3 --version 2>&1)。pyenv 或 brew 裝一個再跑"
   ensure_dir "$state"; ensure_dir "$bindir"
+  # 授權閘門信任的核准與授權（bin/lib/authz.py）。放在 state 目錄的兄弟，不在任何 session 的 additionalDirectories 內，沙盒內寫不進去
+  ensure_dir "${state%/}-protected"; chmod 700 "${state%/}-protected"
 
   # 記下 python3 背後真正的執行檔，opsx 和 hooks 只叫它（bin/lib/python.sh）。路徑不同就覆寫：
   # pyenv 換版本後舊路徑會失效，重跑這裡是唯一的修法。

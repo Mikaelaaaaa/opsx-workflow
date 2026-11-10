@@ -21,6 +21,14 @@ How:
 
 Merging is never part of this chain. The flow stops at "waiting for merge".
 
+## The Stop hook enforces it
+
+The text above is not enough on its own, so `hooks/openspec-stop-gate.sh` checks the card's node (`stage_of`) whenever you try to stop. If the next node is grill, propose, apply, review, pr, or babysit and no gate is blocking, it blocks the stop and tells you to invoke that node.
+
+- A gate that asks 要不要接 / 要不要派 / 要不要繼續 does not count as open. Asking whether to continue is a violation of step 3, not a reason to stop. Only a question the user alone can answer (a product choice, a grant, a conflict) belongs in a gate.
+- The hook blocks the same node at most 3 times. On the next stop it writes a gate titled 卡在接 /<node> itself and lets you stop. `stop_hook_active` does not release it.
+- Babysit leaves `babysit: <ISO time>` under `## MR` in `report.md`; without it the hook keeps asking for `/babysit`.
+
 ## Light flow
 
 Small changes do not carry the full ceremony.

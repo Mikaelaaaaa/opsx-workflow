@@ -6,7 +6,9 @@
 # 輸出：{generated_at, scopes[{workspace, repos[]}], repo_paths{repo: 實體路徑}, cards[], unfiled[{slug, title, source, found}],
 #       last_sync（sync.log 最後一行，沒有檔時 null）， unmatched_agents[], errors[{source,message}]}
 # 每張卡：{repo, slug, title, kind, stage, section, since, waiting, open_gates[{id, opened_at}], dispatch, status, agent_status, mr,
-#        source, upstream, stale}
+#        source, upstream, stale, session（收進 session 的主 change 才有："<repo>/<feature>"）}
+# sessions[]：{repo, feature, section, main_done, main_total, sub_done, sub_total, current{slug, stage}|null,
+#   mains[{slug, pr_status, stage, section, dispatch, agent_status, open_gates, waiting, subs[{slug, status, stage, worker, open_gates, waiting}]}]}
 #   section ∈ 待處理 | 進行中 | 待指派 | 收件匣 | 已完成（收件匣＝沒派出、stage 還是 explore）；waiting.type ∈ 等待授權 | 等待決定 | 可以合併 | 終端機等待輸入
 #
 # gates.md 的格式（apply 步 5 寫、answer 改）：每個 gate 一段
@@ -97,8 +99,10 @@ opsx_collect() {
   fi
 
   # 讀卡的檔與全域狀態，組 JSON
-  OPSX_C_WORK="$work" OPSX_C_STATE="$state" OPSX_C_HERDR_ERR="$herdr_err" OPSX_C_NOW="$now" "$OPSX_PY" -I - <<'PY'
+  OPSX_C_WORK="$work" OPSX_C_STATE="$state" OPSX_C_HERDR_ERR="$herdr_err" OPSX_C_NOW="$now" OPSX_C_LIB="$OPSX_ROOT/bin/lib" "$OPSX_PY" -I - <<'PY'
 import datetime, json, os, re, sys, tomllib
+sys.path.insert(0, os.environ["OPSX_C_LIB"])
+from chain import load_workplan
 
 work, state = os.environ["OPSX_C_WORK"], os.environ["OPSX_C_STATE"]
 errors = []
@@ -265,6 +269,87 @@ for line in read(os.path.join(work, "cards.tsv")).split("\n"):
     })
 
 order = {"待處理": 0, "進行中": 1, "待指派": 2, "收件匣": 3, "已完成": 4}
+
+def wp_list(owner, key, where):
+    """load_workplan 認不出形狀時不會 raise（features: oops 會變字串），這裡檢查：key 不在或空是 []，其餘要是有 name 的 mapping list。"""
+    v = owner.get(key) or []
+    if not isinstance(v, list) or not all(isinstance(x, dict) and x.get("name") for x in v):
+        raise ValueError("%s 的 %s 要是有 name 的 list：%r" % (where, key, v))
+    return v
+
+def sub_stage(d, status):
+    if status is not None: return status.get("phase")
+    if not os.path.isdir(d): return None
+    if not os.path.exists(os.path.join(d, "proposal.md")): return "inbox"
+    if not os.path.exists(os.path.join(d, "tasks.md")): return "propose"
+    return "apply" if re.search(r"^\s*- \[ \]", read(os.path.join(d, "tasks.md")), re.M) else "done"
+
+def sub_node(main_dir, ch):
+    d = os.path.join(main_dir, "subs", ch["name"])
+    status_path = os.path.join(d, "status.json")
+    status = load_json(status_path, None)
+    if status is not None and not isinstance(status, dict):   # 跟 JSON 壞掉同樣處理：記 errors、站點改由檔推，不讓一個檔毀掉整份
+        errors.append({"source": status_path, "message": "status.json 要是 object：%r" % (status,)}); status = None
+    gates_path = os.path.join(d, "gates.md")
+    gates = parse_gates(read(gates_path))
+    return {"slug": ch["name"], "status": ch.get("status"), "stage": sub_stage(d, status),
+            "worker": status.get("worker") if status is not None else None,
+            "open_gates": [{"id": g["id"], "opened_at": opened_at_of(g, gates_path, now_dt)} for g in gates if g.get("status") == "open"],
+            "waiting": waiting_of({"mr": None}, gates, None)}
+
+def main_node(repo, pr, by_key):
+    c = by_key.get((repo, pr["name"]))
+    if c:
+        vals = {k: c[k] for k in ("stage", "section", "dispatch", "agent_status", "open_gates", "waiting")}
+    else:   # 已歸檔超出 archive cap，或還沒建卡
+        merged = pr.get("status") == "merged"
+        vals = {"stage": "archive" if merged else None, "section": "已完成" if merged else None,
+                "dispatch": None, "agent_status": None, "open_gates": [], "waiting": None}
+    main_dir = os.path.join(repo_paths[repo], "openspec", "changes", pr["name"])
+    return {"slug": pr["name"], "pr_status": pr.get("status"), **vals,
+            "subs": [sub_node(main_dir, ch) for ch in wp_list(pr, "changes", "PR %s" % pr["name"])]}
+
+def session_of(repo, f, by_key):
+    prs = wp_list(f, "prs", "feature %s" % f["name"])
+    mains = [main_node(repo, pr, by_key) for pr in prs]
+    subs = [s for m in mains for s in m["subs"]]
+    cur = next((m for m in mains if m["pr_status"] != "merged"), None)
+    live = [m for m in mains if m["section"] != "已完成"]
+    if not live: section = "已完成"
+    elif any(s["waiting"] for s in subs): section = "待處理"
+    # 沒有卡、還沒合併的主 change：workplan 排了但還沒建卡，算待指派
+    else: section = min((m["section"] or "待指派" for m in live), key=order.__getitem__)
+    return {"repo": repo, "feature": f["name"], "section": section,
+            "main_done": sum(1 for m in mains if m["pr_status"] == "merged"), "main_total": len(mains),
+            "sub_done": sum(1 for s in subs if s["status"] == "done"), "sub_total": len(subs),
+            "current": {"slug": cur["slug"], "stage": cur["stage"]} if cur else None, "mains": mains}
+
+# sessions（board-tree D4）：feature 底下有 PR 掛子殼（changes/<PR>/subs/）才收；舊寫法一個 PR 掛多個平放殼的不收
+by_key = {}
+for c in cards: by_key.setdefault((c["repo"], c["slug"]), c)
+sessions = []
+for repo in repos:
+    wp_path = os.path.join(repo_paths[repo], "openspec", "workplan.yaml")
+    if not os.path.exists(wp_path): continue
+    try:
+        features = wp_list(load_workplan(wp_path), "features", "workplan")
+        mine = []
+        for f in features:
+            prs = wp_list(f, "prs", "feature %s" % f["name"])
+            if any(os.path.isdir(os.path.join(repo_paths[repo], "openspec", "changes", pr["name"], "subs")) for pr in prs):
+                mine.append(session_of(repo, f, by_key))
+    except ValueError as e:   # UnicodeDecodeError 也是 ValueError
+        errors.append({"source": wp_path, "message": "workplan 讀不懂：%s" % e}); continue
+    for s in mine:
+        for m in s["mains"]:
+            c = by_key.get((repo, m["slug"]))
+            if not c: continue
+            if "session" in c:
+                errors.append({"source": wp_path, "message": "%s 同時在 %s 與 %s，卡的 session 取前者" % (m["slug"], c["session"], "%s/%s" % (repo, s["feature"]))})
+            else:
+                c["session"] = "%s/%s" % (repo, s["feature"])
+    sessions.extend(mine)
+
 cards.sort(key=lambda x: (order[x["section"]], x["repo"], x["slug"]))
 unfiled_dir = os.path.join(state, "unfiled")
 unfiled = []
@@ -331,7 +416,7 @@ unmatched = [{"name": a.get("terminal_title_stripped") or a.get("agent") or "", 
               "agent_status": a.get("agent_status"), "cwd": a.get("cwd"), "workspace": a.get("workspace_id"),
               "orphan": str(a.get("pane_id")) in orphan_panes}
              for a in (agents or []) if str(a.get("pane_id")) not in matched_panes]
-print(json.dumps({"generated_at": now, "scopes": scopes, "repo_paths": repo_paths, "cards": cards, "unfiled": unfiled, "last_sync": last_sync, "unmatched_agents": unmatched, "orphans": orphans, "errors": errors,
+print(json.dumps({"generated_at": now, "scopes": scopes, "repo_paths": repo_paths, "cards": cards, "sessions": sessions, "unfiled": unfiled, "last_sync": last_sync, "unmatched_agents": unmatched, "orphans": orphans, "errors": errors,
                   "legacy": legacy, "worktrees_skipped": worktrees}, ensure_ascii=False))
 PY
 }
