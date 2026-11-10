@@ -86,6 +86,12 @@ sed 's/milestone: "2.0"/milestone: "9.9"/' "$FX/good.yaml" > "$R/openspec/workpl
 expect_err now later 9.9
 sed 's/^current_milestone: "1.0"/current_milestone: "3.0"/' "$FX/good.yaml" > "$R/openspec/workplan.yaml"
 expect_err now current_milestone 3.0
+# workplan 讀不懂（形狀不對、不是 UTF-8）：報錯指名欄位，不丟 traceback
+printf 'features: oops\n' > "$R/openspec/workplan.yaml"
+expect_err now features
+printf 'features:\n  - name: \xff\xfe\n' > "$R/openspec/workplan.yaml"
+expect_err now workplan
+! grep -q Traceback "$ERR" || fail "不是 UTF-8 不能丟 traceback：$(cat "$ERR")"
 cp "$FX/good.yaml" "$R/openspec/workplan.yaml"
 
 # --- Scenario：incident 的等級 ---

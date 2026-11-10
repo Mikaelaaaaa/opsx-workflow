@@ -20,6 +20,8 @@ The change has questions that explore could not close. Close them, cheaply, in t
 
 `openspec/changes/<slug>/explore.md` exists and its `## 待決` section lists the open items. Read it first. If the section is empty or missing, reply「<slug> 沒有待決，直接 /propose」and stop. Grill is a gate on the way from explore to propose, not a place to re-explore.
 
+If the card's `.openspec.yaml` says the kind is chore or bug-fix, grill does not run for it (`../../references/continue.md`, "Light flow"): reply「<slug> 是 chore / bug-fix，不經 grill，直接 /propose」and stop. Propose turns the open items into assumptions.
+
 Load the project's language before asking anything: `CONTEXT.md` (or `CONTEXT-MAP.md` and the context it points at), `docs/adr/`, `openspec/workplan.yaml`. The user will use words from their own head; you need to know when those words collide with what the project already calls things.
 
 ## Classify before you ask

@@ -23,6 +23,18 @@ class PriorityError(Exception):
     """事實欄位或 workplan 的 milestone 欄位不合格；訊息指名卡或欄位與值。"""
 
 
+class WorkplanUnreadable(PriorityError):
+    """workplan 本身讀不懂（不是 UTF-8、features / prs / changes 不是 mapping list）。collect 的 session 段已經記這種錯，等級段不重記。"""
+
+
+def mapping_list(v, where: str) -> list:
+    """key 不在或空是 []，其餘要是 mapping 的 list。"""
+    v = v or []
+    if not isinstance(v, list) or not all(isinstance(x, dict) for x in v):
+        raise WorkplanUnreadable("workplan 的 %s 要是 mapping 的 list，收到「%s」" % (where, v))
+    return v
+
+
 def unquote(v: str) -> str:
     return v[1:-1] if len(v) >= 2 and v[0] == v[-1] and v[0] in "\"'" else v
 
@@ -117,7 +129,14 @@ def read_text(path: str) -> str:
 def load_plan(top: str) -> dict:
     """workplan 與 milestone 欄位的驗證；沒有 workplan 等於空的。"""
     path = os.path.join(top, "openspec", "workplan.yaml")
-    wp = chain.load_workplan(path) if os.path.exists(path) else {}
+    try:
+        wp = chain.load_workplan(path) if os.path.exists(path) else {}
+    except UnicodeDecodeError as e:
+        raise WorkplanUnreadable("workplan 不是 UTF-8：%s（%s）" % (path, e)) from e
+    features = mapping_list(wp.get("features"), "features")
+    for f in features:
+        for pr in mapping_list(f.get("prs"), "feature %s 的 prs" % f.get("name")):
+            mapping_list(pr.get("changes"), "PR %s 的 changes" % pr.get("name"))
     for m in wp.get("milestones") or []:
         if not isinstance(m, dict) or not isinstance(m.get("name"), str) or not isinstance(m.get("goal"), str):
             raise PriorityError("workplan 的 milestones 每項要有字串 name 與 goal，收到「%s」" % (m,))
@@ -127,13 +146,13 @@ def load_plan(top: str) -> dict:
         raise PriorityError("workplan 的 current_milestone 要是一個名字，收到「%s」" % (current,))
     if current and current not in goals:
         raise PriorityError("workplan 的 current_milestone「%s」不在 milestones 裡（有：%s）" % (current, "、".join(goals) or "無"))
-    for f in wp.get("features") or []:
+    for f in features:
         m = f.get("milestone")
         if m is not None and not isinstance(m, str):
             raise PriorityError("workplan 的 feature「%s」的 milestone 要是一個名字，收到「%s」" % (f.get("name"), m))
         if m and m not in goals:
             raise PriorityError("workplan 的 feature「%s」的 milestone「%s」不在 milestones 裡" % (f.get("name"), m))
-    return {"features": wp.get("features") or [], "goals": goals, "current": current}
+    return {"features": features, "goals": goals, "current": current}
 
 
 def owners(features: list) -> dict:

@@ -276,9 +276,9 @@ G="$(printf '%s' "$J" | python3 -I -c 'import datetime,json,sys;print(int(dateti
 [ "$G" -le $((S + 2)) ] || fail "generated_at 要在讀來源前取：呼叫前 ${S}，generated_at ${G}"
 
 # ---------- 卡的等級與目前 milestone（workplan-priority/priority-board，specs/board-collect「卡的等級」「目前 milestone」） ----------
-R6="$FX/code6"; mkdir -p "$R6/p/.git" "$R6/q/.git" "$R6/w/.git"
+R7="$FX/code7"; mkdir -p "$R7/p/.git" "$R7/q/.git" "$R7/w/.git"
 pcard() { # <repo> <slug> [frontmatter 行…]
-  local d="$R6/$1/openspec/changes/$2"; shift 2; mkdir -p "$d"
+  local d="$R7/$1/openspec/changes/$2"; shift 2; mkdir -p "$d"
   printf 'schema: opsx\ncreated: 2026-11-10\nkind: dev\n' > "$d/.openspec.yaml"
   { printf -- '---\ntype: 功能\nsource: me\nfound: 2026-11-10\nrelated:\n'; printf '%s\n' "$@"; printf -- '---\n\n## 一句話\n\n%s\n' "$(basename "$d")"; } > "$d/inbox.md"
 }
@@ -286,8 +286,8 @@ pcard p hot 'kind_of_work: incident' 'impact: security' 'evidence: tests/auth.te
 pcard p held 'priority: P1' 'priority_reason: 等客戶'
 pcard p bad 'kind_of_work: incident' 'impact: data'
 pcard p plain
-D="$R6/p/openspec/changes/archive/2026-11-01-gone"; mkdir -p "$D"; printf 'schema: opsx\n' > "$D/.openspec.yaml"; printf '## 一句話\n\n舊的\n' > "$D/inbox.md"
-cat > "$R6/p/openspec/workplan.yaml" <<'EOF'
+D="$R7/p/openspec/changes/archive/2026-11-01-gone"; mkdir -p "$D"; printf 'schema: opsx\n' > "$D/.openspec.yaml"; printf '## 一句話\n\n舊的\n' > "$D/inbox.md"
+cat > "$R7/p/openspec/workplan.yaml" <<'EOF'
 milestones:
   - name: "1.0"
     goal: "能開單出貨"
@@ -321,10 +321,10 @@ features:
             status: pending
 EOF
 pcard q q1
-printf 'milestones:\n  - name: "1.0"\n    goal: "先上線"\nfeatures:\n  - name: f\n    milestone: "1.0"\n' > "$R6/q/openspec/workplan.yaml"
+printf 'milestones:\n  - name: "1.0"\n    goal: "先上線"\nfeatures:\n  - name: f\n    milestone: "1.0"\n' > "$R7/q/openspec/workplan.yaml"
 pcard w w1 'kind_of_work: incident' 'impact: security' 'evidence: x'
-printf 'milestones:\n  - name: "1.0"\n    goal: "先上線"\ncurrent_milestone: "9.9"\n' > "$R6/w/openspec/workplan.yaml"
-J="$(opsx collect --root "$R6")"; assert_eq "$?" 0 "priority collect rc: $J"
+printf 'milestones:\n  - name: "1.0"\n    goal: "先上線"\ncurrent_milestone: "9.9"\n' > "$R7/w/openspec/workplan.yaml"
+J="$(opsx collect --root "$R7")"; assert_eq "$?" 0 "priority collect rc: $J"
 # 卡帶等級與理由
 C="$(card "$J" p hot)"; assert_eq "$(q "$C" priority.level)" P0; assert_eq "$(q "$C" priority.overridden)" false
 case "$(q "$C" priority.reason)" in *security*) ;; *) fail "hot 的理由要含 security：$(q "$C" priority)" ;; esac
@@ -344,4 +344,119 @@ case "$WE" in *9.9*) ;; *) fail "壞 workplan 要記進 errors 並指名值：$(
 assert_eq "$(q "$(card "$J" q q1)" priority.level)" P2
 # 還差幾張；沒設目前 milestone 的 repo 沒有 key
 assert_eq "$(q "$J" milestones)" '{"p": {"current": "1.0", "goal": "能開單出貨", "remaining": 2}}'
+
+# ---------- session：workplan 的 feature 收成 sessions[]（specs/board-collect「收成 session 的 feature」等四條） ----------
+R6="$FX/code6"; S6="$FX/state6"; mkdir -p "$R6/s/.git" "$R6/t/.git" "$R6/u/.git" "$R6/t/openspec/changes" "$R6/u/openspec/changes" "$S6"
+sess() { printf '%s' "$1" | python3 -I -c 'import json,sys;d=json.load(sys.stdin)
+s=[s for s in d["sessions"] if s["repo"]==sys.argv[1] and s["feature"]==sys.argv[2]]
+print(json.dumps(s[0],ensure_ascii=False) if s else "null")' "$2" "$3"; }
+ROOT_SAVED="$ROOT"; ROOT="$R6"
+# bt：主 change 在 review（tasks 全勾、tests green），底下三個子殼
+D=$(mkcard s bt); printf '## 1\n\n- [x] 1.1 a\n' > "$D/tasks.md"; printf '{"phase":"review","tests":"green"}' > "$D/status.json"
+mkdir -p "$D/subs/ct" "$D/subs/as" "$D/subs/ui"
+printf '# p\n' > "$D/subs/ct/proposal.md"; printf '## 1\n\n- [ ] 1.1 a\n' > "$D/subs/ct/tasks.md"; printf '[]' > "$D/subs/ct/status.json"   # 合法 JSON 但不是 object
+printf '## g1\ntype: decision\nstatus: open\n問題: 哪個？\n選項: A | B (Recommended)\n' > "$D/subs/as/gates.md"
+printf '# p\n' > "$D/subs/ui/proposal.md"; printf '{"phase": "apply", "tests": "unknown", "worker": "subagent-2"}' > "$D/subs/ui/status.json"
+mkcard s fx1 >/dev/null; mkcard s solo >/dev/null
+mkdir -p "$R6/s/openspec/changes/z1/subs/z1b"   # z1 已合併、殼只剩 subs/：不是卡，但讓 fdone 有子殼
+cat > "$R6/s/openspec/workplan.yaml" <<'EOF'
+features:
+  - name: fb
+    prs:
+      - name: m1
+        status: merged
+        changes:
+          - name: a1
+            status: done
+          - name: a2
+            status: done
+          - name: a3
+            status: done
+          - name: a4
+            status: done
+      - name: bt
+        status: in-progress
+        changes:
+          - name: ct
+            status: in-progress
+          - name: as
+            status: pending
+          - name: ui
+            status: done
+  - name: fx
+    prs:
+      - name: fx1
+        status: in-progress
+        changes:
+          - name: fx1
+            status: in-progress
+          - name: fx1-fix
+            status: pending
+  - name: solo
+    prs:
+      - name: solo
+        status: in-progress
+        changes:
+          - name: solo
+            status: in-progress
+  - name: fdone
+    prs:
+      - name: z1
+        status: merged
+        changes:
+          - name: z1
+            status: done
+          - name: z1b
+            status: done
+      - name: z2
+        status: merged
+        changes:
+          - name: z2
+            status: done
+  - name: fdup
+    prs:
+      - name: bt
+        status: in-progress
+        changes:
+          - name: ct
+            status: in-progress
+EOF
+printf 'features:\n  - name: \xff\xfe\n' > "$R6/t/openspec/workplan.yaml"   # 不是 UTF-8
+printf 'features: oops\n' > "$R6/u/openspec/workplan.yaml"                 # features 不是 list
+printf '{"s/bt":{"workspace":"s","tab":"t1","pane":"p-bt","agent":"bt","model":"claude-opus-5-5","mode":"autopilot","kind":"dev","branch":"feat/bt/mikaela","grants":[],"started_at":"2026-11-05T09:00:00+08:00"}}' > "$S6/dispatch.json"
+J="$(opsx collect --root "$R6" --state "$S6")"; assert_eq "$?" 0 "session collect rc: $J"
+WS="$(cd "$R6/s" && pwd -P)/openspec/workplan.yaml"; WT="$(cd "$R6/t" && pwd -P)/openspec/workplan.yaml"; WU="$(cd "$R6/u" && pwd -P)/openspec/workplan.yaml"
+# 1.1 哪些 feature 收：只有 PR 掛子殼的；一個 PR 掛兩個平放 change（fx）與 1 PR 1 change（solo）都不收；workplan 壞的 repo 沒有 session、各記一筆 errors
+assert_eq "$(printf '%s' "$J" | python3 -I -c 'import json,sys;print(" ".join("%s/%s" % (s["repo"], s["feature"]) for s in json.load(sys.stdin)["sessions"]))')" "s/fb s/fdone s/fdup"
+for k in solo fx1; do
+  C="$(card "$J" s $k)"; assert_eq "$(printf '%s' "$C" | python3 -I -c 'import json,sys;print("session" in json.load(sys.stdin))')" False "$k 的卡沒有 session 欄"
+done
+for w in "$WT" "$WU"; do
+  assert_eq "$(printf '%s' "$J" | python3 -I -c 'import json,sys;print(sum(1 for e in json.load(sys.stdin)["errors"] if e["source"]==sys.argv[1]))' "$w")" 1 "壞 workplan 一筆 errors：$w $(q "$J" errors)"
+done
+# 1.2 樹：mains 依 PR 順序；有卡的主 change 跟卡同值；沒資料夾的 merged PR 是 archive；subs 依 changes 順序
+F="$(sess "$J" s fb)"
+assert_eq "$(q "$F" mains.0.slug) $(q "$F" mains.0.pr_status) $(q "$F" mains.0.stage) $(q "$F" mains.0.section)" "m1 merged archive 已完成"
+assert_eq "$(q "$F" mains.0.subs.0)" '{"open_gates": [], "slug": "a1", "stage": null, "status": "done", "waiting": null, "worker": null}'
+assert_eq "$(printf '%s' "$F" | python3 -I -c 'import json,sys;print([s["slug"] for s in json.load(sys.stdin)["mains"][1]["subs"]])')" "['ct', 'as', 'ui']"
+assert_eq "$(printf '%s\n%s' "$F" "$(card "$J" s bt)" | python3 -I -c 'import json,sys
+m,c=[json.loads(l) for l in sys.stdin.read().split("\n")]; m=m["mains"][1]
+ks=["stage","section","dispatch","agent_status","open_gates","waiting"]
+print([k for k in ks if m[k]!=c[k]], m["slug"], m["pr_status"], m["stage"], m["section"], m["dispatch"]["pane"])')" "[] bt in-progress review 進行中 p-bt"
+assert_eq "$(q "$F" mains.1.subs.1.open_gates)" '[{"id": "g1", "opened_at": null}]'
+assert_eq "$(q "$F" mains.1.subs.1.waiting.type) $(q "$F" mains.1.subs.1.waiting.recommended) $(q "$F" mains.1.subs.1.stage)" "等待決定 B inbox"
+assert_eq "$(q "$F" mains.1.subs.0.stage) $(q "$F" mains.1.subs.0.worker) $(q "$F" mains.1.subs.0.status)" "apply null in-progress"
+assert_eq "$(printf '%s' "$J" | python3 -I -c 'import json,sys;print(sum(1 for e in json.load(sys.stdin)["errors"] if e["source"].endswith("/subs/ct/status.json")))')" 2 "status.json 不是 object 記 errors（bt/ct 在 fb 與 fdup 各讀一次），站點改由檔推"
+assert_eq "$(q "$F" mains.1.subs.2.stage) $(q "$F" mains.1.subs.2.worker)" "apply subagent-2"
+# 1.3 一行：計數、目前站、section（子 change 的 gate 讓 session 進待處理，主 change 卡本身是進行中）
+assert_eq "$(q "$F" main_done)/$(q "$F" main_total) $(q "$F" sub_done)/$(q "$F" sub_total)" "1/2 5/7"
+assert_eq "$(q "$F" current)" '{"slug": "bt", "stage": "review"}'
+assert_eq "$(q "$F" section)" 待處理
+F="$(sess "$J" s fdone)"; assert_eq "$(q "$F" section) $(q "$F" current) $(q "$F" main_done)/$(q "$F" main_total)" "已完成 null 2/2"
+# 1.4 卡標上 session，卡仍在 cards[]；bt 同時在 fb 與 fdup：取第一個，記一筆 errors
+assert_eq "$(q "$(card "$J" s bt)" session)" s/fb
+E="$(printf '%s' "$J" | python3 -I -c 'import json,sys;print(json.dumps([e for e in json.load(sys.stdin)["errors"] if e["source"]==sys.argv[1]],ensure_ascii=False))' "$WS")"
+assert_eq "$(printf '%s' "$E" | python3 -I -c 'import json,sys;print(len(json.load(sys.stdin)))')" 1 "重複 slug 一筆 errors：$E"
+printf '%s' "$E" | grep -q 'bt' || fail "重複 slug 的 error 要指名 bt：$E"
+ROOT="$ROOT_SAVED"
 echo ok

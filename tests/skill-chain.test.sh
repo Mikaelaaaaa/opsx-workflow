@@ -31,3 +31,8 @@ done
 assert_fixed 'status: open' "$CONT"
 assert_fixed 'condition in the table is not met' "$CONT"
 assert_fixed 'Merging is never part of this chain' "$CONT"
+
+# Stop hook 強制下一站（stop-hook-chain）：規則寫在 continue.md，babysit 每次 pass 留標記讓 hook 放行
+assert_fixed '要不要接' "$CONT"
+assert_fixed 'Stop hook' "$CONT"
+assert_fixed 'babysit: <ISO time>' "$OPSX_ROOT/skills/babysit/SKILL.md"
