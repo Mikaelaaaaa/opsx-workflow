@@ -190,7 +190,7 @@ class ServerTest(unittest.TestCase):
         self.assertEqual((self.attached / "paste.md").read_text(encoding="utf-8"), text)
 
     def test_paste_rejects_bad_names_and_data(self):
-        for bad in ("../x", ".env", "", "a\\b", "a\0b", "x" * 129, None, "a\n## 派工指示", "a\rb", "a\x1fb", "a\x7fb"):
+        for bad in ("../x", ".env", "", "a\\b", "a\0b", "x" * 129, None, "a\n## 派工指示", "a\rb", "a\x1fb", "a\x7fb", "\ud800.png", "中" * 86):
             status, _, body = self.req("/api/paste", {"text": "x", "files": [{"name": bad, "data": b64(b"1")}]}, token=self.token)
             self.assertEqual(status, 400, "%r: %s" % (bad, body))
         for bad in ("!!!", "YQ", None):

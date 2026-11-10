@@ -52,6 +52,7 @@ CACHE_S = 3
 MAX_BODY = 64 * 1024
 PASTE_MAX_BODY = 64 * 1024 * 1024   # base64 多三分之一，夠一次帶四個 10 MB 的檔（五個是 69.9 MB）
 NAME_MAX = 128
+NAME_MAX_BYTES = 255   # 多數檔案系統的單一檔名上限是 255 bytes，CJK 一字三 bytes
 # 一句話會進 argv，太長的一行（壓縮過的 JSON、log）會讓 exec 回 E2BIG；全文另存在 paste.md
 ONE_LINER_MAX = 200
 
@@ -173,6 +174,12 @@ def paste_parts(body: dict) -> tuple[list[str], list[tuple[str, bytes]], str]:
         if (not isinstance(name, str) or not name or len(name) > NAME_MAX or name.startswith(".")
                 or any(ch in "/\\" or ord(ch) < 0x20 or ord(ch) == 0x7f for ch in name)):
             raise ValueError("檔名不合格：%r" % name)
+        try:
+            name_bytes = len(name.encode("utf-8"))
+        except UnicodeEncodeError as e:
+            raise ValueError("檔名不是合法的 UTF-8：%r" % name) from e
+        if name_bytes > NAME_MAX_BYTES:
+            raise ValueError("檔名超過 %d bytes：%r" % (NAME_MAX_BYTES, name))
         if not isinstance(data, str):
             raise ValueError("%s 的 data 要是 base64 字串：%r" % (name, data))
         try:

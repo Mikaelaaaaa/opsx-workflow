@@ -710,14 +710,24 @@ async function addFiles(list){
   }finally{newReading--;}
   renderNewFiles();
 }
-/* 送成功才清空：失敗或上一個動作還在跑時，貼上的文字與附檔都留著 */
+/* 送成功才清空，而且只清送出的那份：失敗、忙碌時全留著；送出期間新打的字與新加的檔也留著。
+   送出後關掉又開了新草稿（newGen 變了）就完全不動 */
 function submitNew(){
   if(newReading){toast('附件還在讀，讀完再送',true);return;}
   if(ui.busy){toast('上一個動作還在跑，輸入先留著，等一下再送',true);return;}
-  const req=newRequest($('#new-text').value,newFiles,newRepo());if(!req)return;
+  const text=$('#new-text').value,sent=newFiles.slice(),gen=newGen;
+  const req=newRequest(text,sent,newRepo());if(!req)return;
   const where=req.body.repo?' --repo '+req.body.repo:'';
   const label=req.path==='new'?`opsx new${where} -- ${req.body.text}`:`opsx new${where}${req.body.files.map(f=>' --attach '+f.name).join('')}（貼上）`;
-  act(label,async()=>{const r=await api.post(req.path,req.body);closeNew();return r;});
+  act(label,async()=>{
+    const r=await api.post(req.path,req.body);
+    if(gen===newGen){
+      newFiles=newFiles.filter(f=>!sent.includes(f));
+      if($('#new-text').value===text)$('#new-text').value='';
+      if(!newFiles.length&&!$('#new-text').value)closeNew();else renderNewFiles();
+    }
+    return r;
+  });
 }
 
 /* 先 explore：互動模式派出，第一句由 dispatch 從 stage 推，收件卡一定是 /explore（board-inbox D5） */

@@ -87,6 +87,21 @@ m.submitNew(); await flush(); await flush();
 assert.strictEqual($('#new-text').value, '', '成功後清空');
 assert.strictEqual($('#newbar').hidden, true, '成功後關掉');
 
+// 送出期間又打字、又加檔：成功後只清掉送出的那份
+let release;
+postResult = () => new Promise(r => { release = () => r({ok: true, stdout: 'me-2'}); });
+m.openNew(); $('#new-text').value = '先送的';
+m.submitNew(); await flush();
+$('#new-text').value = '送出後才打的';
+const extra = m.addFiles([{name: 'later.png', size: 3, b64: 'BBBB'}]);
+readers.shift()(); await extra;
+release(); await flush(); await flush();
+assert.strictEqual($('#new-text').value, '送出後才打的', '送出期間打的字留著');
+assert.deepStrictEqual(m.newFiles.map(f => f.name), ['later.png'], '送出期間加的檔留著');
+assert.strictEqual($('#newbar').hidden, false, '還有東西就不關');
+m.closeNew();
+postResult = () => ({ok: true, stdout: 'me-1'});
+
 // 忙碌時不送也不清
 ui.busy = true; posts.length = 0; toasts.length = 0;
 m.openNew(); $('#new-text').value = '忙的時候貼的';
