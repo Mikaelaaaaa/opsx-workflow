@@ -77,7 +77,7 @@ PY
 repo_has_live_card() { # <repo>
   local f="$OPSX_STATE_DIR/dispatch.json"
   [ -f "$f" ] || return 1
-  jq -e --arg p "$1/" 'any(to_entries[]; (.key | startswith($p)) and (.value.mode == "autopilot" or .value.mode == "drive"))' "$f" >/dev/null 2>&1
+  jq -e --arg p "$1/" 'any(to_entries[]; (.key | startswith($p)) and (.value | type == "object") and (.value.mode == "autopilot" or .value.mode == "drive"))' "$f" >/dev/null 2>&1
 }
 # 用 jq 不用 python：python 沒記或壞掉時，閘門仍要分得出哪些卡歸它管。
 card_mode() { # <repo> <slug>：印 interactive、autopilot、drive、stopped，沒派過就空；dispatch.json 不是合法 JSON 時回非 0

@@ -11,18 +11,19 @@ repo="$(repo_name)"
 # repo 有 autopilot / drive 的卡在跑時只管第三級；第二級沒有卡可查授權，放行。
 UNMAPPED=0
 mode=""
+# dispatch.json 壞掉時讀不到模式，就退回比對檔案原文：裡面有這個 repo 的卡（key 前綴）才擋，沒有就不管。
+# 讀不到檔時，$(<…) 會是空字串、比對不到，所以要先擋。
+dispatch_broken() {
+  [ -r "$OPSX_STATE_DIR/dispatch.json" ] || deny "opsx 授權閘門：讀不到 $OPSX_STATE_DIR/dispatch.json，分不出 $repo 的卡的模式，先擋下。檢查這個檔案的權限"
+  [[ $(<"$OPSX_STATE_DIR/dispatch.json") == *"\"$repo/"* ]] || exit 0
+  deny "opsx 授權閘門：$OPSX_STATE_DIR/dispatch.json 不是合法 JSON，讀不到 $repo 的卡的模式，先擋下。修好這個檔案"
+}
 if [ -n "$slug" ]; then
-  # dispatch.json 壞掉時讀不到模式，就退回比對檔案原文：裡面有這張卡的 key 才擋。
-  # 原文也讀不到時，$(<…) 會是空字串、比對不到，所以要先擋。
-  if ! mode="$(card_mode "$repo" "$slug")"; then
-    [ -r "$OPSX_STATE_DIR/dispatch.json" ] || deny "opsx 授權閘門：讀不到 $OPSX_STATE_DIR/dispatch.json，分不出這張卡的模式，先擋下。檢查這個檔案的權限"
-    [[ $(<"$OPSX_STATE_DIR/dispatch.json") == *"\"$repo/$slug\""* ]] || exit 0
-    deny "opsx 授權閘門：$OPSX_STATE_DIR/dispatch.json 不是合法 JSON，讀不到這張卡的模式，先擋下。修好這個檔案"
-  fi
+  mode="$(card_mode "$repo" "$slug")" || dispatch_broken
 fi
 if [ -z "$mode" ]; then
   rc=0; repo_has_live_card "$repo" || rc=$?
-  case "$rc" in 0) UNMAPPED=1 ;; 1) exit 0 ;; *) deny "opsx 授權閘門：$OPSX_STATE_DIR/dispatch.json 不是合法 JSON，分不出 $repo 有沒有在跑的卡，先擋下。修好這個檔案" ;; esac
+  case "$rc" in 0) UNMAPPED=1 ;; 1) exit 0 ;; *) dispatch_broken ;; esac
 else
   case "$mode" in autopilot|drive) ;; *) exit 0 ;; esac
 fi
