@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(opsx status *)",
+      "Bash(opsx log *)",
+      "Bash(openspec status *)",
+      "Bash(openspec instructions *)",
+      "Bash(openspec list *)"
+    ],
+    "additionalDirectories": ["${OPSX_STATE_DIR}"]
+  },
+  "sandbox": {
+    "network": {"allowUnixSockets": ["${HOME}/.config/herdr/herdr.sock"]},
+    "excludedCommands": ["gh pr *"]
+  }
+}

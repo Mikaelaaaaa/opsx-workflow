@@ -2,6 +2,18 @@
 # opsx init：repo 層與 --global。對應要求檔 §3.6「CLI helper」。
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
+# 取 JSON 裡某個路徑（點分隔）的值，印成 JSON；不存在印 MISSING
+cj() { python3 -I -c '
+import json, sys
+d = json.load(open(sys.argv[1]))
+for k in sys.argv[2].split("."):
+    if not isinstance(d, dict) or k not in d:
+        print("MISSING"); sys.exit(0)
+    d = d[k]
+print(json.dumps(d))' "$1" "$2"; }
+# repo 層會把 repo 路徑寫進使用者層 settings：這段用自己的 settings 目錄，與後面 --global 的斷言分開
+export CLAUDE_CONFIG_DIR="$FX/cc-repo"; CR="$CLAUDE_CONFIG_DIR/settings.json"
+
 # --- 邊界：不在 git repo 裡 → 拒絕，什麼都不建 ---
 mkdir -p "$FX/plain"; cd "$FX/plain"
 assert_rc 2 opsx init
@@ -37,11 +49,21 @@ assert_grep 'repo = "Agentory-CS"' "$OPSX_STATE_DIR/sources.toml"
 assert_grep "path = \"$R\"" "$OPSX_STATE_DIR/sources.toml"
 assert_file "$OPSX_STATE_DIR/workspaces.toml"               # 非互動：建檔但不掛
 assert_not_grep "Agentory-CS" "$OPSX_STATE_DIR/workspaces.toml"
+# 該 repo 加進使用者層可寫目錄；範圍只到 repo，不含父目錄
+assert_eq "$(cj "$CR" permissions.additionalDirectories)" "[\"$R\"]"
+
+# 資料夾沒信任過（沒有 .claude.json）：警告，說怎麼處理，也說 opsx 不替你改
+case "$out" in *還沒信任*) ;; *) fail "沒信任的 repo 要警告：$out" ;; esac
+case "$out" in *不會替你改*) ;; *) fail "警告要說 opsx 不改信任紀錄：$out" ;; esac
+printf '{"projects": {"%s": {"hasTrustDialogAccepted": true}}}' "$R" > "$CLAUDE_CONFIG_DIR/.claude.json"
+trust_before="$(cat "$CLAUDE_CONFIG_DIR/.claude.json")"
 
 # --- 重跑是 no-op：檔案內容不變、不重複登記 ---
-before="$(cat "$OPSX_STATE_DIR/sources.toml" "$R/.git/info/exclude")"
+before="$(cat "$OPSX_STATE_DIR/sources.toml" "$R/.git/info/exclude" "$CR")"
 out2="$(opsx init 2>&1)"; assert_eq "$?" 0 "rerun rc"
-after="$(cat "$OPSX_STATE_DIR/sources.toml" "$R/.git/info/exclude")"
+case "$out2" in *還沒信任*) fail "已信任的 repo 不該警告：$out2" ;; esac
+assert_eq "$(cat "$CLAUDE_CONFIG_DIR/.claude.json")" "$trust_before" "opsx 不能改信任紀錄"
+after="$(cat "$OPSX_STATE_DIR/sources.toml" "$R/.git/info/exclude" "$CR")"
 assert_eq "$after" "$before" "rerun changed files"
 assert_eq "$(grep -c 'repo = "Agentory-CS"' "$OPSX_STATE_DIR/sources.toml")" 1 "duplicate registration"
 
@@ -78,8 +100,16 @@ echo "$out3" | grep -q "remote" || fail "should mention no remote: $out3"
 cd "$R"; git -C "$R" worktree add -q "$FX/wt" -b feat/x/mikaela
 cd "$FX/wt"; out="$(opsx init 2>&1)" || fail "init in worktree: $out"
 assert_eq "$(grep -c '^openspec/$' "$R/.git/info/exclude")" 1 "exclude duplicated or missing via worktree"
+# linked worktree 加的是主 repo，不是 worktree 自己；多個 repo 各出現一次
+dirs="$(cj "$CR" permissions.additionalDirectories)"
+case "$dirs" in *"\"$FX/wt\""*) fail "不該把 worktree 路徑加進可寫目錄：$dirs" ;; esac
+assert_eq "$(printf '%s' "$dirs" | grep -o "\"$R\"" | wc -l | tr -d ' ')" 1 "主 repo 要剛好出現一次：$dirs"
+for r in "$R2" "$R3" "$R4" "$R5"; do
+  case "$dirs" in *"\"$r\""*) ;; *) fail "$r 沒進可寫目錄：$dirs" ;; esac
+done
 
 # --- --global ---
+export CLAUDE_CONFIG_DIR="$FX/claude-config"   # repo 層那段用 $FX/cc-repo，這裡換回乾淨的
 cd "$FX"; use_fakes herdr launchctl; export OPSX_FAKE_LOG="$FX/herdr.log"; : > "$OPSX_FAKE_LOG"
 export OPSX_LAUNCHCTL=launchctl   # lib.sh 預設沒有 launchctl；這裡用 fake 測安裝
 rm -f "$OPSX_STATE_DIR/python"
@@ -98,6 +128,70 @@ assert_eq "$(readlink "$OPSX_BIN_DIR/opsx")" "$OPSX_ROOT/bin/opsx"
 echo 'x = 1' >> "$OPSX_STATE_DIR/grants.toml"
 opsx init --global >/dev/null 2>&1 || fail "global rerun"
 assert_grep "x = 1" "$OPSX_STATE_DIR/grants.toml"
+
+# --- 沙盒權限：裝進 CLAUDE_CONFIG_DIR/settings.json（specs/opsx-init「--global 把沙盒權限裝進使用者層」）---
+CS="$CLAUDE_CONFIG_DIR/settings.json"
+assert_file "$CS"
+assert_eq "$(cj "$CS" permissions.additionalDirectories)" "[\"$OPSX_STATE_DIR\"]"
+assert_eq "$(cj "$CS" sandbox.network.allowUnixSockets)" "[\"$HOME/.config/herdr/herdr.sock\"]"
+assert_eq "$(cj "$CS" sandbox.excludedCommands)" '["gh pr *"]' "只排除 gh pr *，不是整個 gh *"
+assert_eq "$(cj "$CS" sandbox.enabled)" MISSING "不替使用者開關沙盒"
+assert_no_file "$CS.opsx-bak"        # 第一次裝，原檔不存在，沒有東西可備份
+before="$(cat "$CS")"
+outs="$(opsx init --global 2>&1)"; assert_eq "$?" 0 "settings rerun: $outs"
+assert_eq "$(cat "$CS")" "$before" "重跑改了 settings.json"
+assert_no_file "$CS.opsx-bak"        # no-op 不產生備份
+
+# CLAUDE_CONFIG_DIR 沒設：寫 $HOME/.claude/settings.json
+mkdir -p "$FX/home"
+env HOME="$FX/home" CLAUDE_CONFIG_DIR= opsx init --global >/dev/null 2>&1 || fail "global without CLAUDE_CONFIG_DIR"
+assert_file "$FX/home/.claude/settings.json"
+assert_eq "$(cj "$FX/home/.claude/settings.json" sandbox.network.allowUnixSockets)" "[\"$FX/home/.config/herdr/herdr.sock\"]"
+
+# 使用者已有設定：保留、追加、備份原檔
+mkdir -p "$FX/cc2"
+printf '{"sandbox":{"enabled":true,"network":{"allowUnixSockets":["/other.sock"]}},"theme":"dark"}' > "$FX/cc2/settings.json"
+orig="$(cat "$FX/cc2/settings.json")"
+CLAUDE_CONFIG_DIR="$FX/cc2" opsx init --global >/dev/null 2>&1 || fail "global with existing settings"
+assert_eq "$(cj "$FX/cc2/settings.json" theme)" '"dark"'
+assert_eq "$(cj "$FX/cc2/settings.json" sandbox.enabled)" true
+assert_eq "$(cj "$FX/cc2/settings.json" sandbox.network.allowUnixSockets)" "[\"/other.sock\", \"$HOME/.config/herdr/herdr.sock\"]"
+assert_eq "$(cat "$FX/cc2/settings.json.opsx-bak")" "$orig" "備份要是原內容"
+
+# 標準設定（templates/settings.opsx.json）是唯一來源：裝出來的 allow 與範本逐項相同，兩個乾淨環境裝出來一模一樣
+assert_eq "$(cj "$CS" permissions.allow)" "$(cj "$OPSX_ROOT/templates/settings.opsx.json" permissions.allow)"
+CLAUDE_CONFIG_DIR="$FX/cc3" opsx init --global >/dev/null 2>&1 || fail "global second dir"
+assert_eq "$(cat "$FX/cc3/settings.json")" "$(cat "$CS")" "兩個環境裝出來的 settings 要一致"
+
+# settings.json 壞掉：整個 init --global 失敗，檔案不動
+mkdir -p "$FX/cc4"; printf '{"sandbox": ' > "$FX/cc4/settings.json"
+outb="$(CLAUDE_CONFIG_DIR="$FX/cc4" opsx init --global 2>&1)" && fail "壞 JSON 時 init --global 要失敗：$outb"
+case "$outb" in *"$FX/cc4/settings.json"*) ;; *) fail "訊息要含檔名：$outb" ;; esac
+assert_eq "$(cat "$FX/cc4/settings.json")" '{"sandbox": ' "壞 JSON 被改了"
+assert_no_file "$FX/cc4/settings.json.opsx-bak"
+
+# --- init --check：比對機器 / repo 的設定與標準設定，只讀 ---
+cd "$FX"
+outc="$(opsx init --check 2>&1)"; assert_eq "$?" 0 "裝完的機器 --check 要過：$outc"
+case "$outc" in *一致*) ;; *) fail "一致時要說一致：$outc" ;; esac
+mkdir -p "$FX/cc5"; printf '{"theme":"dark"}' > "$FX/cc5/settings.json"
+before="$(cat "$FX/cc5/settings.json")"
+outc="$(CLAUDE_CONFIG_DIR="$FX/cc5" opsx init --check 2>&1)"; rc=$?
+assert_eq "$rc" 1 "沒裝的機器 --check 要失敗：$outc"
+case "$outc" in *permissions.additionalDirectories*"$OPSX_STATE_DIR"*) ;; *) fail "要印缺哪一項：$outc" ;; esac
+case "$outc" in *opsx\ init\ --global*) ;; *) fail "要說怎麼補：$outc" ;; esac
+assert_eq "$(cat "$FX/cc5/settings.json")" "$before" "--check 改了檔"
+assert_no_file "$FX/cc5/settings.json.opsx-bak"
+# repo 層：該 repo 在可寫目錄才算齊；沒信任的 repo 多一行警告但不算不一致
+CLAUDE_CONFIG_DIR="$FX/cc6" opsx init --global >/dev/null 2>&1 || fail "global for cc6"
+cd "$R"
+outc="$(CLAUDE_CONFIG_DIR="$FX/cc6" opsx init --check 2>&1)"; rc=$?
+assert_eq "$rc" 1 "repo 沒登記時 --check 要失敗：$outc"
+case "$outc" in *"$R"*) ;; *) fail "要印缺的 repo 路徑：$outc" ;; esac
+CLAUDE_CONFIG_DIR="$FX/cc6" opsx init >/dev/null 2>&1 || fail "init in cc6"
+outc="$(CLAUDE_CONFIG_DIR="$FX/cc6" opsx init --check 2>&1)"; assert_eq "$?" 0 "登記後 --check 要過：$outc"
+case "$outc" in *還沒信任*) ;; *) fail "cc6 沒有信任紀錄，--check 要警告：$outc" ;; esac
+cd "$FX"
 
 # --- 每日同步 launchd：第一次安裝 ---
 PL="$OPSX_LAUNCH_AGENTS_DIR/com.opsx.sync.plist"

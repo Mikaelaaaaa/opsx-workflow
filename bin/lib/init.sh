@@ -5,8 +5,9 @@
 opsx_init() {
   case "${1:-}" in
     --global) init_global ;;
+    --check) init_check || exit 1 ;;
     "") init_repo ;;
-    *) die "init 只接受 --global，收到：$1" ;;
+    *) die "init 只接受 --global 或 --check，收到：$1" ;;
   esac
 }
 
@@ -84,8 +85,41 @@ init_global() {
   else
     say "init --global: 沒有 herdr，看板 plugin 略過（裝了 herdr 再跑一次）"
   fi
+  merge_claude_settings "$py" --template "$OPSX_ROOT/templates/settings.opsx.json"
   install_sync_job "$state" "$bindir"
   say "init --global: 設定在 $state"
+}
+
+# 使用者層 Claude Code settings：CLAUDE_CONFIG_DIR 優先，沒設才用 ~/.claude。
+# 沙盒不讓沒登記的目錄可寫、不讓連 herdr socket，裝完 opsx 的 session 才不用人手動開權限。
+claude_settings_file() { printf '%s/settings.json' "${CLAUDE_CONFIG_DIR:-$HOME/.claude}"; }
+
+merge_claude_settings() { # <python> <claude-settings.py 的參數…>
+  local py="$1" file out; shift
+  file="$(claude_settings_file)"
+  out="$("$py" -I "$OPSX_ROOT/bin/lib/claude-settings.py" --file "$file" "$@")" \
+    || die "init: 沒改 ${file}（上面是原因）"
+  case "$out" in
+    created) say "init: 建 ${file}（標準設定）" ;;
+    changed) say "init: 標準設定合併進 ${file}（原檔備份在 ${file}.opsx-bak）" ;;
+    *) say "init: ${file} 的設定已有" ;;
+  esac
+}
+
+# opsx init --check：只讀。使用者層 settings 缺標準設定的項目就逐項印出、exit 1；在 repo 裡再看該 repo 是否在可寫目錄、有沒有信任
+init_check() {
+  local file out rc=0 top args=()
+  file="$(claude_settings_file)"
+  top="$(git_toplevel)"
+  [ -z "$top" ] || args+=(--add-dir "$top")
+  out="$("$OPSX_PY" -I "$OPSX_ROOT/bin/lib/claude-settings.py" --file "$file" --template "$OPSX_ROOT/templates/settings.opsx.json" ${args[@]+"${args[@]}"} --check)" || rc=$?
+  case "$rc" in
+    0) say "init --check: ${file} 與標準設定一致" ;;
+    3) printf '%s\n' "$out"; say "init --check: ${file} 和標準設定不一致，上面是缺的項目。全域的跑 opsx init --global，repo 的在那個 repo 根目錄跑 opsx init" ;;
+    *) die "init --check: 比對失敗（上面是原因）" ;;
+  esac
+  [ -z "$top" ] || warn_untrusted "$top"
+  [ "$rc" = 0 ]
 }
 
 # 每天 09:00 跑 opsx sync 的 launchd job（board-inbox）。launchd 的 PATH 只有 /usr/bin:/bin，
@@ -190,6 +224,8 @@ init_repo() {
   fi
 
   register_source "$top" "$name"
+  merge_claude_settings "$OPSX_PY" --add-dir "$top"
+  warn_untrusted "$top"
   register_workspace "$name"
 }
 

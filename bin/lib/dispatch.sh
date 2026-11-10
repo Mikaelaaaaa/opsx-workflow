@@ -70,6 +70,7 @@ PY
     if git -C "$top" show-ref --verify --quiet "refs/heads/$branch"; then git -C "$top" worktree add -q "$wt" "$branch"
     else git -C "$top" worktree add -q "$wt" -b "$branch"; fi
   fi
+  warn_untrusted "$top"
 
   # workspace：workspaces.toml 記的是 label（人看的，例 agnetory-ai），herdr 的 tab create 只吃 id（w1），
   # 所以用 `herdr workspace list`（result.workspaces[].{label,workspace_id}，2026-11-06 實跑）換；沒掛就開一個以 repo 為 label 的
