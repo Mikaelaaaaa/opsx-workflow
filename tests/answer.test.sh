@@ -36,8 +36,14 @@ printf '{"Agentory-AI/x":{"mode":"autopilot","pane":"p4","agent":"x","grants":[]
 printf '# grants\n' > "$OPSX_STATE_DIR/grants.toml"
 cd "$R"
 
+# symlink-safe-writes：舊的固定暫存檔名被換成 symlink，答 gate 不能寫到目標；gates.md 的權限換名後不變
+printf 'keep me\n' > "$FX/victim"; ln -s "$FX/victim" "$C/gates.md.tmp"; ln -s "$FX/victim" "$OPSX_STATE_DIR/grants.toml.tmp"
+chmod 644 "$C/gates.md"
+
 # --- 決定類 ---
 out="$(opsx answer x --gate g2 "選 檔案" 2>&1)"; assert_eq "$?" 0 "answer g2: $out"
+assert_eq "$(cat "$FX/victim")" "keep me" "gates.md 的舊暫存檔名上的 symlink 不能被寫"
+assert_eq "$(python3 -I -c 'import os,sys; print(oct(os.stat(sys.argv[1]).st_mode & 0o777))' "$C/gates.md")" "0o644" "gates.md 換名後要保留權限"
 awk '/^## g2/{f=1} /^## g3/{f=0} f' "$C/gates.md" > "$FX/g2.txt"
 assert_grep '^status: answered' "$FX/g2.txt"; assert_grep '^answer: 選 檔案' "$FX/g2.txt"; assert_grep '^answered_at: 20' "$FX/g2.txt"
 awk '/^## g1/{f=1} /^## g2/{f=0} f' "$C/gates.md" | grep -q '^status: open' || fail "g1 不該被動到"
@@ -63,6 +69,8 @@ assert_grep '^# grants' "$OPSX_STATE_DIR/grants.toml"   # 原有的註解留著
 awk '/^## g1/{f=1} /^## g2/{f=0} f' "$C/gates.md" | grep -q '^status: answered' || fail "g1 要 answered"
 assert_grep '^agent prompt x 允許$' "$OPSX_FAKE_LOG"
 assert_eq "$(tail -1 "$C/decisions.tsv" | cut -f2-5)" $'你\t已允許\t允許\tg1 · repo'
+assert_eq "$(cat "$FX/victim")" "keep me" "grants.toml 與 gates.md 的舊暫存檔名上的 symlink 不能被寫"
+rm -f "$C/gates.md.tmp" "$OPSX_STATE_DIR/grants.toml.tmp"
 
 # --- 授權：這張卡 ---
 gates; printf '# grants\n' > "$OPSX_STATE_DIR/grants.toml"
@@ -102,6 +110,17 @@ assert_eq "$(grep -c '^## g9' "$C/gates.md" || true)" 0 "不該多出假 gate"
 gates; sed -i.bak 's/^action: push$/action: git push/' "$C/gates.md"; rm -f "$C/gates.md.bak"
 out="$(opsx answer x --gate g1 --grant repo "允許" 2>&1)"; [ $? -ne 0 ] || fail "壞 action 要拒絕"; echo "$out" | grep -q 'git push' || fail "要印出 action: $out"
 python3 -I -c 'import tomllib,sys;tomllib.load(open(sys.argv[1],"rb"))' "$OPSX_STATE_DIR/grants.toml" || fail "grants.toml 被寫壞了"
+
+# --- 字元合法但不在八個動作內（grant-action）：拒絕、點名 gate / 原值 / 合法值，三個檔都不動 ---
+gates; sed -i.bak 's/^action: push$/action: external-api/' "$C/gates.md"; rm -f "$C/gates.md.bak"
+cp "$C/gates.md" "$FX/before-ext.md"; cp "$OPSX_STATE_DIR/grants.toml" "$FX/before-grants.toml"; cat "$PD/authz.json" > "$FX/before-authz.json" 2>/dev/null || : > "$FX/before-authz.json"
+for g in card repo this; do
+  out="$(opsx answer x --gate g1 --grant "$g" "允許" 2>&1)"; [ $? -ne 0 ] || fail "${g}: 不在八個內的 action 要拒絕"
+  for want in g1 external-api push mr migrate delete install rebase external env; do echo "$out" | grep -qF "$want" || fail "${g}: 訊息要含 ${want}: $out"; done
+done
+cmp -s "$C/gates.md" "$FX/before-ext.md" || fail "拒絕時 gates.md 不該變"
+cmp -s "$OPSX_STATE_DIR/grants.toml" "$FX/before-grants.toml" || fail "拒絕時 grants.toml 不該變"
+{ cat "$PD/authz.json" 2>/dev/null || :; } | cmp -s - "$FX/before-authz.json" || fail "拒絕時受保護授權不該變"
 
 # --- 答案以 -- 開頭：用 -- 隔開 ---
 gates
@@ -202,4 +221,20 @@ assert_eq "$(jq -c '."Agentory-AI/bt".grants // []' "$PD/authz.json")" '[]' "這
 assert_eq "$(jq -c 'keys' "$PD/authz.json")" '["Agentory-AI/bt"]' "子 change 沒有自己的授權條目"
 assert_eq "$(jq -c 'keys' "$OPSX_STATE_DIR/dispatch.json")" '["Agentory-AI/bt"]' "子 change 不進 dispatch.json"
 assert_no_file "$B/decisions.tsv"
+
+# --- 同名 gate：回 open 的那個，其他段原樣不動（驗收：board-actions「同名 gate 回 open 的」）---
+dupgates() { printf '## 卡在接 /review\ntype: decision\nstatus: answered\nanswer: 先前的答案\n\n## 卡在接 /review\ntype: decision\nstatus: open\n問題: 卡在哪\n' > "$C/gates.md"; }
+dupgates; cd "$R"
+out="$(opsx answer x --gate '卡在接 /review' 重做 2>&1)"; assert_eq "$?" 0 "同名 gate 回 open 的: $out"
+assert_eq "$(grep -c '^status: answered' "$C/gates.md")" 2 "兩段都 answered"
+assert_eq "$(grep -c '^answer: ' "$C/gates.md")" 2
+assert_eq "$(sed -n '1,4p' "$C/gates.md" | grep -c '先前的答案')" 1 "第一段原樣"
+awk '/^## /{n++} n==2' "$C/gates.md" | grep -q '^answer: 重做$' || fail "第二段才該拿到答案: $(cat "$C/gates.md")"
+
+# --- 同名 gate 全都不是 open：非 0 退出、列出每段 status、gates.md 不變 ---
+cp "$C/gates.md" "$FX/before.md"
+out="$(opsx answer x --gate '卡在接 /review' 再答 2>&1)"; rc=$?; [ $rc -ne 0 ] || fail "同名 gate 全 answered 要退出非零"
+echo "$out" | grep -q '不是 open' || fail "訊息要含「不是 open」: $out"
+assert_eq "$(printf '%s' "$out" | grep -o 'answered' | wc -l | tr -d ' ')" 2 "兩段各自的 status: $out"
+cmp -s "$C/gates.md" "$FX/before.md" || fail "gates.md 不該變"
 echo ok

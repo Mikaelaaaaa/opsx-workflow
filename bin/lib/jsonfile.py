@@ -15,6 +15,8 @@ import os
 import sys
 import tempfile
 
+import safefile
+
 
 def load(path: str) -> dict:
     try:
@@ -30,7 +32,7 @@ def load(path: str) -> dict:
 
 def update(path: str, mutate) -> dict:
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-    with open(path + ".lock", "w") as lock:
+    with safefile.open_lock(path + ".lock") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         d = load(path)
         mutate(d)

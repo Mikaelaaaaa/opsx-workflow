@@ -102,6 +102,7 @@ opsx_collect() {
 import datetime, json, os, re, sys, tomllib
 sys.path.insert(0, os.environ["OPSX_C_LIB"])
 import gatetype
+import grantactions
 from chain import load_workplan
 
 sys.path.insert(0, os.path.join(os.environ["OPSX_ROOT"], "bin", "lib"))
@@ -257,8 +258,8 @@ def waiting_of(card, gates, agent_status):
         if gtype is None:
             return {"type": "type 不明", "action": None, "options": [], **base}
         if gtype == gatetype.APPROVAL:
-            opts = ["這次", "這張卡", "這個 repo 永遠", "拒絕"]
-            if g.get("action") == "merge": opts = ["這次", "這張卡", "拒絕"]   # merge 永遠不可長期授權，answer 會拒，按鈕就不要給
+            # action 不在閘門會查的動作內（含 merge、沒寫）時 answer --grant 一定失敗，授權選項就不要給
+            opts = ["這次", "這張卡", "這個 repo 永遠", "拒絕"] if g.get("action") in grantactions.ACTIONS else ["拒絕"]
             return {"type": "等待授權", "action": g.get("action"), "options": opts, **base}
         opts = [o.strip() for o in (g.get("選項") or "").split("|") if o.strip()]
         rec = base["recommended"]

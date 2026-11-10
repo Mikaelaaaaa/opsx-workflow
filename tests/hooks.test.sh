@@ -46,6 +46,7 @@ printf '{"Agentory-AI/eval-core":{"mode":"autopilot"}}' > "$OPSX_STATE_DIR/dispa
 out="$(run_hook openspec-router.sh "$(j "$R" "" '{}' "下一步")")"; r="$(reason "$out")"
 case "$r" in *"autopilot："*"不用 AskUserQuestion"*) ;; *) fail "router: autopilot 規則: $r" ;; esac
 case "$r" in *'approval | decision'*'needs: run'*) ;; *) fail "router: autopilot 規則要寫合法 type 與 needs: run: $r" ;; esac
+case "$r" in *'action:'*'deny 訊息'*) ;; *) fail "router: autopilot 規則要教授權 gate 寫 action:、值取自 deny 訊息: $r" ;; esac
 case "$r" in *"等待決定 / 等待授權"*) fail "router: 不能把看板標籤當 type 值教給 agent: $r" ;; esac
 case "$r" in *"interactive："*) fail "router: autopilot 卡不該有 interactive 規則: $r" ;; esac
 for tok in "不寫迴圈" "賦值" "命令替換" "{ } 群組" "source" "bash -c" '印 $?' "一個 Bash 呼叫做一件事" "opsx log"; do
@@ -100,7 +101,19 @@ git -C "$R" checkout -q main
 out="$(cg 'git commit -m "chore: bump"')"; assert_eq "$(decision "$out")" deny "commit: branch 對不到卡要擋"
 out="$(cg 'git commit -m "chore: bump [no-change] 只是改 README"')"; assert_eq "$(decision "$out")" allow "commit: [no-change] 放行"
 assert_grep "Agentory-AI" "$OPSX_STATE_DIR/bypass.log"
+# symlink-safe-writes：bypass.log 是 symlink → 不寫到目標
+rm -f "$OPSX_STATE_DIR/bypass.log"; printf 'keep me\n' > "$FX/victim"; ln -s "$FX/victim" "$OPSX_STATE_DIR/bypass.log"
+cg 'git commit -m "chore: bump [no-change] 再一次"' >/dev/null 2>&1 || true
+assert_eq "$(cat "$FX/victim")" "keep me" "commit: bypass.log 不能附加到 symlink 的目標"
+rm -f "$OPSX_STATE_DIR/bypass.log"
 out="$(cg 'ls -la')"; assert_eq "$out" "" "commit: 非 commit 指令不出聲"
+out="$(cg 'echo "之後再 git commit -m x"')"; assert_eq "$out" "" "commit: 引號內的 git commit 不出聲"
+out="$(cg 'bash -c "git commit -m x"')"; assert_eq "$(decision "$out")" deny "commit: bash -c 內的 commit 仍擋"
+# 三種容器（grill D2）：commit 訊息、opsx answer 答案、寫檔 heredoc 內提到 git commit 不觸發
+out="$(cg 'opsx answer s g1 -- "之後再 git commit -m x，不要 git commit --amend"')"; assert_eq "$out" "" "commit: answer 答案文字提到 git commit 不觸發"
+out="$(cg 'cat > n.md <<'"'EOF'"'
+git commit -m x
+EOF')"; assert_eq "$out" "" "commit: 寫檔 heredoc 內提到 git commit 不觸發"
 # 子殼分支 <主>--<子>：看子殼的 tasks.md，不看主殼
 mkdir -p "$C/subs/s1"; printf '## 1. x\n\n- [ ] 1.1 a\n' > "$C/subs/s1/tasks.md"
 printf '## 1. x\n\n- [ ] 1.1 s1\n' > "$C/tasks.md"
@@ -146,6 +159,189 @@ out="$(gg Write '{"file_path":"/x/.env.local","content":"A=1"}')"; assert_eq "$(
 out="$(gg Write '{"file_path":"/x/.env.example","content":"A="}')"; assert_eq "$(decision "$out")" allow "grant: .env.example 可以"
 out="$(gg Edit '{"file_path":"/x/.gitlab-ci.yml","old_string":"a","new_string":"b"}')"; assert_eq "$(decision "$out")" deny "grant: 改 CI 第三級"
 out="$(gg Edit '{"file_path":"/x/src/a.ts","old_string":"a","new_string":"b"}')"; assert_eq "$(decision "$out")" allow "grant: 一般檔直接做"
+# 字樣只在引號 / heredoc 內 → 不管；字串裡真的在執行的仍照第三級擋
+out="$(gg Bash "$(cmdj 'git commit -m "docs: 說明 glab mr merge 與 gh pr merge 的核准流程"')")"; assert_eq "$out" "" "grant: commit 訊息提到 merge 不觸發"
+out="$(gg Bash "$(cmdj 'opsx answer s g1 -- "不要 git push --force origin main，也不要 pnpm add x"')")"; assert_eq "$out" "" "grant: answer 文字提到 force-push / 裝套件不觸發"
+out="$(gg Bash "$(cmdj 'cat > inbox.md <<'"'EOF'"'
+drop table users; deploy.sh; curl https://api.example.com/x; rm -rf /
+EOF')")"; assert_eq "$out" "" "grant: heredoc 內的字樣不觸發"
+out="$(gg Bash "$(cmdj 'git push gitlab "main"')")"; assert_eq "$(decision "$out")" deny "grant: 引號包住的 main 仍是 push main"
+out="$(gg Bash "$(cmdj "git push --force gitlab 'feat/x'")")"; assert_eq "$(decision "$out")" deny "grant: 單引號分支名不讓 force-push 漏掉"
+out="$(gg Bash "$(cmdj 'bash -c "glab mr merge 212"')")"; assert_eq "$(decision "$out")" deny "grant: bash -c 內的 merge 仍擋"
+out="$(gg Bash "$(cmdj 'git push gitlab feat/eval-core/mikaela && bash <<EOF
+git push --force gitlab main
+EOF')")"; assert_eq "$(decision "$out")" deny "grant: 已授權的 push 後面串 bash heredoc 的 force-push 仍擋（本體會被執行）"
+out="$(gg Bash "$(cmdj 'echo "$(gh pr merge 12)"')")"; assert_eq "$(decision "$out")" deny "grant: 雙引號內 \$(…) 的 merge 仍擋"
+out="$(gg Bash "$(cmdj 'eval "git push --force gitlab main"')")"; assert_eq "$(decision "$out")" deny "grant: eval 內的 force-push 仍擋"
+out="$(gg Bash "$(cmdj 'echo ok && sh -c '"'"'pnpm add left-pad'"'"'')")"; assert_eq "$(decision "$out")" deny "grant: sh -c 單引號內的裝套件仍擋"
+
+# 第三級白名單容器（grill D1）：三種容器的資料部分不算，其他寫法一律照原文比對
+out="$(gg Bash "$(cmdj 'git commit -m "$(cat <<'"'EOF'"'
+fix: glab mr merge、drop table users、git push --force origin main
+EOF
+)"')")"; assert_eq "$out" "" "grant 白名單: 標準 commit heredoc 寫法不觸發"
+out="$(gg Bash "$(cmdj "git commit -m 'it is glab mr merge' -m \"second: git push --force origin main\"")")"; assert_eq "$out" "" "grant 白名單: 多個 -m 不觸發"
+out="$(gg Bash "$(cmdj "opsx answer s g1 -- 'glab mr merge 之後再做'")")"; assert_eq "$out" "" "grant 白名單: answer 單引號文字不觸發"
+out="$(gg Bash "$(cmdj 'cat > notes.md <<'"'EOF'"'
+git push --force origin main
+EOF')")"; assert_eq "$out" "" "grant 白名單: cat 寫檔 heredoc（quoted delimiter）不觸發"
+out="$(gg Bash "$(cmdj 'cat >> notes.md <<EOF
+./deploy.sh spark1-prod
+EOF')")"; assert_eq "$out" "" "grant 白名單: cat 寫檔 heredoc（unquoted、沒有命令替換）不觸發"
+out="$(gg Bash "$(cmdj 'git commit -m "$(git push --force gitlab main)"')")"; assert_eq "$(decision "$out")" deny "grant 白名單: commit 訊息內的 \$(…) 仍擋"
+out="$(gg Bash "$(cmdj 'opsx answer s g1 -- "$(gh pr merge 12)"')")"; assert_eq "$(decision "$out")" deny "grant 白名單: answer 內的 \$(…) 仍擋"
+out="$(gg Bash "$(cmdj 'cat > f <<EOF
+$(git push --force gitlab main)
+EOF')")"; assert_eq "$(decision "$out")" deny "grant 白名單: unquoted heredoc 內的 \$(…) 仍擋"
+out="$(gg Bash "$(cmdj 'cat <<EOF | sh
+git push --force gitlab main
+EOF')")"; assert_eq "$(decision "$out")" deny "grant 白名單: heredoc 接 pipe 進 sh 仍擋"
+out="$(gg Bash "$(cmdj 'psql <<SQL
+DROP TABLE users;
+SQL')")"; assert_eq "$(decision "$out")" deny "grant 繞過口: heredoc 餵 psql"
+out="$(gg Bash "$(cmdj 'ssh spark1 bash <<EOF
+cd /srv && ./deploy.sh spark1-prod
+EOF')")"; assert_eq "$(decision "$out")" deny "grant 繞過口: heredoc 餵 ssh bash"
+out="$(gg Bash "$(cmdj 'git push gitlab feat/eval-core/mikaela && psql -c "DROP TABLE users"')")"; assert_eq "$(decision "$out")" deny "grant 繞過口: 已授權 push 串 psql -c DROP TABLE"
+out="$(gg Bash "$(cmdj 'git push gitlab feat/eval-core/mikaela && ssh spark1 "cd /srv && ./deploy.sh spark1-prod"')")"; assert_eq "$(decision "$out")" deny "grant 繞過口: 已授權 push 串 ssh deploy"
+out="$(gg Bash "$(cmdj 'c="git push --force gitlab main"; $c')")"; assert_eq "$(decision "$out")" deny "grant 繞過口: 變數展開"
+out="$(gg Bash "$(cmdj 'source <(echo "git push --force gitlab main")')")"; assert_eq "$(decision "$out")" deny "grant 繞過口: source <(…)"
+out="$(gg Bash "$(cmdj 'bash -e -c "git push --force gitlab main"')")"; assert_eq "$(decision "$out")" deny "grant 繞過口: bash -e -c"
+out="$(gg Bash "$(cmdj 'bash --norc -c "git push --force gitlab main"')")"; assert_eq "$(decision "$out")" deny "grant 繞過口: bash --norc -c"
+out="$(gg Bash "$(cmdj 'dash -c "git push --force gitlab main"')")"; assert_eq "$(decision "$out")" deny "grant 繞過口: dash -c"
+out="$(gg Bash "$(cmdj 'bash -lc "git push --force gitlab main"')")"; assert_eq "$(decision "$out")" deny "grant 繞過口: bash -lc"
+out="$(gg Bash "$(cmdj "bash -c \$'git push --force gitlab main'")")"; assert_eq "$(decision "$out")" deny "grant 繞過口: bash -c \$'…'"
+out="$(gg Bash "$(cmdj 'echo "$(echo "a b" ; git push -f gitlab main)"')")"; assert_eq "$(decision "$out")" deny "grant 繞過口: \$(…) 內有帶空白的引號"
+out="$(gg Bash "$(cmdj "echo hi # 'x
+git push --force gitlab main
+echo 'y'")")"; assert_eq "$(decision "$out")" deny "grant 繞過口: 註解內的引號吃掉下一行"
+out="$(gg Bash "$(cmdj 'git add ".github/workflows/my ci.yml"')")"; assert_eq "$(decision "$out")" deny "grant 繞過口: 帶空白的引號 CI 路徑"
+out="$(gg Bash "$(cmdj 'bash -c "bash -c \"bash -c '"'"'git push --force gitlab main'"'"'\""')")"; assert_eq "$(decision "$out")" deny "grant 遞迴: 3 層巢狀"
+out="$(gg Bash "$(cmdj 'bash -c "bash -c \"bash -c '"'"'bash -c \"git push --force gitlab main\"'"'"'\""')")"; assert_eq "$(decision "$out")" deny "grant 遞迴: 4 層巢狀"
+out="$(gg Bash "$(cmdj "$(printf 'git push --force gitlab main\r')")")"; assert_eq "$(decision "$out")" deny "grant: CRLF 指令照擋"
+out="$(gg Bash '{"command":""}')"; assert_eq "$out" "" "grant: 空指令不出聲"
+mkdir -p "$FX/noperl"; printf '#!/usr/bin/env bash\nexit 127\n' > "$FX/noperl/perl"; chmod +x "$FX/noperl/perl"
+out="$(PATH="$FX/noperl:$PATH" gg Bash "$(cmdj 'ls')")"; assert_eq "$(decision "$out")" deny "grant: perl 失敗要 deny，不是放行"
+reason "$out" | grep -q perl || fail "grant: perl 失敗的 deny 要說是 perl: $(reason "$out")"
+mkdir -p "$FX/noperl-l3"
+printf '#!/usr/bin/env bash\ncase "$1" in *cmd-containers.pl) exit 1 ;; esac\nexec %s "$@"\n' "$(command -v perl)" > "$FX/noperl-l3/perl"; chmod +x "$FX/noperl-l3/perl"
+out="$(PATH="$FX/noperl-l3:$PATH" gg Bash "$(cmdj 'ls')")"; assert_eq "$(decision "$out")" deny "grant: 只有 cmd-containers.pl 失敗也要 deny"
+
+# 白名單容器的「容器本身」不能變成繞過口（review 第 2 輪）：已授權 push 串在前面時閘門會明確 allow，所以每個都要 deny
+deny3() { local cmd out; cmd="$(cat)"; out="$(gg Bash "$(cmdj "$cmd")")"; assert_eq "$(decision "$out")" deny "$1"; }
+allow3() { local cmd out; cmd="$(cat)"; out="$(gg Bash "$(cmdj "$cmd")")"; assert_eq "$out" "" "$1"; }
+deny3 "grant 容器: 引號內的 git commit -m 不是容器" <<'X'
+git push gitlab feat/eval-core/mikaela && echo "git commit -m '" && git push --force gitlab main && echo "'"
+X
+deny3 "grant 容器: eval 後的 git commit -m 不是容器" <<'X'
+git push gitlab feat/eval-core/mikaela && eval git commit -m '; git push --force gitlab main'
+X
+deny3 "grant 容器: 引號內 git commit -m 字串裡的命令替換仍會執行" <<'X'
+git push gitlab feat/eval-core/mikaela && echo "git commit -m '$(git push --force gitlab main)'"
+X
+deny3 "grant 容器: 註解內的 git commit -m 不是容器" <<'X'
+git push gitlab feat/eval-core/mikaela
+# git commit -m '
+git push --force gitlab main
+# '
+X
+deny3 "grant 容器: 引號內的 opsx answer 不是容器" <<'X'
+git push gitlab feat/eval-core/mikaela && echo "opsx answer a b -- "; git push --force gitlab main; echo ""
+X
+deny3 "grant 容器: 同上，換成 merge（merge_gate 也不能被繞過）" <<'X'
+git push gitlab feat/eval-core/mikaela && echo "git commit -m '" && glab mr merge 212 && echo "'"
+X
+deny3 "grant 容器: commit 標準寫法後面緊接命令替換" <<'X'
+git commit -m "$(cat <<'EOF'
+msg
+EOF
+)$(git push --force gitlab main)$(cat <<'EOF'
+EOF
+)"
+X
+deny3 "grant 容器: commit heredoc 在第一個結尾行就結束，後面的行會執行" <<'X'
+git commit -m "$(cat <<'EOF'
+msg
+EOF
+xx; git push -f gitlab main
+EOF
+)"
+X
+deny3 "grant 容器: 跨行單引號內的假 heredoc opener" <<'X'
+echo '
+cat > f <<EOF
+'; git push -f gitlab main
+EOF
+X
+deny3 "grant 容器: opener 行尾反斜線續行接 pipe 進 sh" <<'X'
+cat <<EOF \
+| sh
+git push --force gitlab main
+EOF
+X
+deny3 "grant 容器: delimiter 是混合寫法 <<\"E\"OF" <<'X'
+cat > f <<"E"OF
+x
+EOF
+git push --force gitlab main
+E
+X
+deny3 "grant 容器: delimiter 是 EOF-1" <<'X'
+cat > f <<EOF-1
+x
+EOF-1
+git push --force gitlab main
+EOF
+X
+deny3 "grant 容器: 前面定義了 cat 函式" <<'X'
+git push gitlab feat/eval-core/mikaela
+cat() { bash; }
+cat <<'EOF'
+git push --force gitlab main
+EOF
+X
+deny3 "grant 容器: 扣掉 commit 訊息後，串在後面的第三級仍擋" <<'X'
+git commit -m 'a' && git push --force gitlab main
+X
+deny3 "grant 容器: 扣掉 answer 答案後，串在後面的第三級仍擋" <<'X'
+opsx answer s --gate g1 'a' ; git push --force gitlab main
+X
+deny3 "grant 容器: 扣掉 heredoc 本體後，後面的第三級仍擋" <<'X'
+cat > f <<'EOF'
+x
+EOF
+git push --force gitlab main
+X
+allow3 "grant 容器: opsx answer 真實用法（--gate、單引號文字）不觸發" <<'X'
+opsx answer s --gate g1 'git push --force gitlab main 之後再說'
+X
+allow3 "grant 容器: opsx answer 帶 --grant 與雙引號文字不觸發" <<'X'
+opsx answer s --gate g1 --grant this "glab mr merge 之後再說"
+X
+allow3 "grant 容器: cd 之後的 cat heredoc 不觸發" <<'X'
+cd x && cat > f <<'EOF'
+git push --force gitlab main
+EOF
+X
+big="$(head -c 40000 /dev/zero | tr '\0' a)"
+out="$(gg Bash "$(cmdj "git commit -m \"$big git push --force gitlab main\"")")"; assert_eq "$(decision "$out")" deny "grant 容器: 超過長度上限就整段原樣比對（不扣容器）"
+many="$(printf 'cat > f <<EOF\n%.0s' $(seq 1 1500))"
+out="$(gg Bash "$(cmdj "$many")")"; assert_eq "$(decision "$out")" allow "grant 容器: 一堆沒有結尾的 heredoc opener 不會拖到逾時"
+
+# 第二級 deny 帶精確的 action 值，agent 照抄寫 gate（grant-action）；一個授權都沒有的狀態下八個動作各擋一次
+printf '# grants\n' > "$OPSX_STATE_DIR/grants.toml"; printf '{}' > "$PD/authz.json"
+for pair in "push|git push gitlab feat/eval-core/mikaela" "mr|glab mr create -F desc.md" "migrate|pnpm db:migrate" "delete|rm -rf build" \
+            "install|pnpm add left-pad" "rebase|git rebase main" "external|curl https://api.example.com/x"; do
+  out="$(gg Bash "$(cmdj "${pair#*|}")")"; assert_eq "$(decision "$out")" deny "grant-action: ${pair%%|*}"
+  reason "$out" | grep -qF "action: ${pair%%|*}" || fail "grant-action: ${pair%%|*} 的 deny 要帶 action: ${pair%%|*}：$(reason "$out")"
+  assert_eq "$(reason "$out" | grep -oE 'action: [a-z]+' | wc -l | tr -d ' ')" 1 "grant-action: ${pair%%|*} 只能帶自己的一個 action"
+done
+out="$(gg Write '{"file_path":"/x/.env.local","content":"A=1"}')"
+reason "$out" | grep -qF "action: env" || fail "grant-action: env 的 deny 要帶 action: env：$(reason "$out")"
+out="$(gg Bash "$(cmdj 'git push --force gitlab main')")"
+reason "$out" | grep -qF 'action:' && fail "grant-action: 第三級不帶 action：$(reason "$out")"
+printf '[repos."Agentory-AI"]\npush = true\nmr = false\nmigrate = false\n' > "$OPSX_STATE_DIR/grants.toml"
+printf '{"Agentory-AI/eval-core":{"grants":["migrate"]}}' > "$PD/authz.json"
 
 # ---------- grant gate：合併的一次性核准（herdr-board D5 / 3.3）----------
 FAKES="$OPSX_ROOT/tests/fakes"; mkdir -p "$FX/fakebin"
@@ -266,6 +462,7 @@ out="$(mg 'echo "it'"'"'s gh pr create"')"; assert_eq "$out" "" "mr: 雙引號�
 out="$(mg 'cat > inbox.md <<'"'EOF'"'
 用 glab mr create 開 MR
 EOF')"; assert_eq "$out" "" "mr: heredoc 內的字樣不觸發"
+out="$(mg 'git commit -m "docs: gh pr create 與 glab mr create 的格式"')"; assert_eq "$out" "" "mr: commit 訊息提到 create 不觸發"
 out="$(mg 'cd x && glab mr create -F bad.md')"; assert_eq "$(decision "$out")" deny "mr: && 之後的 create 仍檢查"
 out="$(mg 'gh pr create --title "it'"'"'s" --body "just text"')"; assert_eq "$(decision "$out")" deny "mr: 引號內含單引號不讓真的 create 漏掉"
 out="$(mg "echo it's ok; if true; then gh pr create --fill --title 'x'; fi")"; assert_eq "$(decision "$out")" deny "mr: 未配對撇號與 then 之後的 create 不漏檢"
@@ -280,6 +477,15 @@ out="$(mg 'gh pr create --title t --body "$(cat <<'"'EOF'"'
 just text
 EOF
 )"')"; assert_eq "$(decision "$out")" deny "mr: --body \$(cat <<EOF) 不合格仍擋"
+# 字串裡真的在執行的指令仍檢查（骨架遞迴）
+out="$(mg 'bash -c "gh pr create --fill"')"; assert_eq "$(decision "$out")" deny "mr: bash -c 內的 create 仍擋"
+out="$(mg "sh -c 'glab mr create --fill'")"; assert_eq "$(decision "$out")" deny "mr: sh -c 單引號內的 create 仍擋"
+out="$(mg 'eval "gh pr create --fill"')"; assert_eq "$(decision "$out")" deny "mr: eval 內的 create 仍擋"
+out="$(mg 'echo "$(gh pr create --fill)"')"; assert_eq "$(decision "$out")" deny "mr: 雙引號內 \$(…) 的 create 仍擋"
+out="$(mg 'echo "`gh pr create --fill`"')"; assert_eq "$(decision "$out")" deny "mr: 雙引號內反引號的 create 仍擋"
+out="$(mg 'echo "$(echo "$(echo "$(echo "$(gh pr create --fill)")")")"')"; assert_eq "$(decision "$out")" deny "mr: 超過 3 層的 create 原樣比對仍擋"
+out="$(mg 'echo "$(echo hi) 之後用 gh pr create"')"; assert_eq "$out" "" "mr: 雙引號內 \$(…) 之外的字樣不觸發"
+out="$(mg "echo 'gh pr create' | xargs -I{} echo {}")"; assert_eq "$out" "" "mr: 單引號字樣餵 xargs 不觸發"
 
 # ---------- gate-timestamp ----------
 # 有 open 的 gate 時 hook 會叫 $CLAUDE_PLUGIN_ROOT/bin/opsx coordinate --kick：換成假的 plugin 根，bin/opsx 是 fake，記到 kick.log
@@ -310,12 +516,19 @@ rm -f "$G"; out="$(gt "$G")"; assert_eq "$out" "rc=0" "gate-ts: 檔案不存在�
 printf '## g1\nstatus: open\n' > "$G"
 printf '{"tool_name":"Write","tool_input":{"file_path":"%s"}}' "$G" | CLAUDE_PLUGIN_ROOT="$GP" env -u OPSX_NOW bash "$H/gate-timestamp.sh" >/dev/null 2>&1
 grep -Eq '^opened_at: [0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}[+-][0-9]{2}:[0-9]{2}$' "$G" || fail "gate-ts: 真時間要是帶冒號 offset 的 ISO：$(cat "$G")"
+# symlink-safe-writes：暫存檔與 warn 檔名帶 pid（可猜）。exec 保留 pid，所以在同一個 pid 下先放好 symlink
+printf '## g1\ntype: decision\nstatus: open\n' > "$G"; printf 'keep me\n' > "$FX/victim"
+printf '{"tool_name":"Write","tool_input":{"file_path":"%s"}}' "$G" | CLAUDE_PLUGIN_ROOT="$GP" OPSX_NOW=2026-11-06T14:05:00+08:00 bash -c 'ln -s "$1" "$2.tmp.$$"; ln -s "$1" "$2.warn.$$"; exec bash "$3"' _ "$FX/victim" "$G" "$H/gate-timestamp.sh" >/dev/null 2>&1
+assert_eq "$(cat "$FX/victim")" "keep me" "gate-ts: 帶 pid 的舊檔名上的 symlink 不能被寫"
+assert_grep '^opened_at: 2026-11-06T14:05:00+08:00$' "$G"
+rm -f "$G".tmp.* "$G".warn.*
 
 # gate type：同義詞改正、表外與沒寫只提醒（gate-type-normalize）。提醒走 PostToolUse 的 additionalContext，退出碼永遠 0
-gts() { printf '{"cwd":"%s","tool_name":"Write","tool_input":{"file_path":"%s"},"hook_event_name":"PostToolUse"}' "$R" "$1" | OPSX_NOW=2026-11-06T14:05:00+08:00 bash "$H/gate-timestamp.sh" 2>/dev/null; }
+gts() { printf '{"cwd":"%s","tool_name":"Write","tool_input":{"file_path":"%s"},"hook_event_name":"PostToolUse"}' "$R" "$1" | CLAUDE_PLUGIN_ROOT="$GP" OPSX_NOW=2026-11-06T14:05:00+08:00 bash "$H/gate-timestamp.sh" 2>/dev/null; }
 printf '## g1\ntype: authorization\nneeds: run\nstatus: answered\n\n## g2\ntype: 等待授權\nstatus: answered\n\n## g3\ntype:  Decision \nstatus: answered\n\n## g4\ntype: 決定\nstatus: answered\n\n## g5\ntype: approval\nstatus: answered\n' > "$G"
 out="$(gts "$G")"; assert_eq "$out" "" "gate-type: 同義詞改正不出聲"
 assert_eq "$(cat "$G")" "$(printf '## g1\ntype: approval\nneeds: run\nstatus: answered\n\n## g2\ntype: approval\nstatus: answered\n\n## g3\ntype: decision\nstatus: answered\n\n## g4\ntype: decision\nstatus: answered\n\n## g5\ntype: approval\nstatus: answered')" "gate-type: 同義詞改正，needs 與其他行不動"
+: > "$KL"
 printf '## g1\ntype: approval-ish\nstatus: open\n問題: x\n\n## g2\nstatus: open\n問題: 沒寫\n\n## g3\nstatus: answered\n\n## g4\ntype: decision\nstatus: open\n' > "$G"; cp "$G" "$FX/gt-before.md"
 out="$(gts "$G")"; assert_eq "$(cmp -s "$G" "$FX/gt-before.md" && echo same)" "" "gate-type: 表外與沒寫的 type 要補 opened_at 但不改 type"
 assert_eq "$(jq -r '.hookSpecificOutput.hookEventName' <<<"$out")" PostToolUse
@@ -323,8 +536,9 @@ ctx="$(jq -r '.hookSpecificOutput.additionalContext' <<<"$out")"
 for want in g1 approval-ish 'approval | decision' g2 '沒寫 type' 'needs: run'; do case "$ctx" in *"$want"*) ;; *) fail "gate-type: 提醒要含「${want}」：$ctx" ;; esac; done
 case "$ctx" in *g3*|*g4*) fail "gate-type: answered 與合法的 gate 不該被提醒：$ctx" ;; esac
 assert_eq "$(grep -c '^type: approval-ish$' "$G")" 1 "gate-type: 表外的值原樣保留"
-printf '## g1\ntype: approval-ish\nstatus: open\n' > "$G"; printf '{"tool_name":"Write","tool_input":{"file_path":"%s"}}' "$G" | OPSX_NOW=2026-11-06T14:05:00+08:00 bash "$H/gate-timestamp.sh" >/dev/null 2>&1
+printf '## g1\ntype: approval-ish\nstatus: open\n' > "$G"; printf '{"tool_name":"Write","tool_input":{"file_path":"%s"}}' "$G" | CLAUDE_PLUGIN_ROOT="$GP" OPSX_NOW=2026-11-06T14:05:00+08:00 bash "$H/gate-timestamp.sh" >/dev/null 2>&1
 assert_eq "$?" 0 "gate-type: 提醒時退出碼仍是 0"
+assert_eq "$(cat "$KL")" "$(printf 'opsx coordinate --kick\nopsx coordinate --kick')" "gate-type: 有 open 的 gate 兩次寫入各 kick 一次，且只叫到假的 bin/opsx"
 # 兩份同義詞表一致：hook 的 SYN 與 bin/lib/gatetype.py 的 SYNONYMS
 hook_tbl="$(sed -n "s/^SYN='\(.*\)'$/\1/p" "$H/gate-timestamp.sh" | tr ' ' '\n' | sort)"
 py_tbl="$(OPSX_LIB="$OPSX_ROOT/bin/lib" python3 -I -c 'import os,sys;sys.path.insert(0,os.environ["OPSX_LIB"]);import gatetype;print("\n".join("%s=%s"%kv for kv in gatetype.SYNONYMS.items()))' | sort)"
@@ -381,6 +595,50 @@ feat: x
 Co-Authored-By: Claude
 EOF
 )"')"; assert_eq "$(decision "$out")" deny "guard: heredoc"
+# 字樣只在引號 / heredoc 內 → 不擋
+out="$(sd 'echo "git push origin main"')"; assert_eq "$(decision "$out")" allow "guard: 引號內的 push main"
+out="$(sd 'opsx answer s g1 -- "git add .env 之後再說"')"; assert_eq "$(decision "$out")" allow "guard: 引號內的 git add .env"
+out="$(sd 'bash -c "git push origin main"')"; assert_eq "$(decision "$out")" deny "guard: bash -c 內的 push main 仍擋"
+out="$(sd 'git push origin "main"')"; assert_eq "$(decision "$out")" deny "guard: 引號包住的 main 仍擋"
+# 三種容器（grill D2）：提到 push main、claude 不擋；真的署名寫在 heredoc 餵給 commit 的訊息裡仍擋
+out="$(sd 'git commit -m "docs: git push origin main 與 git add .env 的說明"')"; assert_eq "$(decision "$out")" allow "guard: commit 訊息提到 push main / add .env"
+out="$(sd 'opsx answer s g1 -- "git push origin main，Co-Authored-By: Claude 都只是文字"')"; assert_eq "$(decision "$out")" allow "guard: answer 答案文字提到 push main 與署名字樣"
+out="$(sd 'cat > n.md <<'"'EOF'"'
+git push origin main
+Co-Authored-By: Claude
+EOF')"; assert_eq "$(decision "$out")" allow "guard: 寫檔 heredoc 內的字樣"
+out="$(sd 'git commit -F - <<'"'EOF'"'
+feat: x
+
+Co-Authored-By: Claude <noreply@anthropic.com>
+EOF')"; assert_eq "$(decision "$out")" deny "guard: heredoc 餵給 git commit -F - 的署名仍擋"
+out="$(PATH="$FX/noperl:$PATH" sd 'git commit -m x')"; assert_eq "$(decision "$out")" deny "guard: perl 失敗要 deny"
+out="$(PATH="$FX/noperl:$PATH" mg 'ls')"; assert_eq "$(decision "$out")" deny "mr: perl 失敗要 deny"
+out="$(PATH="$FX/noperl:$PATH" cg 'git commit -m x')"; assert_eq "$(decision "$out")" deny "commit: perl 失敗要 deny"
+# 署名寫法的變體（spec 署名寫法的變體）
+out="$(sd "git commit -m \$'x\nCo-Authored-By: Claude <a@b.c>'")"; assert_eq "$(decision "$out")" deny "guard: \$'…' 內的字面 \\n 後接署名"
+out="$(sd 'printf "x\n\nCo-Authored-By: Claude <a@b.c>\n" | git commit -F -')"; assert_eq "$(decision "$out")" deny "guard: printf 的 \\n 後接署名"
+out="$(sd 'echo -e "x\nCo-Authored-By: Claude" | git commit -F -')"; assert_eq "$(decision "$out")" deny "guard: echo -e 的 \\n 後接署名"
+out="$(sd 'git commit -m "x
+   Co-Authored-By: Claude <a@b.c>"')"; assert_eq "$(decision "$out")" deny "guard: 署名行前面有縮排空白"
+out="$(sd 'GIT_AUTHOR_EMAIL=noreply@anthropic.com git commit -m x')"; assert_eq "$(decision "$out")" deny "guard: GIT_AUTHOR_EMAIL"
+# 骨架的寫法（bash -e -c、bash -lc、$'…'、heredoc 餵 bash）由第二級、MR 閘門、commit 閘門用，各自要看得到
+out="$(mg 'bash -e -c "gh pr create --fill"')"; assert_eq "$(decision "$out")" deny "mr: bash -e -c 內的 create 仍擋"
+out="$(mg 'bash -lc "gh pr create --fill"')"; assert_eq "$(decision "$out")" deny "mr: bash -lc 內的 create 仍擋"
+out="$(mg "bash -c \$'gh pr create --fill'")"; assert_eq "$(decision "$out")" deny "mr: bash -c \$'…' 內的 create 仍擋"
+out="$(mg 'bash <<EOF
+gh pr create --fill
+EOF')"; assert_eq "$(decision "$out")" deny "mr: heredoc 餵給 bash 的 create 仍擋"
+out="$(cg 'bash -e -c "git commit -m x"')"; assert_eq "$(decision "$out")" deny "commit: bash -e -c 內的 commit 仍擋"
+out="$(cg 'bash <<EOF
+git commit -m x
+EOF')"; assert_eq "$(decision "$out")" deny "commit: heredoc 餵給 bash 的 commit 仍擋"
+# 署名只抓署名形式：內文提到 claude / anthropic 放行
+out="$(sd 'git commit -m "fix: claude 路徑處理"')"; assert_eq "$(decision "$out")" allow "guard: 內文提到 claude"
+out="$(sd 'git commit -m "feat: x" -m "改用 Anthropic SDK 的 retry"')"; assert_eq "$(decision "$out")" allow "guard: 第二個 -m 提到 anthropic"
+out="$(sd 'git commit -m "docs: 說明 Co-Authored-By 與 Generated with 的檢查規則"')"; assert_eq "$(decision "$out")" allow "guard: 提到署名字樣但不是署名行"
+out="$(sd 'git commit -m "x" -m "Generated with [Claude Code](https://claude.com/claude-code)"')"; assert_eq "$(decision "$out")" deny "guard: Generated with 行"
+out="$(sd 'GIT_COMMITTER_NAME=Claude git commit -m x')"; assert_eq "$(decision "$out")" deny "guard: GIT_COMMITTER_NAME"
 
 # ---------- stop gate ----------
 STOP_STATE="$OPSX_STATE_DIR/stop-chain"
@@ -427,6 +685,65 @@ printf '{"phase":"review","step":7,"total":7,"label":"report.md 寫好","tests":
 out="$(sg)"; assert_eq "$(decision "$out")" block "stop: review 最後一步 report 後有新 commit 照擋"
 printf '{"phase":"apply","step":8,"total":8,"label":"x","tests":"green","at":"2026-11-05T15:00:00+08:00"}' > "$C/status.json"
 rm -f "$C/gates.md"; rm -rf "$STOP_STATE"
+# 子 change 的 subagent 在背景做：主殼未勾但只能等通知，不計次、不寫 gate
+iso_shift() { python3 -I -c 'import datetime, sys; h, z = int(sys.argv[1]), int(sys.argv[2]); print((datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=h)).astimezone(datetime.timezone(datetime.timedelta(hours=z))).isoformat(timespec="seconds"))' "$1" "$2"; }
+mk_sub() { # <子> <worker> <at> [step]
+  local s="$C/subs/$1"; mkdir -p "$s/specs/x"
+  printf 'schema: opsx\nparent: eval-core\n' > "$s/.openspec.yaml"
+  printf '## Why\n' > "$s/proposal.md"; printf '## Context\n' > "$s/design.md"
+  printf '## 1. a\n\n- [ ] 1.1 t\n  - 驗收：a\n  - 測試：b\n' > "$s/tasks.md"
+  printf '### Requirement: r\n\n#### Scenario: s\n' > "$s/specs/x/spec.md"
+  printf '{"phase":"apply","step":%s,"total":4,"label":"x","tests":"unknown","at":"%s","worker":"%s"}' "${4:-0}" "$3" "$2" > "$s/status.json"
+}
+FRESH="$( source "$OPSX_ROOT/bin/lib/common.sh"; now_iso )"
+printf '## 1. x\n\n- [ ] 1.1 `attach-cli`：a\n- [x] 1.2 `attach-board`：b\n' > "$C/tasks.md"
+mk_sub attach-cli subagent-attach-cli "$FRESH"
+out="$(KEEP=1 sg)"; out="$(KEEP=1 sg)"; out="$(KEEP=1 sg)"; out="$(KEEP=1 sg)"; out="$(KEEP=1 sg)"
+assert_eq "$out" "" "stop: subagent 在做未疊的子 change，連停五次都放行"
+assert_eq "$([ -e "$C/gates.md" ] && echo y || echo n)" n "stop: subagent 在做不寫「卡在接 /apply」gate"
+assert_eq "$([ -e "$STOP_STATE/Agentory-AI-eval-core" ] && echo y || echo n)" n "stop: subagent 在做不留擋的次數"
+printf '## 1. x\n\n- [x] 1.1 `attach-cli`：a\n- [ ] 1.2 `attach-board`：b\n' > "$C/tasks.md"
+out="$(sg)"; assert_eq "$(decision "$out")" block "stop: 子 change 已疊（主殼已勾）、沒有別的 subagent 在跑"; reason "$out" | grep -q '1 個 task 沒勾' || fail "stop: 已疊要說幾個 task 沒勾"
+mk_sub attach-board subagent-attach-board "$FRESH"
+out="$(sg)"; assert_eq "$out" "" "stop: 另一個子 change 的 subagent 還在做"
+printf '## 1. x\n\n- [ ] 1.1 `attach-cli`：a\n- [x] 1.2 `attach-board`：b\n' > "$C/tasks.md"
+mk_sub attach-cli subagent-attach-cli "2020-01-01T00:00:00+08:00"
+out="$(sg)"; assert_eq "$(decision "$out")" block "stop: subagent status 超過 120 分鐘"
+mk_sub attach-cli session "$FRESH"
+out="$(sg)"; assert_eq "$(decision "$out")" block "stop: 子殼 worker 是 session"
+mk_sub attach-cli subagent-attach-cli "not-a-time"
+out="$(sg)"; assert_eq "$(decision "$out")" block "stop: at 解析不了照擋"
+mk_sub attach-cli subagent-attach-cli "$(iso_shift -3 8)"
+out="$(sg)"; assert_eq "$(decision "$out")" block "stop: at 是 3 小時前（換算時區後）"
+mk_sub attach-cli subagent-attach-cli "$(iso_shift 3 8)"
+out="$(sg)"; assert_eq "$(decision "$out")" block "stop: at 是未來照擋"
+mk_sub attach-cli subagent-attach-cli "$(iso_shift 0 -5)"
+out="$(sg)"; assert_eq "$out" "" "stop: 負時區的新 at 放行"
+mk_sub attach-cli subagent-attach-cli "$FRESH" 4
+out="$(sg)"; assert_eq "$(decision "$out")" block "stop: 子 change 已回報 DONE（step=total）但還沒疊，照擋"
+printf '## 1. x\n\n- [x] 1.1 `attach-cli`：a\n- [ ] R1.1 疊完後檢查 `attach-cli` 的 new.sh\n' > "$C/tasks.md"
+mk_sub attach-cli subagent-attach-cli "$FRESH"
+out="$(sg)"; assert_eq "$(decision "$out")" block "stop: 子殼名只出現在後面的 R task 行，照擋"
+printf '## 1. x\n\n- [x] 1.1 `attach-cli`：a\n- [ ] R1.1 `attach-cli`：疊完後檢查 new.sh\n' > "$C/tasks.md"
+out="$(sg)"; assert_eq "$(decision "$out")" block "stop: R task 行以子殼名開頭（編號不是 [0-9.]+），照擋"
+printf '## 1. x\n\n- [ ] 1.1 `attach-cli`：a\n- [x] 1.2 `attach-board`：b\n' > "$C/tasks.md"
+mk_sub attach-cli subagent-attach-cli "$(iso_shift 0 8)"
+out="$(sg)"; assert_eq "$out" "" "stop: 正時區的新 at 放行"
+printf '{"phase":"apply","total":4,"label":"x","tests":"unknown","at":"%s","worker":"subagent-attach-cli"}' "$FRESH" > "$C/subs/attach-cli/status.json"
+out="$(sg)"; assert_eq "$(decision "$out")" block "stop: status 缺 step 照擋"
+printf '{"phase":"apply","step":"0","total":4,"label":"x","tests":"unknown","at":"%s","worker":"subagent-attach-cli"}' "$FRESH" > "$C/subs/attach-cli/status.json"
+out="$(sg)"; assert_eq "$(decision "$out")" block "stop: step 不是數字照擋"
+mk_sub attach-cli subagent-attach-cli "$FRESH"
+printf '## 1. x\n\n- [ ] 1.1 `attach-cli`：a\n- [x] 1.2 `attach-board`：b\n' > "$C/tasks.md"
+printf '## 1. x\n\n- [ ] 1.1 `attach-cli`：a\n- [x] 1.2 `attach-board`：b\n' > "$C/tasks.md"
+rm -rf "$C/subs"; rm -f "$C/gates.md"; rm -rf "$STOP_STATE"
+# hook 自己寫的「卡在接」gate：建議是選項之一，不是 hook 內部說明
+printf '## 1. x\n\n- [ ] 1.1 a\n' > "$C/tasks.md"
+out="$(KEEP=1 sg)"; out="$(KEEP=1 sg)"; out="$(KEEP=1 sg)"; out="$(KEEP=1 sg)"
+assert_grep '^建議: 重做 /apply 一次，做不完就把卡在哪寫進 gates.md$' "$C/gates.md"
+assert_not_grep '先看 pane' "$C/gates.md"
+printf '## 1. x\n\n- [x] 1.1 a\n- [x] 1.2 b\n' > "$C/tasks.md"
+rm -f "$C/gates.md"; rm -rf "$STOP_STATE"
 # 卡在 linked worktree：只算卡自己 branch 的 commit，主 checkout 是別的 session 在用
 sgw() { [ -n "${KEEP:-}" ] || rm -rf "$STOP_STATE"; printf '{"cwd":"%s","stop_hook_active":false}' "$WT" | bash "$H/openspec-stop-gate.sh" 2>/dev/null; true; }
 done_report; sleep 1
@@ -467,14 +784,25 @@ out="$(sg)"; assert_eq "$out" "" "stop: approval gate 只有人能答，問要�
 printf '## 1. x\n\n- [ ] 1.1 a\n- [ ] 1.2 b\n' > "$C/tasks.md"
 printf '## 要不要接 /apply\nstatus: open\n' > "$C/gates.md"
 out="$(sg)"; assert_eq "$(decision "$out")" block "stop: apply 站「要不要接」gate 不放行"; reason "$out" | grep -q 'invoke /apply' || fail "stop: apply 站 reason 要叫 invoke /apply"
+# approval 旗標只管自己那個 gate：前一個 approval 不能把後面沒有 type 的「要不要接」gate 變成會擋的
+printf '## 核准 push\ntype: approval\nstatus: answered\n\n## 要不要接 /apply\nstatus: open\n' > "$C/gates.md"
+out="$(sg)"; assert_eq "$(decision "$out")" block "stop: approval 旗標不帶到下一個 gate"; reason "$out" | grep -q 'invoke /apply' || fail "stop: approval 後接「要不要接」gate，reason 要叫 invoke /apply"
 rm -f "$C/gates.md" "$C/tasks.md"
 
 # 擋的次數：同一站 3 次，第 4 次 hook 寫 gate 放行；第 5 次不寫第二個
 rm -rf "$STOP_STATE"
+# symlink-safe-writes：擋次數的狀態檔是 symlink → 換成一般檔，目標不變（內容是合法的舊狀態，讀它不出錯）
+mkdir -p "$STOP_STATE"; printf 'none 0 - x\n' > "$FX/victim"; ln -s "$FX/victim" "$STOP_STATE/Agentory-AI-$(basename "$C")"
 out="$(KEEP=1 sg)"; assert_eq "$(decision "$out")" block "stop: 第 1 次擋"
+assert_eq "$(cat "$FX/victim")" "none 0 - x" "stop: 狀態檔上的 symlink 不能被寫到目標"
 out="$(KEEP=1 sg)"; assert_eq "$(decision "$out")" block "stop: 第 2 次擋"
 out="$(KEEP=1 sg)"; assert_eq "$(decision "$out")" block "stop: 第 3 次擋"
 assert_no_file "$C/gates.md"
+# gates.md 是 symlink 時，第 4 次要寫的自動 gate 不能附加到目標；次數沒推進，下面的真第 4 次照常寫
+printf 'keep me\n' > "$FX/victim"; ln -s "$FX/victim" "$C/gates.md"
+out="$(KEEP=1 sg)"
+assert_eq "$(cat "$FX/victim")" "keep me" "stop: 自動 gate 不能附加到 symlink 的目標"
+rm -f "$C/gates.md"
 out="$(KEEP=1 sg)"; assert_eq "$out" "" "stop: 第 4 次放行"
 assert_grep '^## 卡在接 /propose' "$C/gates.md"; assert_grep '^status: open$' "$C/gates.md"; assert_grep '^opened_at: ' "$C/gates.md"
 assert_grep '^type: decision$' "$C/gates.md"; assert_grep '^問題: ' "$C/gates.md"; assert_grep '^選項: ' "$C/gates.md"
@@ -489,6 +817,15 @@ assert_eq "$(grep -c '^## 卡在接 /propose' "$C/gates.md")" 1 "stop: 答完後
 out="$(KEEP=1 sg)"; out="$(KEEP=1 sg)"
 out="$(KEEP=1 sg)"; assert_eq "$out" "" "stop: 第二輪擋滿放行"
 assert_grep '^## 卡在接 /propose #1$' "$C/gates.md"; assert_grep '^## 卡在接 /propose #2$' "$C/gates.md"
+# 流水號取最大值加一：較早的 gate 不在了（Write 覆寫、人手刪），數量小於最大號
+printf '## 卡在接 /propose #2\ntype: decision\nstatus: answered\n' > "$C/gates.md"; rm -rf "$STOP_STATE"
+out="$(KEEP=1 sg)"; out="$(KEEP=1 sg)"; out="$(KEEP=1 sg)"; out="$(KEEP=1 sg)"
+assert_grep '^## 卡在接 /propose #3$' "$C/gates.md"
+assert_eq "$(grep -c '^## 卡在接 /propose #2$' "$C/gates.md")" 1 "stop: 缺較早 gate 時新 gate 不與 #2 同名"
+# 舊格式標題尾端多一個空白也要算進去
+printf '## 卡在接 /propose \ntype: decision\nstatus: answered\n' > "$C/gates.md"; rm -rf "$STOP_STATE"
+out="$(KEEP=1 sg)"; out="$(KEEP=1 sg)"; out="$(KEEP=1 sg)"; out="$(KEEP=1 sg)"
+assert_grep '^## 卡在接 /propose #2$' "$C/gates.md"
 rm -f "$C/gates.md"
 # stop_hook_active 為 true 次數未滿仍擋
 out="$(sg true)"; assert_eq "$(decision "$out")" block "stop: stop_hook_active 為 true 仍擋"
@@ -512,6 +849,12 @@ assert_eq "$(cut -d' ' -f1,2 "$STOP_STATE/Agentory-AI-eval-core")" "apply 2" "st
 printf '## 1. x\n\n- [x] 1.1 a\n- [ ] 1.2 b\n- [ ] 1.3 c\n' > "$C/tasks.md"
 out="$(KEEP=1 sg)"; assert_eq "$(decision "$out")" block "stop: 勾了 task 後仍擋"
 assert_eq "$(cut -d' ' -f1,2 "$STOP_STATE/Agentory-AI-eval-core")" "apply 1" "stop: 有進度次數重算"
+# apply 站 HEAD 算進度：同一組未勾 task，中間多一個 commit，次數歸零
+out="$(KEEP=1 sg)"
+assert_eq "$(cut -d' ' -f1,2 "$STOP_STATE/Agentory-AI-eval-core")" "apply 2" "stop: HEAD 不變次數累計"
+git -C "$R" commit -q --allow-empty -m "chore: between apply stops"
+out="$(KEEP=1 sg)"; assert_eq "$(decision "$out")" block "stop: apply 站 commit 後仍擋"
+assert_eq "$(cut -d' ' -f1,2 "$STOP_STATE/Agentory-AI-eval-core")" "apply 1" "stop: apply 站 commit 算進度，次數歸零"
 # 現有檢查共用次數：tests red 擋 3 次，第 4 次寫「卡在接 /apply」
 printf '## 1. x\n\n- [x] 1.1 a\n' > "$C/tasks.md"
 printf '{"phase":"apply","step":8,"total":8,"label":"x","tests":"red","at":"2026-11-05T15:00:00+08:00"}' > "$C/status.json"
@@ -552,11 +895,55 @@ out="$(sg)"; reason "$out" | grep -q '/review' && fail "stop: 確認 sha 等於 
 git -C "$R" commit -q --allow-empty -m "fix: after confirm"
 out="$(sg)"; reason "$out" | grep -q '再跑一次 /review' || fail "stop: 確認後又有新 commit 要重審"
 printf '# report\n' > "$C/report.md"
+# babysit 站查 forge：MR 狀態來自假 glab
+use_fakes glab; export OPSX_FAKE_LOG="$FX/glab.log" OPSX_TEST_GLAB_JSON="$FX/mr.json" OPSX_MR_CACHE_TTL=0; : > "$OPSX_FAKE_LOG"
+OPEN_MR='{"state":"opened","draft":false,"has_conflicts":false,"sha":"abc123","head_pipeline":{"status":"success"},"unresolved_discussions_count":0}'
+MERGED_MR='{"state":"merged","draft":false,"has_conflicts":false,"sha":"abc123","merged_at":"2026-11-10T03:00:00.000Z"}'
+printf '%s' "$OPEN_MR" > "$OPSX_TEST_GLAB_JSON"
 # babysit 站：有 MR 沒有 babysit: 行
 printf '# report\n\n## MR\nhttps://gitlab.tsg-navigator.com/a/b/-/merge_requests/212 · opened 2026-11-10 · auto-merge: no\n' > "$C/report.md"
 out="$(sg)"; assert_eq "$(decision "$out")" block "stop: MR 已開沒 babysit → 擋"; reason "$out" | grep -q '/babysit' || fail "stop: 要叫 /babysit"
 done_report
 out="$(sg)"; assert_eq "$out" "" "stop: 有 babysit: 行放行"
+# MR 已合併、workplan 沒標 merged、沒有 babysit: 行 → 要 /archive，不要 babysit 記號
+printf '%s' "$MERGED_MR" > "$OPSX_TEST_GLAB_JSON"
+printf '# report\n\n## MR\nhttps://gitlab.tsg-navigator.com/a/b/-/merge_requests/212 · opened 2026-11-10 · auto-merge: no\n' > "$C/report.md"
+out="$(sg)"; assert_eq "$(decision "$out")" block "stop: MR 已合併 → 擋"
+reason "$out" | grep -q '/archive' || fail "stop: 已合併要叫 /archive: $(reason "$out")"
+reason "$out" | grep -q 'babysit' && fail "stop: 已合併不該提 babysit: $(reason "$out")"
+# 已合併也勝過舊的 babysit: 記號
+done_report
+out="$(sg)"; reason "$out" | grep -q '/archive' || fail "stop: 已合併且有 babysit: 行仍要 /archive: $(reason "$out")"
+# 擋滿 3 次：第 4 次寫「卡在接 /archive #1」並放行
+rm -f "$C/gates.md"; rm -rf "$STOP_STATE"
+KEEP=1 sg >/dev/null; KEEP=1 sg >/dev/null; KEEP=1 sg >/dev/null
+out="$(KEEP=1 sg)"; assert_eq "$out" "" "stop: 已合併擋 3 次後放行"
+assert_grep '^## 卡在接 /archive #1$' "$C/gates.md"; assert_not_grep '卡在接 /babysit' "$C/gates.md"
+rm -f "$C/gates.md"
+# 查不到 MR 狀態：維持 /babysit，reason 帶查詢的錯誤文字
+printf '# report\n\n## MR\nhttps://gitlab.tsg-navigator.com/a/b/-/merge_requests/212 · opened 2026-11-10 · auto-merge: no\n' > "$C/report.md"
+printf '' > "$OPSX_TEST_GLAB_JSON"
+out="$(sg)"; assert_eq "$(decision "$out")" block "stop: 查不到 MR → 維持擋"
+reason "$out" | grep -q '/babysit' || fail "stop: 查不到要叫 /babysit: $(reason "$out")"
+reason "$out" | grep -q 'glab mr view 212' || fail "stop: 要帶查詢的錯誤文字: $(reason "$out")"
+# 已關閉但沒合併（merged_at 是 null）：不是 /archive
+printf '{"state":"closed","draft":false,"has_conflicts":false,"sha":"abc123","merged_at":null}' > "$OPSX_TEST_GLAB_JSON"
+out="$(sg)"; assert_eq "$(decision "$out")" block "stop: MR 已關閉未合併 → 擋"
+reason "$out" | grep -q '/babysit' || fail "stop: 已關閉未合併要叫 /babysit: $(reason "$out")"
+reason "$out" | grep -q '/archive' && fail "stop: 已關閉未合併不能叫 /archive: $(reason "$out")"
+# forge 查詢掛住：在 hook 的 10 秒之內放棄，仍 block 並帶錯誤文字
+printf '%s' "$MERGED_MR" > "$OPSX_TEST_GLAB_JSON"
+t0="$(date +%s)"; out="$(OPSX_TEST_GLAB_SLEEP=6 OPSX_MR_TIMEOUT=1 sg)"; elapsed=$(( $(date +%s) - t0 ))
+[ "$elapsed" -lt 4 ] || fail "stop: 查詢要在時限內放棄，花了 ${elapsed} 秒"
+assert_eq "$(decision "$out")" block "stop: 查詢逾時 → 擋"
+reason "$out" | grep -q '/babysit' || fail "stop: 逾時要叫 /babysit: $(reason "$out")"
+reason "$out" | grep -q 'glab mr view 212' || fail "stop: 逾時要帶錯誤文字: $(reason "$out")"
+# 不設 OPSX_MR_TIMEOUT：hook 自己的預設要在 10 秒內放棄
+t0="$(date +%s)"; out="$(unset OPSX_MR_TIMEOUT; OPSX_TEST_GLAB_SLEEP=9 sg)"; elapsed=$(( $(date +%s) - t0 ))
+[ "$elapsed" -lt 8 ] || fail "stop: 預設時限要小於 hook 的 10 秒，花了 ${elapsed} 秒"
+assert_eq "$(decision "$out")" block "stop: 預設時限逾時 → 擋"
+reason "$out" | grep -q '逾時' || fail "stop: 要說逾時: $(reason "$out")"
+printf '%s' "$OPEN_MR" > "$OPSX_TEST_GLAB_JSON"; done_report
 # 沒有卡的 branch 不擋
 git -C "$R" checkout -q -b scratch-x; out="$(sg)"; assert_eq "$out" "" "stop: branch 對不到卡不擋"
 git -C "$R" checkout -q "feat/eval-core/mikaela"
@@ -579,6 +966,14 @@ assert_not_grep '^agent prompt' "$OPSX_FAKE_LOG"
 assert_no_file "$QD/Agentory-AI-qc.tsv"; assert_file "$QD/Agentory-AI-qc.tsv.failed"
 assert_grep 'rename' "$CD/decisions.tsv"; assert_grep 'agent_not_found' "$CD/decisions.tsv"
 printf '%s' "$out" | jq -r '.hookSpecificOutput.additionalContext' | grep -q '失敗' || fail "要用 additionalContext 說失敗: $out"
+# symlink-safe-writes：drive 的 log 是 symlink → 這一步失敗（佇列留 .failed），目標不變
+rm -f "$QD/Agentory-AI-qc.tsv.failed"; printf 'drive\tqc\t%s\n' "$R" > "$QD/Agentory-AI-qc.tsv"; : > "$OPSX_FAKE_LOG"
+DL="$OPSX_STATE_DIR/drive-Agentory-AI-qc.log"; rm -f "$DL"; printf 'keep me\n' > "$FX/victim"; ln -s "$FX/victim" "$DL"
+out="$(post "opsx chain p")"
+sleep 1
+assert_eq "$(cat "$FX/victim")" "keep me" "queue: drive log 不能附加到 symlink 的目標"
+assert_file "$QD/Agentory-AI-qc.tsv.failed"
+rm -f "$DL" "$QD/Agentory-AI-qc.tsv.failed"
 
 # ---------- 當前卡：dispatch worktree 根優先，否則 branch 第二段 ----------
 K="$(mk_repo Cards)"

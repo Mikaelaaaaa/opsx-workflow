@@ -18,6 +18,10 @@ hook_tool() { jqr '.tool_name'; }
 hook_file() { jqr '.tool_input.file_path'; }
 hook_cwd()  { local c; c="$(jqr '.cwd')"; printf '%s' "${c:-$PWD}"; }
 hook_prompt() { jqr '.prompt'; }
+# 指令骨架：只留真的會執行的部分（引號字串、heredoc 本體不算；bash -c、eval、$(…) 內的算）。比對指令用它，不要對原始字串 grep。
+cmd_skeleton() { printf '%s' "$1" | perl "$OPSX_ROOT/hooks/cmd-skeleton.pl"; }
+# 第三級比對用的文字：原文，只扣掉 commit 訊息、opsx answer 答案、寫檔 heredoc 三種容器的資料部分。認不得的寫法都留著。
+cmd_l3text() { printf '%s' "$1" | perl "$OPSX_ROOT/hooks/cmd-containers.pl"; }
 hook_event() { jqr '.hook_event_name'; }
 
 # 主 repo 的根（linked worktree 裡也回主 repo：卡在主 repo 的 openspec/，dispatch.json 的 key 是主 repo 名）

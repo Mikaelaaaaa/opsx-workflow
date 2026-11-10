@@ -90,31 +90,35 @@ level2() { # <action> <label>
   local rc=0
   has_grant "$repo" "$slug" "$1" || rc=$?
   case "$rc" in 0) GRANTED=1; return 0 ;; 3) ;; *) deny "$PY_FAIL" ;; esac
-  deny "opsx 授權閘門：「$2」要授權（第二級），$repo 沒有長期授權、這張卡也沒有。$GATE_MSG"
+  deny "opsx 授權閘門：「$2」要授權（第二級），$repo 沒有長期授權、這張卡也沒有。gate 寫 action: $1。$GATE_MSG"
 }
 
 if [ "$tool" = "Bash" ]; then
   [ -n "$cmd" ] || exit 0
   c="$(printf '%s' "$cmd" | tr '\n' ' ')"
+  # 第三級比對原文，只扣掉三種容器（commit 訊息、opsx answer 答案、寫檔 heredoc）的資料部分，認不得的寫法都留著（grill D1）；
+  # 第二級比對指令骨架（引號與 heredoc 內的字樣不算）。merge_gate 與訊息仍讀原文。
+  l3="$(cmd_l3text "$cmd" | tr '\n' ' ')" || deny "opsx 授權閘門：perl 執行失敗，讀不到指令內容，先擋下。確認 perl 可用"
+  sk="$(cmd_skeleton "$cmd" | tr '\n' ' ')" || deny "opsx 授權閘門：perl 執行失敗，讀不到指令骨架，先擋下。確認 perl 可用"
   # 第三級（merge 放行後不 exit，其餘檢查照跑）
-  if printf '%s' "$c" | grep -qE '(glab mr merge|gh pr merge)'; then
+  if printf '%s' "$l3" | grep -qE '(glab mr merge|gh pr merge)'; then
     [ "$UNMAPPED" = 1 ] && level3 "merge"
     merge_gate && GRANTED=1
   fi
-  printf '%s' "$c" | grep -qE 'git\s+push.*(--force|-f\b|\+[a-zA-Z])' && level3 "force-push"
-  printf '%s' "$c" | grep -qE 'git\s+push.*\b(main|master)\b' && level3 "push main"
-  printf '%s' "$c" | grep -qiE '(^|\s|/)deploy(\.sh)?(\s|$)' && level3 "deploy"
-  printf '%s' "$c" | grep -qiE 'drop\s+(table|database|schema)|truncate\s+table|db:reset' && level3 "刪資料"
-  printf '%s' "$c" | grep -qE 'sops\s+(-e|--encrypt|edit)|\.gitlab-ci\.yml|\.github/workflows' && level3 "改 CI / secrets"
+  printf '%s' "$l3" | grep -qE 'git\s+push.*(--force|-f\b|\+[a-zA-Z])' && level3 "force-push"
+  printf '%s' "$l3" | grep -qE 'git\s+push.*\b(main|master)\b' && level3 "push main"
+  printf '%s' "$l3" | grep -qiE '(^|\s|/)deploy(\.sh)?(\s|$)' && level3 "deploy"
+  printf '%s' "$l3" | grep -qiE 'drop\s+(table|database|schema)|truncate\s+table|db:reset' && level3 "刪資料"
+  printf '%s' "$l3" | grep -qE 'sops\s+(-e|--encrypt|edit)|\.gitlab-ci\.yml|\.github/workflows' && level3 "改 CI / secrets"
   [ "$UNMAPPED" = 1 ] && exit 0
   # 第二級
-  printf '%s' "$c" | grep -qE '(^|\s|&&|;)git\s+push(\s|$)' && level2 push "git push"
-  printf '%s' "$c" | grep -qE '(glab mr (create|update)|gh pr (create|edit))' && level2 mr "開 / 改 MR"
-  printf '%s' "$c" | grep -qE 'db:migrate|drizzle-kit (migrate|push)|alembic upgrade' && level2 migrate "本機 migrate"
-  printf '%s' "$c" | grep -qE '(^|\s|&&|;)rm\s+-(r|f|rf|fr)\b' && level2 delete "刪檔（rm -r/-f）"
-  printf '%s' "$c" | grep -qE '(pnpm (add|install|i)\b|npm (install|i|ci)\b|uv (add|sync)|pip install|yarn add|brew install)' && level2 install "裝套件"
-  printf '%s' "$c" | grep -qE '(^|\s|&&|;)git\s+rebase(\s|$)' && level2 rebase "git rebase"
-  printf '%s' "$c" | grep -qE '(curl|wget|http)\s+' && ! printf '%s' "$c" | grep -qE 'localhost|127\.0\.0\.1|litellm\.agentory\.cc' && level2 external "呼叫外部 API"
+  printf '%s' "$sk" | grep -qE '(^|\s|&&|;)git\s+push(\s|$)' && level2 push "git push"
+  printf '%s' "$sk" | grep -qE '(glab mr (create|update)|gh pr (create|edit))' && level2 mr "開 / 改 MR"
+  printf '%s' "$sk" | grep -qE 'db:migrate|drizzle-kit (migrate|push)|alembic upgrade' && level2 migrate "本機 migrate"
+  printf '%s' "$sk" | grep -qE '(^|\s|&&|;)rm\s+-(r|f|rf|fr)\b' && level2 delete "刪檔（rm -r/-f）"
+  printf '%s' "$sk" | grep -qE '(pnpm (add|install|i)\b|npm (install|i|ci)\b|uv (add|sync)|pip install|yarn add|brew install)' && level2 install "裝套件"
+  printf '%s' "$sk" | grep -qE '(^|\s|&&|;)git\s+rebase(\s|$)' && level2 rebase "git rebase"
+  printf '%s' "$sk" | grep -qE '(curl|wget|http)\s+' && ! printf '%s' "$sk" | grep -qE 'localhost|127\.0\.0\.1|litellm\.agentory\.cc' && level2 external "呼叫外部 API"
   [ "$GRANTED" = 1 ] && allow
   exit 0
 fi

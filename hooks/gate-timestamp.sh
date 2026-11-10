@@ -21,8 +21,8 @@ case "$file" in */openspec/changes/*/gates.md) ;; *) exit 0 ;; esac
 [ -f "$file" ] || exit 0
 
 now="${OPSX_NOW:-$(now_iso)}"
-warn="$file.warn.$$"
-: > "$warn" || exit 0
+# mktemp：隨機名、排他建立，名字不能預先放 symlink
+warn="$(mktemp "$file.warn.XXXXXX")" || exit 0
 
 # 一個 gate 從 "## " 行到下一個 "## " 行。status 的判斷跟 stop-gate、collect 一致：值去掉空白後剛好是 open。
 new="$(awk -v now="$now" -v syn="$SYN" -v warn="$warn" '
@@ -60,7 +60,9 @@ new="$(awk -v now="$now" -v syn="$SYN" -v warn="$warn" '
 ' "$file")" || { rm -f "$warn"; exit 0; }
 
 if [ "$new" != "$(cat "$file")" ]; then
-  tmp="$file.tmp.$$"
+  # shortcut: mktemp 與寫入之間有毫秒級空窗（要猜到隨機名並換成 symlink），這支不載入 python；要補就改走 safefile.py replace
+  tmp="$(mktemp "$file.tmp.XXXXXX")" || { rm -f "$warn"; exit 0; }
+  chmod "$(stat -f %Lp "$file" 2>/dev/null || stat -c %a "$file")" "$tmp" 2>/dev/null   # mktemp 是 0600，換名後 gates.md 要保留原權限
   printf '%s\n' "$new" > "$tmp" && mv "$tmp" "$file"
 fi
 

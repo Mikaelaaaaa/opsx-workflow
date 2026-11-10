@@ -113,9 +113,9 @@ assert_eq "$(q "$J" legacy)" '{"a": 2}'; assert_eq "$(card "$J" a old-1)" null
 assert_eq "$(printf '%s' "$J" | python3 -I -c 'import json,sys;print(sum(1 for c in json.load(sys.stdin)["cards"] if c["section"]=="已完成"))')" 4
 J3="$(OPSX_COLLECT_ARCHIVE_CAP=2 opsx collect --root "$ROOT")"
 assert_eq "$(printf '%s' "$J3" | python3 -I -c 'import json,sys;print(sorted(c["slug"] for c in json.load(sys.stdin)["cards"] if c["section"]=="已完成"))')" "['old3', 'x5']"
-# answered 的 gate 不是待處理；merge gate 的選項沒有「這個 repo 永遠」
+# answered 的 gate 不是待處理；merge gate 沒有授權選項（只留拒絕）
 C="$(card "$J" a x6)"; assert_eq "$(q "$C" waiting)" null; assert_eq "$(q "$C" section)" 待指派
-C="$(card "$J" a x7)"; assert_eq "$(q "$C" waiting.options)" '["這次", "這張卡", "拒絕"]'
+C="$(card "$J" a x7)"; assert_eq "$(q "$C" waiting.options)" '["拒絕"]' "merge 不在授權動作內，沒有授權選項"
 
 # 節點與分段
 C="$(card "$J" a x1)"; assert_eq "$(q "$C" stage)" explore; assert_eq "$(q "$C" section)" 收件匣; assert_eq "$(q "$C" title)" 第一張
@@ -491,6 +491,8 @@ gcard() { # <slug> <gates.md 內容>
   printf '## 1\n\n- [ ] 1.1 a\n' > "$d/tasks.md"; printf '%b' "$2" > "$d/gates.md"
 }
 gcard t-auth    '## g1\ntype: authorization\naction: push\nstatus: open\n問題: push？\n建議: 允許\n'
+gcard t-unk     '## g1\ntype: approval\naction: run-tests\nstatus: open\n問題: 跑測試\n'
+gcard t-noact   '## g1\ntype: approval\nstatus: open\n問題: 沒寫 action\n'
 gcard t-zh-dec  '## g1\ntype: 等待決定\nstatus: open\n問題: 哪個？\n選項: A | B (Recommended)\n'
 gcard t-zh-auth '## g1\ntype:  等待授權 \naction: push\nstatus: open\n問題: push？\n'
 gcard t-notype  '## g1\nstatus: open\n問題: 沒寫 type\n建議: 照做\n'
@@ -502,6 +504,10 @@ J="$(opsx collect --root "$R7")"; assert_eq "$?" 0 "gate-type collect rc"
 w() { q "$(card "$J" r6 "$1")" "waiting.$2"; }
 assert_eq "$(w t-auth type)" 等待授權 "authorization 是授權"
 assert_eq "$(w t-auth options)" '["這次", "這張卡", "這個 repo 永遠", "拒絕"]'
+# action 不是閘門會查的動作、或沒寫：--grant 一定失敗，所以不給授權選項，只留拒絕（grant-action）
+assert_eq "$(w t-unk options)" '["拒絕"]' "表外 action 沒有授權選項"
+assert_eq "$(w t-noact options)" '["拒絕"]' "沒寫 action 沒有授權選項"
+assert_eq "$(w t-unk type)" 等待授權 "表外 action 仍是授權題"
 assert_eq "$(w t-zh-dec type)" 等待決定; assert_eq "$(w t-zh-dec options)" '["A", "B"]'
 assert_eq "$(w t-zh-auth type)" 等待授權 "值前後有空白"
 assert_eq "$(w t-notype type)" "type 不明" "沒寫 type 不再當決定"

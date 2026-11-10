@@ -48,7 +48,7 @@ continue_one() { # <top> <repo> <父卡> <chain.py 的 child 行>
   stage="$(stage_name "$top" "$child")"
   local q="$OPSX_STATE_DIR/herdr-queue/$repo-$child.tsv"; ensure_dir "$(dirname "$q")"
   { printf 'rename\t%s\t%s\n' "$old_name" "$child"; printf 'prompt\t%s\t/%s %s\n' "$child" "$stage" "$child"
-    [ "$mode" != interactive ] && printf 'drive\t%s\t%s\n' "$child" "$top"; true; } > "$q"   # autopilot 一律起 drive（drive 是舊名）
+    [ "$mode" != interactive ] && printf 'drive\t%s\t%s\n' "$child" "$top"; true; } | opsx_replace "$q" || die "chain: 寫不進佇列 $q"   # autopilot 一律起 drive（drive 是舊名）
   log_row "$d" 系統 已指派 "自動派：因 ${parent} merged（同一個 pane 續接）" "${wt} · ${branch}"
   say "chain: ${parent} → ${child}：$wt 已切到 ${branch}；改名和第一句 /${stage} 交給 hook（佇列 ${q}）"
 }
@@ -64,7 +64,7 @@ session_next() { # <top> <repo> <父主 change> <chain.py 的 session 行>
     feature="$out"
     local q="$OPSX_STATE_DIR/herdr-queue/$repo-$child.tsv" stage; ensure_dir "$(dirname "$q")"
     stage="$(stage_name "$top" "$child")"
-    printf 'prompt\t%s\t[%s] /%s %s\n' "$feature" "$child" "$stage" "$child" > "$q"
+    printf 'prompt\t%s\t[%s] /%s %s\n' "$feature" "$child" "$stage" "$child" | opsx_replace "$q" || die "chain: 寫不進佇列 $q"
     log_row "$top/openspec/changes/$child" 系統 已指派 "自動派：因 ${parent} merged（同一個 session ${feature} 接著做）" "$branch"
     say "chain: ${parent} → ${child}：交給 session ${feature}，第一句 /${stage} 交給 hook（佇列 ${q}）"
   done <<< "$rows"

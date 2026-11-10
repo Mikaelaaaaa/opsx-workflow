@@ -78,6 +78,14 @@ assert_grep "w1:p3" "$ROOT/o/openspec/changes/st/decisions.tsv"
 assert_grep "w1:p1" "$OPSX_STATE_DIR/reap.log"
 assert_grep "w1:p8.*working" "$OPSX_STATE_DIR/reap.log"
 
+# reap.log 是 symlink（symlink-safe-writes）：拒絕、非 0、目標不變
+rm -f "$OPSX_STATE_DIR/reap.log"; printf 'keep me\n' > "$FX/victim"; ln -s "$FX/victim" "$OPSX_STATE_DIR/reap.log"
+out="$(opsx reap --root "$ROOT" 2>&1)"; rc=$?
+[ $rc -ne 0 ] || fail "reap.log 是 symlink 要非 0：$out"
+case "$out" in *reap.log*) ;; *) fail "訊息要含 reap.log：$out" ;; esac
+assert_eq "$(cat "$FX/victim")" "keep me" "reap.log 不能附加到 symlink 的目標"
+rm -f "$OPSX_STATE_DIR/reap.log"
+
 # 共用 pane：q 也歸檔、p 的 pane 還 idle → 關
 rm -rf "$ROOT/o/openspec/changes/q"; archive q
 : > "$OPSX_FAKE_LOG"

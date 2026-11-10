@@ -70,7 +70,10 @@ assert_eq "$(git rev-parse HEAD)" "$base" "邊界都不動歷史"
 assert_eq "$(git status --porcelain)" "" "邊界都不留髒 tree"
 
 # --- Scenario：乾淨疊回 ---
+printf 'keep me\n' > "$FX/victim"; ln -s "$FX/victim" "$M/tasks.md.stack.tmp"   # symlink-safe-writes：舊的固定暫存檔名
 out="$(opsx stack m s1 "$S1" 2>&1)"; assert_eq "$?" 0 "乾淨疊回: $out"
+assert_eq "$(cat "$FX/victim")" "keep me" "tasks.md 的舊暫存檔名上的 symlink 不能被寫"
+rm -f "$M/tasks.md.stack.tmp"
 assert_eq "$(git rev-list --count "$base"..HEAD)" 1 "PR 分支多一個 commit"
 assert_eq "$(git log -1 --format=%s)" "feat: s1" "subject 跟子 change 的 commit 一樣"
 grep -q '^- \[x\] 1.1 `s1`' "$M/tasks.md" || fail "s1 要勾: $(cat "$M/tasks.md")"

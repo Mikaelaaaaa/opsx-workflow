@@ -1,20 +1,30 @@
 #!/usr/bin/env bash
-# 假 claude：每次呼叫記一行 JSON 到 $OPSX_FAKE_LOG（cwd、argv、--settings 檔的內容），
+# 假 claude：每次呼叫記一行 JSON 到 $OPSX_FAKE_LOG（cwd、argv、--settings 檔的內容、cwd 祖父目錄的內容），
 # 再把一行假紀錄寫進真 claude 存 transcript 的位置：$CLAUDE_CONFIG_DIR/projects/<cwd 非英數字換成 ->/<id>.jsonl。
+# 路徑規則在這裡用 python 自己算，不跟 runner 共用同一條 sed。
+# OPSX_FAKE_EXIT 設了：寫完 transcript 後以該值結束。OPSX_FAKE_NO_TRANSCRIPT 設了：不寫 transcript。
+# 一開始往 stdout 印一行 fake-claude-ran，讓測試能比對 runner 的輸出順序。
+echo fake-claude-ran
 python3 -I - "$@" >> "${OPSX_FAKE_LOG:?}" <<'PY'
 import json, os, sys
 argv = sys.argv[1:]
 settings = None
 if "--settings" in argv:
     settings = json.load(open(argv[argv.index("--settings") + 1]))
-print(json.dumps({"cwd": os.getcwd(), "argv": argv, "settings": settings}, ensure_ascii=False))
+cwd = os.getcwd()
+siblings = sorted(os.listdir(os.path.dirname(os.path.dirname(cwd))))
+print(json.dumps({"cwd": cwd, "argv": argv, "settings": settings, "siblings": siblings}, ensure_ascii=False))
 PY
-id=""
-prev=""
-for a in "$@"; do
-  case "$prev" in --session-id|--resume) id="$a" ;; esac
-  prev="$a"
-done
-dir="${CLAUDE_CONFIG_DIR:?}/projects/$(pwd -P | sed 's/[^a-zA-Z0-9]/-/g')"
-mkdir -p "$dir"
-printf '{"session":"%s","call":"%s"}\n' "$id" "$1" >> "$dir/$id.jsonl"
+[ -z "${OPSX_FAKE_NO_TRANSCRIPT:-}" ] && python3 -I - "${CLAUDE_CONFIG_DIR:?}" "$@" <<'PY'
+import json, os, re, sys
+config_dir, argv = sys.argv[1], sys.argv[2:]
+id_ = ""
+for flag in ("--session-id", "--resume"):
+    if flag in argv:
+        id_ = argv[argv.index(flag) + 1]
+directory = os.path.join(config_dir, "projects", re.sub(r"[^a-zA-Z0-9]", "-", os.path.realpath(os.getcwd())))
+os.makedirs(directory, exist_ok=True)
+with open(os.path.join(directory, id_ + ".jsonl"), "a") as f:
+    f.write(json.dumps({"session": id_, "call": argv[0]}, separators=(",", ":")) + "\n")
+PY
+exit "${OPSX_FAKE_EXIT:-0}"

@@ -261,7 +261,10 @@ git -C "$R3" switch -q feat/p/mikaela; git -C "$R3" branch -q -D feat/c/mikaela 
 
 # 乾淨 tree（3.2）：切到子卡 branch（不帶 tracking）、登記、寫佇列；chain 自己不叫 herdr
 : > "$R3/openspec/changes/c/decisions.tsv"; : > "$OPSX_FAKE_LOG"
+mkdir -p "$(dirname "$Q")"; printf 'keep me\n' > "$FX/victim"; ln -s "$FX/victim" "$Q"   # symlink-safe-writes：佇列檔名被換成 symlink
 out="$(opsx chain p 2>&1)"; assert_eq "$?" 0 "單一續接: $out"
+assert_eq "$(cat "$FX/victim")" "keep me" "佇列檔名上的 symlink 不能被寫到目標"
+[ ! -L "$Q" ] || fail "佇列檔要換成一般檔，不留 symlink"
 assert_eq "$(git -C "$R3" branch --show-current)" "feat/c/mikaela" "切到子卡 branch"
 assert_eq "$(git -C "$R3" config --get branch.feat/c/mikaela.remote || echo none)" none "不帶 upstream tracking"
 assert_eq "$(git -C "$R3" log -1 --format=%s)" "merge p" "從主要 remote（gitlab）的 main 開，含父卡的合併（6.3）"
@@ -372,7 +375,9 @@ assert_eq "$got" "$(printf 'child\tm2\tfeat/m2/u\tdev')" "主 change 合併後�
 # m1 的 pane 是舊值（session 重派過）：新成員的 pane 要取自 session 條目 sess/@f
 printf '{"sess/@f":{"mode":"autopilot","pane":"w5:pS","tab":"w5:tK","workspace":"opsx","workspace_id":"w5","agent":"claude","model":"m","worktree":"%s","started_at":"t","drive_pid":null},"sess/m1":{"mode":"autopilot","pane":"w5:pQ","tab":"w5:tJ","workspace":"opsx","workspace_id":"w5","agent":"claude","kind":"dev","grants":[],"worktree":"%s","branch":"feat/m1/u","herdr_name":"f","via":"@f","feature":"f"}}' "$R4" "$R4" > "$J"
 cd "$R4"; : > "$OPSX_FAKE_LOG"
+printf 'keep me\n' > "$FX/victim"; ln -s "$FX/victim" "$OPSX_STATE_DIR/herdr-queue/sess-m2.tsv"   # symlink-safe-writes
 out="$(opsx chain m1 2>&1)"; assert_eq "$?" 0 "feature 續接: $out"
+assert_eq "$(cat "$FX/victim")" "keep me" "session 佇列檔名上的 symlink 不能被寫到目標"
 assert_eq "$(cat "$OPSX_FAKE_LOG")" "" "feature 續接不開 pane、chain 不直接叫 herdr"
 assert_eq "$(cat "$OPSX_STATE_DIR/herdr-queue/sess-m2.tsv")" "$(printf 'prompt\tf\t[m2] /apply m2')" "佇列：送進同一個 session，前綴 [m2]"
 assert_eq "$(jq -r '."sess/m2" | [.herdr_name, .via, .feature, .pane, .branch, .worktree] | join(" ")' "$J")" "f @f f w5:pS feat/m2/u $R4" "m2 掛在同一個 session，pane 取自 session 條目"
