@@ -728,7 +728,7 @@ function stop(c){act(`opsx stop ${c.slug}`,()=>api.post('stop',{slug:c.slug,repo
 function reap(pane){act(`opsx reap${pane?' --pane '+pane:''}`,()=>api.post('reap',pane?{pane}:{}));}
 function focusAgent(agent){
   if(!agent){toast('這張沒有 pane',true);return;}
-  act(`herdr agent focus ${agent}`,()=>api.post('focus',{agent}));
+  act(`herdr agent focus ${agent}`,()=>api.post('focus',{agent}).then(r=>r.hint?{...r,stdout:r.hint}:r));
 }
 
 /* ＋新增：範圍選到單一 repo 就建在那個 repo，否則進待分類（board-inbox D6） */

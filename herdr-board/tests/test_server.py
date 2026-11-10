@@ -66,9 +66,16 @@ class ServerTest(unittest.TestCase):
         herdr = shim_dir / "herdr"
         herdr.write_text("#!/usr/bin/env bash\n" f'printf "%s\\n" "$*" >> "{cls.herdr_log}"\n'
                          'if [ "$3" = "w9:p9" ]; then echo "pane not found" >&2; exit 1; fi\n'
+                         'if [ "$1 $2 $3" = "agent focus gone" ]; then echo "agent not found" >&2; exit 1; fi\n'
                          'if [ "$1 $2" = "agent read" ]; then printf "line 1\\nline 2\\n"; exit 0; fi\n'
                          'echo "{}"\n')
         herdr.chmod(0o755)
+        cls.open_log = cls.tmp / "open.log"
+        open_shim = shim_dir / "open"
+        open_shim.write_text("#!/usr/bin/env bash\n" f'printf "%s\\n" "$*" >> "{cls.open_log}"\n'
+                             'if [ "$2" = "Nope" ]; then echo "Unable to find application named Nope" >&2; exit 1; fi\n')
+        open_shim.chmod(0o755)
+        cls.config = cls.state / "config.toml"
         cls.repo = cls.tmp / "repo"
         (cls.repo / "openspec" / "changes").mkdir(parents=True)   # --repo 只收真的 opsx repo 根
         cls.fixture = cls.tmp / "collect.json"
@@ -102,6 +109,10 @@ class ServerTest(unittest.TestCase):
             self.fail_flag.unlink()
         if self.rc_file.exists():
             self.rc_file.unlink()
+        self.open_log.write_text("")
+        self.herdr_log.write_text("")
+        if self.config.exists():
+            self.config.unlink()
 
     def test_binds_loopback_only(self):
         self.assertEqual(self.host, "127.0.0.1")
@@ -380,6 +391,69 @@ class ServerTest(unittest.TestCase):
         self.assertEqual(status, 400)
         status, _, _ = self.req("/api/focus", {"pane": "w1:p4"}, token=self.token)   # 舊欄位：herdr pane focus 不收 id，拒絕
         self.assertEqual(status, 400)
+
+    def focus(self, agent="retry-backoff"):
+        status, _, body = self.req("/api/focus", {"agent": agent}, token=self.token)
+        self.assertEqual(status, 200, body)
+        return json.loads(body)
+
+    def test_focus_raises_terminal_app(self):
+        self.config.write_text('terminal_app = "Warp"\n')
+        out = self.focus()
+        self.assertTrue(out["ok"])
+        self.assertEqual(self.open_log.read_text().strip(), "-a Warp")
+        self.assertNotIn("hint", out)
+
+    def test_focus_without_terminal_app_hints(self):
+        out = self.focus()
+        self.assertTrue(out["ok"])
+        self.assertEqual(self.open_log.read_text(), "", "沒設就不能叫 open")
+        self.assertIn("請切到", out["hint"])
+        self.assertIn("config.toml", out["hint"])
+
+    def test_focus_app_launch_fails_hints(self):
+        self.config.write_text('terminal_app = "Nope"\n')
+        out = self.focus()
+        self.assertTrue(out["ok"], "ok 只反映 herdr")
+        self.assertIn("請切到 Nope", out["hint"])
+        self.assertIn("Unable to find application", out["hint"])
+
+    def test_focus_broken_config_hints(self):
+        self.config.write_text("terminal_app = \n")
+        out = self.focus()
+        self.assertTrue(out["ok"])
+        self.assertEqual(self.open_log.read_text(), "")
+        self.assertIn("config.toml", out["hint"])
+        self.assertIn("壞", out["hint"])
+
+    def test_focus_unreadable_config_hints(self):
+        self.config.write_bytes(b"\xff\xfe")   # 不是 UTF-8
+        out = self.focus()
+        self.assertTrue(out["ok"])
+        self.assertIn("config.toml", out["hint"])
+        self.config.unlink()
+        self.config.mkdir()   # 是目錄：read_text 丟 IsADirectoryError
+        try:
+            out = self.focus()
+        finally:
+            self.config.rmdir()
+        self.assertTrue(out["ok"])
+        self.assertIn("config.toml", out["hint"])
+        self.assertEqual(self.open_log.read_text(), "")
+
+    def test_focus_config_without_usable_terminal_app_hints(self):
+        for text in ('# terminal_app = "Warp"\n', 'other = 1\n', 'terminal_app = ""\n', 'terminal_app = 1\n', 'terminal_app = "War\\u0000p"\n'):
+            self.config.write_text(text)
+            out = self.focus()
+            self.assertTrue(out["ok"], text)
+            self.assertIn("請切到", out["hint"], text)
+            self.assertEqual(self.open_log.read_text(), "", text)
+
+    def test_focus_herdr_failure_does_not_raise_app(self):
+        self.config.write_text('terminal_app = "Warp"\n')
+        out = self.focus("gone")
+        self.assertFalse(out["ok"])
+        self.assertEqual(self.open_log.read_text(), "", "herdr 失敗不叫 open")
 
     def test_opsx_failure_is_reported_not_500(self):
         self.fail_flag.write_text("1")

@@ -159,6 +159,23 @@ opsx init --global >/dev/null 2>&1 || fail "global rerun"
 assert_grep "x = 1" "$OPSX_STATE_DIR/grants.toml"
 assert_grep '"k":1' "${OPSX_STATE_DIR}-protected/authz.json"   # 重跑不清授權
 
+# --- config.toml：terminal_app 依 TERM_PROGRAM 預填（specs/opsx-init「--global 建 config.toml 並預填終端機 app」）---
+CT="$OPSX_STATE_DIR/config.toml"
+rm -f "$CT"
+TERM_PROGRAM=WarpTerminal opsx init --global >/dev/null 2>&1 || fail "global with Warp"
+assert_grep '^terminal_app = "Warp"$' "$CT"
+TERM_PROGRAM=ghostty opsx init --global >/dev/null 2>&1 || fail "global rerun with ghostty"
+assert_grep '^terminal_app = "Warp"$' "$CT"   # 已有的檔不覆蓋
+assert_not_grep 'Ghostty' "$CT"
+rm -f "$CT"
+TERM_PROGRAM=vscode opsx init --global >/dev/null 2>&1 || fail "global with vscode"
+assert_file "$CT"
+assert_not_grep '^terminal_app' "$CT"   # 對不出來不寫值
+assert_grep '^# terminal_app' "$CT"
+rm -f "$CT"
+( unset TERM_PROGRAM; opsx init --global >/dev/null 2>&1 ) || fail "global without TERM_PROGRAM"
+assert_not_grep '^terminal_app' "$CT"
+
 # --- 沙盒權限：裝進 CLAUDE_CONFIG_DIR/settings.json（specs/opsx-init「--global 把沙盒權限裝進使用者層」）---
 CS="$CLAUDE_CONFIG_DIR/settings.json"
 assert_file "$CS"

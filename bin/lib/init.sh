@@ -60,6 +60,16 @@ init_global() {
   write_if_missing "$state/workspaces.toml" '# repo ↔ herdr workspace。opsx init 在 repo 裡跑時問一次；指派時也會自動記。
 [repos]
 '
+  local term_line='# terminal_app = "Warp"'
+  case "${TERM_PROGRAM:-}" in
+    WarpTerminal) term_line='terminal_app = "Warp"' ;;
+    ghostty) term_line='terminal_app = "Ghostty"' ;;
+    iTerm.app) term_line='terminal_app = "iTerm"' ;;
+    Apple_Terminal) term_line='terminal_app = "Terminal"' ;;
+  esac
+  write_if_missing "$state/config.toml" "# opsx 全域設定。terminal_app：看板「開啟 pane」切完 herdr 焦點後帶到前景的終端機 app（open -a 認得的名稱）。
+$term_line
+"
   local link="$bindir/opsx"
   if [ -L "$link" ] && [ "$(readlink "$link")" = "$OPSX_ROOT/bin/opsx" ]; then
     say "init --global: $link 已有"
