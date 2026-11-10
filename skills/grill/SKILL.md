@@ -20,6 +20,8 @@ The change has questions that explore could not close. Close them, cheaply, in t
 
 `openspec/changes/<slug>/explore.md` exists and its `## 待決` section lists the open items. Read it first. If the section is empty or missing, reply「<slug> 沒有待決，直接 /propose」and stop. Grill is a gate on the way from explore to propose, not a place to re-explore.
 
+If the card's `.openspec.yaml` says the kind is chore or bug-fix, grill does not run for it (`../../references/continue.md`, "Light flow"): reply「<slug> 是 chore / bug-fix，不經 grill，直接 /propose」and stop. Propose turns the open items into assumptions.
+
 Load the project's language before asking anything: `CONTEXT.md` (or `CONTEXT-MAP.md` and the context it points at), `docs/adr/`, `openspec/workplan.yaml`. The user will use words from their own head; you need to know when those words collide with what the project already calls things.
 
 ## Classify before you ask
@@ -58,7 +60,7 @@ When the router line carries `autopilot：`, nobody is watching the pane. AskUse
   風險: <what goes wrong with the recommendation>
   預設: <what happens if nobody answers>
   ```
-  The options follow the same rules as an AskUserQuestion: 2–4 real alternatives, recommended first.
+  The options follow the same rules as an AskUserQuestion: 2–4 real alternatives, recommended first. `type` is `approval` (a permission) or `decision` (a choice) and nothing else; when 建議 is a command the user must run themselves, add a `needs: run` line.
 - **Anything else.** Take the option you would have marked Recommended. Write it as a D like any other, add a `  - 自動採用：autopilot，沒問使用者` line under it, and log one line in decisions.tsv. The user can overturn it at review or on the MR.
 
 If you wrote any gate, still write grill.md with the Ds you have, say which items wait on which gate, and stop. The answer comes back as a prompt. Turn it into its D, remove the item from 待決, and carry on. Once 待決 is empty, propose comes next as usual.

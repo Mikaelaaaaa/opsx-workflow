@@ -184,6 +184,18 @@ echo "$out" | grep -q 'OPSX_USER' && echo "$out" | grep -q 'Your Name' || fail "
 assert_eq "$(cat "$OPSX_FAKE_LOG")" "" "refused dispatch must not touch herdr"
 git -C "$R3" config user.name t
 
+# --- 新分支從 fetch 後的 origin/main 開，不從主 checkout 當下的 HEAD（主 checkout 在 feat/x、origin/main 比本機新） ---
+B="$FX/upstream.git"; git init -q --bare -b main "$B"
+R5="$(mk_repo dep-card "$B")"; git -C "$R5" branch -M main; git -C "$R5" push -q origin main
+git -C "$R5" fetch -q origin
+git clone -q "$B" "$FX/other"; git -C "$FX/other" -c user.email=t@t -c user.name=t commit -q --allow-empty -m merged-dep; git -C "$FX/other" push -q origin main
+up="$(git -C "$FX/other" rev-parse HEAD)"
+git -C "$R5" switch -q -c feat/x; git -C "$R5" -c user.email=t@t -c user.name=t commit -q --allow-empty -m wip
+mkdir -p "$R5/openspec/changes/dep-card"; printf 'schema: opsx\nkind: dev\n' > "$R5/openspec/changes/dep-card/.openspec.yaml"
+printf '"dep-card" = "w1"\n' >> "$OPSX_STATE_DIR/workspaces.toml"
+out="$(cd "$R5" && opsx dispatch dep-card --agent claude --mode autopilot 2>&1)" || fail "dispatch dep-card: $out"
+assert_eq "$(git -C "$R5/.claude/worktrees/dep-card" rev-parse HEAD)" "$up" "新分支要長在 fetch 後的 origin/main"
+
 # --- stop ---
 : > "$OPSX_FAKE_LOG"; cd "$R"
 opsx stop retry-backoff >/dev/null 2>&1 || fail "stop"
@@ -218,4 +230,84 @@ python3 -I -c 'import json,sys;p=sys.argv[1];d=json.load(open(p));d["Other-Repo/
 : > "$OPSX_FAKE_LOG"
 out="$(opsx dispatch coord3 --agent claude --mode autopilot 2>&1)"; [ $? -eq 2 ] || fail "fan-out 父卡的 pane 還活著，同名要拒絕: $out"
 assert_eq "$(cat "$OPSX_FAKE_LOG")" "" "拒絕時不碰 herdr"
+
+# --- feature session：一個 pane、每個可做的主 change 一筆 ---
+RF="$(mk_repo Feat-Repo)"; mkdir -p "$OPSX_STATE_DIR"
+cat > "$RF/openspec-wp.yaml" <<'EOF'
+features:
+  - name: fs
+    depends-on: []
+    prs:
+      - name: m1
+        branch: feat/m1/mikaela
+        status: pending
+        depends-on: []
+        changes:
+          - name: a1
+            status: pending
+      - name: m2
+        branch: feat/m2/mikaela
+        status: pending
+        depends-on: []
+        changes:
+          - name: m2
+            status: pending
+      - name: m3
+        branch: feat/m3/mikaela
+        status: pending
+        depends-on: [m1]
+        changes:
+          - name: m3
+            status: pending
+EOF
+mkdir -p "$RF/openspec"; mv "$RF/openspec-wp.yaml" "$RF/openspec/workplan.yaml"
+for s in m1 m2 m3; do mkdir -p "$RF/openspec/changes/$s"; printf 'schema: opsx\nkind: dev\n' > "$RF/openspec/changes/$s/.openspec.yaml"; printf -- '- [ ] 1.1 x\n' > "$RF/openspec/changes/$s/tasks.md"; done
+cd "$RF"; printf '{}' > "$OPSX_STATE_DIR/dispatch.json"; : > "$OPSX_FAKE_LOG"
+
+# 沒有這個 feature：拒絕，不開 pane
+out="$(opsx dispatch --feature nope --agent claude --mode autopilot 2>&1)"; [ $? -eq 2 ] || fail "沒有的 feature 要拒絕: $out"
+echo "$out" | grep -q nope || fail "訊息要說 nope: $out"
+assert_eq "$(cat "$OPSX_FAKE_LOG")" "" "沒有的 feature 不碰 herdr"
+assert_rc 2 opsx dispatch --feature "Bad Name" --agent claude
+assert_rc 2 opsx dispatch m1 --feature fs --agent claude
+
+# 派 fs：m1、m2 沒依賴，m3 等 m1，不寫
+out="$(opsx dispatch --feature fs --agent claude --mode autopilot 2>&1)"; assert_eq "$?" 0 "feature dispatch: $out"
+assert_eq "$(grep -c '^agent start' "$OPSX_FAKE_LOG")" 1 "一個 feature 只開一個 agent"
+assert_grep '^agent start fs --kind claude ' "$OPSX_FAKE_LOG"
+assert_grep '^tab create .* --label fs' "$OPSX_FAKE_LOG"
+assert_grep '^agent prompt fs /apply m1$' "$OPSX_FAKE_LOG"
+J="$OPSX_STATE_DIR/dispatch.json"
+assert_eq "$(jq -r '."Feat-Repo/m1" | [.herdr_name, .via, .feature, .pane, .branch] | join(" ")' "$J")" "fs fs fs w1:pE feat/m1/mikaela" "m1 的條目"
+assert_eq "$(jq -r '."Feat-Repo/m2" | [.herdr_name, .via, .feature, .pane, .branch] | join(" ")' "$J")" "fs fs fs w1:pE feat/m2/mikaela" "m2 跟 m1 共用 pane"
+assert_eq "$(jq -r '."Feat-Repo/m3" // "none"' "$J")" none "依賴沒滿足的主 change 不寫"
+assert_eq "$(git -C "$RF/.claude/worktrees/fs" rev-parse --abbrev-ref HEAD)" "feat/m1/mikaela" "worktree 叫 feature 名，從第一個主 change 的 branch 開"
+assert_grep '已指派' "$RF/openspec/changes/m2/decisions.tsv"
+
+# 再派一次：session 還在，拒絕
+: > "$OPSX_FAKE_LOG"
+out="$(opsx dispatch --feature fs --agent claude --mode autopilot 2>&1)"; [ $? -eq 2 ] || fail "session 還在要拒絕: $out"
+assert_eq "$(cat "$OPSX_FAKE_LOG")" "" "拒絕時不碰 herdr"
+
+# --- dispatch --note：送第一句之前寫進 inbox.md 的 ## 派工指示（specs/dispatch-note「opsx dispatch --note 在第一句之前寫入」） ---
+cd "$R"
+N="$R/openspec/changes/note-card"; mkdir -p "$N"; printf 'schema: opsx\nkind: dev\n' > "$N/.openspec.yaml"
+printf -- '---\ntype: 功能\n---\n\n## 一句話\n\nx\n' > "$N/inbox.md"
+cp "$N/inbox.md" "$FX/note-before.md"; : > "$OPSX_FAKE_LOG"
+out="$(opsx dispatch note-card --agent claude --mode interactive --note "  " 2>&1)"; [ $? -ne 0 ] || fail "空白 --note 要拒絕: $out"
+[ ! -d "$R/.claude/worktrees/note-card" ] || fail "空白 --note 不該開 worktree"
+assert_eq "$(cat "$OPSX_FAKE_LOG")" "" "空白 --note 不碰 herdr"
+cmp -s "$N/inbox.md" "$FX/note-before.md" || fail "空白 --note 不該動 inbox.md"
+printf 'cp "%s" "%s"\n' "$N/inbox.md" "$FX/note-at-prompt.md" > "$FX/snap-prompt.sh"
+out="$(OPSX_TEST_ON_PROMPT="$FX/snap-prompt.sh" opsx dispatch note-card --agent claude --mode interactive --note "先跑 lint" 2>&1)" || fail "dispatch --note: $out"
+assert_grep '^agent prompt note-card /explore note-card$' "$OPSX_FAKE_LOG"
+assert_file "$FX/note-at-prompt.md"
+awk '/^## 派工指示[[:space:]]*$/{f=1;next} /^## /{f=0} f && /^- /' "$FX/note-at-prompt.md" | grep -qE '^- 20[0-9-]+T[0-9:]+[+-][0-9:]+ 先跑 lint$' || fail "第一句送出時要已寫入：$(cat "$FX/note-at-prompt.md")"
+cp "$N/inbox.md" "$FX/note-before.md"
+out="$(opsx dispatch note-card --agent claude --mode interactive --note "第二條" 2>&1)"; [ $? -ne 0 ] || fail "還在跑的卡重派要拒絕: $out"
+cmp -s "$N/inbox.md" "$FX/note-before.md" || fail "重派被拒時不該寫指示"
+opsx stop note-card >/dev/null 2>&1 || fail "stop note-card"
+opsx dispatch note-card --agent claude --mode interactive >/dev/null 2>&1 || fail "不帶 --note 重派"
+cmp -s "$N/inbox.md" "$FX/note-before.md" || fail "不帶 --note 不該動 inbox.md"
+opsx --help 2>&1 | grep -q '^  dispatch .*--note' || fail "opsx --help 的 dispatch 行要列 --note"
 echo ok

@@ -18,6 +18,8 @@ init_global() {
   python3 -I -c 'import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)' 2>/dev/null \
     || die "init --global: PATH 上的 python3 要 3.11 以上（有 tomllib），現在是 $(python3 --version 2>&1)。pyenv 或 brew 裝一個再跑"
   ensure_dir "$state"; ensure_dir "$bindir"
+  # 授權閘門信任的核准與授權（bin/lib/authz.py）。放在 state 目錄的兄弟，不在任何 session 的 additionalDirectories 內，沙盒內寫不進去
+  ensure_dir "${state%/}-protected"; chmod 700 "${state%/}-protected"
 
   # 記下 python3 背後真正的執行檔，opsx 和 hooks 只叫它（bin/lib/python.sh）。路徑不同就覆寫：
   # pyenv 換版本後舊路徑會失效，重跑這裡是唯一的修法。
@@ -87,7 +89,7 @@ init_global() {
   fi
   merge_claude_settings "$py" --template "$OPSX_ROOT/templates/settings.opsx.json"
   write_coordinator_settings "$py" "$state"
-  install_sync_job "$state" "$bindir"
+  install_launch_jobs "$state" "$bindir"
   say "init --global: 設定在 $state"
 }
 
@@ -152,18 +154,28 @@ init_check() {
   [ "$rc" = 0 ]
 }
 
-# 每天 09:00 跑 opsx sync 的 launchd job（board-inbox）。launchd 的 PATH 只有 /usr/bin:/bin，
-# 找不到 glab / gh、pyenv 的 python3（要 3.11 的 tomllib）、nvm 的 openspec，所以把這些目錄寫進 plist。
+# 兩支 launchd job：每天 09:00 跑 opsx sync（board-inbox），每 5 分鐘跑一輪 opsx coordinate（opsx-coordinate）。
+# launchd 的 PATH 只有 /usr/bin:/bin，找不到 glab / gh、pyenv 的 python3（要 3.11 的 tomllib）、nvm 的 openspec，所以把這些目錄寫進 plist。
+# coordinate 另帶 HERDR_ENV=1：沒有它 collect 不問 herdr，coordinate 會整輪拒跑。
 # OPSX_LAUNCH_AGENTS_DIR / OPSX_LAUNCHCTL 讓測試不碰真的 ~/Library 與 launchctl。
-install_sync_job() { # <state> <bindir>
+install_launch_jobs() { # <state> <bindir>
   local state="$1" bindir="$2" lc="${OPSX_LAUNCHCTL:-launchctl}"
-  if ! command -v "$lc" >/dev/null 2>&1; then say "init --global: 沒有 launchctl（不是 macOS），每日同步略過，要同步就手動跑 opsx sync"; return; fi
-  local dir="${OPSX_LAUNCH_AGENTS_DIR:-$HOME/Library/LaunchAgents}" label=com.opsx.sync
-  local plist="$dir/$label.plist" domain="gui/$(id -u)" path d
+  if ! command -v "$lc" >/dev/null 2>&1; then say "init --global: 沒有 launchctl（不是 macOS），每日同步與 coordinate 略過，要跑就手動 opsx sync / opsx coordinate"; return; fi
+  local path d
   path="$bindir:/opt/homebrew/bin"
   for d in "$(dirname "$(cat "$state/python")")" "$(dirname "$(command -v openspec 2>/dev/null || echo /usr/bin/x)")" /usr/local/bin /usr/bin /bin; do
     case ":$path:" in *":$d:"*) ;; *) path="$path:$d" ;; esac
   done
+  install_launch_job "$lc" "$state" "$bindir" "$path" com.opsx.sync sync 每日同步 "每天 09:00" \
+    '<key>StartCalendarInterval</key><dict><key>Hour</key><integer>9</integer><key>Minute</key><integer>0</integer></dict>' ''
+  install_launch_job "$lc" "$state" "$bindir" "$path" com.opsx.coordinate coordinate coordinate "每 5 分鐘" \
+    '<key>StartInterval</key><integer>300</integer>' '<key>HERDR_ENV</key><string>1</string>'
+}
+
+install_launch_job() { # <launchctl> <state> <bindir> <PATH> <label> <opsx 子命令> <名稱> <時間說明> <排程 plist 片段> <額外環境變數 plist 片段>
+  local lc="$1" state="$2" bindir="$3" path="$4" label="$5" cmd="$6" name="$7" when="$8" schedule="$9" env="${10}"
+  local dir="${OPSX_LAUNCH_AGENTS_DIR:-$HOME/Library/LaunchAgents}"
+  local plist="$dir/$label.plist" domain="gui/$(id -u)" out="$state/$cmd.out"
   ensure_dir "$dir"
   cat > "$plist.tmp" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -171,25 +183,25 @@ install_sync_job() { # <state> <bindir>
 <plist version="1.0">
 <dict>
   <key>Label</key><string>$label</string>
-  <key>ProgramArguments</key><array><string>$bindir/opsx</string><string>sync</string></array>
-  <key>StartCalendarInterval</key><dict><key>Hour</key><integer>9</integer><key>Minute</key><integer>0</integer></dict>
-  <key>EnvironmentVariables</key><dict><key>PATH</key><string>$path</string><key>OPSX_STATE_DIR</key><string>$state</string></dict>
-  <key>StandardOutPath</key><string>$state/sync.out</string>
-  <key>StandardErrorPath</key><string>$state/sync.out</string>
+  <key>ProgramArguments</key><array><string>$bindir/opsx</string><string>$cmd</string></array>
+  $schedule
+  <key>EnvironmentVariables</key><dict><key>PATH</key><string>$path</string><key>OPSX_STATE_DIR</key><string>$state</string>$env</dict>
+  <key>StandardOutPath</key><string>$out</string>
+  <key>StandardErrorPath</key><string>$out</string>
 </dict>
 </plist>
 EOF
   local changed=1
   if cmp -s "$plist.tmp" "$plist"; then changed=0; rm "$plist.tmp"; say "init --global: $plist 已有"
-  else mv "$plist.tmp" "$plist"; say "init --global: 寫 ${plist}（每日同步 09:00）"; fi
+  else mv "$plist.tmp" "$plist"; say "init --global: 寫 ${plist}（${name}，${when}）"; fi
   # launchd 只在 bootstrap 時讀 plist：已載入而內容變了，要先 bootout 才會用新的 PATH
   if "$lc" print "$domain/$label" >/dev/null 2>&1 && [ "$changed" = 1 ]; then
     "$lc" bootout "$domain/$label" || die "init --global: launchctl bootout $domain/$label 失敗"
   fi
   if "$lc" print "$domain/$label" >/dev/null 2>&1 && [ "$changed" = 0 ]; then
-    say "init --global: 每日同步 $label 已載入"
+    say "init --global: ${name} $label 已載入"
   elif "$lc" bootstrap "$domain" "$plist"; then
-    say "init --global: 每日同步 $label 載入了，每天 09:00 跑 opsx sync，輸出在 $state/sync.out"
+    say "init --global: ${name} $label 載入了，${when}跑 opsx ${cmd}，輸出在 $out"
   else
     die "init --global: launchctl bootstrap $domain $plist 失敗"
   fi

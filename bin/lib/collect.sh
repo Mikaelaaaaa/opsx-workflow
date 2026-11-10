@@ -6,12 +6,15 @@
 # 輸出：{generated_at, scopes[{workspace, repos[]}], repo_paths{repo: 實體路徑}, cards[], unfiled[{slug, title, source, found}],
 #       last_sync（sync.log 最後一行，沒有檔時 null）， unmatched_agents[], errors[{source,message}]}
 # 每張卡：{repo, slug, title, kind, stage, section, since, waiting, open_gates[{id, opened_at}], dispatch, status, agent_status, mr,
-#        source, upstream, stale}
-#   section ∈ 待處理 | 進行中 | 待指派 | 收件匣 | 已完成（收件匣＝沒派出、stage 還是 explore）；waiting.type ∈ 等待授權 | 等待決定 | 可以合併 | 終端機等待輸入
+#        source, upstream, stale, session（收進 session 的主 change 才有："<repo>/<feature>"）}
+# sessions[]：{repo, feature, section, main_done, main_total, sub_done, sub_total, current{slug, stage}|null,
+#   mains[{slug, pr_status, stage, section, dispatch, agent_status, open_gates, waiting, subs[{slug, status, stage, worker, open_gates, waiting}]}]}
+#   section ∈ 待處理 | 進行中 | 待指派 | 收件匣 | 已完成（收件匣＝沒派出、stage 還是 explore）；waiting.type ∈ 等待授權 | 等待決定 | type 不明 | 可以合併 | 終端機等待輸入；waiting.needs ∈ run | null
 #
 # gates.md 的格式（apply 步 5 寫、answer 改）：每個 gate 一段
 #   ## <gate id>
 #   type: approval | decision      action: push|mr|migrate|…（approval 才有）      status: open | answered      opened_at: <ISO>
+#   needs: run（可選：建議欄是要人在終端機跑的指令；看板不給照建議）      type 沒寫或不在同義詞表內 → waiting.type 為 type 不明
 #   問題: …   建議: …   選項: a | b (Recommended) | c（decision 才有）   證據: …   風險: …   預設: …
 #   已確認: …（可多行，到下一個欄位為止）   answer: …（answered 時）
 
@@ -97,8 +100,11 @@ opsx_collect() {
   fi
 
   # 讀卡的檔與全域狀態，組 JSON
-  OPSX_C_WORK="$work" OPSX_C_STATE="$state" OPSX_C_HERDR_ERR="$herdr_err" OPSX_C_NOW="$now" "$OPSX_PY" -I - <<'PY'
+  OPSX_C_WORK="$work" OPSX_C_STATE="$state" OPSX_C_HERDR_ERR="$herdr_err" OPSX_C_NOW="$now" OPSX_C_LIB="$OPSX_ROOT/bin/lib" "$OPSX_PY" -I - <<'PY'
 import datetime, json, os, re, sys, tomllib
+sys.path.insert(0, os.environ["OPSX_C_LIB"])
+import gatetype
+from chain import load_workplan
 
 work, state = os.environ["OPSX_C_WORK"], os.environ["OPSX_C_STATE"]
 errors = []
@@ -152,7 +158,7 @@ if os.path.exists(agents_path) and not os.environ["OPSX_C_HERDR_ERR"]:
         agents = None
         errors.append({"source": "herdr", "message": "agent list 讀不懂（要 result.agents）：%s" % e})
 
-FIELD = re.compile(r"^(type|action|status|opened_at|問題|建議|選項|證據|風險|預設|已確認|answer):\s*(.*)$")
+FIELD = re.compile(r"^(type|needs|action|status|opened_at|問題|建議|選項|證據|風險|預設|已確認|answer):\s*(.*)$")
 
 def parse_gates(text):
     gates, cur, key = [], None, None
@@ -200,8 +206,12 @@ def waiting_of(card, gates, agent_status):
     for g in gates:
         if g.get("status", "").strip() != "open": continue
         base = {"gate_id": g["id"], "question": g.get("問題"), "recommended": g.get("建議"), "evidence": g.get("證據"),
-                "risk": g.get("風險"), "default_if_unanswered": g.get("預設"), "confirmed": g.get("已確認")}
-        if g.get("type") == "approval":
+                "risk": g.get("風險"), "default_if_unanswered": g.get("預設"), "confirmed": g.get("已確認"),
+                "needs": "run" if g.get("needs") == "run" else None}
+        gtype = gatetype.normalize(g.get("type", ""))
+        if gtype is None:
+            return {"type": "type 不明", "action": None, "options": [], **base}
+        if gtype == gatetype.APPROVAL:
             opts = ["這次", "這張卡", "這個 repo 永遠", "拒絕"]
             if g.get("action") == "merge": opts = ["這次", "這張卡", "拒絕"]   # merge 永遠不可長期授權，answer 會拒，按鈕就不要給
             return {"type": "等待授權", "action": g.get("action"), "options": opts, **base}
@@ -215,10 +225,10 @@ def waiting_of(card, gates, agent_status):
         return {"type": "等待決定", "action": None, "options": cleaned, **{**base, "recommended": rec}}
     mr = card["mr"]
     if mr and mr.get("state") == "ready":
-        return {"type": "可以合併", "action": "merge", "gate_id": None, "options": ["合併"], "question": "MR 五條件全綠", "recommended": "合併",
+        return {"type": "可以合併", "action": "merge", "gate_id": None, "needs": None, "options": ["合併"], "question": "MR 五條件全綠", "recommended": "合併",
                 "evidence": mr["url"], "risk": None, "default_if_unanswered": "留在進行中", "confirmed": None}
     if agent_status == "blocked":
-        return {"type": "終端機等待輸入", "action": None, "gate_id": None, "options": ["開啟 pane", "停止", "重新指派"],
+        return {"type": "終端機等待輸入", "action": None, "gate_id": None, "needs": None, "options": ["開啟 pane", "停止", "重新指派"],
                 "question": "agent 在終端機等輸入，板上沒有對應的 gate", "recommended": "開啟 pane", "evidence": None, "risk": "照規則不該發生：要授權的動作應寫 gate",
                 "default_if_unanswered": "agent 停在那裡", "confirmed": None}
     return None
@@ -248,14 +258,14 @@ for line in read(os.path.join(work, "cards.tsv")).split("\n"):
     gates_path = os.path.join(d, "gates.md")
     gates = parse_gates(read(gates_path)) if not c["archived"] else []
     waiting = None if c["archived"] else waiting_of(c, gates, agent_status)
-    if c["archived"] or c["stage"] == "archive": section = "已完成"
+    if c["archived"] or c["stage"] in ("archive", "split"): section = "已完成"
     elif waiting: section = "待處理"
     elif disp: section = "進行中"
     elif c["stage"] == "explore": section = "收件匣"
     else: section = "待指派"
     cards.append({
         "repo": c["repo"], "slug": c["slug"], "title": one_liner(inbox) or c["slug"], "kind": kind_of(d),
-        "stage": c["stage"], "section": section,
+        "stage": c["stage"], "section": section, "archived": c["archived"],
         "since": frontmatter(inbox, "found") or (re.search(r"^created:\s*(\S+)", read(os.path.join(d, ".openspec.yaml")), re.M) or [None, None])[1],
         "waiting": waiting, "open_gates": [{"id": g["id"], "opened_at": opened_at_of(g, gates_path, now_dt)} for g in gates if g.get("status") == "open"],
         "dispatch": disp, "status": load_json(os.path.join(d, "status.json"), None),
@@ -265,6 +275,87 @@ for line in read(os.path.join(work, "cards.tsv")).split("\n"):
     })
 
 order = {"待處理": 0, "進行中": 1, "待指派": 2, "收件匣": 3, "已完成": 4}
+
+def wp_list(owner, key, where):
+    """load_workplan 認不出形狀時不會 raise（features: oops 會變字串），這裡檢查：key 不在或空是 []，其餘要是有 name 的 mapping list。"""
+    v = owner.get(key) or []
+    if not isinstance(v, list) or not all(isinstance(x, dict) and x.get("name") for x in v):
+        raise ValueError("%s 的 %s 要是有 name 的 list：%r" % (where, key, v))
+    return v
+
+def sub_stage(d, status):
+    if status is not None: return status.get("phase")
+    if not os.path.isdir(d): return None
+    if not os.path.exists(os.path.join(d, "proposal.md")): return "inbox"
+    if not os.path.exists(os.path.join(d, "tasks.md")): return "propose"
+    return "apply" if re.search(r"^\s*- \[ \]", read(os.path.join(d, "tasks.md")), re.M) else "done"
+
+def sub_node(main_dir, ch):
+    d = os.path.join(main_dir, "subs", ch["name"])
+    status_path = os.path.join(d, "status.json")
+    status = load_json(status_path, None)
+    if status is not None and not isinstance(status, dict):   # 跟 JSON 壞掉同樣處理：記 errors、站點改由檔推，不讓一個檔毀掉整份
+        errors.append({"source": status_path, "message": "status.json 要是 object：%r" % (status,)}); status = None
+    gates_path = os.path.join(d, "gates.md")
+    gates = parse_gates(read(gates_path))
+    return {"slug": ch["name"], "status": ch.get("status"), "stage": sub_stage(d, status),
+            "worker": status.get("worker") if status is not None else None,
+            "open_gates": [{"id": g["id"], "opened_at": opened_at_of(g, gates_path, now_dt)} for g in gates if g.get("status") == "open"],
+            "waiting": waiting_of({"mr": None}, gates, None)}
+
+def main_node(repo, pr, by_key):
+    c = by_key.get((repo, pr["name"]))
+    if c:
+        vals = {k: c[k] for k in ("stage", "section", "dispatch", "agent_status", "open_gates", "waiting")}
+    else:   # 已歸檔超出 archive cap，或還沒建卡
+        merged = pr.get("status") == "merged"
+        vals = {"stage": "archive" if merged else None, "section": "已完成" if merged else None,
+                "dispatch": None, "agent_status": None, "open_gates": [], "waiting": None}
+    main_dir = os.path.join(repo_paths[repo], "openspec", "changes", pr["name"])
+    return {"slug": pr["name"], "pr_status": pr.get("status"), **vals,
+            "subs": [sub_node(main_dir, ch) for ch in wp_list(pr, "changes", "PR %s" % pr["name"])]}
+
+def session_of(repo, f, by_key):
+    prs = wp_list(f, "prs", "feature %s" % f["name"])
+    mains = [main_node(repo, pr, by_key) for pr in prs]
+    subs = [s for m in mains for s in m["subs"]]
+    cur = next((m for m in mains if m["pr_status"] != "merged"), None)
+    live = [m for m in mains if m["section"] != "已完成"]
+    if not live: section = "已完成"
+    elif any(s["waiting"] for s in subs): section = "待處理"
+    # 沒有卡、還沒合併的主 change：workplan 排了但還沒建卡，算待指派
+    else: section = min((m["section"] or "待指派" for m in live), key=order.__getitem__)
+    return {"repo": repo, "feature": f["name"], "section": section,
+            "main_done": sum(1 for m in mains if m["pr_status"] == "merged"), "main_total": len(mains),
+            "sub_done": sum(1 for s in subs if s["status"] == "done"), "sub_total": len(subs),
+            "current": {"slug": cur["slug"], "stage": cur["stage"]} if cur else None, "mains": mains}
+
+# sessions（board-tree D4）：feature 底下有 PR 掛子殼（changes/<PR>/subs/）才收；舊寫法一個 PR 掛多個平放殼的不收
+by_key = {}
+for c in cards: by_key.setdefault((c["repo"], c["slug"]), c)
+sessions = []
+for repo in repos:
+    wp_path = os.path.join(repo_paths[repo], "openspec", "workplan.yaml")
+    if not os.path.exists(wp_path): continue
+    try:
+        features = wp_list(load_workplan(wp_path), "features", "workplan")
+        mine = []
+        for f in features:
+            prs = wp_list(f, "prs", "feature %s" % f["name"])
+            if any(os.path.isdir(os.path.join(repo_paths[repo], "openspec", "changes", pr["name"], "subs")) for pr in prs):
+                mine.append(session_of(repo, f, by_key))
+    except ValueError as e:   # UnicodeDecodeError 也是 ValueError
+        errors.append({"source": wp_path, "message": "workplan 讀不懂：%s" % e}); continue
+    for s in mine:
+        for m in s["mains"]:
+            c = by_key.get((repo, m["slug"]))
+            if not c: continue
+            if "session" in c:
+                errors.append({"source": wp_path, "message": "%s 同時在 %s 與 %s，卡的 session 取前者" % (m["slug"], c["session"], "%s/%s" % (repo, s["feature"]))})
+            else:
+                c["session"] = "%s/%s" % (repo, s["feature"])
+    sessions.extend(mine)
+
 cards.sort(key=lambda x: (order[x["section"]], x["repo"], x["slug"]))
 unfiled_dir = os.path.join(state, "unfiled")
 unfiled = []
@@ -282,10 +373,56 @@ for line in reversed([l for l in read(os.path.join(state, "sync.log")).split("\n
     if m:
         last_sync = {"at": cols[0], "created": int(m[1]), "updated": int(m[2]), "unchanged": int(m[3]), "errors": int(m[4]), "first_error": m[5] or ""}
         break
+
+# 孤兒 pane：cwd（或 foreground_cwd）在 <repo>/.claude/worktrees/<slug>/ 底下（或 dispatch.json 記的 worktree），
+# 而且這張卡已歸檔、已拆（stage split）、dispatch.json 標 stopped、或卡目錄不在，而且這個 pane 就是 dispatch.json 該條記的 pane。
+# 三個都要：只看 cwd，人在同名 worktree 自己開的 pane 會被認領；只看 pane id，herdr 重用 id 時會指到別人的 pane。
+# 判斷只在這裡算一次，coordinate / reap / 看板都讀 orphans。
+# workplan 標 merged 的卡（stage archive）還沒歸檔，agent 可能正在跑 /archive，不算。
+# 同一個 slug 先歸檔後又建活卡時活卡優先，所以歸檔的先放、活的後蓋。
+card_by_key = {(c["repo"], c["slug"]): c for c in cards if c["archived"]}
+card_by_key.update({(c["repo"], c["slug"]): c for c in cards if not c["archived"]})
+worktree_of = {}
+for k, e in dispatch.items():
+    if e.get("worktree"):
+        worktree_of[e["worktree"].rstrip("/")] = tuple(k.split("/", 1))
+
+def worktree_owner(path):
+    for p in {path, os.path.realpath(path)}:
+        for wt, key in worktree_of.items():
+            if p == wt or p.startswith(wt + "/"): return key
+        for repo_, top in repo_paths.items():
+            prefix = top + "/.claude/worktrees/"
+            if p.startswith(prefix) and p[len(prefix):].split("/")[0]: return (repo_, p[len(prefix):].split("/")[0])
+    return None
+
+def orphan_reason(key, pane):
+    # .claude/worktrees/ 也放別的工具自己開的 worktree：dispatch.json 沒記過、或記的不是這個 pane 的，不是 opsx 開的 pane
+    entry = dispatch.get("%s/%s" % key)
+    if entry is None or str(entry.get("pane")) != str(pane): return None
+    c = card_by_key.get(key)
+    if c is None:
+        # 卡不在 cards 裡不等於卡目錄不存在：repo 沒被這次掃描、或被當舊卡濾掉的活卡不能算
+        top = repo_paths.get(key[0])
+        return "card-missing" if top and not os.path.isdir(os.path.join(top, "openspec", "changes", key[1])) else None
+    if c["archived"]: return "archived"
+    if c["stage"] == "split": return "split"
+    if entry.get("mode") == "stopped": return "stopped"
+    return None
+
+orphans = []
+for a in (agents or []):
+    key = next((k for k in (worktree_owner(p) for p in (a.get("cwd"), a.get("foreground_cwd")) if p) if k), None)
+    reason = orphan_reason(key, a.get("pane_id")) if key else None
+    if reason:
+        orphans.append({"pane": a.get("pane_id"), "cwd": a.get("cwd"), "agent_status": a.get("agent_status"),
+                        "repo": key[0], "slug": key[1], "reason": reason})
+orphan_panes = {str(o["pane"]) for o in orphans}
 unmatched = [{"name": a.get("terminal_title_stripped") or a.get("agent") or "", "pane": a.get("pane_id"),
-              "agent_status": a.get("agent_status"), "cwd": a.get("cwd"), "workspace": a.get("workspace_id")}
+              "agent_status": a.get("agent_status"), "cwd": a.get("cwd"), "workspace": a.get("workspace_id"),
+              "orphan": str(a.get("pane_id")) in orphan_panes}
              for a in (agents or []) if str(a.get("pane_id")) not in matched_panes]
-print(json.dumps({"generated_at": now, "scopes": scopes, "repo_paths": repo_paths, "cards": cards, "unfiled": unfiled, "last_sync": last_sync, "unmatched_agents": unmatched, "errors": errors,
+print(json.dumps({"generated_at": now, "scopes": scopes, "repo_paths": repo_paths, "cards": cards, "sessions": sessions, "unfiled": unfiled, "last_sync": last_sync, "unmatched_agents": unmatched, "orphans": orphans, "errors": errors,
                   "legacy": legacy, "worktrees_skipped": worktrees}, ensure_ascii=False))
 PY
 }

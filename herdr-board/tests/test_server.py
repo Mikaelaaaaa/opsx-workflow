@@ -139,6 +139,17 @@ class ServerTest(unittest.TestCase):
         self.assertEqual(self.log.read_text().strip(), "answer x --gate g1 --grant repo --repo %s -- 允許" % r)
         self.assertIn("ok: answer", out["stdout"])
 
+    def test_answer_forwards_sub(self):
+        status, _, body = self.req("/api/answer", {"slug": "bt", "sub": "as", "gate": "g1", "text": "ok"}, token=self.token)
+        self.assertEqual(status, 200)
+        self.assertTrue(json.loads(body)["ok"], body)
+        self.assertEqual(self.log.read_text().strip(), "answer bt --sub as --gate g1 -- ok")
+
+    def test_answer_rejects_bad_sub(self):
+        status, _, _ = self.req("/api/answer", {"slug": "bt", "sub": "../x", "gate": "g1", "text": "ok"}, token=self.token)
+        self.assertEqual(status, 400)
+        self.assertEqual(self.log.read_text(), "")
+
     def test_merge_and_stop_and_dispatch(self):
         r = str(self.repo)
         self.req("/api/merge", {"slug": "x", "repo": r}, token=self.token)
@@ -202,6 +213,31 @@ class ServerTest(unittest.TestCase):
         self.rc_file.write_text("3")
         status, _, body = self.req("/api/merge", {"slug": "x"}, token=self.token)
         self.assertEqual(status, 200, "只有 sync 的退出碼 3 是 409：%s" % body)
+
+    def test_index_has_the_orphan_row_and_its_buttons(self):
+        _, _, body = self.req("/")
+        for needle in ("孤兒 pane", 'data-act="reap"', 'data-act="reap-all"', "api.post('reap'"):
+            self.assertIn(needle, body)
+
+    def test_reap_one_pane_or_all(self):
+        status, _, body = self.req("/api/reap", {"pane": "w1:p3"}, token=self.token)
+        self.assertEqual(status, 200, body)
+        status, _, body = self.req("/api/reap", {}, token=self.token)
+        self.assertEqual(status, 200, body)
+        self.assertEqual(self.log.read_text().strip().split("\n"), ["reap --pane w1:p3", "reap"])
+
+    def test_reap_rejects_a_pane_that_looks_like_a_flag(self):
+        status, _, body = self.req("/api/reap", {"pane": "--all"}, token=self.token)
+        self.assertEqual(status, 400, body)
+        self.assertEqual(self.log.read_text(), "")
+
+    def test_reap_not_an_orphan_is_422(self):
+        self.rc_file.write_text("2")
+        status, _, body = self.req("/api/reap", {"pane": "w9:p1"}, token=self.token)
+        self.assertEqual(status, 422, body)
+        self.rc_file.write_text("2")
+        status, _, body = self.req("/api/merge", {"slug": "x"}, token=self.token)
+        self.assertEqual(status, 200, "只有 reap 的退出碼 2 是 422：%s" % body)
 
     def test_repo_must_be_an_opsx_root_and_text_single_line(self):
         status, _, body = self.req("/api/merge", {"slug": "x", "repo": "/tmp"}, token=self.token)

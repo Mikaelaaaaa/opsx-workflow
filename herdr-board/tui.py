@@ -58,7 +58,8 @@ class Feed:
 def draw(scr, rows, cur: tm.Cursor, data: dict, note: str) -> None:
     scr.erase()
     h, w = scr.getmaxyx()
-    n_wait = sum(1 for r in rows if r["kind"] == "card" and r["card"].get("section") == "待處理")
+    # 頂列照舊數 cards[]：收進 session 的主 change 卡不在 rows 裡，但仍算待處理
+    n_wait = sum(1 for c in data.get("cards") or [] if c.get("section") == "待處理")
     scr.addstr(0, 0, tm.fit(" opsx  待處理 %d" % n_wait, w - 1), curses.A_BOLD)
     y = 2
     top = max(0, (cur.index or 0) - (h - 6))
@@ -66,7 +67,7 @@ def draw(scr, rows, cur: tm.Cursor, data: dict, note: str) -> None:
         if i < top or y >= h - 2:
             continue
         if r["kind"] == "header":
-            scr.addstr(y, 0, tm.fit("%s %s · %d" % ("▸" if r.get("collapsed") else "▾", r["section"], r["count"]), w - 1), curses.A_BOLD)
+            scr.addstr(y, 0, tm.fit("%s %s · %d%s" % ("▸" if r.get("collapsed") else "▾", r["section"], r["count"], " · 孤兒 pane %d（網頁上關）" % r["orphans"] if r["orphans"] else ""), w - 1), curses.A_BOLD)
         else:
             attr = curses.A_REVERSE if i == cur.index else curses.A_NORMAL
             scr.addstr(y, 2, tm.fit("%s %s" % (r["mark"], r["text"]), w - 3), attr)

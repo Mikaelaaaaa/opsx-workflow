@@ -1,17 +1,21 @@
 #!/usr/bin/env bash
 # opsx status：寫 changes/<slug>/status.json。要求檔 §3.6 新增的儲存 6。
-#   opsx status <phase> <n>/<total> <label…> [--tests green|red] [--change <slug>]
+#   opsx status <phase> <n>/<total> <label…> [--tests green|red] [--change <slug>] [--sub <子>] [--worker <誰>]
 #   opsx status --show [--change <slug>]
 # phase 只准主流程的那幾個；slug 從 branch {action}/{slug}/{user} 推，推不到要給 --change。
+# slug 是 <主>--<子>（subagent 的子殼分支）或給了 --sub 時寫子殼 changes/<主>/subs/<子>/status.json。
+# worker 是誰在做：子殼分支是 subagent-<子>，其他是 session；--worker 覆寫。
 
 OPSX_PHASES="explore grill propose apply review pr archive"
 
 opsx_status() {
-  local phase="" step="" total="" label=() tests="" change="" show=""
+  local phase="" step="" total="" label=() tests="" change="" show="" sub="" worker=""
   while [ $# -gt 0 ]; do
     case "$1" in
       --tests) tests="${2:-}"; shift 2 ;;
       --change) change="${2:-}"; shift 2 ;;
+      --sub) sub="${2:-}"; shift 2 ;;
+      --worker) worker="${2:-}"; shift 2 ;;
       --show) show=1; shift ;;
       --*) die "status: 不認得的選項 $1" ;;
       *)
@@ -26,7 +30,10 @@ opsx_status() {
   [ -n "$top" ] || die "status: 不在 git repo 裡"
   [ -n "$change" ] || change="$(slug_from_branch "$(git_branch)")"
   [ -n "$change" ] || die "status: branch '$(git_branch)' 對不到卡（要 {action}/{slug}/{user}），或給 --change <slug>"
-  local dir="$top/openspec/changes/$change" file
+  case "$change" in *--*) [ -z "$worker" ] && worker="subagent-${change#*--}" ;; esac
+  [ -n "$sub" ] && change="${change%%--*}--$sub"
+  [ -n "$worker" ] || worker=session
+  local dir file; dir="$(st_card_dir "$top" "$change")"
   [ -d "$dir" ] || die "status: 沒有這張卡：$dir"
   file="$dir/status.json"
 
@@ -51,11 +58,11 @@ opsx_status() {
   [ -n "$tests" ] || tests=unknown
 
   local lbl="${label[*]}" at; at="$(now_iso)"
-  OPSX_PHASE="$phase" OPSX_N="$n" OPSX_T="$t" OPSX_LABEL="$lbl" OPSX_TESTS="$tests" OPSX_AT="$at" \
+  OPSX_PHASE="$phase" OPSX_N="$n" OPSX_T="$t" OPSX_LABEL="$lbl" OPSX_TESTS="$tests" OPSX_AT="$at" OPSX_WORKER="$worker" \
   "$OPSX_PY" -I - "$file" <<'PY'
 import json,os,sys
 d={"phase":os.environ["OPSX_PHASE"],"step":int(os.environ["OPSX_N"]),"total":int(os.environ["OPSX_T"]),
-   "label":os.environ["OPSX_LABEL"],"tests":os.environ["OPSX_TESTS"],"at":os.environ["OPSX_AT"]}
+   "label":os.environ["OPSX_LABEL"],"tests":os.environ["OPSX_TESTS"],"at":os.environ["OPSX_AT"],"worker":os.environ["OPSX_WORKER"]}
 with open(sys.argv[1],"w",encoding="utf-8") as f: json.dump(d,f,ensure_ascii=False,indent=2); f.write("\n")
 PY
   say "status: $change → $phase $n/$t · $lbl · tests $tests"

@@ -18,6 +18,10 @@ def card(slug, section, pane=None, waiting=None, status=None, repo="a"):
             "agent_status": "working" if pane else None, "mr": None}
 
 
+def in_progress_header(data):
+    return next(r for r in tm.rows(data, done_open=False) if r["kind"] == "header" and r["section"] == "進行中")
+
+
 DATA = {"generated_at": "t", "scopes": [], "errors": [], "unmatched_agents": [],
         "cards": [
             card("done1", "已完成"),
@@ -49,6 +53,10 @@ class RowsTest(unittest.TestCase):
         slugs = [r["card"]["slug"] for r in tm.rows(DATA, done_open=True) if r["kind"] == "card"]
         self.assertEqual(slugs[-1], "done1")
 
+    def test_in_progress_header_counts_orphans(self):
+        self.assertEqual(in_progress_header({**DATA, "orphans": [{"pane": "w1:p1"}, {"pane": "w1:p2"}]})["orphans"], 2)
+        self.assertEqual(in_progress_header(DATA)["orphans"], 0, "舊資料沒有 orphans 這個鍵")
+
     def test_card_line_text(self):
         rows = tm.rows(DATA, done_open=False)
         ask = next(r for r in rows if r["kind"] == "card" and r["card"]["slug"] == "ask1")
@@ -56,6 +64,59 @@ class RowsTest(unittest.TestCase):
         self.assertIn("push?", ask["text"])
         run = next(r for r in rows if r["kind"] == "card" and r["card"]["slug"] == "run1")
         self.assertIn("apply 3/8", run["text"])
+
+
+SESSION = {"repo": "a", "feature": "fb", "section": "進行中", "main_done": 1, "main_total": 2, "sub_done": 5, "sub_total": 7,
+           "current": {"slug": "bt", "stage": "review"},
+           "mains": [{"slug": "bt", "pr_status": "in-progress", "stage": "review", "section": "進行中",
+                      "dispatch": {"pane": "p9", "agent": "claude", "herdr_name": "fb"}, "agent_status": "working",
+                      "open_gates": [], "waiting": None, "subs": []}]}
+SDATA = {"cards": [dict(card("bt", "進行中", pane="p9"), session="a/fb"), card("solo", "進行中")],
+         "sessions": [SESSION], "unmatched_agents": [], "errors": []}
+
+
+class SessionRowsTest(unittest.TestCase):
+    def test_session_line_text(self):
+        rows = tm.rows(SDATA, done_open=False)
+        s = next(r for r in rows if r["kind"] == "session")
+        self.assertIn("fb · 主 change 1/2 · 子 change 5/7 · bt review", s["text"])
+        self.assertTrue(tm._session_line(dict(SESSION, current=None)).endswith("已合併"))
+        self.assertEqual(tm._session_line(dict(SESSION, current={"slug": "bt", "stage": None})),
+                         "fb · 主 change 1/2 · 子 change 5/7 · bt", "目前站沒有 stage 就只寫 slug")
+
+    def test_session_replaces_its_mains(self):
+        rows = tm.rows(SDATA, done_open=False)
+        i = next(i for i, r in enumerate(rows) if r["kind"] == "header" and r["section"] == "進行中")
+        j = next(i for i, r in enumerate(rows) if r["kind"] == "header" and r["section"] == "待指派")
+        names = [r["session"]["feature"] if r["kind"] == "session" else r["card"]["slug"] for r in rows[i + 1:j]]
+        self.assertEqual(names, ["fb", "solo"], "進行中有 fb 一行與 solo 一行，沒有 bt")
+        self.assertEqual(rows[i]["count"], 2, "區塊計數含 session")
+
+    def test_collapsed_section_keeps_session_hidden_but_counted(self):
+        data = dict(SDATA, sessions=[dict(SESSION, section="已完成", current=None)])
+        rows = tm.rows(data, done_open=False)
+        done = next(r for r in rows if r["kind"] == "header" and r["section"] == "已完成")
+        self.assertTrue(done["collapsed"])
+        self.assertEqual(done["count"], 1)
+        self.assertFalse(any(r["kind"] == "session" for r in rows))
+
+    def test_enter_on_session_focuses_current_main(self):
+        rows = tm.rows(SDATA, done_open=False)
+        cur = tm.Cursor(rows)
+        self.assertEqual(rows[cur.index]["kind"], "session", "游標停在 session 行")
+        self.assertEqual(tm.enter(rows[cur.index]), ["herdr", "agent", "focus", "fb"])
+        cur.move(1)
+        self.assertEqual(rows[cur.index]["card"]["slug"], "solo")
+        cur.move(-1)
+        self.assertEqual(rows[cur.index]["key"], "session:a/fb")
+
+    def test_enter_on_session_uses_slug_without_herdr_name_and_none_when_not_dispatched(self):
+        main = dict(SESSION["mains"][0], dispatch={"pane": "p9", "agent": "claude"})
+        self.assertEqual(tm.enter({"kind": "session", "session": dict(SESSION, mains=[main])}),
+                         ["herdr", "agent", "focus", "bt"])
+        idle = dict(SESSION["mains"][0], dispatch=None)
+        self.assertIsNone(tm.enter({"kind": "session", "session": dict(SESSION, mains=[idle])}))
+        self.assertIsNone(tm.enter({"kind": "session", "session": dict(SESSION, current=None)}))
 
 
 class WidthTest(unittest.TestCase):

@@ -15,13 +15,15 @@ Unified development workflow plugin for Claude Code. Covers the full cycle: thin
 `init --global` 會把 PATH 上 `python3` 背後真正的執行檔記在 `~/.local/state/opsx/python`，opsx 和 hooks 只用它（繞過 pyenv shim，每次省 250 ms 左右）。
 升級到有這個檔的版本後、或 pyenv 換了 python 版本後，要再跑一次 `opsx init --global`；沒跑的話 opsx 會報錯，卡的 branch 上的授權閘門會擋下 Bash 呼叫。
 
-`init --global` 與 `init` 也會改使用者層 Claude Code settings（`$CLAUDE_CONFIG_DIR/settings.json`，沒設才是 `~/.claude/settings.json`）。要寫什麼只有一份標準設定：`templates/settings.opsx.json`（opsx / openspec 的 allow 規則、opsx state 目錄可寫、`gh pr *` 在沙盒外執行、授權檔唯讀）；`init` 在 repo 裡再把該 repo 的根目錄加進可寫目錄。state 目錄下的 `grants.toml`（「這個 repo 永遠」那級的授權）、`python`（hook 跑的 interpreter 路徑）與 `coordinator-settings.json`（主控 session 的設定）在沙盒內唯讀，所以要改它們得在沙盒外（你的終端機）跑 `opsx init --global` 或 `opsx answer --grant`。這只擋沙盒內對這三個檔的直接寫入，不是完整的授權邊界：`dispatch.json` 仍可被沙盒內的 session 寫，卡片層的 `grants`、`once` 與 `merge_approved` 都在裡面，可被偽造，這個缺口由 `merge-approval-protect` 補；rename 能否蓋過被 deny 的檔、hardlink 能否繞過，也沒實測，同樣交給它。`opsx init` 在 opsx 程式碼位於被登記的 repo 內時（例如 opsx 自己的 repo）只警告：登記後所有 session 都能改那些程式碼。只追加不存在的項目，改檔前把原檔備份成 `settings.json.opsx-bak`，重跑不動；檔案不是合法 JSON 時直接報錯、不改它。
+`init --global` 與 `init` 也會改使用者層 Claude Code settings（`$CLAUDE_CONFIG_DIR/settings.json`，沒設才是 `~/.claude/settings.json`）。要寫什麼只有一份標準設定：`templates/settings.opsx.json`（opsx / openspec 的 allow 規則、opsx state 目錄可寫、`gh pr *` 在沙盒外執行、授權檔唯讀）；`init` 在 repo 裡再把該 repo 的根目錄加進可寫目錄。state 目錄下的 `grants.toml`（「這個 repo 永遠」那級的授權）、`python`（hook 跑的 interpreter 路徑）與 `coordinator-settings.json`（主控 session 的設定）在沙盒內唯讀，所以要改它們得在沙盒外（你的終端機）跑 `opsx init --global` 或 `opsx answer --grant`。這只擋沙盒內對這三個檔的直接寫入：合併核准與卡片層、這次的授權由下面的 `opsx-protected` 擋；rename 能否蓋過被 deny 的檔、hardlink 能否繞過，沒實測。`opsx init` 在 opsx 程式碼位於被登記的 repo 內時（例如 opsx 自己的 repo）只警告：登記後所有 session 都能改那些程式碼。只追加不存在的項目，改檔前把原檔備份成 `settings.json.opsx-bak`，重跑不動；檔案不是合法 JSON 時直接報錯、不改它。
 
 herdr socket 不在使用者層標準設定裡：能連它的 session 可以用 `herdr pane run` 在沒有沙盒的 pane 裡跑指令。一般 agent 的 herdr 動作照原設計走 `hooks/opsx-herdr-queue.sh`；只有主控 session（opsx coordinator）要開 socket，`opsx init --global` 會把設定寫到 `~/.local/state/opsx/coordinator-settings.json`，主控 session 這樣啟動：`claude --settings ~/.local/state/opsx/coordinator-settings.json`。**opsx 只追加、不刪除**：如果你以前手動在使用者層 settings 的 `sandbox.network.allowUnixSockets` 加過 herdr socket，要自己刪掉，否則每個 session 都還能連 herdr，上面的隔離不成立。
 
 新電腦 onboarding：裝好 plugin → `opsx init --global` → 每個 repo 根目錄 `opsx init` → `opsx init --check` 確認和標準設定一致（只讀；缺什麼逐項印出，exit 1）。要改全部機器的設定，改 `templates/settings.opsx.json`、再各跑一次 `opsx init --global`，不要手改各台的 settings。
 
 資料夾要在 Claude Code 的信任對話框按過信任，專案層 settings 的 allow 與 additionalDirectories 才生效；`opsx init`、`opsx init --check`、`opsx dispatch` 發現 repo 沒信任會警告。opsx 自己的設定在使用者層，不受信任狀態影響；opsx 不會替你改信任紀錄。
+
+合併核准、「這張卡」與「這次」的授權存在 `~/.local/state/opsx-protected/authz.json`（`init --global` 建，0700）。它刻意放在 `~/.local/state/opsx/` 之外，不要把它或它的父目錄加進任何 `additionalDirectories`：沙盒內的 session 寫得到 `dispatch.json`，所以閘門只信這裡。`opsx merge`、`opsx answer --grant card|this` 要在沙盒外跑（終端機或看板），在 agent 的沙盒裡會報「受保護位置寫不進去」。`opsx init` 的上層目錄檢查也涵蓋它：repo 根目錄是 state 目錄的上層時直接拒絕，`opsx-protected` 與 state 目錄同層，所以一併不會被開成可寫。
 
 ## 看板
 
@@ -115,6 +117,8 @@ herdr socket 不在使用者層標準設定裡：能連它的 session 可以用 
 5. **Review** — `/review` to verify implementation against spec + code quality (built into autopilot, or standalone)
 6. **PR** — `/pr` to create a well-formatted pull request
 7. **Archive** — `/archive` to finalize and archive the completed change
+
+A card that is too big gets split by `/explore` into sessions, main changes and sub-changes: see `references/work-split.md`.
 
 ### Autopilot Flow (`/apply --auto --pr`)
 

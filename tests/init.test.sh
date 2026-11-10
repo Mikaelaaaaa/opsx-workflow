@@ -149,10 +149,15 @@ assert_file "$OPSX_STATE_DIR/grants.toml"
 assert_file "$OPSX_STATE_DIR/workspaces.toml"
 [ -L "$OPSX_BIN_DIR/opsx" ] || fail "symlink missing"
 assert_eq "$(readlink "$OPSX_BIN_DIR/opsx")" "$OPSX_ROOT/bin/opsx"
+# 受保護授權位置：state 目錄的兄弟（不在 additionalDirectories 內），0700（protected-authorization「init 建目錄」）
+assert_dir "${OPSX_STATE_DIR}-protected"
+assert_eq "$(stat -f %Lp "${OPSX_STATE_DIR}-protected" 2>/dev/null || stat -c %a "${OPSX_STATE_DIR}-protected")" 700 "受保護目錄要 0700"
+echo '{"k":1}' > "${OPSX_STATE_DIR}-protected/authz.json"
 # 重跑：symlink 不報錯、檔案不清空
 echo 'x = 1' >> "$OPSX_STATE_DIR/grants.toml"
 opsx init --global >/dev/null 2>&1 || fail "global rerun"
 assert_grep "x = 1" "$OPSX_STATE_DIR/grants.toml"
+assert_grep '"k":1' "${OPSX_STATE_DIR}-protected/authz.json"   # 重跑不清授權
 
 # --- 沙盒權限：裝進 CLAUDE_CONFIG_DIR/settings.json（specs/opsx-init「--global 把沙盒權限裝進使用者層」）---
 CS="$CLAUDE_CONFIG_DIR/settings.json"
@@ -244,10 +249,23 @@ for d in "$OPSX_BIN_DIR" /opt/homebrew/bin "$(dirname "$(cat "$OPSX_STATE_DIR/py
 done
 assert_grep "^bootstrap gui/$(id -u) $PL\$" "$OPSX_FAKE_LOG"
 
-# --- 已經裝過：launchctl print 成功就不重載 ---
+# --- 每 5 分鐘一輪的 coordinate launchd：第一次安裝 ---
+SYNC_PL="$PL"; PL="$OPSX_LAUNCH_AGENTS_DIR/com.opsx.coordinate.plist"
+assert_file "$PL"
+assert_eq "$(pl ProgramArguments)" "[\"$OPSX_BIN_DIR/opsx\", \"coordinate\"]"
+assert_eq "$(pl StartInterval)" 300
+assert_eq "$(pl EnvironmentVariables.HERDR_ENV)" 1
+assert_eq "$(pl EnvironmentVariables.OPSX_STATE_DIR)" "$OPSX_STATE_DIR"
+assert_eq "$(pl EnvironmentVariables.PATH)" "$P" "coordinate 的 PATH 跟每日同步同一份"
+assert_eq "$(pl StandardOutPath)" "$OPSX_STATE_DIR/coordinate.out"
+assert_grep "^bootstrap gui/$(id -u) $PL\$" "$OPSX_FAKE_LOG"
+PL="$SYNC_PL"
+
+# --- 已經裝過：launchctl print 成功就不重載（兩支都是） ---
 : > "$OPSX_FAKE_LOG"
 OPSX_TEST_LAUNCHCTL_LOADED=1 opsx init --global >/dev/null 2>&1 || fail "global with loaded job"
 assert_grep '^print gui/' "$OPSX_FAKE_LOG"; assert_not_grep '^bootstrap' "$OPSX_FAKE_LOG"
+assert_grep "^print gui/$(id -u)/com.opsx.coordinate\$" "$OPSX_FAKE_LOG"
 
 # --- 已載入但 plist 內容變了（例如 nvm / pyenv 升級後重跑）：先 bootout 再 bootstrap，launchd 才會讀新的 ---
 printf '<!-- 舊的 -->\n' > "$PL"; : > "$OPSX_FAKE_LOG"
