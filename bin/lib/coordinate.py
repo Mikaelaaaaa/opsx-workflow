@@ -464,7 +464,7 @@ def deps_unmerged(slug, prs):
 def is_archived(top, name):
     """change 目錄不在了，而且 openspec archive 留下了 <日期>-<name>。"""
     changes = os.path.join(top, "openspec", "changes")
-    return not os.path.isdir(os.path.join(changes, name)) and bool(glob.glob(os.path.join(changes, "archive", "*-" + glob.escape(name))))
+    return not os.path.isdir(os.path.join(changes, name)) and bool(glob.glob(os.path.join(changes, "archive", "????-??-??-" + glob.escape(name))))
 
 
 def waiting_on(prs, slug):

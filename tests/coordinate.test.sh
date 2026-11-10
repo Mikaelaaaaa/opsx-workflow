@@ -258,6 +258,15 @@ assert_eq "$(wp_status core)" in-progress "沒 propose 的兄弟還在，PR 不�
 assert_eq "$(count '^opsx dispatch af')" 0 "core 沒 merged，依賴它的不派：$(cat "$OPSX_FAKE_LOG")"
 cp "$WP0" "$R/openspec/workplan.yaml"; rm -f "$MEMO"
 
+# --- 收尾：archive 裡只有名字以 -cb 結尾的別的 change，沒 propose 的 cb 不算已歸檔 ---
+mkdir -p "$R/openspec/changes/archive/2026-11-07-ca-cb"
+round || fail "rc: $(cat "$FX/out")"
+assert_eq "$(wp_change cb)" pending "別的 change 的歸檔不算 cb 已歸檔"
+assert_eq "$(wp_status core)" in-progress "別的 change 的歸檔不讓 PR 標 merged"
+assert_eq "$(count '^opsx dispatch af')" 0 "core 沒 merged，依賴它的不派：$(cat "$OPSX_FAKE_LOG")"
+rm -rf "$R/openspec/changes/archive/2026-11-07-ca-cb"
+cp "$WP0" "$R/openspec/workplan.yaml"; rm -f "$MEMO"
+
 # --- 收尾：兄弟 change 已歸檔（drop 或手動 archive）、workplan 沒更新，PR 照樣標 merged、依賴它的同輪派出 ---
 mkdir -p "$R/openspec/changes/archive/2026-11-07-cb"
 round || fail "rc: $(cat "$FX/out")"
