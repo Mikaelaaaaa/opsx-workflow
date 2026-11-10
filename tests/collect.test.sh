@@ -288,6 +288,7 @@ printf '# p\n' > "$D/subs/ct/proposal.md"; printf '## 1\n\n- [ ] 1.1 a\n' > "$D/
 printf '## g1\ntype: decision\nstatus: open\n問題: 哪個？\n選項: A | B (Recommended)\n' > "$D/subs/as/gates.md"
 printf '# p\n' > "$D/subs/ui/proposal.md"; printf '{"phase": "apply", "tests": "unknown", "worker": "subagent-2"}' > "$D/subs/ui/status.json"
 mkcard s fx1 >/dev/null; mkcard s solo >/dev/null
+mkdir -p "$R6/s/openspec/changes/z1/subs/z1b"   # z1 已合併、殼只剩 subs/：不是卡，但讓 fdone 有子殼
 cat > "$R6/s/openspec/workplan.yaml" <<'EOF'
 features:
   - name: fb
@@ -355,9 +356,11 @@ printf 'features: oops\n' > "$R6/u/openspec/workplan.yaml"                 # fea
 printf '{"s/bt":{"workspace":"s","tab":"t1","pane":"p-bt","agent":"bt","model":"claude-opus-5-5","mode":"autopilot","kind":"dev","branch":"feat/bt/mikaela","grants":[],"started_at":"2026-11-05T09:00:00+08:00"}}' > "$S6/dispatch.json"
 J="$(opsx collect --root "$R6" --state "$S6")"; assert_eq "$?" 0 "session collect rc: $J"
 WS="$(cd "$R6/s" && pwd -P)/openspec/workplan.yaml"; WT="$(cd "$R6/t" && pwd -P)/openspec/workplan.yaml"; WU="$(cd "$R6/u" && pwd -P)/openspec/workplan.yaml"
-# 1.1 哪些 feature 收：有子殼、一個 PR 掛兩個 change；1 PR 1 change 不收；workplan 壞的 repo 沒有 session、各記一筆 errors
-assert_eq "$(printf '%s' "$J" | python3 -I -c 'import json,sys;print(" ".join("%s/%s" % (s["repo"], s["feature"]) for s in json.load(sys.stdin)["sessions"]))')" "s/fb s/fx s/fdone s/fdup"
-C="$(card "$J" s solo)"; assert_eq "$(printf '%s' "$C" | python3 -I -c 'import json,sys;print("session" in json.load(sys.stdin))')" False "solo 的卡沒有 session 欄"
+# 1.1 哪些 feature 收：只有 PR 掛子殼的；一個 PR 掛兩個平放 change（fx）與 1 PR 1 change（solo）都不收；workplan 壞的 repo 沒有 session、各記一筆 errors
+assert_eq "$(printf '%s' "$J" | python3 -I -c 'import json,sys;print(" ".join("%s/%s" % (s["repo"], s["feature"]) for s in json.load(sys.stdin)["sessions"]))')" "s/fb s/fdone s/fdup"
+for k in solo fx1; do
+  C="$(card "$J" s $k)"; assert_eq "$(printf '%s' "$C" | python3 -I -c 'import json,sys;print("session" in json.load(sys.stdin))')" False "$k 的卡沒有 session 欄"
+done
 for w in "$WT" "$WU"; do
   assert_eq "$(printf '%s' "$J" | python3 -I -c 'import json,sys;print(sum(1 for e in json.load(sys.stdin)["errors"] if e["source"]==sys.argv[1]))' "$w")" 1 "壞 workplan 一筆 errors：$w $(q "$J" errors)"
 done
@@ -379,9 +382,8 @@ assert_eq "$(q "$F" main_done)/$(q "$F" main_total) $(q "$F" sub_done)/$(q "$F" 
 assert_eq "$(q "$F" current)" '{"slug": "bt", "stage": "review"}'
 assert_eq "$(q "$F" section)" 待處理
 F="$(sess "$J" s fdone)"; assert_eq "$(q "$F" section) $(q "$F" current) $(q "$F" main_done)/$(q "$F" main_total)" "已完成 null 2/2"
-F="$(sess "$J" s fx)"; assert_eq "$(q "$F" section) $(q "$F" current.slug) $(q "$F" current.stage)" "收件匣 fx1 explore"
 # 1.4 卡標上 session，卡仍在 cards[]；bt 同時在 fb 與 fdup：取第一個，記一筆 errors
-assert_eq "$(q "$(card "$J" s bt)" session)" s/fb; assert_eq "$(q "$(card "$J" s fx1)" session)" s/fx
+assert_eq "$(q "$(card "$J" s bt)" session)" s/fb
 E="$(printf '%s' "$J" | python3 -I -c 'import json,sys;print(json.dumps([e for e in json.load(sys.stdin)["errors"] if e["source"]==sys.argv[1]],ensure_ascii=False))' "$WS")"
 assert_eq "$(printf '%s' "$E" | python3 -I -c 'import json,sys;print(len(json.load(sys.stdin)))')" 1 "重複 slug 一筆 errors：$E"
 printf '%s' "$E" | grep -q 'bt' || fail "重複 slug 的 error 要指名 bt：$E"

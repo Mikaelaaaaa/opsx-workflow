@@ -321,7 +321,7 @@ def session_of(repo, f, by_key):
             "sub_done": sum(1 for s in subs if s["status"] == "done"), "sub_total": len(subs),
             "current": {"slug": cur["slug"], "stage": cur["stage"]} if cur else None, "mains": mains}
 
-# sessions（board-tree D3）：feature 底下有 PR 掛子殼（changes/<PR>/subs/），或有一個 PR 掛 2 個以上 change
+# sessions（board-tree D4）：feature 底下有 PR 掛子殼（changes/<PR>/subs/）才收；舊寫法一個 PR 掛多個平放殼的不收
 by_key = {}
 for c in cards: by_key.setdefault((c["repo"], c["slug"]), c)
 sessions = []
@@ -333,8 +333,7 @@ for repo in repos:
         mine = []
         for f in features:
             prs = wp_list(f, "prs", "feature %s" % f["name"])
-            if any(os.path.isdir(os.path.join(repo_paths[repo], "openspec", "changes", pr["name"], "subs"))
-                   or len(wp_list(pr, "changes", "PR %s" % pr["name"])) >= 2 for pr in prs):
+            if any(os.path.isdir(os.path.join(repo_paths[repo], "openspec", "changes", pr["name"], "subs")) for pr in prs):
                 mine.append(session_of(repo, f, by_key))
     except ValueError as e:   # UnicodeDecodeError 也是 ValueError
         errors.append({"source": wp_path, "message": "workplan 讀不懂：%s" % e}); continue
