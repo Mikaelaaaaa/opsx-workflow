@@ -419,6 +419,21 @@ assert_grep '^notification show \[demo/p1\] gate split ' "$OPSX_FAKE_LOG"
 assert_eq "$(memo_get _parked demo/p1)" "" "split gate 不記 parked：$(cat "$MEMO")"
 rm -f "$MEMO"; : > "$OPSX_FAKE_LOG"; : > "$LOG"
 
+# --- split gate 一律要人答：建議不含合併 / merge 也不代答（要人答不能靠建議剛好有哪個字） ---
+cards '[{"slug":"p1","section":"待處理","dispatch":'"$D"',"agent_status":"idle","waiting":{"type":"等待決定","needs":null,"waits_on":null,"gate_id":"split","question":"照這個拆法建殼、寫 workplan？","recommended":"照這個拆法，forge session 等 grant-gate-levels 進 main 再開","options":["照這個拆法","不拆"]}}]'
+round || fail "split 無合併字 rc: $(cat "$FX/out")"
+assert_eq "$(count '^opsx answer')" 0 "split gate 建議不含合併也不代答：$(cat "$OPSX_FAKE_LOG")"
+assert_eq "$(count '^opsx stop')" 0 "split gate 不停 pane：$(cat "$OPSX_FAKE_LOG")"
+assert_grep '^notification show \[demo/p1\] gate split ' "$OPSX_FAKE_LOG"
+rm -f "$MEMO"; : > "$OPSX_FAKE_LOG"; : > "$LOG"
+
+# --- waits-on 排在合併類規則之前：建議含「合併後」也照停 pane ---
+cards '[{"slug":"p1","section":"待處理","dispatch":'"$D"',"agent_status":"idle","waiting":{"type":"等待決定","needs":null,"waits_on":"a","gate_id":"g8","question":"等 a 做完","recommended":"a 合併後再開","options":["等"]}}]'
+round || fail "waits-on 先於合併類 rc: $(cat "$FX/out")"
+assert_grep "^opsx stop p1 --repo $R\$" "$OPSX_FAKE_LOG"
+assert_eq "$(count '^notification show')" 0 "waits-on 的 gate 不通知：$(cat "$OPSX_FAKE_LOG")"
+rm -f "$MEMO"; : > "$OPSX_FAKE_LOG"; : > "$LOG"
+
 # --- 等別張卡：停下並記 parked ---
 cards '[{"slug":"p1","section":"待處理","dispatch":'"$D"',"agent_status":"idle","waiting":{"type":"等待決定","needs":null,"waits_on":"a","gate_id":"g7","question":"等 a 合進 main 之後再做","recommended":null,"options":["等"]}}]'
 round || fail "rc: $(cat "$FX/out")"

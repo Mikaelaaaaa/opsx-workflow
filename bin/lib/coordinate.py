@@ -33,6 +33,8 @@ GRANT_WORDS = ("授權", "開 PR", "開 / 改 MR", "gh pr create", "push", "推�
 HUMAN_WORDS = ("你", "使用者", "沙盒外", "自己跑", "本人", "人工", "跑指令", "跑腳本", "錄", "貼路徑")
 HUMAN_QUESTION = ("只有你能做", "誰來跑")
 MERGE_WORDS = ("合併", "merge")
+# explore 寫的拆法確認 gate 的 id：要人決定，永遠不代答
+SPLIT_GATE = "split"
 VERIFY_ANSWER = "這個要真機跑的驗證使用者之後自己做：把它標成「等使用者驗」寫進 report.md 的 Consider，不要再開 gate，繼續做完剩下的 task 到 /review、/pr。"
 GRANT_ANSWER = "允許。長期授權在 grants.toml，直接做。"
 
@@ -306,6 +308,10 @@ class Round:
         if w["type"] == "type 不明":
             self.log("?? %s gate %s 的 type 沒寫或不在 approval | decision，不代答，要人看：%s" % (key, w["gate_id"], (w.get("question") or "")[:100]))
             self.notify_gate(c, w, "的 type 不明")
+            return
+        if w["gate_id"] == SPLIT_GATE:
+            self.log("?? %s gate %s 是拆法確認，只有使用者能答，不代答、不停 pane：%s" % (key, w["gate_id"], (w.get("question") or "")[:100]))
+            self.notify_gate(c, w, "要你確認拆法")
             return
         q = w.get("question") or ""
         pick = w.get("recommended") or (w.get("options") or [None])[0]

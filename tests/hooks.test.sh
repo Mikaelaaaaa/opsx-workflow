@@ -46,6 +46,7 @@ printf '{"Agentory-AI/eval-core":{"mode":"autopilot"}}' > "$OPSX_STATE_DIR/dispa
 out="$(run_hook openspec-router.sh "$(j "$R" "" '{}' "下一步")")"; r="$(reason "$out")"
 case "$r" in *"autopilot："*"不用 AskUserQuestion"*) ;; *) fail "router: autopilot 規則: $r" ;; esac
 case "$r" in *'approval | decision'*'needs: run'*) ;; *) fail "router: autopilot 規則要寫合法 type 與 needs: run: $r" ;; esac
+case "$r" in *'waits-on:'*) ;; *) fail "router: autopilot 規則要教等別張卡的 gate 寫 waits-on: $r" ;; esac
 case "$r" in *'action:'*'deny 訊息'*) ;; *) fail "router: autopilot 規則要教授權 gate 寫 action:、值取自 deny 訊息: $r" ;; esac
 case "$r" in *"等待決定 / 等待授權"*) fail "router: 不能把看板標籤當 type 值教給 agent: $r" ;; esac
 case "$r" in *"interactive："*) fail "router: autopilot 卡不該有 interactive 規則: $r" ;; esac
