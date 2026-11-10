@@ -73,15 +73,17 @@ level2() { # <action> <label>
 if [ "$tool" = "Bash" ]; then
   [ -n "$cmd" ] || exit 0
   c="$(printf '%s' "$cmd" | tr '\n' ' ')"
-  # 比對只看會執行的部分（骨架），引號與 heredoc 內的字樣不算；merge_gate 與訊息仍讀原文
+  # 第三級比對原文，只扣掉三種容器（commit 訊息、opsx answer 答案、寫檔 heredoc）的資料部分，認不得的寫法都留著（grill D1）；
+  # 第二級比對指令骨架（引號與 heredoc 內的字樣不算）。merge_gate 與訊息仍讀原文。
+  l3="$(cmd_l3text "$cmd" | tr '\n' ' ')" || deny "opsx 授權閘門：perl 執行失敗，讀不到指令內容，先擋下。確認 perl 可用"
   sk="$(cmd_skeleton "$cmd" | tr '\n' ' ')" || deny "opsx 授權閘門：perl 執行失敗，讀不到指令骨架，先擋下。確認 perl 可用"
   # 第三級（merge 放行後不 exit，其餘檢查照跑）
-  printf '%s' "$sk" | grep -qE '(glab mr merge|gh pr merge)' && merge_gate && GRANTED=1
-  printf '%s' "$sk" | grep -qE 'git\s+push.*(--force|-f\b|\+[a-zA-Z])' && level3 "force-push"
-  printf '%s' "$sk" | grep -qE 'git\s+push.*\b(main|master)\b' && level3 "push main"
-  printf '%s' "$sk" | grep -qiE '(^|\s|/)deploy(\.sh)?(\s|$)' && level3 "deploy"
-  printf '%s' "$sk" | grep -qiE 'drop\s+(table|database|schema)|truncate\s+table|db:reset' && level3 "刪資料"
-  printf '%s' "$sk" | grep -qE 'sops\s+(-e|--encrypt|edit)|\.gitlab-ci\.yml|\.github/workflows' && level3 "改 CI / secrets"
+  printf '%s' "$l3" | grep -qE '(glab mr merge|gh pr merge)' && merge_gate && GRANTED=1
+  printf '%s' "$l3" | grep -qE 'git\s+push.*(--force|-f\b|\+[a-zA-Z])' && level3 "force-push"
+  printf '%s' "$l3" | grep -qE 'git\s+push.*\b(main|master)\b' && level3 "push main"
+  printf '%s' "$l3" | grep -qiE '(^|\s|/)deploy(\.sh)?(\s|$)' && level3 "deploy"
+  printf '%s' "$l3" | grep -qiE 'drop\s+(table|database|schema)|truncate\s+table|db:reset' && level3 "刪資料"
+  printf '%s' "$l3" | grep -qE 'sops\s+(-e|--encrypt|edit)|\.gitlab-ci\.yml|\.github/workflows' && level3 "改 CI / secrets"
   # 第二級
   printf '%s' "$sk" | grep -qE '(^|\s|&&|;)git\s+push(\s|$)' && level2 push "git push"
   printf '%s' "$sk" | grep -qE '(glab mr (create|update)|gh pr (create|edit))' && level2 mr "開 / 改 MR"
