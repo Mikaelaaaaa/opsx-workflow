@@ -240,7 +240,7 @@ def file_unfiled(state: pathlib.Path, item: dict, today: str) -> pathlib.Path:
     while path.exists():
         n += 1
         path = unfiled / ("%s-%d.md" % (item["slug"], n))
-    path.write_text(inbox_text(item, today), encoding="utf-8")
+    safefile.write_atomic(str(path), inbox_text(item, today))
     return path
 
 
@@ -251,7 +251,7 @@ def update_debt(entry: dict, item: dict) -> bool:
     new = fm_set(fm_set(old, "line", item["extra"]["line"]), "stale", None)
     if new == old:
         return False
-    path.write_text(new, encoding="utf-8")
+    safefile.write_atomic(str(path), new)
     return True
 
 
@@ -273,7 +273,7 @@ def update_issue(entry: dict, item: dict) -> bool:
         new = fm_set(new, "upstream_updated", item["updated_at"])
     if new == old:
         return False
-    path.write_text(new, encoding="utf-8")
+    safefile.write_atomic(str(path), new)
     return True
 
 
@@ -293,7 +293,7 @@ def mark_closed(opsx_root: pathlib.Path, kind: str, index: dict, seen: set[str],
             tally.error(src, p.stderr.strip() or "%s.sh state 退出 %d" % (kind, p.returncode))
             continue
         if p.stdout.strip() == "closed":
-            entry["path"].write_text(fm_set(text, "upstream", "closed"), encoding="utf-8")
+            safefile.write_atomic(str(entry["path"]), fm_set(text, "upstream", "closed"))
             tally.updated += 1
 
 
@@ -306,7 +306,7 @@ def mark_stale(index: dict, seen: set[str], scanned: set[str], tally: Tally) -> 
         text = entry["path"].read_text(encoding="utf-8")
         if fm_get(text, "stale") == "true":
             continue
-        entry["path"].write_text(fm_set(text, "stale", "true"), encoding="utf-8")
+        safefile.write_atomic(str(entry["path"]), fm_set(text, "stale", "true"))
         tally.updated += 1
 
 

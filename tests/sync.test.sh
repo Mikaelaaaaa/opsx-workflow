@@ -88,6 +88,30 @@ err="$(sync_debt 2>&1)"; rc=$?
 case "$err" in *sync.lock*) ;; *) fail "訊息要含 sync.lock：$err" ;; esac
 assert_eq "$(cat "$FX/victim")" "keep me" "sync.lock 不能被改"
 rm -f "$OPSX_STATE_DIR/sync.lock"
+
+# --- inbox.md 改寫（update_debt、mark_stale）：inbox.md 是 symlink → 換成一般檔，目標不變 ---
+printf -- '---\nsource: shortcut:x:1\nline: 1\n---\n\n## 一句話\n\nx\n' > "$FX/victim-inbox.md"
+cp "$FX/victim-inbox.md" "$FX/victim-inbox.before"
+ln -s "$FX/victim-inbox.md" "$FX/inbox-link.md"
+python3 -I -c '
+import pathlib, sys
+sys.path.insert(0, sys.argv[1]); import sync
+p = pathlib.Path(sys.argv[2])
+assert sync.update_debt({"path": p}, {"extra": {"line": "9"}})
+' "$OPSX_ROOT/bin/lib" "$FX/inbox-link.md" || fail "update_debt rc"
+cmp -s "$FX/victim-inbox.md" "$FX/victim-inbox.before" || fail "update_debt 不能寫到 symlink 的目標：$(cat "$FX/victim-inbox.md")"
+[ ! -L "$FX/inbox-link.md" ] || fail "update_debt 要把 symlink 換成一般檔"
+assert_grep '^line: 9$' "$FX/inbox-link.md"
+rm -f "$FX/inbox-link.md"; ln -s "$FX/victim-inbox.md" "$FX/inbox-link.md"
+python3 -I -c '
+import pathlib, sys
+sys.path.insert(0, sys.argv[1]); import sync
+p = pathlib.Path(sys.argv[2])
+sync.mark_stale({"shortcut:x:1": {"frozen": False, "path": p}}, set(), {"x"}, sync.Tally())
+' "$OPSX_ROOT/bin/lib" "$FX/inbox-link.md" || fail "mark_stale rc"
+cmp -s "$FX/victim-inbox.md" "$FX/victim-inbox.before" || fail "mark_stale 不能寫到 symlink 的目標"
+assert_grep '^stale: true$' "$FX/inbox-link.md"
+rm -f "$FX/inbox-link.md"
 # ========== gitlab / github ==========
 CS="$(mk_opsx_repo Agentory-CS)"; mv "$CS" "$ROOT/Agentory-CS"; CS="$(cd "$ROOT/Agentory-CS" && pwd -P)"
 B="$(mk_opsx_repo b)"; mv "$B" "$ROOT/b"; B="$(cd "$ROOT/b" && pwd -P)"
