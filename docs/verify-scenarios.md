@@ -7,14 +7,15 @@
 - **新版**：本 repo 的 `skills/` 與 `references/`。**舊版**：`~/.claude/plugins/cache/opsx-workflow/opsx-workflow/0.1.0/skills/` 加上 `~/.claude/skills/grill-me`（舊版沒有 grill）。那個目錄名叫 0.1.0，但裡面的 `plugin.json` 寫 0.2.0；12 個檔的日期是 2026-05-26 到 06-18，2026-08-31 安裝，都早於改寫 commit `f321dc6`（11-05），所以是改寫前的版本，只是版號標錯。改寫 commit 沒有 parent，git 裡沒有更可靠的基線。量測當時的內容雜湊（`find . -type f | LC_ALL=C sort | xargs shasum -a 256 | shasum -a 256` 前 16 碼）：舊版 skills `32c535b73ba72a8e`、grill-me `3ba7a6558b999b93`；重跑前先比對，不同就不是同一個基線。
 - 五個題目，情境 1 拆成 grill、propose、review 三段分開測，每段的輸入事先寫好。題目在 `skills/<skill>/evals/fixtures/`，判分條件在 `skills/<skill>/evals/evals.json`，`bash tests/run.sh scenarios` 驗題目的前置條件。
 - 每題新舊各跑 3 次，同一句 prompt，skill 放在工作 repo 的 `.claude/skills/`（`evals/prepare-run.sh`）。
-- 候選者用 `evals/run-candidate.sh` 跑，每次一個獨立的 `claude --setting-sources project,local -p` session，要在 sandbox 外的終端機執行。user 層的 plugin、skill、hooks 不載入，skill 只有工作 repo `.claude/skills/` 那份；認證用平常的登入，不需要 API key。runner 在 `$TMPDIR` 底下建工作 repo，專案名是 fixture 名，路徑含 `claude` 或題目禁用字就拒跑。題目帶 `second_turn` 時，runner 用同一個 session id `--resume` 跑第二輪。跑完把 transcript 複製到結果目錄的 `<session id>.jsonl`，並印出 `work:`、`session:`、`transcript:` 三行。grader 讀那一份 transcript 和工作 repo。本表兩輪還沒有 runner，是主 session 開 subagent 跑的（見限制）。以 grill 段為例，跑完先確認隔離有效：
+- 候選者用 `evals/run-candidate.sh` 跑，每次一個獨立的 `claude --setting-sources project,local -p` session，要在 sandbox 外的終端機執行。user 層的 plugin、skill、hooks 不載入，skill 只有工作 repo `.claude/skills/` 那份；認證用平常的登入，不需要 API key。runner 在 `$TMPDIR` 底下建工作 repo，專案名是 fixture 名；路徑含 `claude` 或題目禁用字、位在本 repo 或結果目錄底下、或任何上層目錄有 `CLAUDE.md` 或 `.claude/`，都拒跑（工作 repo 在 `$HOME` 底下就是最常見的一種，`TMPDIR` 要設到沒有這些的目錄）。題目帶 `second_turn` 時，runner 用同一個 session id `--resume` 跑第二輪。session 啟動前先印 `starting: session=<id> work=<暫時路徑>`；跑完（claude 中途失敗也一樣）把 transcript 複製到結果目錄的 `<session id>.jsonl`，把工作 repo 搬到結果目錄的 `<session id>/<fixture>`，並印出 `work:`（搬完的最終路徑）、`session:`、`transcript:` 三行，退出碼沿用 claude 的。grader 讀那一份 transcript 和 `work:` 的工作 repo；transcript 裡記的 cwd 是 `starting:` 那行的暫時路徑。本表兩輪還沒有 runner，是主 session 開 subagent 跑的（見限制）。以 grill 段為例，跑完先確認隔離有效：
 
   ```bash
   bash evals/run-candidate.sh grill 0 new "$HOME/opsx-results/grill"
+  repo=<本 repo 的絕對路徑>
   t=<上一步印的 transcript 路徑>
-  grep -c 'opsx-workflow' "$t"           # 要是 0
+  grep -c "$repo" "$t"                   # 要是 0；看路徑，不看專案名：new 組複製進去的 skill 與 reference 本來就含 opsx-workflow 字樣
   grep -c 'skills/grill/evals' "$t"      # 要是 0
-  grep -m1 'Primary working directory' "$t"   # 要是上一步印的 work 路徑
+  grep -m1 'Primary working directory' "$t"   # 要是 starting: 那行印的 work 路徑
   ```
 - 每題一個 grader 一次判完 6 次執行，只看到 A / B 標籤；過程題（先重現、讀了哪些檔、有沒有繞過 hook）讀執行紀錄，不採信自述。
 - 第一輪（每組 1 次）用來修題目與判分條件，不併入下表。

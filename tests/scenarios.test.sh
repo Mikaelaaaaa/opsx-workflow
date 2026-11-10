@@ -71,14 +71,17 @@ assert e["second_turn"].strip() == open(sys.argv[2]).read().strip()
 assert "answers.md" not in e["prompt"]
 PY
 assertion_has "$OPSX_ROOT/skills/grill/evals/evals.json" "first turn ended"
-# 「先問再看答案」那條另判：第一輪工具呼叫碰到題目路徑就不過，隔離失效時分數才看得出來
-python3 -I - "$OPSX_ROOT/skills/grill/evals/evals.json" <<'PY' || fail "grill eval 0 first-turn assertion must fail any turn-1 tool call touching skills/*/evals/, the fixture directory, or the results directory"
+# 「先問再看答案」那條另判：第一輪工具呼叫碰到工作 repo 以外的路徑就不過，隔離失效時分數才看得出來。
+# 不能提 fixture directory（工作 repo 本身以 fixture 名命名）或 results directory（grader 拿不到路徑）
+python3 -I - "$OPSX_ROOT/skills/grill/evals/evals.json" <<'PY' || fail "grill eval 0 first-turn assertion must fail any turn-1 tool call touching a path outside the work repo (skills/*/evals/ as an example), without naming the fixture directory or the results directory"
 import json, sys
 e = next(x for x in json.load(open(sys.argv[1]))["evals"] if x["id"] == 0)
 a = [x for x in e["assertions"] if "first turn ended" in x]
 assert len(a) == 1
-for key in ("tool call", "skills/*/evals/", "fixture directory", "results directory", "fails"):
+for key in ("tool call", "skills/*/evals/", "outside the work repo", "fails"):
     assert key in a[0], key
+for key in ("fixture directory", "results directory"):
+    assert key not in a[0], key
 PY
 assertion_has "$OPSX_ROOT/skills/grill/evals/evals.json" "no longer lists the user-only item"
 assertion_has "$OPSX_ROOT/skills/grill/evals/evals.json" "by executing src/backoff.ts"
@@ -178,5 +181,19 @@ done
 assert_grep "^## 結論" "$r"
 assert_grep "^## 開的卡" "$r"
 assert_not_grep "TBD" "$r"
+
+# 隔離檢查：洩漏看主 repo 的絕對路徑，不看專案名（new 組複製進去的 skill 與 reference 本來就含 opsx-workflow 字樣）
+assert_not_grep "grep -c 'opsx-workflow'" "$r"
+assert_grep '^  repo=<' "$r"
+assert_grep '^  grep -c "\$repo" "\$t"' "$r"
+assert_grep "starting:" "$r"
+printf 'reflect skill: see opsx-workflow harness reference\n' > "$FX/new-transcript.jsonl"
+python3 -I - "$r" "$FX/new-transcript.jsonl" <<'PY' || fail "the doc's leak check must print 0 on a clean new-group transcript"
+import subprocess, sys
+doc, t = sys.argv[1:]
+cmd = next(l.strip() for l in open(doc) if l.strip().startswith('grep -c "$repo"'))
+out = subprocess.run(cmd, shell=True, env={"repo": "/x/y", "t": t, "PATH": "/usr/bin:/bin"}, capture_output=True, text=True).stdout
+assert out.split()[0] == "0", out
+PY
 
 echo "ok: $n fixtures"
