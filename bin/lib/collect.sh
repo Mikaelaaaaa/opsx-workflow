@@ -248,7 +248,7 @@ for line in read(os.path.join(work, "cards.tsv")).split("\n"):
     gates_path = os.path.join(d, "gates.md")
     gates = parse_gates(read(gates_path)) if not c["archived"] else []
     waiting = None if c["archived"] else waiting_of(c, gates, agent_status)
-    if c["archived"] or c["stage"] == "archive": section = "已完成"
+    if c["archived"] or c["stage"] in ("archive", "split"): section = "已完成"
     elif waiting: section = "待處理"
     elif disp: section = "進行中"
     elif c["stage"] == "explore": section = "收件匣"

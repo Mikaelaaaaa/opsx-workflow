@@ -38,7 +38,7 @@ Your engagement intensity should match the conversation. Don't announce transiti
 > Concrete options force clarity: "Redis vs SQS vs BullMQ for this queue?" is more productive
 > than "what queue should we use?" The user can always pick "Other" if none fit.
 
-**In autopilot** (the router line carries `autopilot：`), never call AskUserQuestion. Nobody is at the pane, and herdr marks the agent blocked. Do not settle the user's choices yourself here either. Write each open choice into explore.md's 待決, with the options you would have offered, and let /grill handle it under its autopilot rules (`skills/grill/SKILL.md`, "In autopilot"). A work breakdown is written without the confirmation step, and logged in decisions.tsv.
+**In autopilot** (the router line carries `autopilot：`), never call AskUserQuestion. Nobody is at the pane, and herdr marks the agent blocked. Do not settle the user's choices yourself here either. Write each open choice into explore.md's 待決, with the options you would have offered, and let /grill handle it under its autopilot rules (`skills/grill/SKILL.md`, "In autopilot"). A split still goes through the one gate in "Splitting a big card"; autopilot does not skip it.
 
 **When terms are vague** — challenge the language. "What do you mean by 'user'? Is that a Customer, a Tenant Admin, or an End User?" Every vague term in a plan becomes a bug in the implementation.
 
@@ -156,7 +156,7 @@ features:
             description: "Queue infrastructure and worker scaffold"
 ```
 
-Workplan supports multiple features. Each feature groups PRs; each PR groups changes. `/apply` can target a feature (`/apply --auto eval-service`), a PR (`/apply eval-infra`), or individual changes.
+Workplan supports multiple features. Each feature groups PRs; each PR groups changes. Features and changes take `depends-on` too (a feature lists PR names, a change lists sibling changes in the same PR); see "Splitting a big card". `/apply` can target a feature (`/apply --auto eval-service`), a PR (`/apply eval-infra`), or individual changes.
 
 This file is the **planning artifact** (not authoritative state) for:
 - Which changes belong to which PR, which PRs belong to which feature
@@ -167,6 +167,37 @@ This file is the **planning artifact** (not authoritative state) for:
 `/apply` reads this to know what to do. `/explore` writes and updates it.
 
 ---
+
+## Splitting a big card
+
+Four layers, defined in `references/work-split.md`: a dispatch sends out work; a **session** (workplan `features[]`) is one pane working a group of similar main changes in order; a **main change** (`prs[]`) is one branch and one PR; a **sub-change** (`prs[].changes[]`) is one commit, done by a subagent.
+
+When the D5 check in explore.md says split (at intake, or after exploring), write the split as one gate in `openspec/changes/<slug>/gates.md`:
+
+```
+## split
+type: decision
+status: open
+問題: 照這個拆法建殼、寫 workplan？
+已確認: <the D5 result: which of the three applied>
+拆法:
+  - session <feature> (depends-on: [<PR names>])
+    - main change <pr> · <branch> (depends-on: [<pr>])
+      - sub-change <name> (depends-on: [<sibling sub-change>])
+選項: 照這個拆法 (Recommended) | 改拆法 | 不拆
+建議: <why this grouping: similar topics share a session, different risks get their own main change>
+風險: <what a wrong split costs>
+預設: 不建殼，等回覆
+```
+
+Until the gate is answered, create no shell and do not touch the workplan. Interactive mode asks the same thing with AskUserQuestion instead of the gate. Once confirmed, in this order:
+
+1. Each main change: `openspec new change <pr> --schema opsx`, with an inbox.md that says what the whole main change does and lists its sub-changes.
+2. Each sub-change: `openspec/changes/<main>/subs/<sub>/` with `inbox.md` (frontmatter `parent: <main>`, `depends-on: [<sibling>]`) and `.openspec.yaml` (`schema: opsx`, `kind:`, `parent: <main>`). The openspec CLI does not know about these; `opsx check <main>` does.
+3. `openspec/workplan.yaml`: the features, PRs and changes with all three levels of `depends-on`. No dependency means no waiting.
+4. The original card's inbox frontmatter gets `split_into: <main1>, <main2>`. Its stage becomes `split` and the flow stops there; continue with the first main change that has no unmet dependency.
+
+Log the split in decisions.tsv with `opsx log`.
 
 ## Capturing Decisions
 
@@ -206,7 +237,7 @@ Read `references/ADR-FORMAT.md` for the format. Most ADRs are a single paragraph
 
 When the change has a shell (`openspec/changes/<slug>/`), end by writing `explore.md` in the schema's template:
 
-- **已知**: facts from the code, each with a file path or the command you ran. Anything a prototype answered goes here with what was run and what it showed.
+- **已知**: facts from the code, each with a file path or the command you ran. Anything a prototype answered goes here with what was run and what it showed. Always include the **D5 check**, one line per criterion with your judgment: ① it spans more than one subsystem; ② it mixes different risk (data migration, permissions, external API next to ordinary logic); ③ one shell would hold more than 6 tasks. If any one holds, the card is split ("Splitting a big card"). Do not judge by estimated line count.
 - **待決**: only questions the user must answer (product choice, preference, risk appetite). Each with 2–4 concrete options, the recommended one marked `(Recommended)`. A question `grep` or a ten-line script could answer does not belong here.
 - **不做**: directions ruled out, with the reason.
 

@@ -108,6 +108,8 @@ Unified development workflow plugin for Claude Code. Covers the full cycle: thin
 6. **PR** — `/pr` to create a well-formatted pull request
 7. **Archive** — `/archive` to finalize and archive the completed change
 
+A card that is too big gets split by `/explore` into sessions, main changes and sub-changes: see `references/work-split.md`.
+
 ### Autopilot Flow (`/apply --auto --pr`)
 
 In full autopilot mode, `/apply` handles the entire cycle automatically:

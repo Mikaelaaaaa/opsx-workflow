@@ -147,6 +147,8 @@ worker（一個 PR 一個 session，一個 worktree）
 subagent（opsx apply 現有的 test agent、雙 review agent，不變）
 ```
 
+大卡拆成 session / 主 change / 子 change 的四層定義與三層依賴（2026-11-10 定）見 `references/work-split.md`。
+
 ### 設計決定
 
 - 派工表是 tsk（跨專案、人挑）+ `workplan.yaml`（單 repo、機器細節），不另發明 pstack 的 plan markdown。coordinator 只是兩者的讀者。
