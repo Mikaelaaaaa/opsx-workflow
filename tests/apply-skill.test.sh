@@ -19,4 +19,10 @@ done
 for k in 'opsx stack' 'workplan 順序' '退出 3' 'session 自己重做' '/review' '/pr' '不在衝突標記上手解'; do
   has "$k" "$SUBS"
 done
+
+# --- review-fix-in-scope：apply 接 review 退回的 task；pr 在有待修時拒絕 ---
+has '## R<N>. review 退回' "$SK"
+has '測試先紅再修' "$SK"
+has '待修（範圍內）' "$OPSX_ROOT/skills/pr/SKILL.md"
+has '/apply <slug>' "$OPSX_ROOT/skills/pr/SKILL.md"
 echo ok

@@ -9,7 +9,8 @@ Every node of the main flow ends by starting the next one in the same session. N
 | grill | `/propose <slug>` | 待決 fully answered |
 | propose | `/apply <slug>` | tasks.md written, every applyRequires artifact done |
 | apply | `/review <slug>` | every task checked, tests green |
-| review | `/pr <slug>` | no Bug or Must-fix left open after the fix round (Consider does not count) |
+| review | `/apply <slug>` | `待修（範圍內）` has items |
+| review | `/pr <slug>` | no `待修（範圍內）` item left open (Consider does not count) |
 | pr | `/babysit <slug>` | MR opened and verified |
 | babysit | stop | the five merge conditions are green: merging is the user's |
 
@@ -38,5 +39,5 @@ Small changes do not carry the full ceremony.
 - **Skip grill.** A card of kind chore or bug-fix goes from explore straight to propose even when 待決 is non-empty; propose writes each open item into proposal.md as an assumption. The router (`bin/lib/stage.sh`) says the same. Grill runs before tasks.md exists, so only the kind can decide this.
 - **A small card** has all of: tasks.md has at most 3 tasks, and the changed files, test paths left out (`tests/` and any file named `*.test.*` or `*_test.*`), share the same first path component in `git diff --name-only main...HEAD`. Only kind chore or bug-fix can be small. Review measures it, because only then do tasks and the diff exist.
 - **Review of a small card** runs one merged reviewer (spec conformance and code quality together) and no adversarial one. Any other card runs three.
-- **Review runs at most two rounds.** The round number is in report.md's title. After two rounds a third review is not started; a gate lists the Bug and Must-fix items still open.
-- **Consider never blocks the flow.** Consider never opens a gate and never sends the card back to apply. Only a Bug or Must-fix still open after the second round opens a gate.
+- **Review runs at most two rounds.** The round number is in report.md's title. After two rounds a third full review is not started: the items still open are fixed through `/apply`, and review runs only a confirm pass over them and writes `確認: <sha>` in report.md. A gate is for an item that needs a user decision.
+- **Consider never blocks the flow.** Consider never opens a gate and never sends the card back to apply. Only an in-scope Bug or Must-fix that needs a user decision and cannot be fixed opens a gate.
