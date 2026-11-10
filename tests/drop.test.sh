@@ -50,4 +50,18 @@ U2="$(opsx new -- 第二個不需要的)"; assert_eq "$U2" "$U"
 assert_rc 0 opsx drop "$U2" -- 也不需要
 assert_grep '^不需要的$' "$OPSX_STATE_DIR/unfiled/dropped/$U.md"
 assert_grep '^第二個不需要的$' "$OPSX_STATE_DIR/unfiled/dropped/$U-2.md"
+
+# --- 捨棄待分類帶著附件：資料夾跟 .md 同名；dropped/ 只剩同名資料夾也不能蓋掉 ---
+printf 'png-bytes' > "$FX/shot.png"
+export OPSX_TEST_NOW="2026-11-06 15:00"
+P="$(opsx new --attach "$FX/shot.png" -- 有附件不需要)"
+assert_rc 0 opsx drop "$P" -- 不需要
+assert_file "$OPSX_STATE_DIR/unfiled/dropped/$P.md"
+assert_eq "$(cat "$OPSX_STATE_DIR/unfiled/dropped/$P/attachments/shot.png")" png-bytes
+assert_no_file "$OPSX_STATE_DIR/unfiled/$P.md"; assert_no_file "$OPSX_STATE_DIR/unfiled/$P"
+rm "$OPSX_STATE_DIR/unfiled/dropped/$P.md"
+P2="$(opsx new --attach "$FX/shot.png" -- 又一個)"; assert_eq "$P2" "$P"
+assert_rc 0 opsx drop "$P2" -- 也不要
+assert_file "$OPSX_STATE_DIR/unfiled/dropped/$P-2.md"; assert_file "$OPSX_STATE_DIR/unfiled/dropped/$P-2/attachments/shot.png"
+assert_no_file "$OPSX_STATE_DIR/unfiled/dropped/$P.md"
 echo ok

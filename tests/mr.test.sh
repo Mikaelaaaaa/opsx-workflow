@@ -92,6 +92,22 @@ printf '%s' "$GREEN" > "$OPSX_TEST_GLAB_JSON"
 ( OPSX_MR_CACHE_TTL=60 mr_json "$C" >/dev/null ) & ( OPSX_MR_CACHE_TTL=60 mr_json "$C" >/dev/null ) & wait
 [ "$(ls "$OPSX_STATE_DIR/cache/" | grep -c '^mr-.*\.json$')" = 1 ] || fail "並行後應只有一個快取檔：$(ls "$OPSX_STATE_DIR/cache/")"
 
+# --- forge 查詢的時間上限：OPSX_MR_TIMEOUT 沒設就不限時，設了逾時要殺掉、錯誤文字說逾時 ---
+unset OPSX_MR_TIMEOUT
+assert_eq "$(mr_forge sh -c 'sleep 2; echo ok')" ok "沒設 OPSX_MR_TIMEOUT 不限時"
+t0="$(date +%s)"; OPSX_MR_TIMEOUT=1 mr_forge sleep 6 >/dev/null; rc=$?; elapsed=$(( $(date +%s) - t0 ))
+assert_eq "$rc" 124 "逾時退出碼 124"; [ "$elapsed" -lt 4 ] || fail "要在時限內殺掉，花了 ${elapsed} 秒"
+printf '%s' "$GREEN" > "$OPSX_TEST_GLAB_JSON"
+t0="$(date +%s)"; j="$(OPSX_TEST_GLAB_SLEEP=6 OPSX_MR_TIMEOUT=1 mr_json "$C")"; elapsed=$(( $(date +%s) - t0 ))
+[ "$elapsed" -lt 4 ] || fail "忽略 SIGALRM 的 CLI 也要在時限內殺掉，花了 ${elapsed} 秒"
+assert_eq "$(field "$j" state)" none
+field "$j" error | grep -q '逾時' || fail "error 要說逾時: $(field "$j" error)"
+field "$j" error | grep -q '沒登入' && fail "逾時不該說沒登入: $(field "$j" error)"
+mkdir -p "$FX/noperl"; printf '#!/bin/sh\nexit 127\n' > "$FX/noperl/perl"; chmod +x "$FX/noperl/perl"
+j="$(PATH="$FX/noperl:$PATH" OPSX_MR_TIMEOUT=1 mr_json "$C")"
+field "$j" error | grep -q 'perl' || fail "找不到 perl 要點名: $(field "$j" error)"
+field "$j" error | grep -q '沒登入' && fail "找不到 perl 不該說沒登入: $(field "$j" error)"
+
 # --- drive 仍能用 mr_state（它改成 source mr.sh）---
 grep -q 'bin/lib/mr.sh' "$OPSX_ROOT/bin/lib/drive.sh" || fail "drive.sh 要 source mr.sh，不自己留一份 mr_state"
 ! grep -q '^mr_state()' "$OPSX_ROOT/bin/lib/drive.sh" || fail "drive.sh 裡不該再定義 mr_state"

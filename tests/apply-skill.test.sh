@@ -25,6 +25,10 @@ has 'opsx status apply <total>/<total>' "$SUBS"
 has '--sub <子> --worker session' "$SUBS"
 has 'anything that is not `NEEDS-USER`' "$SUBS"
 
+# --- grant-action：授權 gate 要寫 action:，值取自 hook 的 deny 訊息 ---
+has 'action: <value>' "$SK"
+has "grant hook's deny message" "$SK"
+
 # --- review-fix-in-scope：apply 接 review 退回的 task；pr 在有待修時拒絕 ---
 has '## R<N>. review 退回' "$SK"
 has '測試先紅再修' "$SK"
