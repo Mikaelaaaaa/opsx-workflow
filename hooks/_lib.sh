@@ -28,7 +28,13 @@ repo_top() {
 }
 repo_name() { basename "$(repo_top)"; }
 branch() { git -C "$(hook_cwd)" rev-parse --abbrev-ref HEAD 2>/dev/null || true; }
-card_slug() { local b; b="$(branch)"; case "$b" in */*/*) printf '%s' "$b" | cut -d/ -f2 ;; *) printf '' ;; esac; }
+card_slug() {
+  local t w b; t="$(repo_top)"
+  w="$(git -C "$(hook_cwd)" rev-parse --show-toplevel 2>/dev/null || true)"; [ -n "$w" ] && w="$(cd "$w" && pwd -P)"
+  # dispatch 一律開在 <top>/.claude/worktrees/<slug>，branch 名不一定等於卡名，所以 worktree 根優先
+  if [ -n "$t" ] && [ "$(dirname "$w")" = "$t/.claude/worktrees" ] && [ -d "$(st_card_dir "$t" "${w##*/}")" ]; then printf '%s' "${w##*/}"; return 0; fi
+  b="$(branch)"; case "$b" in */*/*) printf '%s' "$b" | cut -d/ -f2 ;; *) printf '' ;; esac
+}
 card_dir() { local t s d; t="$(repo_top)"; s="$(card_slug)"; [ -n "$t" ] && [ -n "$s" ] && d="$(st_card_dir "$t" "$s")" && [ -d "$d" ] && printf '%s' "$d" || printf ''; }
 card_kind() { st_card_kind "$1"; }
 status_tests() { st_status_tests "$1"; }
