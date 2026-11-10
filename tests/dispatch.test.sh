@@ -134,7 +134,7 @@ unset OPSX_TEST_NOT_READY_ONCE OPSX_TEST_PANE_TEXT
 opsx stop retry-backoff >/dev/null 2>&1 || fail "stop before redispatch"
 : > "$OPSX_FAKE_LOG"
 out="$(opsx dispatch retry-backoff --agent codex --mode interactive 2>&1)" || fail "redispatch: $out"
-assert_grep '^agent start retry-backoff --kind codex --pane w1:pE -- -a on-request -s workspace-write$' "$OPSX_FAKE_LOG"
+assert_grep '^agent start retry-backoff --kind codex --pane w1:pE -- -a on-request -s workspace-write --add-dir '"$R"'/openspec --add-dir '"$OPSX_STATE_DIR"'$' "$OPSX_FAKE_LOG"
 python3 -I -c 'import json,sys;d=json.load(open(sys.argv[1]))["Agentory-CS/retry-backoff"];assert d["agent"]=="codex" and d["model"]=="gpt-5" and d["mode"]=="interactive",d' "$OPSX_STATE_DIR/dispatch.json" || fail "redispatch must rewrite the entry"
 # interactive 的 claude 也要 --add-dir（互動模式一樣在沙盒裡）
 opsx stop retry-backoff >/dev/null 2>&1 || fail "stop before redispatch"

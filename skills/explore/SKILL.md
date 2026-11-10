@@ -166,6 +166,10 @@ This file is the **planning artifact** (not authoritative state) for:
 
 `/apply` reads this to know what to do. `/explore` writes and updates it.
 
+## Milestones
+
+A project's first big explore splits its milestones with the user, each one sentence of 做完時使用者能做到什麼, written to the workplan's top-level `milestones:` (`name` and `goal`; quote both, since the workplan parser splits a `goal` with a colon in it). Every feature you write gets `milestone:` pointing at one of them. `current_milestone` is set only by the user, when they change phase; never set or change it yourself. A project may have no milestones, and the skill names none of its own. Field shapes and how they decide a card's level: `references/priority.md`.
+
 ---
 
 ## Splitting a big card
@@ -181,7 +185,7 @@ status: open
 問題: 照這個拆法建殼、寫 workplan？
 已確認: <the D5 result: which of the three applied>
 拆法:
-  - session <feature> (depends-on: [<PR names>])
+  - session <feature> (milestone: <name or none>, depends-on: [<PR names>])
     - main change <pr> · <branch> (depends-on: [<pr>])
       - sub-change <name> (depends-on: [<sibling sub-change>])
 選項: 照這個拆法 (Recommended) | 改拆法 | 不拆
@@ -196,6 +200,8 @@ A gate's `type` is `approval` (a permission) or `decision` (a choice) and nothin
 2. Each sub-change: `openspec/changes/<main>/subs/<sub>/` with `inbox.md` (frontmatter `parent: <main>`, `depends-on: [<sibling>]`) and `.openspec.yaml` (`schema: opsx`, `kind:`, `parent: <main>`). The openspec CLI does not know about these; `opsx check <main>` does.
 3. `openspec/workplan.yaml`: the features, PRs and changes with all three levels of `depends-on`. No dependency means no waiting.
 4. The original card's inbox frontmatter gets `split_into: <main1>, <main2>`. Its stage becomes `split` and the flow stops there; continue with the first main change that has no unmet dependency.
+
+Every inbox.md you write here, and any card you open while exploring, gets the facts in its frontmatter (`kind_of_work`, plus `impact` and `evidence` for an incident); then run `opsx priority <slug>`, and if it prints P0 without a user override write the `p0-review` gate per `references/priority.md`.
 
 Log the split in decisions.tsv with `opsx log`.
 
