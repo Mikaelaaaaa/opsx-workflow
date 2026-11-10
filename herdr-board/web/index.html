@@ -271,11 +271,31 @@ main{flex:1;min-width:0;padding-left:max(16px,env(safe-area-inset-left,0px));pad
 <script>
 'use strict';
 /* ---------- token、資料 ---------- */
-(function(){
-  /* token 走 fragment（#token=…）：不進 server log、不進 Referer；讀一次存 sessionStorage，網址列抹掉 */
-  const h=new URLSearchParams(location.hash.replace(/^#/,''));const t=h.get('token')||new URLSearchParams(location.search).get('token');
-  try{if(t){sessionStorage.setItem('opsx-token',t);history.replaceState(null,'',location.pathname+'#home');}}catch(e){}
-})();
+/* card deep link start */
+function parseHash(hash){
+  const h=new URLSearchParams(hash.replace(/^#/,''));
+  return {token:h.get('token'),card:h.get('card'),tab:hash==='#log'?'log':hash==='#inbox'?'inbox':'home'};
+}
+/* token 走 fragment（#token=…）：不進 server log、不進 Referer；讀一次存 sessionStorage，網址列抹掉。
+   card 要在抹掉前讀出來；它在不在收件匣要等 collect 才知道，網址列先放 #home */
+function readLoadHash(win){
+  const p=parseHash(win.location.hash);const t=p.token||new URLSearchParams(win.location.search).get('token');
+  try{if(t)win.sessionStorage.setItem('opsx-token',t);if(t||p.card)win.history.replaceState(null,'',win.location.pathname+'#home');}catch(e){}
+  return p.card;
+}
+function deepLinkTarget(cards,cardKey){
+  const c=cards.find(c=>c.repo+'/'+c.slug===cardKey);
+  if(!c)return {tab:'home',missing:true};
+  return {tab:c.section==='收件匣'?'inbox':'home',open:cardKey};
+}
+/* 只在開頁後第一次成功的 collect 處理，之後的刷新不再切 tab 或重開抽屜 */
+function applyDeepLink(env,cards){
+  const k=env.ui.deepLink;if(!k)return;env.ui.deepLink=null;
+  const t=deepLinkTarget(cards,k);env.showTab(t.tab);
+  if(t.missing)env.toast('找不到這張卡',true);else env.openDrawer(t.open);
+}
+/* card deep link end */
+const deepLinkAtLoad=readLoadHash(window);
 function token(){try{return sessionStorage.getItem('opsx-token')||'';}catch(e){return '';}}
 const api={
   async collect(){const r=await fetch('/api/collect',{headers:{'X-Opsx-Token':token()}});if(r.status===401)throw new Error('token 不對：從 herdr 的 open-board 重開一次');if(!r.ok)throw new Error('collect '+r.status+'：'+(await r.text()).slice(0,200));return r.json();},
@@ -284,7 +304,7 @@ const api={
   async post(action,body){const r=await fetch('/api/'+action,{method:'POST',headers:{'X-Opsx-Token':token(),'Content-Type':'application/json'},body:JSON.stringify(body)});const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(action+' '+r.status+'：'+(j.error||j.stderr||''));if(!j.ok)throw new Error((j.stderr||j.stdout||'opsx '+action+' 失敗').trim());return j;}
 };
 let data={generated_at:null,scopes:[],cards:[],sessions:[],unmatched_agents:[],errors:[],legacy:{},worktrees_skipped:[]};let lastRaw='';
-const ui={tab:'home',scope:'all',ws:null,repo:null,sel:null,open:null,doneOpen:false,busy:false,logFilter:'all',drop:null,dropText:'',fileRepo:{},prio:null,prioText:'',prioLevel:null};
+const ui={tab:'home',deepLink:deepLinkAtLoad,scope:'all',ws:null,repo:null,sel:null,open:null,doneOpen:false,busy:false,logFilter:'all',drop:null,dropText:'',fileRepo:{},prio:null,prioText:'',prioLevel:null};
 let tl=null;let tlErr='';let bannerClosed=false;let seenAt=null;  /* 這頁最後一次送給 /api/seen 的時間 */
 const outputs={};  /* 卡 key → {ok, text} 或 {ok:false, error}；抽屜打開時才抓 */
 const REFRESH_MS=5000;
@@ -1041,6 +1061,7 @@ function showCollect(j,force){
   const {generated_at,...rest}=j;const raw=JSON.stringify(rest);
   if(force||raw!==lastRaw){lastRaw=raw;data=j;render();}
   else{data.generated_at=generated_at;$('#stamp').textContent='collect '+ago(generated_at);}
+  applyDeepLink({ui,showTab,openDrawer,toast},j.cards);
 }
 function showCollectError(e){
   if(!lastRaw)setView($('#view'),`<div class="empty" style="color:var(--danger)">${esc(e.message)}</div>`,false);
@@ -1049,7 +1070,7 @@ function showCollectError(e){
 function refresh(force){return runRefresh({live,collect:()=>api.collect(),show:showCollect,fail:showCollectError,schedule},force);}
 function schedule(){clearTimeout(timer);timer=setTimeout(()=>{if(document.hidden){schedule();return;}refresh(false);},REFRESH_MS);}
 document.addEventListener('visibilitychange',()=>{if(!document.hidden){refresh(false);loadLog();}});
-if(location.hash==='#log')showTab('log');else{if(location.hash==='#inbox')ui.tab='inbox';if(location.hash!=='#'+ui.tab)history.replaceState(null,'','#'+ui.tab);loadLog();}
+const tabAtLoad=parseHash(location.hash).tab;if(tabAtLoad==='log')showTab('log');else{ui.tab=tabAtLoad;if(location.hash!=='#'+ui.tab)history.replaceState(null,'','#'+ui.tab);loadLog();}
 refresh(true);
 </script>
 </body>
