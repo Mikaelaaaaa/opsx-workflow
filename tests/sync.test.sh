@@ -273,4 +273,45 @@ printf '[]' > "$OPSX_TEST_ISSUES/gh-z.json"; cp "$GS/issue-view-closed.json" "$O
 opsx sync --root "$ROOT" --source github >/dev/null 2>&1
 assert_grep '^upstream: closed$' "$SI"
 
+# ========== 沒有 repo 的來源寫進待分類（sync-obsidian / sync-unfiled-sink）==========
+# 正式來源都還綁 repo：把 debt 的收集換成固定的、沒有 repo 的 item，再跑 sync.main
+sync_unrepo() { # <items json：[{source, slug, title}]>
+  python3 -I -c 'import json,sys
+sys.path.insert(0, sys.argv[1] + "/bin/lib")
+import sync
+items = [dict(i, repo=None, path=None, type="功能", body=None, evidence="- 測試來源", extra={}) for i in json.loads(sys.argv[2])]
+sync.debt_items = lambda *_: (items, set())
+sys.argv = ["opsx sync", "--state", sys.argv[3], "--opsx-root", sys.argv[1], "--root", sys.argv[4], "--source", "debt"]
+sys.exit(sync.main())' "$OPSX_ROOT" "$1" "$OPSX_STATE_DIR" "$ROOT"; }
+UF="$OPSX_STATE_DIR/unfiled"
+repo_changes() { find "$FX" -path "$OPSX_STATE_DIR" -prune -o -path '*/openspec/changes/*' -print | sort; }
+unfiled_files() { find "$UF" -maxdepth 1 -name '*.md' | sort; }
+
+# --- 沒有 repo 的新項目：寫進待分類，不在任何 repo 建殼，計入新建 ---
+before="$(repo_changes)"
+out="$(sync_unrepo '[{"source":"x:1","slug":"ob-1234abcd","title":"收件夾的筆記"}]' 2>&1)"; assert_eq "$?" 0 "sync unrepo: $out"
+assert_file "$UF/ob-1234abcd.md"; assert_grep '^source: x:1$' "$UF/ob-1234abcd.md"; assert_grep '^收件夾的筆記$' "$UF/ob-1234abcd.md"
+assert_eq "$(repo_changes)" "$before" "沒有 repo 的 item 不能在 repo 建殼"
+assert_eq "$(logcols)" "$(printf '1\t0\t0\t0\t')"
+
+# --- 待分類撞名：依序 -2、-3，原檔不動；同一次同步裡重複的 source 只寫一份 ---
+printf -- '---\ntype: 功能\nsource: me\n---\n\n## 一句話\n\n手動的\n' > "$UF/ob-5678abcd.md"; cp "$UF/ob-5678abcd.md" "$FX/me-unfiled.md"
+sync_unrepo '[{"source":"x:2","slug":"ob-5678abcd","title":"二"},{"source":"x:3","slug":"ob-5678abcd","title":"三"},{"source":"x:2","slug":"ob-5678abcd","title":"二"}]' >/dev/null 2>&1
+assert_eq "$(cat "$UF/ob-5678abcd.md")" "$(cat "$FX/me-unfiled.md")" "撞名的原檔不動"
+assert_grep '^source: x:2$' "$UF/ob-5678abcd-2.md"; assert_grep '^source: x:3$' "$UF/ob-5678abcd-3.md"
+assert_no_file "$UF/ob-5678abcd-4.md"
+assert_eq "$(logcols)" "$(printf '2\t0\t0\t0\t')"
+
+# --- 重跑不重複 ---
+files="$(unfiled_files)"
+sync_unrepo '[{"source":"x:1","slug":"ob-1234abcd","title":"收件夾的筆記"},{"source":"x:2","slug":"ob-5678abcd","title":"二"}]' >/dev/null 2>&1
+assert_eq "$(unfiled_files)" "$files"; assert_eq "$(logcols)" "$(printf '0\t0\t2\t0\t')"
+
+# --- 已捨棄的不再進來 ---
+mkdir -p "$UF/dropped"; mv "$UF/ob-1234abcd.md" "$UF/dropped/"
+files="$(unfiled_files)"
+sync_unrepo '[{"source":"x:1","slug":"ob-1234abcd","title":"收件夾的筆記"}]' >/dev/null 2>&1
+assert_eq "$(unfiled_files)" "$files" "dropped 裡有同 source 就不再寫"
+assert_eq "$(logcols | cut -f1)" 0
+
 echo ok
