@@ -114,7 +114,9 @@ class Round:
         if ago <= datetime.timedelta(minutes=ARCHIVE_GRACE_MINUTES):
             self.log("⏳ %s 已合併，等它自己 /archive" % key)
             return False
-        if c["agent_status"] == "idle":
+        # idle 也可能是在等人回 gate，或互動模式的人暫時離開：那兩種不收，收了等於替人答 gate、關掉人的 session
+        waiting_human = c["open_gates"] or self.dispatch_file[key].get("mode") == "interactive"
+        if c["agent_status"] == "idle" and not waiting_human:
             self.log("-- %s 合併 %d 分鐘了 agent 還 idle，沒人會 /archive，這裡收尾" % (key, minutes))
             return True
         self.log("?? %s 合併 %d 分鐘了還沒歸檔，agent 是 %s，要人看它卡在哪" % (key, minutes, c["agent_status"]))

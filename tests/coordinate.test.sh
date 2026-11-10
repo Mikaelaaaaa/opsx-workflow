@@ -231,6 +231,17 @@ assert_eq "$got" "opsx stop g --repo $R
 openspec archive g -y" "idle 超過 30 分鐘要 stop 再收尾：$(cat "$OPSX_FAKE_LOG")"
 cp "$WP0" "$R/openspec/workplan.yaml"
 
+# --- 收尾：idle 超過 30 分鐘，但卡上有 open gate（在等人回）或是互動模式（人暫時離開），不收尾、記 ?? ---
+cards "[$(merged g "$(ago 40)" "$D" '"idle"' | sed 's/^{/{"open_gates":[{"id":"g9","opened_at":null}],/')]"
+round || fail "rc: $(cat "$FX/out")"
+assert_eq "$(grep -cE '^(opsx stop|openspec archive)' "$OPSX_FAKE_LOG")" 0 "有 open gate 不收尾：$(cat "$OPSX_FAKE_LOG")"
+grep '??' "$LOG" | grep -q g || fail "有 open gate 要記 ??：$(cat "$LOG")"
+printf '{"demo/g":{"mode":"interactive","agent":"claude","pane":"w1:p2","drive_pid":null,"branch":"feat/g/m"}}' > "$DISP"
+cards "[$(merged g "$(ago 40)" "$D" '"idle"')]"
+round || fail "rc: $(cat "$FX/out")"
+assert_eq "$(grep -cE '^(opsx stop|openspec archive)' "$OPSX_FAKE_LOG")" 0 "互動模式不收尾：$(cat "$OPSX_FAKE_LOG")"
+cp "$WP0" "$R/openspec/workplan.yaml"
+
 # --- 收尾：沒派過的卡（dispatch.json 沒有）不收尾，留給人 ---
 rm -f "$DISP"
 cards "[$(merged g 2026-11-07T12:00:00Z null null)]"
