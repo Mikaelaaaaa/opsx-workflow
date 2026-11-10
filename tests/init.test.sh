@@ -114,8 +114,12 @@ outh="$(HOME="$RH" opsx init 2>&1)" && fail "repo 就是 \$HOME 時 opsx init �
 case "$outh" in *"$RH"*) ;; *) fail "訊息要點名路徑：$outh" ;; esac
 RP="$(mk_repo pp)"; mkdir -p "$RP/home"; cd "$RP"
 outh="$(HOME="$RP/home" opsx init 2>&1)" && fail "repo 是 \$HOME 的上層時 opsx init 要失敗：$outh"
+case "$outh" in *"$RP"*上層*) ;; *) fail "要由守衛拒絕並點名路徑：$outh" ;; esac
 RS="$(mk_repo sp)"; cd "$RS"
+# state 目錄要先有 python 檔，不然 opsx 在進 init_repo 之前就因為找不到 python 而失敗，測到的不是守衛
+mkdir -p "$RS/state"; cp "$OPSX_STATE_DIR/python" "$RS/state/python"
 outh="$(OPSX_STATE_DIR="$RS/state" opsx init 2>&1)" && fail "repo 是 state 目錄的上層時 opsx init 要失敗：$outh"
+case "$outh" in *"$RS"*上層*) ;; *) fail "要由守衛拒絕並點名路徑：$outh" ;; esac
 dirs="$(cj "$CR" permissions.additionalDirectories)"
 for r in "$RH" "$RP" "$RS"; do
   case "$dirs" in *"\"$r\""*) fail "$r 不該進可寫目錄：$dirs" ;; esac

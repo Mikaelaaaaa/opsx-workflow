@@ -111,7 +111,7 @@ def main():
     if exists and not os.path.exists(bak):
         shutil.copy2(args.file, bak)
     # 寫到 symlink 指向的真檔（dotfiles），暫存檔放同一個目錄且名字唯一；沿用原檔權限，新檔 0600
-    mode =stat.S_IMODE(os.stat(real).st_mode) if exists else 0o600
+    mode = stat.S_IMODE(os.stat(real).st_mode) if exists else 0o600
     fd, tmp = tempfile.mkstemp(dir=directory, prefix=".settings.", suffix=".tmp")
     with os.fdopen(fd, "w", encoding="utf-8") as f:
         f.write(json.dumps(data, indent=2, ensure_ascii=False) + "\n")
