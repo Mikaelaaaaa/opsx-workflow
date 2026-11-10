@@ -2,6 +2,13 @@
 # 主流程狀態判斷，純函式，參數明示（top、slug）。hook 的 router 和 drive.sh 都用這一份，
 # 所以「下一步是什麼」只有一個答案。要求檔 §8.3 Router 表。
 
+# slug 含 `--` 是子殼：<主>--<子> 對到 changes/<主>/subs/<子>。只印路徑，不檢查存在
+st_card_dir() { # <top> <slug>
+  case "$2" in
+    *--*) printf '%s/openspec/changes/%s/subs/%s' "$1" "${2%%--*}" "${2#*--}" ;;
+    *) printf '%s/openspec/changes/%s' "$1" "$2" ;;
+  esac
+}
 st_card_kind() { local d="$1"; [ -f "$d/.openspec.yaml" ] && sed -n 's/^kind: *//p' "$d/.openspec.yaml" | head -1 || true; }
 st_status_tests() { local d="$1"; [ -f "$d/status.json" ] && jq -r '.tests // "unknown"' "$d/status.json" 2>/dev/null || printf 'unknown'; }
 st_tasks_open() { [ -f "$1/tasks.md" ] || { printf 0; return; }; grep -cE '^\s*- \[ \]' "$1/tasks.md" || true; }
@@ -60,6 +67,7 @@ stage_of() { # <top> <slug>
   if st_workplan_merged "$top" "$slug"; then printf 'archive · %s · %s · skills/archive/SKILL.md\n' "$slug" "$kind"; return; fi
   if [ -f "$d/report.md" ]; then
     if st_mr_in_report "$d"; then printf 'babysit · %s · %s · skills/babysit/SKILL.md（MR 已開，等合併；有留言用 babysit）\n' "$slug" "$kind"
+    elif [ -f "$d/tasks.md" ] && [ "$(st_tasks_open "$d")" -gt 0 ]; then printf 'apply · %s · %s · %s（review 退回了 task，先做完）\n' "$slug" "$kind" "$reads"
     else printf 'pr · %s · %s · skills/pr/SKILL.md · skills/pr/references/mr-note.md\n' "$slug" "$kind"; fi; return
   fi
   if [ -f "$d/tasks.md" ]; then

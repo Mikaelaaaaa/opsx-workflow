@@ -131,6 +131,29 @@ gates; : > "$OPSX_FAKE_LOG"
 printf '{"Agentory-AI/x":{"mode":"autopilot","pane":"p4","agent":"claude","grants":[],"herdr_name":"x"}}' > "$OPSX_STATE_DIR/dispatch.json"
 out="$(opsx answer x --gate g2 "選 B" 2>&1)"; assert_eq "$?" 0 "續接卡 answer: $out"
 assert_grep '^agent prompt x 選 B$' "$OPSX_FAKE_LOG"
+# feature session 代管的主 change（opsx dispatch --feature 寫的形狀）：送到 feature 名的 session，前綴 [<主>]
+gates; : > "$OPSX_FAKE_LOG"
+printf '{"Agentory-AI/x":{"mode":"autopilot","pane":"p4","agent":"claude","grants":[],"herdr_name":"fs","via":"fs","feature":"fs"}}' > "$OPSX_STATE_DIR/dispatch.json"
+out="$(opsx answer x --gate g2 "選 B" 2>&1)"; assert_eq "$?" 0 "session 代管卡 answer: $out"
+assert_grep '^agent prompt fs \[x\] 選 B$' "$OPSX_FAKE_LOG"
+
+# --- 舊寫法的授權 gate 可以 --grant；type 不明不行（gate-type-normalize） ---
+printf '{"Agentory-AI/x":{"mode":"autopilot","pane":"p4","agent":"x","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"
+printf '# grants\n' > "$OPSX_STATE_DIR/grants.toml"; rm -rf "$PD"
+printf '## g1\ntype: authorization\naction: push\nstatus: open\n問題: push？\n\n## g2\ntype: approval-ish\naction: push\nstatus: open\n問題: ？\n\n## g3\naction: push\nstatus: open\n問題: 沒寫 type\n\n## g4\ntype: 等待授權\naction: push\nstatus: open\n問題: push？\n' > "$C/gates.md"
+cp "$C/gates.md" "$FX/before.md"
+out="$(opsx answer x --gate g2 --grant card "允許" 2>&1)"; [ $? -ne 0 ] || fail "表外的 type 不能 --grant"
+echo "$out" | grep -q 'approval-ish' || fail "訊息要印原始值：$out"
+out="$(opsx answer x --gate g3 --grant card "允許" 2>&1)"; [ $? -ne 0 ] || fail "沒寫 type 不能 --grant"
+echo "$out" | grep -q '沒寫 type' || fail "訊息要說沒寫 type：$out"
+cmp -s "$C/gates.md" "$FX/before.md" || fail "拒絕時 gates.md 不該變"
+assert_no_file "$PD/authz.json"   # 拒絕時不該有授權寫入（受保護位置連檔都不該出現）
+out="$(opsx answer x --gate g1 --grant card "允許" 2>&1)"; assert_eq "$?" 0 "authorization 要能授權：$out"
+assert_eq "$(jq -c '."Agentory-AI/x".grants' "$PD/authz.json")" '["push"]' "authorization 的授權要落在受保護位置"
+rm -rf "$PD"   # g1 的授權已留下 push，不清掉的話下面的斷言就算 g4 什麼都沒寫也會過
+out="$(opsx answer x --gate g4 --grant card "允許" 2>&1)"; assert_eq "$?" 0 "等待授權 要能授權：$out"
+assert_eq "$(jq -c '."Agentory-AI/x".grants' "$PD/authz.json")" '["push"]' "等待授權 的授權要自己落在受保護位置"
+awk '/^## g4/{f=1} f' "$C/gates.md" | grep -q '^status: answered' || fail "g4 要 answered"
 
 # --- 子 change：--sub 回 subs/<子>/gates.md，decisions 記子殼，主 change 的檔不動（board-tree answer-sub）---
 mk_change "$R" bt; B="$R/openspec/changes/bt"; S="$B/subs/as"; mkdir -p "$S"
@@ -169,11 +192,13 @@ chmod -R u+w "$PD" 2>/dev/null; rm -rf "$PD"
 subgates; printf '{"Agentory-AI/bt":{"mode":"autopilot","pane":"p5","agent":"claude","grants":[],"herdr_name":"fb"}}' > "$OPSX_STATE_DIR/dispatch.json"
 out="$(opsx answer bt --sub as --gate g2 --grant card 允許 2>&1)"; assert_eq "$?" 0 "sub card: $out"
 assert_eq "$(jq -c '."Agentory-AI/bt".grants' "$PD/authz.json")" '["push"]'
+assert_eq "$(jq -c '."Agentory-AI/bt".once // []' "$PD/authz.json")" '[]' "card 不該寫進 once"
 assert_eq "$(jq -c '."Agentory-AI/bt".grants' "$OPSX_STATE_DIR/dispatch.json")" '[]' "card 授權不該寫進 dispatch.json"
 assert_eq "$(tail -1 "$S/decisions.tsv" | cut -f2-5)" $'你\t已允許\t允許\tg2 · card'
-subgates
+subgates; rm -rf "$PD"
 out="$(opsx answer bt --sub as --gate g2 --grant this 允許 2>&1)"; assert_eq "$?" 0 "sub this: $out"
 assert_eq "$(jq -c '."Agentory-AI/bt".once' "$PD/authz.json")" '["push"]'
+assert_eq "$(jq -c '."Agentory-AI/bt".grants // []' "$PD/authz.json")" '[]' "這次不該變成卡級授權"
 assert_eq "$(jq -c 'keys' "$PD/authz.json")" '["Agentory-AI/bt"]' "子 change 沒有自己的授權條目"
 assert_eq "$(jq -c 'keys' "$OPSX_STATE_DIR/dispatch.json")" '["Agentory-AI/bt"]' "子 change 不進 dispatch.json"
 assert_no_file "$B/decisions.tsv"

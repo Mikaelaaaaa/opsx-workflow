@@ -6,6 +6,8 @@
 用法：coordinate.py <state dir> [--dry]
 """
 import datetime
+import functools
+import glob
 import json
 import os
 import re
@@ -14,6 +16,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import chain  # noqa: E402
+import jsonfile  # noqa: E402
 
 MAX_DISPATCH = 6
 REDISPATCH_MINUTES = 10
@@ -139,7 +142,8 @@ class Round:
         key = card_key(c)
         entry = self.dispatch_file.get(key)
         self.log("++ %s 已在 forge 合併、agent 不在，收尾" % key)
-        if entry and entry.get("mode") != "stopped":
+        shared = self.session_siblings(key, entry, top)
+        if entry and entry.get("mode") != "stopped" and not shared:
             self.act(["opsx", "stop", c["slug"], "--repo", top])
         if not self.mark_merged(top, c["slug"]):
             return False
@@ -147,6 +151,16 @@ class Round:
         if rc != 0:
             self.log("?? %s openspec archive 失敗：%s" % (key, err[:200]))
             return False
+        if shared:
+            # pane 與 worktree 是同 feature 的 session 共用的，它還在做 shared 這幾張：不送 opsx stop（會打到 session），
+            # 只把這張的條目標 stopped，之後算「session 還有誰活著」、開新 session 撞名檢查才不會把它算進去
+            self.log("-- %s 的 session %s 還在做 %s，不 stop pane、不移除 worktree，只標條目 stopped" % (key, entry["feature"], "、".join(shared)))
+            entry["mode"] = "stopped"
+            if self.dry:
+                self.log("DRY dispatch.json %s 標 stopped" % key)
+            else:
+                jsonfile.update(os.path.join(self.state, "dispatch.json"), functools.partial(mark_stopped, key=key, at=self.now.isoformat(timespec="seconds")))
+            return True
         # 沒記 worktree 的是早期派的卡，當時 worktree 一律開在這裡
         wt = entry["worktree"] if entry and entry.get("worktree") else os.path.join(top, ".claude", "worktrees", c["slug"])
         if os.path.isdir(wt):
@@ -171,8 +185,17 @@ class Round:
         if pr is None:
             self.log("-- %s 不在 %s，沒有 PR 要標 merged" % (slug, path))
             return True
-        pending = [x.get("name") for x in pr.get("changes") or [] if x.get("name") != slug and x.get("status") != "done"]
-        marks = [("changes", slug, "done")] + ([] if pending else [("prs", pr["name"], "merged")])
+        names = [x.get("name") for x in pr.get("changes") or []]
+        if slug not in names:
+            # 主 change 合併：PR 標 merged，還沒 done 的子 change 一起標 done
+            pending, archived = [], []
+            marks = [("changes", x.get("name"), "done") for x in pr.get("changes") or [] if x.get("status") != "done"] + [("prs", pr["name"], "merged")]
+        else:
+            # drop 與手動 openspec archive 只搬目錄、不改 workplan；只是目錄不在的可能還沒 propose，不算
+            unfinished = [x.get("name") for x in pr.get("changes") or [] if x.get("name") != slug and x.get("status") != "done"]
+            archived = [n for n in unfinished if is_archived(top, n)]
+            pending = [n for n in unfinished if n not in archived]
+            marks = [("changes", n, "done") for n in [slug] + archived] + ([] if pending else [("prs", pr["name"], "merged")])
         if self.dry:
             self.log("DRY workplan %s 標 %s" % (path, "、".join("%s %s" % (n, v) for _, n, v in marks)))
             return True
@@ -189,6 +212,8 @@ class Round:
             f.write("\n".join(lines))
         os.replace(tmp, path)
         self.plans.pop(top, None)
+        if archived:
+            self.log("ok   workplan 的 change %s 已歸檔、沒更新，跟著標 done" % "、".join(archived))
         if pending:
             self.log("ok   workplan 的 change %s 標 done；PR %s 還有 %s 沒 done，不標 merged" % (slug, pr["name"], "、".join(pending)))
         else:
@@ -206,6 +231,9 @@ class Round:
     def handle_gate(self, c, top):
         """派出去的卡的第一個 open gate，照固定規則答、停、或留給人。"""
         w, key = c["waiting"], card_key(c)
+        if w.get("needs") == "run":
+            self.log("?? %s gate %s 要人在終端機跑指令再貼結果，不代答：%s" % (key, w["gate_id"], (w.get("recommended") or "")[:100]))
+            return
         if w["type"] == "等待授權":
             # 合併永遠由人按：action 不一定剛好寫成 merge（mr-merge、external 打合併 API），題目也要看
             if any(k in ((w["action"] or "") + " " + (w.get("question") or "")).lower() for k in MERGE_WORDS):
@@ -215,6 +243,9 @@ class Round:
             return
         if w["type"] == "終端機等待輸入":
             self.log("?? %s 在 pane %s 等終端機輸入（autopilot 不該問 pane），要人看" % (key, c["dispatch"].get("pane")))
+            return
+        if w["type"] == "type 不明":
+            self.log("?? %s gate %s 的 type 沒寫或不在 approval | decision，不代答，要人看：%s" % (key, w["gate_id"], (w.get("question") or "")[:100]))
             return
         q = w.get("question") or ""
         pick = w.get("recommended") or (w.get("options") or [None])[0]
@@ -245,7 +276,42 @@ class Round:
             return
         self.answer(c, top, w["gate_id"], pick)
 
+    def session_siblings(self, key, entry, top):
+        """條目帶 feature 時，同 repo、同 feature、還沒停掉、卡還沒歸檔的其他卡的 key。
+        session 共用時歸檔的卡條目不標 stopped（標了要送 stop 給共用的 pane），所以用卡的資料夾還在不在判斷。"""
+        if not entry or not entry.get("feature"):
+            return []
+        repo = key.split("/", 1)[0]
+        return [k for k, v in self.dispatch_file.items()
+                if k != key and k.startswith(repo + "/") and v.get("feature") == entry["feature"] and v.get("mode") != "stopped"
+                and os.path.isdir(os.path.join(top, "openspec", "changes", k.split("/", 1)[1]))]
+
+    def redispatch_feature(self, c, top, why):
+        """session 的 pane 不在了：同 feature 每張沒停的卡 stop 一次，再整個 feature 重派一次。memo 以 <repo>/@<feature> 記。"""
+        feature = c["dispatch"]["feature"]
+        key = "%s/@%s" % (c["repo"], feature)
+        last = self.memo["_redispatched"].get(key)
+        if last and self.now - datetime.datetime.fromisoformat(last) < datetime.timedelta(minutes=REDISPATCH_MINUTES):
+            self.log("-- %s %s，%d 分鐘內重派過，這輪不再派" % (key, why, REDISPATCH_MINUTES))
+            return
+        if "agent" not in c["dispatch"]:
+            self.log("?? %s %s，但 dispatch.json 沒記 agent，不知道派給誰" % (key, why))
+            return
+        self.log("!! %s %s，各卡 stop 後整個 feature 重派" % (key, why))
+        mine = card_key(c)
+        for k in sorted([mine] + self.session_siblings(mine, self.dispatch_file.get(mine), top)):
+            self.act(["opsx", "stop", k.split("/", 1)[1], "--repo", top])
+            self.dispatch_file[k]["mode"] = "stopped"
+        rc, _, err = self.act(["opsx", "dispatch", "--feature", feature, "--agent", c["dispatch"]["agent"], "--mode", "autopilot", "--repo", top])
+        if rc != 0:
+            self.log("?? %s 重派開不了 session：%s" % (key, err[:200]))
+            return
+        self.memo["_redispatched"][key] = self.now.isoformat(timespec="seconds")
+
     def redispatch(self, c, top, why):
+        if c["dispatch"].get("feature"):
+            self.redispatch_feature(c, top, why)
+            return
         key = card_key(c)
         last = self.memo["_redispatched"].get(key)
         if last and self.now - datetime.datetime.fromisoformat(last) < datetime.timedelta(minutes=REDISPATCH_MINUTES):
@@ -296,6 +362,10 @@ class Round:
                 continue   # 人在板上停掉的
             if not os.path.isfile(os.path.join(c["path"], "tasks.md")) or c["mr"]:
                 continue
+            owner, waiting = self.feature_wait(top, c["slug"])
+            if waiting:
+                self.log("⏳ %s 的 feature %s 等 %s merged 才派" % (key, owner, "、".join(waiting)))
+                continue
             missing = deps_unmerged(c["slug"], self.workplan(top))
             if missing:
                 self.log("⏳ %s 等 %s merged 才派" % (key, "、".join(missing)))
@@ -321,6 +391,25 @@ class Round:
                 continue
             self.memo["_parked"].pop(key, None)
 
+    def feature_wait(self, top, slug):
+        """卡所屬的 feature 名，與它 depends-on 裡還沒合併的 PR。coordinate 不自動開 session
+        （等 session-entry 卡重構 session 條目），所以有依賴的 feature 的卡等依賴合了照單卡派。"""
+        prs = self.workplan(top)
+        pr = pr_of(prs, slug)
+        if pr is None:
+            return None, []
+        status = {p.get("name"): p.get("status") for p in prs}
+        for f in session_features(read_features(os.path.join(top, "openspec", "workplan.yaml"))):
+            if any(p.get("name") == pr.get("name") for p in f.get("prs") or []):
+                return f.get("name"), [d for d in f["depends-on"] if status.get(d) != "merged"]
+        return None, []
+
+
+def mark_stopped(d, key, at):
+    """jsonfile.update 的 mutate：條目標 stopped，不碰 pane。"""
+    d[key]["mode"] = "stopped"
+    d[key]["stopped_at"] = at
+
 
 def card_key(c):
     return "%s/%s" % (c["repo"], c["slug"])
@@ -338,11 +427,16 @@ def read_json(path, what):
         raise CoordinateError("%s（%s）不是合法 JSON：%s" % (what, path, e)) from e
 
 
-def read_prs(path):
-    """workplan.yaml 所有 feature 底下的 PR，用 chain.py 同一個 parser。沒有檔就是沒有 PR、沒有依賴。"""
+def read_features(path):
+    """workplan.yaml 的 features，用 chain.py 同一個 parser。沒有檔就是沒有 feature。"""
     if not os.path.exists(path):
         return []
-    return [pr for f in chain.load_workplan(path).get("features") or [] for pr in f.get("prs") or []]
+    return chain.load_workplan(path).get("features") or []
+
+
+def read_prs(path):
+    """workplan.yaml 所有 feature 底下的 PR。沒有檔就是沒有 PR、沒有依賴。"""
+    return [pr for f in read_features(path) for pr in f.get("prs") or []]
 
 
 def merged_prs(prs):
@@ -350,11 +444,13 @@ def merged_prs(prs):
 
 
 def pr_of(prs, slug):
-    """change 所屬的 PR（PR 名常常跟 change 名不同）；workplan 裡沒有就是 None。"""
-    for pr in prs:
-        if any(c.get("name") == slug for c in pr.get("changes") or []):
-            return pr
-    return None
+    """卡所屬的 PR：卡名是 PR 名（主 change）或 PR 底下的 change 名；workplan 裡沒有就是 None。"""
+    return chain.find_pr(prs, slug)
+
+
+def session_features(features):
+    """有 depends-on 的 feature：它的卡要等 feature 的依賴都合併才派。"""
+    return [f for f in features if f.get("depends-on")]
 
 
 def deps_unmerged(slug, prs):
@@ -363,6 +459,20 @@ def deps_unmerged(slug, prs):
         return []
     status = {p.get("name"): p.get("status") for p in prs}
     return [d for d in pr.get("depends-on") or [] if status.get(d) != "merged"]
+
+
+def is_archived(top, name):
+    """change 目錄不在了，而且 openspec archive 留下了 <日期>-<name>。"""
+    changes = os.path.join(top, "openspec", "changes")
+    return not os.path.isdir(os.path.join(changes, name)) and bool(glob.glob(os.path.join(changes, "archive", "????-??-??-" + glob.escape(name))))
+
+
+def waiting_on(prs, slug):
+    """depends-on 裡有這張卡所屬的 PR、自己還沒 merged 的 PR 名。"""
+    pr = pr_of(prs, slug)
+    if pr is None:
+        return []
+    return [p.get("name") for p in prs if pr["name"] in (p.get("depends-on") or []) and p.get("status") != "merged"]
 
 
 def status_line(lines, key, name):
@@ -423,7 +533,8 @@ def main():
     orphans = []
     for c in merged:
         if card_key(c) not in r.dispatch_file:
-            r.log("-- %s 已合併但從沒派過，歸檔留給人" % card_key(c))
+            waiting = waiting_on(r.workplan(repo_paths[c["repo"]]), c["slug"])
+            r.log("?? %s 已合併但從沒派過，歸檔留給人%s" % (card_key(c), "；在等它的 PR：" + "、".join(waiting) if waiting else ""))
         elif owner_gone(c) or r.nobody_archiving(c):
             orphans.append(c)
     done = []
@@ -444,6 +555,7 @@ def main():
         elif drive_dead(c["dispatch"]):
             r.redispatch(c, repo_paths[c["repo"]], "drive pid %s 已經不在" % c["dispatch"]["drive_pid"])
     r.dispatch_new(live, repo_paths)
+    r.act(["opsx", "reap"])   # 失敗 act 已經記 log；孤兒的判斷與關閉條件都在 opsx reap
     r.save()
     r.log("== 結束：%d 張卡，收尾 %d 張" % (len(live), len(done)))
 

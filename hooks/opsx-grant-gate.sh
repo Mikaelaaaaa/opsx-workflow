@@ -5,17 +5,20 @@
 source "$(dirname "${BASH_SOURCE[0]}")/_lib.sh"
 
 top="$(repo_top)"; slug="$(card_slug)"
+slug="${slug%%--*}"   # 子殼分支 <主>--<子> 沒有自己的 dispatch.json 條目，照主 change 的模式與授權
 [ -n "$top" ] || exit 0
 repo="$(repo_name)"
 # 對不到卡（分支不是三段，或 key 不在 dispatch.json，例如 subagent 的 worktree-agent-<id>、fanout 子分支）：
 # repo 有 autopilot / drive 的卡在跑時只管第三級；第二級沒有卡可查授權，放行。
 UNMAPPED=0
 mode=""
-# dispatch.json 壞掉時讀不到模式，就退回比對檔案原文：裡面有這個 repo 的卡（key 前綴）才擋，沒有就不管。
+# dispatch.json 壞掉時讀不到模式，就退回比對檔案原文：有 slug 的分支，裡面有這張卡的 key 才擋；
+# 沒有 slug 的分支（對不到任何卡），裡面有這個 repo 的卡（key 前綴）才擋。沒有就不管。
 # 讀不到檔時，$(<…) 會是空字串、比對不到，所以要先擋。
 dispatch_broken() {
+  local needle="\"$repo/$slug"; [ -n "$slug" ] && needle="$needle\""
   [ -r "$OPSX_STATE_DIR/dispatch.json" ] || deny "opsx 授權閘門：讀不到 $OPSX_STATE_DIR/dispatch.json，分不出 $repo 的卡的模式，先擋下。檢查這個檔案的權限"
-  [[ $(<"$OPSX_STATE_DIR/dispatch.json") == *"\"$repo/"* ]] || exit 0
+  [[ $(<"$OPSX_STATE_DIR/dispatch.json") == *"$needle"* ]] || exit 0
   deny "opsx 授權閘門：$OPSX_STATE_DIR/dispatch.json 不是合法 JSON，讀不到 $repo 的卡的模式，先擋下。修好這個檔案"
 }
 if [ -n "$slug" ]; then
@@ -36,7 +39,7 @@ fi
 PY_FAIL="opsx 授權閘門：python 執行失敗（${OPSX_PY}），讀不到授權，先擋下。跑 opsx init --global"
 
 tool="$(hook_tool)"; cmd="$(hook_cmd)"; file="$(hook_file)"
-GATE_MSG="用 Edit 或 Write 寫 gates.md（type、問題、建議、證據、風險、沒回答的預設；不要用 Bash 寫，opened_at 不用寫，hook 會補），然後做能做的；人在板上回了會自動繼續"
+GATE_MSG="用 Edit 或 Write 寫 gates.md（type: approval | decision，要使用者在終端機跑指令的另加 needs: run；問題、建議、證據、風險、沒回答的預設；不要用 Bash 寫，opened_at 不用寫，hook 會補），然後做能做的；人在板上回了會自動繼續"
 
 level3() { deny "opsx 授權閘門：「$1」是永遠要人的動作（第三級），任何授權蓋不掉。$GATE_MSG"; }
 
