@@ -6,9 +6,11 @@
 用法：coordinate.py <state dir> [--dry]
 """
 import datetime
+import errno
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 
@@ -78,7 +80,7 @@ class Round:
         if herdr:
             raise CoordinateError("herdr 讀不到，agent 狀態不可得，這輪不動：%s" % "；".join(herdr))
         self.memo = read_json(self.memo_path, "coordinator memo")
-        for k in ("_parked", "_redispatched"):
+        for k in ("_parked", "_redispatched", "_notified"):
             self.memo.setdefault(k, {})   # 沒有這個 key 就是還沒記過任何一張
         self.dispatch_file = read_json(os.path.join(self.state, "dispatch.json"), "dispatch.json")
         return data
@@ -203,6 +205,22 @@ class Round:
         elif rc != 0:
             self.log("?? %s gate %s 回不了：%s" % (card_key(c), gate, err[:200]))
 
+    def notify(self, c, kind, ident, event, body):
+        """這裡處理不了、要人去處理的事。每輪從狀態重算，送過的鍵記在 _notified，所以事件觸發那輪漏掉的由定時那輪補，也不會重送。
+        herdr 的通知沒有點擊動作，內文要寫去哪裡處理。"""
+        key = "%s/%s/%s" % (card_key(c), kind, ident)
+        if key in self.memo["_notified"]:
+            return
+        rc, out, err = self.act(["herdr", "notification", "show", "[%s] %s" % (card_key(c), event),
+                                 "--body", body, "--sound", "request"])
+        if rc != 0:
+            self.log("?? 通知 %s 送不出去，下一輪再送：%s" % (key, (err or out).replace("\n", " ")[:200]))
+            return
+        self.memo["_notified"][key] = self.now.isoformat(timespec="seconds")
+
+    def notify_gate(self, c, w, why):
+        self.notify(c, "gate", w["gate_id"], "gate %s %s" % (w["gate_id"], why), "看板：" + one_line(w.get("question") or ""))
+
     def handle_gate(self, c, top):
         """派出去的卡的第一個 open gate，照固定規則答、停、或留給人。"""
         w, key = c["waiting"], card_key(c)
@@ -210,11 +228,14 @@ class Round:
             # 合併永遠由人按：action 不一定剛好寫成 merge（mr-merge、external 打合併 API），題目也要看
             if any(k in ((w["action"] or "") + " " + (w.get("question") or "")).lower() for k in MERGE_WORDS):
                 self.log("?? %s gate %s 要合併授權，不代答：合併由人在板上按" % (key, w["gate_id"]))
+                self.notify_gate(c, w, "要合併授權")
                 return
             self.answer(c, top, w["gate_id"], "允許", grant=True)
             return
         if w["type"] == "終端機等待輸入":
-            self.log("?? %s 在 pane %s 等終端機輸入（autopilot 不該問 pane），要人看" % (key, c["dispatch"].get("pane")))
+            pane = c["dispatch"].get("pane")
+            self.log("?? %s 在 pane %s 等終端機輸入（autopilot 不該問 pane），要人看" % (key, pane))
+            self.notify(c, "blocked", pane, "在終端機等輸入", "pane %s：%s" % (pane, one_line(w.get("question") or "")))
             return
         q = w.get("question") or ""
         pick = w.get("recommended") or (w.get("options") or [None])[0]
@@ -230,6 +251,7 @@ class Round:
         # merge 永遠人：合併授權綁 head sha，代答「重試合併」這類題就等於替人決定合併
         if any(k in text.lower() for k in MERGE_WORDS):
             self.log("?? %s gate %s 是合併類決定題，不代答：%s → %s" % (key, w["gate_id"], q[:100], (pick or "")[:60]))
+            self.notify_gate(c, w, "是合併的決定")
             return
         if any(k in q for k in VERIFY_WORDS):
             self.answer(c, top, w["gate_id"], VERIFY_ANSWER)
@@ -239,9 +261,11 @@ class Round:
             return
         if not pick:
             self.log("?? %s gate %s 沒有選項也沒有建議，要人看：%s" % (key, w["gate_id"], q[:120]))
+            self.notify_gate(c, w, "沒有選項也沒有建議")
             return
         if any(k in pick for k in HUMAN_WORDS) or any(k in q for k in HUMAN_QUESTION):
             self.log("?? %s gate %s 要人動手，不代答：%s → %s" % (key, w["gate_id"], q[:100], pick[:60]))
+            self.notify_gate(c, w, "要你動手")
             return
         self.answer(c, top, w["gate_id"], pick)
 
@@ -250,6 +274,8 @@ class Round:
         last = self.memo["_redispatched"].get(key)
         if last and self.now - datetime.datetime.fromisoformat(last) < datetime.timedelta(minutes=REDISPATCH_MINUTES):
             self.log("-- %s %s，%d 分鐘內重派過，這輪不再派" % (key, why, REDISPATCH_MINUTES))
+            self.notify(c, "dead", last, "重派後 %d 分鐘內又掛了" % REDISPATCH_MINUTES,
+                        "pane %s：%s；看板上重派或停掉" % (c["dispatch"].get("pane"), why))
             return
         if "agent" not in c["dispatch"]:
             self.log("?? %s %s，但 dispatch.json 沒記 agent，不知道派給誰" % (key, why))
@@ -326,6 +352,10 @@ def card_key(c):
     return "%s/%s" % (c["repo"], c["slug"])
 
 
+def one_line(text):
+    return text.split("\n", 1)[0][:100]
+
+
 def read_json(path, what):
     """不存在等於空的；存在但讀不懂就失敗，不當成空的（parked 會無聲消失）。"""
     if not os.path.exists(path):
@@ -397,6 +427,67 @@ def drive_dead(disp):
     return False
 
 
+def pid_alive(pid):
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def lock_pid(lock):
+    """lock 裡記的 pid；lock 剛好被放掉時是 None。"""
+    try:
+        with open(os.path.join(lock, "pid"), encoding="utf-8") as f:
+            return int(f.read().strip())
+    except FileNotFoundError:
+        return None
+
+
+def try_lock(lock):
+    # 先在旁邊的目錄寫好 pid 再 rename 成 lock：別人看到 lock 時裡面一定已經有 pid，不會把剛拿到的誤認成死掉的
+    tmp = "%s.%d" % (lock, os.getpid())
+    os.mkdir(tmp)
+    with open(os.path.join(tmp, "pid"), "w", encoding="utf-8") as f:
+        f.write("%d\n" % os.getpid())
+    try:
+        os.rename(tmp, lock)
+    except OSError as e:
+        shutil.rmtree(tmp)
+        if e.errno in (errno.EEXIST, errno.ENOTEMPTY):
+            return False
+        raise
+    return True
+
+
+def take_lock(lock):
+    """macOS 沒有 flock，用目錄當 lock。持有者的 pid 不在了（被 kill -9）就清掉重拿一次。"""
+    if try_lock(lock):
+        return True
+    pid = lock_pid(lock)
+    if pid is not None and pid_alive(pid):
+        return False
+    try:
+        drop_lock(lock)
+    except FileNotFoundError:
+        pass   # 持有者剛好自己放掉了
+    return try_lock(lock)
+
+
+def drop_lock(lock):
+    # 先改名再刪：刪到一半的空目錄會被別人的 rename 蓋過去
+    old = "%s.old.%d" % (lock, os.getpid())
+    os.rename(lock, old)
+    shutil.rmtree(old)
+
+
+def release_lock(lock):
+    if lock_pid(lock) == os.getpid():
+        drop_lock(lock)
+
+
 def is_merged(c):
     """forge 說合了才算；只看 workplan 的 merged 不算，那可能是卡自己 /archive 做到一半。"""
     return bool(c["mr"] and c["mr"]["merged_at"])
@@ -408,13 +499,33 @@ def owner_gone(c):
 
 
 def main():
-    state = sys.argv[1]
-    r = Round(state, "--dry" in sys.argv[2:])
+    state, dry = sys.argv[1], "--dry" in sys.argv[2:]
+    lock = os.path.join(state, "coordinator.lock")
+    rerun = os.path.join(state, "coordinator.rerun")
+    if not take_lock(lock):
+        # 不等也不搶：同時跑兩輪會答同一個 gate、重派同一張卡兩次。拿著 lock 的那輪結束前會看到記號補跑
+        with open(rerun, "w", encoding="utf-8"):
+            pass
+        Round(state, dry).log("-- 另一輪 coordinator 在跑（pid %s），留下重跑記號" % lock_pid(lock))
+        return 0
+    try:
+        rc = one_round(state, dry)
+        # 補跑一次為限：事件連發時不一直跑下去，之後的記號留給下一次
+        if os.path.exists(rerun):
+            os.remove(rerun)
+            rc = one_round(state, dry) or rc
+    finally:
+        release_lock(lock)
+    return rc
+
+
+def one_round(state, dry):
+    r = Round(state, dry)
     try:
         data = r.load()
     except CoordinateError as e:
         r.log("!! coordinator 這輪不跑：%s" % e)
-        sys.exit(1)
+        return 1
     r.log("== coordinator 開始" + ("（dry）" if r.dry else ""))
     repo_paths = data["repo_paths"]
     cards = [c for c in data["cards"] if not c["archived"]]
@@ -436,6 +547,9 @@ def main():
         w = c["waiting"]
         if c["dispatch"] and w and w["type"] != "可以合併":
             r.handle_gate(c, repo_paths[c["repo"]])
+        if c["mr"] and c["mr"]["state"] == "ready":
+            # 推了新 commit 再全綠是新的一次可以合併，所以綁 head sha
+            r.notify(c, "ready", c["mr"]["head_sha"], "可以合併", "看板按「合併」：" + c["mr"]["url"])
     for c in live:
         if not c["dispatch"] or card_key(c) in r.memo["_parked"]:
             continue
@@ -446,7 +560,8 @@ def main():
     r.dispatch_new(live, repo_paths)
     r.save()
     r.log("== 結束：%d 張卡，收尾 %d 張" % (len(live), len(done)))
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

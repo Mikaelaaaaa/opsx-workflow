@@ -3,10 +3,11 @@
 # 在 status 行下面補 opened_at（本機時間，offset 帶冒號）。時間由機器產生，agent 手寫的會寫錯時區或忘了寫。
 # 工具已經跑完，這支擋不了什麼：讀不到、寫不回都安靜結束，不能卡住 agent。
 # OPSX_NOW 只給測試固定時間用。
-# 不 source _lib.sh：它開 set -e 並載入 python，這支只要 jq 與 awk，失敗也不能讓 hook 報錯。
+# 不 source _lib.sh：它開 set -e 並載入 python，這支只要 jq 與 awk（叫 opsx 是另起 process，失敗不管），失敗也不能讓 hook 報錯。
 set -uo pipefail
+root="${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 # shellcheck source=/dev/null
-source "${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}/bin/lib/common.sh"
+source "$root/bin/lib/common.sh"
 
 file="$(jq -r '.tool_input.file_path // empty' 2>/dev/null)" || exit 0
 case "$file" in */openspec/changes/*/gates.md) ;; *) exit 0 ;; esac
@@ -32,7 +33,13 @@ new="$(awk -v now="$now" '
   END { flush() }
 ' "$file")" || exit 0
 
-[ "$new" = "$(cat "$file")" ] && exit 0
-tmp="$file.tmp.$$"
-printf '%s\n' "$new" > "$tmp" && mv "$tmp" "$file"
+if [ "$new" != "$(cat "$file")" ]; then
+  tmp="$file.tmp.$$"
+  printf '%s\n' "$new" > "$tmp" && mv "$tmp" "$file"
+fi
+
+# 有 gate 等人就叫 coordinate 馬上跑一輪（規則答得了的答、答不了的通知人），不等 launchd 的 5 分鐘。--kick 放背景就回
+if grep -qE '^status:[[:blank:]]*open[[:blank:]]*$' "$file"; then
+  bash "$root/bin/opsx" coordinate --kick >/dev/null 2>&1
+fi
 exit 0
