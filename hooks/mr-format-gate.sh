@@ -4,10 +4,10 @@
 source "$(dirname "${BASH_SOURCE[0]}")/_lib.sh"
 
 cmd="$(hook_cmd)"
-# 先剝掉 heredoc 本體與引號字串，剩下的字串任何位置出現 create / edit 類子命令就檢查：
-# 不限命令位置，then、do、sudo、env、絕對路徑前綴都要擋。剝的方向一律偏少：
-# 單引號只在字首才算開頭（it's 的撇號不算），反斜線跳脫不算引號。description 的抽取在下面仍讀原始 $cmd。
-printf '%s' "$cmd" | perl -e 'local $/; $_ = <STDIN> // ""; s/(?<!<)(<<-?\s*([\x27"]?)(\w+)\2[^\n]*)\n.*?\n[ \t]*\3[ \t]*(?:\n|\z)/$1\n/sg; s/(\\.)|"(?:[^"\\]|\\.)*"|(?<![\w\\])\x27[^\x27]*\x27/defined $1 ? $1 : q("")/sge; exit(/\b(?:gh\s+pr\s+(?:create|edit)|glab\s+mr\s+(?:create|update))\b/ ? 0 : 1)' || exit 0
+# 在指令骨架上找 create / edit 類子命令：不限命令位置，then、do、sudo、env、絕對路徑前綴都要擋。
+# description 的抽取在下面仍讀原始 $cmd。
+sk="$(cmd_skeleton "$cmd")" || deny "opsx MR 閘門：perl 執行失敗，讀不到指令骨架，先擋下。確認 perl 可用"
+printf '%s' "$sk" | grep -qE '\b(gh[[:space:]]+pr[[:space:]]+(create|edit)|glab[[:space:]]+mr[[:space:]]+(create|update))\b' || exit 0
 
 desc=""
 # -F / --description-file / --body-file <path>

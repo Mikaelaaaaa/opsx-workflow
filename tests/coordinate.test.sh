@@ -7,6 +7,8 @@ mkdir -p "$R/openspec/changes"
 use_fakes opsx git openspec gh herdr
 export OPSX_FAKE_LOG="$FX/fake.log" OPSX_TEST_COLLECT_JSON="$FX/collect.json"
 LOG="$OPSX_STATE_DIR/coordinator.log"; MEMO="$OPSX_STATE_DIR/coordinator-memo.json"; DISP="$OPSX_STATE_DIR/dispatch.json"
+# symlink-safe-writes：沙盒內的人把固定檔名換成指向 VICTIM 的 symlink，沙盒外的 coordinate 不能寫到它
+VICTIM="$FX/victim"; victim_reset() { printf 'keep me\n' > "$VICTIM"; }
 
 # cards '<卡的 JSON 陣列，只寫跟預設不同的欄位>' ['<errors JSON 陣列>']：寫成 opsx collect 的輸出
 cards() {
@@ -180,7 +182,10 @@ mkcard g; mkdir -p "$R/.claude/worktrees/g-wt"
 printf '{"demo/g":{"mode":"stopped","agent":"claude","pane":"w1:p2","drive_pid":null,"branch":"feat/g/m","worktree":"%s"}}' "$R/.claude/worktrees/g-wt" > "$DISP"
 G="$(merged g 2026-11-07T12:00:00Z null null)"
 cards "[$G]"
+victim_reset; ln -s "$VICTIM" "$R/openspec/workplan.yaml.coordinate.tmp"
 round || fail "rc: $(cat "$FX/out")"
+assert_eq "$(cat "$VICTIM")" "keep me" "workplan 的舊暫存檔名上的 symlink 不能被寫"
+rm -f "$R/openspec/workplan.yaml.coordinate.tmp"
 got="$(grep -E '^(git|opsx stop|openspec)' "$OPSX_FAKE_LOG")"
 want="git -C $R rev-parse --abbrev-ref HEAD
 git -C $R status --porcelain
@@ -368,11 +373,21 @@ cards '[{"slug":"a1","section":"待處理","dispatch":'"$D"',"agent_status":"idl
 round || fail "type 不明 rc: $(cat "$FX/out")"
 assert_eq "$(count '^opsx answer')" 0 "type 不明不代答：$(cat "$OPSX_FAKE_LOG")"
 grep '??' "$LOG" | grep -q 'gu' || fail "type 不明要記 ?? 給人看：$(cat "$LOG")"
+assert_grep '^notification show \[demo/a1\] gate gu ' "$OPSX_FAKE_LOG"
+assert_eq "$(count '^notification show')" 1 "type 不明的 gate 第一輪通知一次：$(cat "$OPSX_FAKE_LOG")"
+[ -n "$(memo_get _notified demo/a1/gate/gu)" ] || fail "_notified 要有 demo/a1/gate/gu：$(cat "$MEMO")"
+round || fail "type 不明第二輪 rc: $(cat "$FX/out")"
+assert_eq "$(count '^notification show')" 0 "type 不明的 gate 第二輪不重送：$(cat "$OPSX_FAKE_LOG")"
 : > "$OPSX_FAKE_LOG"; : > "$LOG"
 cards '[{"slug":"a1","section":"待處理","dispatch":'"$D"',"agent_status":"idle","waiting":{"type":"等待決定","needs":"run","gate_id":"gr","question":"跑一下","recommended":"ls -la /tmp","options":[]}}]'
 round || fail "needs run rc: $(cat "$FX/out")"
 assert_eq "$(count '^opsx answer')" 0 "needs: run 不代答：$(cat "$OPSX_FAKE_LOG")"
 grep '??' "$LOG" | grep -q 'gr' || fail "needs: run 要記 ?? 給人看：$(cat "$LOG")"
+assert_grep '^notification show \[demo/a1\] gate gr ' "$OPSX_FAKE_LOG"
+assert_eq "$(count '^notification show')" 1 "needs: run 的 gate 第一輪通知一次：$(cat "$OPSX_FAKE_LOG")"
+[ -n "$(memo_get _notified demo/a1/gate/gr)" ] || fail "_notified 要有 demo/a1/gate/gr：$(cat "$MEMO")"
+round || fail "needs run 第二輪 rc: $(cat "$FX/out")"
+assert_eq "$(count '^notification show')" 0 "needs: run 的 gate 第二輪不重送：$(cat "$OPSX_FAKE_LOG")"
 : > "$OPSX_FAKE_LOG"; : > "$LOG"
 cards '[{"slug":"a1","section":"待處理","dispatch":'"$D"',"agent_status":"idle","waiting":{"type":"等待授權","needs":"run","action":"external","gate_id":"ga","question":"要跑 chmod","recommended":"sudo chmod 755 x","options":["這次"]}}]'
 round || fail "approval + needs run rc: $(cat "$FX/out")"
@@ -629,6 +644,13 @@ grep -q -- '--' "$LOG" || fail "要記一行 --：$(cat "$LOG")"
 rm -f "$RERUN"
 round --dry
 assert_no_file "$RERUN"
+# rerun 標記是 symlink：拒絕、非 0、目標不變
+victim_reset; ln -s "$VICTIM" "$RERUN"
+round; rc=$?
+[ $rc -ne 0 ] || fail "rerun 是 symlink 要非 0：$(cat "$FX/out")"
+assert_grep coordinator.rerun "$FX/out"
+assert_eq "$(cat "$VICTIM")" "keep me" "rerun 不能截斷 symlink 的目標"
+rm -f "$RERUN"
 kill "$HOLDER"; wait "$HOLDER" 2>/dev/null
 rm -f "$RERUN" "$MEMO"
 
@@ -679,6 +701,15 @@ assert_eq "$rc" 0 "kick 起不來也要以 0 結束：$(cat "$FX/out")"
 grep -q 'kick' "$LOG" || fail "kick 起不來要在 coordinator.log 記原因：$(cat "$LOG")"
 rmdir "$OPSX_STATE_DIR/coordinate.out"; rm -f "$MEMO"
 
+# --- coordinate.out 是 symlink：不起背景那輪、記一行原因、以 0 結束、目標不變 ---
+: > "$LOG"; victim_reset; ln -s "$VICTIM" "$OPSX_STATE_DIR/coordinate.out"
+bash "$OPSX_ROOT/bin/opsx" coordinate --kick > "$FX/out" 2>&1; rc=$?
+assert_eq "$rc" 0 "coordinate.out 是 symlink 也要以 0 結束：$(cat "$FX/out")"
+grep -q 'coordinate.out' "$LOG" || fail "要在 coordinator.log 記原因並含路徑：$(cat "$LOG")"
+sleep 2
+assert_eq "$(cat "$VICTIM")" "keep me" "coordinate.out 不能附加到 symlink 的目標"
+rm -f "$OPSX_STATE_DIR/coordinate.out" "$MEMO"
+
 notes() { count '^notification show'; }
 
 # --- 要人的 gate 通知一次 ---
@@ -693,6 +724,21 @@ assert_grep ' --body 看板.*這段怎麼驗 --sound request$' "$FX/note1"
 assert_not_grep '第二行' "$FX/note1"
 [ -n "$(memo_get _notified demo/a1/gate/g1)" ] || fail "_notified 要有 demo/a1/gate/g1：$(cat "$MEMO")"
 assert_eq "$(count '^opsx answer')" 0 "要人的 gate 不代答"
+
+# --- memo 的舊暫存檔名被 symlink 占住：不寫到目標，memo 照常更新 ---
+rm -f "$MEMO"; victim_reset; ln -s "$VICTIM" "$MEMO.tmp"
+round || fail "rc: $(cat "$FX/out")"
+assert_eq "$(cat "$VICTIM")" "keep me" "memo 的舊暫存檔名上的 symlink 不能被寫"
+[ -n "$(memo_get _notified demo/a1/gate/g1)" ] || fail "memo 要照常更新：$(cat "$MEMO")"
+rm -f "$MEMO.tmp"
+
+# --- coordinator.log 是 symlink：拒絕、非 0、目標不變 ---
+rm -f "$LOG"; victim_reset; ln -s "$VICTIM" "$LOG"
+bash "$OPSX_ROOT/bin/opsx" coordinate > "$FX/out" 2>&1; rc=$?
+[ $rc -ne 0 ] || fail "log 是 symlink 要非 0：$(cat "$FX/out")"
+assert_grep coordinator.log "$FX/out"
+assert_eq "$(cat "$VICTIM")" "keep me" "log 不能附加到 symlink 的目標"
+rm -f "$LOG" "$MEMO"
 
 # --- --dry 只印，不送不記 ---
 rm -f "$MEMO"
@@ -761,6 +807,19 @@ rm -f "$MEMO"
 round || fail "rc: $(cat "$FX/out")"
 assert_grep "^opsx stop u --repo $R\$" "$OPSX_FAKE_LOG"; assert_grep '^opsx dispatch u ' "$OPSX_FAKE_LOG"
 assert_eq "$(notes)" 0 "重派成功不通知"
+rm -f "$MEMO"
+
+# --- 單卡同一輪重派兩次：gate 答不出去（agent_not_found）又 agent_status unknown，只派一次、不通知 ---
+cards '[{"slug":"u","section":"進行中","dispatch":'"$D"',"agent_status":"unknown","waiting":{"type":"等待授權","gate_id":"g1","action":"x","question":"允許嗎","recommended":null,"options":[]}}]'
+OPSX_TEST_FAIL_answer=agent_not_found round || fail "rc: $(cat "$FX/out")"
+assert_eq "$(count '^opsx dispatch')" 1 "同一輪只重派一次：$(cat "$OPSX_FAKE_LOG")"
+assert_eq "$(notes)" 0 "同一輪第二次要求重派不通知：$(cat "$OPSX_FAKE_LOG")"
+assert_grep '這輪不再派' "$LOG"
+# 對照：下一輪、十分鐘內又掛，照樣通知一次
+cards '[{"slug":"u","section":"進行中","dispatch":'"$D"',"agent_status":"unknown"}]'
+round || fail "rc: $(cat "$FX/out")"
+assert_eq "$(count '^opsx dispatch')" 0 "下一輪十分鐘內不重派"
+assert_eq "$(notes)" 1 "下一輪十分鐘內又掛要通知：$(cat "$OPSX_FAKE_LOG")"
 rm -f "$MEMO"
 
 # --- 每輪最後回收孤兒 pane：呼叫 opsx reap；dry 只記 DRY；reap 失敗不影響這一輪的結束 ---
@@ -865,8 +924,31 @@ got="$(grep -E '^opsx (stop|dispatch)' "$OPSX_FAKE_LOG")"
 assert_eq "$got" "opsx stop m3 --repo $R
 opsx stop m4 --repo $R
 opsx dispatch --feature g --agent claude --mode autopilot --repo $R" "session 死掉：各卡 stop、feature 重派一次"
+assert_eq "$(notes)" 0 "session 重派成功（含同一輪第二張卡）不通知：$(cat "$OPSX_FAKE_LOG")"
+# 十分鐘內第二次掛掉：新 memo、5 分鐘前重派過；兩張卡一件事，通知一次，鍵綁 feature 與那個時間
+rm -f "$MEMO"
+seeded="$(ago 5)"
+printf '{"_redispatched":{"demo/@g":"%s"}}' "$seeded" > "$MEMO"
 round || fail "rc: $(cat "$FX/out")"
 assert_eq "$(count '^opsx dispatch')" 0 "十分鐘內不再重派這個 feature"
+assert_eq "$(notes)" 1 "feature session 十分鐘內第二次掛掉要通知一次：$(cat "$OPSX_FAKE_LOG")"
+[ -n "$(memo_get _notified "demo/@g/dead/$seeded")" ] || fail "_notified 要有 demo/@g/dead/${seeded}：$(cat "$MEMO")"
+round || fail "rc: $(cat "$FX/out")"
+assert_eq "$(notes)" 0 "同一次重派只通知一次"
+# session 共用 pane 卡在終端機：兩張卡一件事一則，兩張都不等了才清鍵
+rm -f "$MEMO"
+BW='"waiting":{"type":"終端機等待輸入","gate_id":null,"question":"agent 在終端機等輸入","recommended":"開啟 pane","options":["開啟 pane"]}'
+cards '[{"slug":"m3","section":"待處理","dispatch":'"$GD"',"agent_status":"blocked",'"$BW"'},{"slug":"m4","section":"待處理","dispatch":'"$GD"',"agent_status":"blocked",'"$BW"'}]'
+round || fail "rc: $(cat "$FX/out")"
+assert_eq "$(notes)" 1 "共用 pane 卡住兩張卡只通知一次：$(cat "$OPSX_FAKE_LOG")"
+[ -n "$(memo_get _notified demo/@g/blocked/w1:p9)" ] || fail "_notified 要有 demo/@g/blocked/w1:p9：$(cat "$MEMO")"
+cards '[{"slug":"m3","section":"進行中","dispatch":'"$GD"',"agent_status":"working"},{"slug":"m4","section":"待處理","dispatch":'"$GD"',"agent_status":"blocked",'"$BW"'}]'
+round || fail "rc: $(cat "$FX/out")"
+assert_eq "$(notes)" 0 "m4 還卡著：m3 不等了不能讓鍵被清而重送：$(cat "$OPSX_FAKE_LOG")"
+[ -n "$(memo_get _notified demo/@g/blocked/w1:p9)" ] || fail "m4 還卡著，鍵要留著：$(cat "$MEMO")"
+cards '[{"slug":"m3","section":"進行中","dispatch":'"$GD"',"agent_status":"working"},{"slug":"m4","section":"進行中","dispatch":'"$GD"',"agent_status":"working"}]'
+round || fail "rc: $(cat "$FX/out")"
+assert_eq "$(memo_get _notified demo/@g/blocked/w1:p9)" "" "兩張都不等了要清鍵：$(cat "$MEMO")"
 rm -f "$MEMO"
 cp "$WP0" "$R/openspec/workplan.yaml"; printf '{}' > "$DISP"
 echo "coordinate: ok"

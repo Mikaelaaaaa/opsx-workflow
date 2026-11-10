@@ -38,6 +38,21 @@ assert_no_file "$R/openspec/changes/nope"
 cd "$FX"; opsx log eval-core 你 已決定 "從外面寫" --repo "$R" || fail "--repo"
 assert_eq "$(tail -1 "$T" | cut -f4)" "從外面寫"
 
+# symlink-safe-writes：decisions.tsv、sync.log 是 symlink → 拒絕、非 0、訊息含路徑、目標不變
+printf 'keep me\n' > "$FX/victim"
+mv "$T" "$FX/decisions.real"; ln -s "$FX/victim" "$T"
+opsx log eval-core claude 已決定 "x" --repo "$R" 2> "$FX/err"; rc=$?
+[ $rc -ne 0 ] || fail "decisions.tsv 是 symlink 要非 0"
+assert_grep decisions.tsv "$FX/err"
+assert_eq "$(cat "$FX/victim")" "keep me" "decisions.tsv 不能附加到 symlink 的目標"
+rm "$T"; mv "$FX/decisions.real" "$T"
+ln -s "$FX/victim" "$OPSX_STATE_DIR/sync.log"
+opsx log --sync gitlab 0 "x" 2> "$FX/err"; rc=$?
+[ $rc -ne 0 ] || fail "sync.log 是 symlink 要非 0"
+assert_grep sync.log "$FX/err"
+assert_eq "$(cat "$FX/victim")" "keep me" "sync.log 不能附加到 symlink 的目標"
+rm "$OPSX_STATE_DIR/sync.log"
+
 # 寫進去的列讀得回來（新格式列）
 opsx timeline --root "$FX" > "$FX/tl.json" || fail "timeline rc"
 python3 -I - "$FX/tl.json" <<'PY' || fail "timeline shape"

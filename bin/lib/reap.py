@@ -12,6 +12,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import jsonfile  # noqa: E402
+import safefile  # noqa: E402
 
 
 class ReapError(Exception):
@@ -98,7 +99,7 @@ class Reaper:
     def note(self, o, text):
         """沒關的原因，或卡目錄不在時關掉的紀錄：<state>/reap.log。"""
         os.makedirs(self.state, exist_ok=True)
-        with open(os.path.join(self.state, "reap.log"), "a", encoding="utf-8") as f:
+        with safefile.open_append(os.path.join(self.state, "reap.log")) as f:
             f.write("%s\t%s\t%s\n" % (now_iso(), cell("%s/%s %s" % (o["repo"], o["slug"], o["pane"])), cell(text)))
 
     def skip(self, o, text):

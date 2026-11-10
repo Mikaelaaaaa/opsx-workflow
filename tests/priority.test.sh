@@ -212,7 +212,10 @@ assert_eq "${out%%$'\t'*}" P1 "有環的卡照算"
 # --- Scenario：使用者覆寫 ---
 R="$R0"
 INB="$R/openspec/changes/later/inbox.md"
+printf 'keep me\n' > "$FX/victim"; ln -s "$FX/victim" "$INB.priority.tmp"   # symlink-safe-writes：舊的固定暫存檔名
 opsx priority later --set P0 --reason "客戶明天上線" --repo "$R" > /dev/null || fail "--set 失敗"
+assert_eq "$(cat "$FX/victim")" "keep me" "inbox 的舊暫存檔名上的 symlink 不能被寫"
+rm -f "$INB.priority.tmp"
 assert_grep '^priority: P0$' "$INB"
 assert_grep '^priority_reason: 客戶明天上線$' "$INB"
 assert_grep '等級改 P0' "$R/openspec/changes/later/decisions.tsv"

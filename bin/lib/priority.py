@@ -12,6 +12,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import chain  # noqa: E402
+import safefile  # noqa: E402
 
 LEVELS = ("P0", "P1", "P2")
 KINDS = ("incident", "planned")
@@ -261,10 +262,7 @@ def set_override(inbox: str, level: str, reason: str) -> None:
         raise PriorityError("%s 的 frontmatter 沒有結尾的 ---" % inbox)
     body = [l for l in lines[1:end] if not re.match(r"^priority(_reason)?:", l)]
     new = [lines[0]] + body + ["priority: " + level, "priority_reason: " + reason] + lines[end:]
-    tmp = inbox + ".priority.tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        f.write("\n".join(new))
-    os.replace(tmp, inbox)
+    safefile.write_atomic(inbox, "\n".join(new))
 
 
 def main() -> None:

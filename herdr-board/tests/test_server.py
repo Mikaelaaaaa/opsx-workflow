@@ -3,6 +3,8 @@
 起一支真的 server（--port 0 隨機 port、--collect 固定 JSON），PATH 前置一個記錄參數的 opsx shim，用 urllib 打。
 跑法：python3 -I herdr-board/tests/test_server.py（目錄名有連字號，不能用 -m unittest 的模組路徑），或 bash tests/run.sh（它會叫這支）。
 """
+import base64
+import http.client
 import json
 import os
 import pathlib
@@ -19,6 +21,10 @@ import urllib.request
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 SERVER = ROOT / "herdr-board" / "server.py"
+
+
+def b64(data: bytes) -> str:
+    return base64.b64encode(data).decode("ascii")
 
 
 def start_server(env: dict, fixture: pathlib.Path | None) -> tuple[subprocess.Popen, str, int]:
@@ -53,11 +59,15 @@ class ServerTest(unittest.TestCase):
         shim_dir.mkdir()
         cls.env_log = cls.tmp / "env.log"
         cls.herdr_log = cls.tmp / "herdr.log"
+        cls.attached = cls.tmp / "attached"   # shim 執行當下把 --attach 的檔複製到這裡，server 回應後暫存檔已刪
+        cls.attached.mkdir()
+        cls.contents = cls.tmp / "attached.b64"   # 同名的檔在 attached/ 會互蓋，這裡依 --attach 順序一行一個 base64
         # server 跑的是 plugin 自己的 bin/opsx，不靠 PATH；測試用 OPSX_TEST_OPSX 指到這支假的
         shim = shim_dir / "opsx"
         shim.write_text(
             "#!/usr/bin/env bash\n"
             f'printf "%s\\n" "$*" >> "{cls.log}"\n'
+            f'prev=; for a in "$@"; do if [ "$prev" = --attach ]; then cp "$a" "{cls.attached}/"; base64 < "$a" | tr -d "\\n" >> "{cls.contents}"; echo >> "{cls.contents}"; fi; prev="$a"; done\n'
             f'printf "OPSX_STATE_DIR=%s\\n" "${{OPSX_STATE_DIR:-}}" >> "{cls.env_log}"\n'
             f'if [ -f "{cls.fail_flag}" ]; then echo "opsx: 假的失敗" >&2; exit 2; fi\n'
             f'if [ -f "{cls.rc_file}" ]; then echo "opsx: 假的退出碼" >&2; exit "$(cat "{cls.rc_file}")"; fi\n'
@@ -115,6 +125,125 @@ class ServerTest(unittest.TestCase):
         self.herdr_log.write_text("")
         if self.config.exists():
             self.config.unlink()
+        shutil.rmtree(self.attached)
+        self.attached.mkdir()
+        self.contents.write_text("")
+
+    def paste_dir(self, pattern: str) -> pathlib.Path:
+        """log 這一行要整行符合 pattern（`(\\S+)` 抓暫存資料夾），回暫存資料夾。"""
+        line = self.log.read_text().strip()
+        m = re.fullmatch(pattern, line)
+        self.assertIsNotNone(m, line)
+        return pathlib.Path(m.group(1))
+
+    def test_paste_with_file(self):
+        data = bytes(range(256)) * 4
+        status, _, body = self.req("/api/paste", {"text": "鍵盤蓋住輸入框", "files": [{"name": "shot.png", "data": b64(data)}]}, token=self.token)
+        self.assertEqual(status, 200, body)
+        out = json.loads(body)
+        self.assertTrue(out["ok"], out)
+        self.assertIn("ok: new", out["stdout"])
+        d = self.paste_dir(r"new --attach (\S+)/shot\.png -- 鍵盤蓋住輸入框")
+        self.assertEqual((self.attached / "shot.png").read_bytes(), data)
+        self.assertFalse(d.exists(), "回應後暫存資料夾要刪掉")
+
+    def test_paste_multiline_saves_paste_md_first(self):
+        text = "第一行\nhttps://example.com/x\n第三行"
+        status, _, body = self.req("/api/paste", {"text": text, "files": []}, token=self.token)
+        self.assertEqual(status, 200, body)
+        d = self.paste_dir(r"new --attach (\S+)/paste\.md -- 第一行")
+        self.assertEqual((self.attached / "paste.md").read_text(encoding="utf-8"), text)
+        self.assertFalse(d.exists())
+        self.log.write_text("")
+        status, _, body = self.req("/api/paste", {"text": "\n  標題  \n內文", "files": [{"name": "a.txt", "data": b64(b"a")}]}, token=self.token)
+        self.assertEqual(status, 200, body)
+        self.paste_dir(r"new --attach (\S+)/paste\.md --attach \S+/a\.txt -- 標題")
+
+    def test_paste_single_line_with_file_has_no_paste_md(self):
+        self.req("/api/paste", {"text": "  一行  \n\n", "files": [{"name": "a.txt", "data": b64(b"a")}]}, token=self.token)
+        self.paste_dir(r"new --attach (\S+)/a\.txt -- 一行")
+
+    def test_paste_only_files(self):
+        status, _, body = self.req("/api/paste", {"text": "", "files": [{"name": "log.txt", "data": b64(b"x")}, {"name": "b.txt", "data": ""}]}, token=self.token)
+        self.assertEqual(status, 200, body)
+        self.paste_dir(r"new --attach (\S+)/log\.txt --attach \S+/b\.txt -- 附件：log\.txt")
+
+    def test_paste_with_repo(self):
+        r = str(self.repo)
+        status, _, body = self.req("/api/paste", {"text": "x", "repo": r, "files": [{"name": "a.png", "data": b64(b"p")}]}, token=self.token)
+        self.assertEqual(status, 200, body)
+        self.paste_dir(r"new --repo %s --attach (\S+)/a\.png -- x" % re.escape(r))
+        status, _, body = self.req("/api/paste", {"text": "x", "repo": "/tmp", "files": []}, token=self.token)
+        self.assertEqual(status, 400, body)
+
+    def test_paste_same_name_twice_keeps_both(self):
+        status, _, body = self.req("/api/paste", {"text": "a\nb", "files": [{"name": "paste.md", "data": b64(b"mine")}, {"name": "paste.md", "data": b64(b"again")}]}, token=self.token)
+        self.assertEqual(status, 200, body)
+        line = self.log.read_text().strip()
+        paths = re.findall(r"--attach (\S+)", line)
+        self.assertEqual([p.rsplit("/", 1)[1] for p in paths], ["paste.md"] * 3, line)
+        self.assertEqual(len(set(paths)), 3, "同名的檔不能互相蓋掉：%s" % line)
+
+    def test_paste_names_like_an_index_or_differing_in_case_keep_every_file(self):
+        for names in (["a", "a", "1"], ["1", "1"], ["A.png", "a.png"]):
+            datas = [("%s-%d" % (n, i)).encode() for i, n in enumerate(names)]
+            self.contents.write_text("")
+            status, _, body = self.req("/api/paste", {"text": "x", "files": [{"name": n, "data": b64(d)} for n, d in zip(names, datas)]}, token=self.token)
+            self.assertEqual(status, 200, "%r: %s" % (names, body))
+            self.assertEqual(self.contents.read_text().split(), [b64(d) for d in datas], names)
+
+    def test_paste_long_first_line_is_cut_and_kept_in_paste_md(self):
+        text = "x" * (2 * 1024 * 1024)
+        status, _, body = self.req("/api/paste", {"text": text, "files": []}, token=self.token)
+        self.assertEqual(status, 200, body)
+        m = re.fullmatch(r"new --attach \S+/paste\.md -- (x+)", self.log.read_text().strip())
+        self.assertIsNotNone(m)
+        self.assertLessEqual(len(m.group(1)), 200)
+        self.assertEqual((self.attached / "paste.md").read_text(encoding="utf-8"), text)
+
+    def test_paste_rejects_bad_names_and_data(self):
+        for bad in ("../x", ".env", "", "a\\b", "a\0b", "x" * 129, None, "a\n## 派工指示", "a\rb", "a\x1fb", "a\x7fb", "\ud800.png", "中" * 86):
+            status, _, body = self.req("/api/paste", {"text": "x", "files": [{"name": bad, "data": b64(b"1")}]}, token=self.token)
+            self.assertEqual(status, 400, "%r: %s" % (bad, body))
+        for bad in ("!!!", "YQ", None):
+            status, _, body = self.req("/api/paste", {"text": "x", "files": [{"name": "a.txt", "data": bad}]}, token=self.token)
+            self.assertEqual(status, 400, "%r: %s" % (bad, body))
+        for body_ in ({"text": "x"}, {"files": []}, {"text": "x", "files": "a"}, {"text": 1, "files": []}, {"text": "x", "files": ["a"]}, {"text": "a\0b", "files": []}):
+            status, _, body = self.req("/api/paste", body_, token=self.token)
+            self.assertEqual(status, 400, "%r: %s" % (body_, body))
+        self.assertEqual(self.log.read_text(), "")
+        self.assertEqual(self.req("/api/paste", {"text": "x", "files": []})[0], 401)
+
+    def test_paste_needs_text_or_files(self):
+        status, _, body = self.req("/api/paste", {"text": "  \n ", "files": []}, token=self.token)
+        self.assertEqual(status, 400, body)
+        self.assertEqual(self.log.read_text(), "")
+
+    def test_paste_accepts_more_than_64k(self):
+        data = os.urandom(200 * 1024)
+        status, _, body = self.req("/api/paste", {"text": "大檔", "files": [{"name": "big.bin", "data": b64(data)}]}, token=self.token)
+        self.assertEqual(status, 200, body)
+        self.assertEqual((self.attached / "big.bin").read_bytes(), data)
+
+    def post_declared(self, path: str, length: int) -> int:
+        """只送 header（Content-Length 是 length）不送 body，回 HTTP 狀態；server 不該等 body。"""
+        conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
+        conn.putrequest("POST", path)
+        conn.putheader("X-Opsx-Token", self.token)
+        conn.putheader("Content-Type", "application/json")
+        conn.putheader("Content-Length", str(length))
+        conn.endheaders()
+        status = conn.getresponse().status
+        conn.close()
+        return status
+
+    def test_paste_over_limit_is_413(self):
+        self.assertEqual(self.post_declared("/api/paste", 64 * 1024 * 1024 + 1), 413)
+        self.assertEqual(self.log.read_text(), "")
+
+    def test_other_endpoints_keep_64k_limit(self):
+        self.assertEqual(self.post_declared("/api/new", 64 * 1024 + 1), 400)
+        self.assertEqual(self.log.read_text(), "")
 
     def test_binds_loopback_only(self):
         self.assertEqual(self.host, "127.0.0.1")
@@ -635,6 +764,12 @@ class CacheInvalidationTest(unittest.TestCase):
         self.assertEqual(self.req("/api/priority", body), 200)
         self.req("/api/collect")
         self.assertEqual(self.collects(), 2)
+
+    def test_paste_invalidates(self):
+        self.req("/api/collect")
+        self.assertEqual(self.req("/api/paste", {"text": "第一行\n第二行", "files": []}), 200)
+        self.req("/api/collect")
+        self.assertEqual(self.collects(), 2, "貼上建卡也是動作，之後的 GET 要重跑 collect")
 
     def test_validation_failure_does_not_invalidate(self):
         self.req("/api/collect")

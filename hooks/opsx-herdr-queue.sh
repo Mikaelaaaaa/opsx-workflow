@@ -29,7 +29,10 @@ for q in "$qd/$repo"-*.tsv; do
       rename) out="$(herdr agent rename "$a" "$b" 2>&1)" || ok=0 ;;
       prompt) out="$(herdr agent prompt "$a" "$b" 2>&1)" || ok=0 ;;
       drive)
-        nohup bash "$OPSX_ROOT/bin/opsx" drive "$a" --repo "$b" >> "$OPSX_STATE_DIR/drive-$repo-$a.log" 2>&1 &
+        drivelog="$OPSX_STATE_DIR/drive-$repo-$a.log"
+        # shortcut: 檢查到開檔之間有空窗，沙盒內要在毫秒內換成 symlink 才打得中，且只能附加 drive 的輸出；要補就改成 O_NOFOLLOW 的 wrapper
+        if [ -L "$drivelog" ]; then out="refuse to write through symlink: $drivelog"; ok=0; else
+        nohup bash "$OPSX_ROOT/bin/opsx" drive "$a" --repo "$b" >> "$drivelog" 2>&1 &
         pid=$!
         out="$(OPSX_KEY="$repo/$a" OPSX_PID="$pid" OPSX_LIB="$OPSX_ROOT/bin/lib" "$OPSX_PY" -I - "$OPSX_STATE_DIR/dispatch.json" <<'PY' 2>&1
 import os, sys
@@ -37,7 +40,8 @@ sys.path.insert(0, os.environ["OPSX_LIB"]); import jsonfile
 def put(d): d[os.environ["OPSX_KEY"]]["drive_pid"] = int(os.environ["OPSX_PID"])
 jsonfile.update(sys.argv[1], put)
 PY
-)" || ok=0 ;;
+)" || ok=0
+        fi ;;
       *) out="佇列裡有不認得的動作：$op"; ok=0 ;;
     esac
     if [ "$ok" -eq 0 ]; then
