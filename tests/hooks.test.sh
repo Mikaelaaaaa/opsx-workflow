@@ -87,6 +87,36 @@ git -C "$R" checkout -q -b main 2>/dev/null || git -C "$R" checkout -q main
 out="$(run_hook openspec-router.sh "$(j "$R" "" '{}' "hi")")"; reason "$out" | grep -q '沒有對到卡' || fail "router: no card: $(reason "$out")"
 git -C "$R" checkout -q feat/eval-core/mikaela
 
+# 沒對到卡時列進行中 change 與下一步（session-change-list）
+L="$(mk_repo Listing)"; LC="$L/openspec/changes"
+git -C "$L" checkout -q -b main 2>/dev/null || git -C "$L" checkout -q main
+mkdir -p "$LC/archive"
+lr() { reason "$(run_hook openspec-router.sh "$(j "$L" "" '{}' "hi" "${1:-UserPromptSubmit}")")"; }
+assert_eq "$(lr)" "opsx：explore · 沒有對到卡 · 進行中 0 張 · 新工作先建殼 · skills/explore/SKILL.md" "router: 沒有進行中 change"
+mkdir -p "$LC/eval-core" "$LC/kb-export"
+printf 'schema: opsx\ncreated: 2026-11-05\n' > "$LC/eval-core/.openspec.yaml"
+printf '## 1. x\n\n- [ ] 1.1 a\n' > "$LC/eval-core/tasks.md"
+printf -- '---\ntype: 功能\n---\n\n## 一句話\n\nx\n' > "$LC/kb-export/inbox.md"
+r="$(lr)"
+assert_eq "$r" "opsx：explore · 沒有對到卡 · 進行中 2 張：/apply eval-core · /explore kb-export · 新工作先建殼 · skills/explore/SKILL.md" "router: 沒對到卡列清單"
+assert_eq "$(lr SessionStart)" "$r" "router: SessionStart 與 UserPromptSubmit 同一段"
+rm -rf "$LC/kb-export"
+mkdir -p "$LC/archive/2026-11-01-old" "$LC/big" "$LC/legacy" "$LC/eval-core/subs/core"
+printf 'schema: opsx\ncreated: 2026-11-01\n' > "$LC/archive/2026-11-01-old/.openspec.yaml"
+printf 'schema: opsx\ncreated: 2026-11-05\n' > "$LC/big/.openspec.yaml"
+printf -- '---\ntype: 功能\nsplit_into: a, b\n---\n\n## 一句話\n\nx\n' > "$LC/big/inbox.md"
+printf 'schema: spec-driven\ncreated: 2026-10-01\n' > "$LC/legacy/.openspec.yaml"
+printf 'schema: opsx\ncreated: 2026-11-05\n' > "$LC/eval-core/subs/core/.openspec.yaml"
+r="$(lr)"
+case "$r" in *"進行中 1 張：/apply eval-core · 新工作先建殼"*) ;; *) fail "router: archive、已拆、舊卡、子殼不列: $r" ;; esac
+case "$r" in *old*|*big*|*legacy*|*" core"*|*/core*) fail "router: 清單不該有 old、big、legacy、core: $r" ;; esac
+# 對到卡時維持一行
+mkdir -p "$LC/kb-export"; printf -- '---\ntype: 功能\n---\n\nx\n' > "$LC/kb-export/inbox.md"
+git -C "$L" checkout -q -b feat/eval-core/mikaela
+r="$(lr)"
+case "$r" in "opsx：apply · eval-core · "*) ;; *) fail "router: 對到卡時維持一行: $r" ;; esac
+case "$r" in *進行中*|*kb-export*) fail "router: 對到卡時不附清單: $r" ;; esac
+
 # ---------- commit gate ----------
 cg() { run_hook openspec-commit-gate.sh "$(j "$R" Bash "{\"command\":$(printf '%s' "$1" | jq -Rs .)}")"; }
 out="$(cg 'git commit -m "feat: x" -- a.ts')"; reason "$out" | grep -q '閘門未啟用' || fail "commit: no workplan → 不擋: $out"

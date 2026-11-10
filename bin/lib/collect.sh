@@ -23,23 +23,6 @@
 # shellcheck source=/dev/null
 source "$OPSX_ROOT/bin/lib/mr.sh"
 
-# 舊 spec-driven 的 change：.openspec.yaml 沒有 schema: opsx，inbox.md 不存在或只有空白。只計數，不當卡。
-# 只用 builtin：真 repo 裡有幾百張舊卡，每張 fork 一次 stage 判斷就是十幾秒。
-collect_is_legacy() { # <change dir>
-  local line inbox
-  if [ -f "$1/.openspec.yaml" ]; then
-    while IFS= read -r line || [ -n "$line" ]; do
-      [[ $line =~ ^schema:[[:space:]]*opsx[[:space:]]*$ ]] && return 1
-    done < "$1/.openspec.yaml"
-  fi
-  if [ -f "$1/inbox.md" ]; then
-    # [:space:] 依 locale：先刪掉全形空白 U+3000 與 NBSP 的位元組，沒有 LANG 的啟動方式（launchd、nohup）下也算空白
-    inbox=$(<"$1/inbox.md"); inbox=${inbox//$'\xe3\x80\x80'/}; inbox=${inbox//$'\xc2\xa0'/}
-    [[ $inbox =~ [^[:space:]] ]] && return 1
-  fi
-  return 0
-}
-
 opsx_collect() {
   local root="$HOME/code" state="$OPSX_STATE_DIR"
   while [ $# -gt 0 ]; do
