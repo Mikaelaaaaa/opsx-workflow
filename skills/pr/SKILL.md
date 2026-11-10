@@ -34,7 +34,7 @@ Turn a reviewed change into a merge request the reviewer and the PM can both rea
    ```
 
    and `opsx status pr 5/5 "MR 已開"`.
-6. **Reply.** The URL, the title, what the Test plan says, and the two closing lines (skipped / unchecked / risks). Next step: the board shows the card as waiting for merge; `/babysit <slug>` handles review comments and CI.
+6. **Reply.** The URL, the title, what the Test plan says, and the two closing lines (skipped / unchecked / risks). Then continue to `/babysit <slug>` per `../../references/continue.md`: invoke it now unless a gate is open. Babysit handles CI and review threads and stops when the card is waiting for the user to merge.
 
 ## Guardrails
 

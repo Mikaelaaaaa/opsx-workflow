@@ -93,7 +93,7 @@ Rules that keep this file useful downstream:
 - **未決 is not a parking lot.** Only things that genuinely need a run to settle, each with its verification plan. If you can settle it now with bucket 1 or 2, do that instead.
 - **Write an ADR too** when a decision meets all three of: hard to reverse, surprising without context, the result of a real trade-off. Use `references/ADR-FORMAT.md`; most decisions will not qualify, and that is fine.
 
-Then tell the user in a few lines what got decided, what is still open, and that the next step is `/propose <slug>`. Call `opsx status grill <n>/<total> <label>` as you move through the items so the board shows progress.
+Then tell the user in a few lines what got decided and what is still open. If 待決 is now fully answered, continue to `/propose <slug>` per `../../references/continue.md` in this turn; if anything went back into 待決, stop there. Call `opsx status grill <n>/<total> <label>` as you move through the items so the board shows progress.
 
 ## What this skill does not do
 

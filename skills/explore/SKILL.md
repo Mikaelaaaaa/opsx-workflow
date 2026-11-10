@@ -210,7 +210,7 @@ When the change has a shell (`openspec/changes/<slug>/`), end by writing `explor
 - **待決**: only questions the user must answer (product choice, preference, risk appetite). Each with 2–4 concrete options, the recommended one marked `(Recommended)`. A question `grep` or a ten-line script could answer does not belong here.
 - **不做**: directions ruled out, with the reason.
 
-Call `opsx status explore <n>/<total> "<label>"` as you go. Say what the next step is: `/grill <slug>` when 待決 is non-empty, `/propose <slug>` when it is empty. The router injects the same.
+Call `opsx status explore <n>/<total> "<label>"` as you go. Then continue per `../../references/continue.md`: invoke `/grill <slug>` when 待決 is non-empty, `/propose <slug>` when it is empty, in this turn.
 
 No shell yet (the user is thinking out loud, not working a card)? Then the conversation might:
 
