@@ -616,6 +616,113 @@ assert_grep '^opsx dispatch card-p2 ' "$OPSX_FAKE_LOG"
 cp "$WP0" "$R/openspec/workplan.yaml"
 rm -f "$MEMO"; printf '{}' > "$DISP"
 
+# --- 自動開 session：有 depends-on 的 feature g 等 m1；根 feature r 沒有 depends-on ---
+auto_wp() { # <m1 的 status>
+  cat > "$R/openspec/workplan.yaml" <<EOF
+features:
+  - name: f
+    depends-on: []
+    prs:
+      - name: m1
+        branch: feat/m1/u
+        status: $1
+        depends-on: []
+        changes:
+          - name: s1
+            status: done
+  - name: g
+    depends-on: [m1]
+    prs:
+      - name: m3
+        branch: feat/m3/u
+        status: pending
+        depends-on: []
+        changes:
+          - name: t3
+            status: pending
+EOF
+}
+mkcard m3
+
+# 依賴沒合：m3 不單卡派、g 不開 session，log 記 feature g 等 m1
+auto_wp pending
+cards '[{"slug":"m3"}]'
+round || fail "rc: $(cat "$FX/out")"
+assert_not_grep "^opsx dispatch m3" "$OPSX_FAKE_LOG"
+assert_not_grep "^opsx dispatch --feature g" "$OPSX_FAKE_LOG"
+grep '⏳' "$LOG" | grep 'feature g' | grep -q 'm1' || fail "feature g 要記等 m1：$(cat "$LOG")"
+
+# m1 合了、沒有 demo/@g：恰好開一次 session，m3 不單卡派
+auto_wp merged
+round || fail "rc: $(cat "$FX/out")"
+assert_eq "$(count '^opsx dispatch --feature g ')" 1 "依賴合了開一次 session：$(cat "$OPSX_FAKE_LOG")"
+assert_grep "^opsx dispatch --feature g --agent claude --mode autopilot --repo $R\$" "$OPSX_FAKE_LOG"
+assert_not_grep "^opsx dispatch m3" "$OPSX_FAKE_LOG"
+grep -- '--' "$LOG" | grep 'demo/m3' | grep -q 'feature g' || fail "m3 要記由 feature g 的 session 做：$(cat "$LOG")"
+rm -f "$MEMO"
+
+# 開不了 session：記 ?? 含 feature 名
+OPSX_TEST_FAIL_dispatch="dispatch: boom" round || fail "rc: $(cat "$FX/out")"
+grep '??' "$LOG" | grep 'feature g' | grep -q boom || fail "開不了 session 要記 ??：$(cat "$LOG")"
+rm -f "$MEMO"
+
+# --dry：不開 session
+round --dry || fail "rc: $(cat "$FX/out")"
+assert_eq "$(count '^opsx dispatch')" 0 "--dry 不派：$(cat "$OPSX_FAKE_LOG")"
+rm -f "$MEMO"
+
+# demo/@g 活著：不再開
+AUTO_G='"workspace":"demo","workspace_id":"w1","tab":"w1:t9","pane":"w1:p9","agent":"claude","model":"claude-opus-5-5","worktree":"'"$R"'/.claude/worktrees/g","started_at":"2026-11-07T10:00:00+08:00","drive_pid":null'
+printf '{"demo/@g":{%s,"mode":"autopilot"}}' "$AUTO_G" > "$DISP"
+round || fail "rc: $(cat "$FX/out")"
+assert_not_grep "^opsx dispatch --feature g" "$OPSX_FAKE_LOG"
+assert_not_grep "^opsx dispatch m3" "$OPSX_FAKE_LOG"
+rm -f "$MEMO"
+
+# demo/@g 是人停的：不重開，m3 也不單卡派
+printf '{"demo/@g":{%s,"mode":"stopped","stopped_at":"2026-11-07T11:00:00+08:00"}}' "$AUTO_G" > "$DISP"
+round || fail "rc: $(cat "$FX/out")"
+assert_not_grep "^opsx dispatch --feature g" "$OPSX_FAKE_LOG"
+assert_not_grep "^opsx dispatch m3" "$OPSX_FAKE_LOG"
+rm -f "$MEMO"
+
+# demo/@g 被 reap 收掉（不活、不是 stopped）：重開一次
+printf '{"demo/@g":{%s,"mode":"autopilot","reaped_at":"2026-11-07T11:00:00+08:00"}}' "$AUTO_G" > "$DISP"
+round || fail "rc: $(cat "$FX/out")"
+assert_eq "$(count '^opsx dispatch --feature g ')" 1 "不活的 session 要重開：$(cat "$OPSX_FAKE_LOG")"
+rm -f "$MEMO"; printf '{}' > "$DISP"
+
+# 根 feature r（沒有 depends-on）：r1、r2 照單卡派，不開 session
+cat > "$R/openspec/workplan.yaml" <<'EOF'
+features:
+  - name: r
+    prs:
+      - name: r1
+        branch: feat/r1/u
+        status: pending
+        depends-on: []
+        changes:
+          - name: r1
+            status: pending
+      - name: r2
+        branch: feat/r2/u
+        status: pending
+        depends-on: []
+        changes:
+          - name: r2
+            status: pending
+EOF
+mkcard r1 r2
+cards '[{"slug":"r1"},{"slug":"r2"}]'
+round || fail "rc: $(cat "$FX/out")"
+assert_grep "^opsx dispatch r1 --agent claude" "$OPSX_FAKE_LOG"
+assert_grep "^opsx dispatch r2 --agent claude" "$OPSX_FAKE_LOG"
+assert_not_grep "^opsx dispatch --feature" "$OPSX_FAKE_LOG"
+rm -rf "$R/openspec/changes/r1" "$R/openspec/changes/r2"; rm -f "$MEMO"
+
+cp "$WP0" "$R/openspec/workplan.yaml"
+rm -rf "$R/openspec/changes/m3"; rm -f "$MEMO"; printf '{}' > "$DISP"
+
 LOCK="$OPSX_STATE_DIR/coordinator.lock"; RERUN="$OPSX_STATE_DIR/coordinator.rerun"
 # wait_for <說明> <shell 條件>：最多等 10 秒（背景那輪、lock 放掉）
 wait_for() { local i=0; until eval "$2"; do i=$((i+1)); [ $i -lt 100 ] || fail "等不到$1：$(cat "$LOG")"; sleep 0.1; done; }
@@ -871,20 +978,22 @@ EOF
 }
 mkcard m2 m3; printf '{}' > "$DISP"; rm -f "$MEMO"
 
-# 主 change m2 的依賴 m1 沒合：不派；m3 的 PR 沒依賴，但 feature g 等 m1：也不派
+# 主 change m2 的依賴 m1 沒合：不派；m3 屬於有依賴的 feature g，由 session 派、不單獨派；g 的依賴沒合也不開
 sess_wp pending
 cards '[{"slug":"m2"},{"slug":"m3"}]'
 round || fail "rc: $(cat "$FX/out")"
-assert_eq "$(count '^opsx dispatch')" 0 "依賴沒合：主 change 不派、feature 的卡不派：$(cat "$OPSX_FAKE_LOG")"
+assert_eq "$(count '^opsx dispatch')" 0 "依賴沒合：主 change 不派、feature 不開：$(cat "$OPSX_FAKE_LOG")"
 grep '⏳' "$LOG" | grep 'm2' | grep -q 'm1' || fail "主 change m2 要記等 m1：$(cat "$LOG")"
 grep '⏳' "$LOG" | grep 'feature g' | grep -q 'm1' || fail "feature g 要記等 m1：$(cat "$LOG")"
 
-# m1 合了：m2、m3 都照單卡派；coordinate 不自動開 session（gate session-bugs-2）
+# m1 合了：m2 照舊單獨派（f 沒有依賴，不是 session feature），g 開一個 session，m3 不單獨派
 sess_wp merged
 round || fail "rc: $(cat "$FX/out")"
 assert_grep "^opsx dispatch m2 --agent claude" "$OPSX_FAKE_LOG"
-assert_grep "^opsx dispatch m3 --agent claude" "$OPSX_FAKE_LOG"
-assert_not_grep "^opsx dispatch --feature" "$OPSX_FAKE_LOG"
+assert_eq "$(count '^opsx dispatch --feature g ')" 1 "g 開一次 session：$(cat "$OPSX_FAKE_LOG")"
+assert_grep "^opsx dispatch --feature g --agent claude --mode autopilot --repo $R" "$OPSX_FAKE_LOG"
+assert_not_grep "^opsx dispatch m3" "$OPSX_FAKE_LOG"
+rm -f "$MEMO"
 
 # 主 change 合併、agent 不在：PR 標 merged，還沒 done 的子 change 一起標 done
 sess_wp merged
