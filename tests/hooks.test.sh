@@ -121,6 +121,7 @@ out="$(cg "cd $FX/wt && git add f && git commit -m x")"; assert_eq "$(decision "
 out="$(cg "cd $FX/wt; git commit -m x")"; assert_eq "$(decision "$out")" allow "commit: cd 用 ; 接 commit 也看 cd 的目錄"
 out="$(cg "cd $R && git add f && git commit -m x")"; assert_eq "$(decision "$out")" deny "commit: cd 到沒有卡的 main、中間隔著別的指令仍擋"
 out="$(cg "git -C $FX/wt commit-tree x && git commit -m y")"; assert_eq "$(decision "$out")" deny "commit: commit-tree 不是 commit，不能拿它的 -C 目錄"
+out="$(cg "echo legit commit now; git -C $FX/wt commit -m x")"; assert_eq "$(decision "$out")" allow "commit: legit commit 裡的 git commit 不是 commit，目錄取自真正的 -C"
 for c in 'git -C ~/wt commit -m x' 'cd ~/wt && git commit -m x' 'git -C /tmp/a\b commit -m x' 'git -C /tmp/wt-* commit -m x' 'git -C /tmp/wt? commit -m x' 'git -C /tmp/{a,b} commit -m x'; do
   out="$(cg "$c")"; assert_eq "$(decision "$out")" deny "commit: 目錄含 ~、反斜線或萬用字元要 deny（${c}）"
   reason "$out" | grep -qF "$(printf '%s' "$c" | sed -E 's/^.*(-C|cd) ([^ ]+).*$/\2/')" || fail "commit: deny 要點名讀不出來的值（${c}）: $(reason "$out")"

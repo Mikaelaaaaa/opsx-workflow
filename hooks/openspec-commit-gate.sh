@@ -13,8 +13,8 @@ join_dir() { case "$2" in /*) printf '%s' "$2" ;; *) printf '%s/%s' "$1" "$2" ;;
 unreadable_dir() { case "$1" in *[\"\'\$\`~\\]*|*[*?\[\{]*) return 0 ;; esac; return 1; }
 unset OPSX_CWD
 bad_dirs=''
-if [[ "$sk" =~ git[[:space:]]+(-C[[:space:]]+([^[:space:]]+)[[:space:]]+)?commit([[:space:]]|$) ]]; then
-  c_dir="${BASH_REMATCH[2]}"
+if [[ "$sk" =~ (^|[[:space:];\&\|\(])git[[:space:]]+(-C[[:space:]]+([^[:space:]]+)[[:space:]]+)?commit([[:space:]]|$) ]]; then
+  c_dir="${BASH_REMATCH[3]}"
   before=" ${sk%%"${BASH_REMATCH[0]}"*}"
   after_cd="${before##*[[:space:];&|(]cd[[:space:]]}"
   cd_dir=''
