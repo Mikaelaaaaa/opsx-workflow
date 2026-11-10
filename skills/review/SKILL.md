@@ -3,6 +3,7 @@ name: review
 description: |
   Spec-driven code review of an OpenSpec change before it becomes an MR. Refuses to start unless
   every task has its test and the change's tests are green, then runs three reviewers in parallel
+  (one merged reviewer on a small chore or bug-fix card, at most two rounds)
   (A: spec conformance against design.md D-ids and tasks; B: code quality using the ponytail six
   categories; C: adversarial, attacks the premise and checks the tests prove the acceptance
   criteria), merges their findings with lead judgment into four buckets, auto-fixes Bug and Must-fix
@@ -22,6 +23,10 @@ Read `openspec/changes/<slug>/tasks.md` and `status.json`. For every checked tas
 
 A main change with `subs/`: also run `opsx check <slug>`. Any line it prints is a sub-change shell that is incomplete; stop the same way and name the lines.
 
+Read the round from report.md: its title is `# Review · <slug> · 第 <N> 輪 · …`; no report.md means N is 0, and this run is round N+1. When N is already 2, two rounds are done: review does not start a reviewer. If report.md still lists an open Bug or Must-fix, write a gate in `gates.md` that lists those items and stop; if none is open, say the review budget is used up and continue to the next node.
+
+Decide small or not by `../../references/continue.md`, "Light flow" (kind chore or bug-fix, at most 3 tasks, one first path component outside tests). A small card runs one merged reviewer in step 2; any other card runs three.
+
 `opsx status review 1/7 "gate 過了"`.
 
 ## Step 1: shared inputs
@@ -36,7 +41,7 @@ Paths to hand every agent: project root, branch, `proposal.md`, `design.md` (D-i
 
 ## Step 2: three agents, one message
 
-Spawn all three in a single message so they run concurrently. None of them sees the others' output. Each reads the diff and every changed file in full, plus two or three sibling files per changed file for the local pattern.
+A small card spawns one merged reviewer (model `claude-sonnet-5-5`) instead: it gets both the Agent A brief and the Agent B brief below and returns one list in the shape below with `AGENT: AB`; Agent C does not run. Any other card spawns all three in a single message so they run concurrently. None of them sees the others' output. Each reads the diff and every changed file in full, plus two or three sibling files per changed file for the local pattern.
 
 **Agent A, spec conformance** (model `claude-sonnet-5-5`). For each D-id in design.md: the file:line that implements it, or a finding. Goals have code; non-goals have none (scope creep is a finding). Each `- [x]` task does what it says, and its `測試：` file tests the `驗收：` scenario it names. Risks in design.md have their stated mitigation. Classification: BUG = task checked and the diff has no code for it (cite task number, plus the D-id it serves); MUST_FIX = the diff has code for the task or goal but it contradicts a decision (cite D-id), even if the task feels unfinished. Do not flag trade-offs design.md already acknowledges. Also return `D_TABLE`: one row per D-id in design.md, followed as well as violated; a followed D gets its file:line, a violated D points at its finding.
 
@@ -76,7 +81,7 @@ Evidence you cannot verify downgrades the finding one level. Only BUG and MUST_F
 
 Seed the report's D 對照 table from Agent A's `D_TABLE` (followed → 照做, violated → 偏離) and keep every row, followed ones included. After bucketing, a row whose finding you dismissed becomes 照做, and a row that a B or C finding in Act on or Consider contradicts becomes 偏離. Cite file:line, not a finding number. Agents B and C write `d_id: none`.
 
-A BUG of the kind 「task 已勾但沒實作」 is always Consider, never Act on: fixing it is redoing `/apply`. Before routing it there, read the diff yourself and confirm the task has no code at all; if it has code that contradicts a D, it is a MUST_FIX against that D and takes the normal Act on path. The report line says 回 `/apply <slug>` 做完; review changes no code and does not touch tasks.md for it.
+A BUG of the kind 「task 已勾但沒實作」 is always Consider, never Act on: fixing it is redoing `/apply`. Before routing it there, read the diff yourself and confirm the task has no code at all; if it has code that contradicts a D, it is a MUST_FIX against that D and takes the normal Act on path. The report line says 回 `/apply <slug>` 做完; review changes no code and does not touch tasks.md for it. This is the one Consider that Step 5's 「Consider never … sends the card back to apply」 does not cover: it is a BUG that stays unfixed, so the unfixed-Bug condition in Step 5 stops the flow before `/pr`.
 
 ## Step 4: fix once
 
@@ -87,7 +92,7 @@ Then apply the fixes, touching only the listed places. The whole fix round may a
 ## Step 5: report.md
 
 ```markdown
-# Review · <slug> · <date> · <commit>
+# Review · <slug> · 第 <N> 輪 · <date> · <commit>
 
 ## D 對照
 | D | 狀態 | 位置 |
@@ -111,12 +116,14 @@ Then apply the fixes, touching only the listed places. The whole fix round may a
 <commit sha> · <what was verified and how> · verdict: <green|red>
 ```
 
-`opsx status review 7/7 "report.md 寫好"`. Reply with the bucket counts, what got fixed, what the user should look at in Consider, and the two closing lines. Then continue to `/pr <slug>` per `../../references/continue.md`: invoke it now unless a gate is open or a Bug or Must-fix is still unfixed.
+A later round rewrites the file from this template but keeps an existing `## MR` section verbatim: `/pr` appends it, and the router and merge read the URL from it.
+
+`opsx status review 7/7 "report.md 寫好"`. Reply with the bucket counts, what got fixed, what the user should look at in Consider, and the two closing lines. Then continue to `/pr <slug>` per `../../references/continue.md`: invoke it now unless a gate is open or a Bug or Must-fix is still unfixed. Consider never opens a gate and never sends the card back to apply. Only when this was round 2 and a Bug or Must-fix is still unfixed, write the gate described in step 0's round rule and stop.
 
 ## Guardrails
 
 - Never skip step 0. The gate is the whole point of test-first.
-- Three agents every time; C is not optional and not only for contested designs.
+- Three agents every time except a small card (one merged reviewer); on any other card C is not optional and not only for contested designs.
 - Findings without evidence are not findings.
 - One fix cycle. Anything left is in the report for the human reviewer or the next session.
 - Review never implements a task. 已勾但沒實作 goes back to `/apply`.
