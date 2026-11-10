@@ -280,4 +280,56 @@ out="$(opsx chain p 2>&1)"; assert_eq "$?" 0 "drive 續接: $out"
 assert_eq "$(jq -r '."solo/c".mode' "$J")" drive
 assert_eq "$(tail -1 "$Q")" "$(printf 'drive\tc\t%s' "$R3")" "drive 模式佇列最後一行"
 cd "$R"
+
+# --- 主 change（殼名 = PR 名，changes[] 是子 change）：chain 用 PR 名找得到 ---
+R4="$(mk_repo sess)"; mk_change "$R4" m1
+cat > "$R4/openspec/workplan.yaml" <<'EOF'
+features:
+  - name: f
+    depends-on: []
+    prs:
+      - name: m1
+        branch: feat/m1/u
+        status: merged
+        depends-on: []
+        changes:
+          - name: s1
+            status: done
+          - name: s2
+            status: done
+      - name: m2
+        branch: feat/m2/u
+        status: pending
+        depends-on: [m1]
+        changes:
+          - name: t1
+            status: pending
+  - name: g
+    depends-on: [m1]
+    prs:
+      - name: m3
+        branch: feat/m3/u
+        status: pending
+        depends-on: [m1]
+        changes:
+          - name: m3
+            status: pending
+EOF
+for s in m2 m3; do mkdir -p "$R4/openspec/changes/$s"; printf 'schema: opsx\nkind: dev\n' > "$R4/openspec/changes/$s/.openspec.yaml"; printf -- '- [ ] 1.1 x\n' > "$R4/openspec/changes/$s/tasks.md"; done
+J="$OPSX_STATE_DIR/dispatch.json"
+printf '{"sess/m1":{"mode":"autopilot","pane":"w5:pQ","tab":"w5:tJ","workspace":"opsx","workspace_id":"w5","agent":"claude","kind":"dev","grants":[],"worktree":"%s","branch":"feat/m1/u"}}' "$R4" > "$J"
+got="$(python3 -I "$OPSX_ROOT/bin/lib/chain.py" children "$R4" sess m1 "$J")"
+assert_eq "$got" "$(printf 'child\tm2\tfeat/m2/u\tdev\nchild\tm3\tfeat/m3/u\tdev')" "主 change 合併後找得到依賴它的主 change（不是 changes[0] 的 t1）"
+
+# --- feature session：m1 合併後同一個 session 接 m2（同 feature），m3 在別的 feature 留給 coordinate ---
+printf '{"sess/m1":{"mode":"autopilot","pane":"w5:pQ","tab":"w5:tJ","workspace":"opsx","workspace_id":"w5","agent":"claude","kind":"dev","grants":[],"worktree":"%s","branch":"feat/m1/u","herdr_name":"f","via":"f","feature":"f"}}' "$R4" > "$J"
+cd "$R4"; : > "$OPSX_FAKE_LOG"
+out="$(opsx chain m1 2>&1)"; assert_eq "$?" 0 "feature 續接: $out"
+assert_eq "$(cat "$OPSX_FAKE_LOG")" "" "feature 續接不開 pane、chain 不直接叫 herdr"
+assert_eq "$(cat "$OPSX_STATE_DIR/herdr-queue/sess-m2.tsv")" "$(printf 'prompt\tf\t[m2] /apply m2')" "佇列：送進同一個 session，前綴 [m2]"
+assert_eq "$(jq -r '."sess/m2" | [.herdr_name, .via, .feature, .pane, .branch, .worktree] | join(" ")' "$J")" "f f f w5:pQ feat/m2/u $R4" "m2 掛在同一個 session"
+assert_eq "$(jq -r '."sess/m1".handed_to // "none"' "$J")" none "session 沒交出去，父主 change 不記交接"
+assert_eq "$(jq -r '."sess/m3" // "none"' "$J")" none "別的 feature 不由 chain 開"
+assert_eq "$(git -C "$R4" branch --show-current)" "feat/m1/mikaela" "chain 不替 session 切 branch"
+cd "$R"
 echo ok

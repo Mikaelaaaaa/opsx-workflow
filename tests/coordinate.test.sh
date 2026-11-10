@@ -395,4 +395,70 @@ sleep 0 & dead=$!; wait "$dead"
 cards '[{"slug":"u","section":"進行中","dispatch":{"mode":"autopilot","agent":"claude","pane":"w1:p1","drive_pid":'"$dead"'},"agent_status":"idle"}]'
 round || fail "rc: $(cat "$FX/out")"
 assert_grep "^opsx dispatch u --agent claude" "$OPSX_FAKE_LOG"
+
+# --- 主 change（卡名 = PR 名，changes[] 是子 change）與 feature session ---
+sess_wp() { # <m1 的 status>
+  cat > "$R/openspec/workplan.yaml" <<EOF
+features:
+  - name: f
+    depends-on: []
+    prs:
+      - name: m1
+        branch: feat/m1/u
+        status: $1
+        depends-on: []
+        changes:
+          - name: s1
+            status: done
+      - name: m2
+        branch: feat/m2/u
+        status: pending
+        depends-on: [m1]
+        changes:
+          - name: t1
+            status: pending
+  - name: g
+    depends-on: [m1]
+    prs:
+      - name: m3
+        branch: feat/m3/u
+        status: pending
+        depends-on: []
+        changes:
+          - name: t3
+            status: pending
+EOF
+}
+mkcard m2 m3; printf '{}' > "$DISP"; rm -f "$MEMO"
+
+# 主 change m2 的依賴 m1 沒合：不派；m3 屬於有依賴的 feature g，由 session 派、不單獨派；g 的依賴沒合也不開
+sess_wp pending
+cards '[{"slug":"m2"},{"slug":"m3"}]'
+round || fail "rc: $(cat "$FX/out")"
+assert_eq "$(count '^opsx dispatch')" 0 "依賴沒合：主 change 不派、feature 不開：$(cat "$OPSX_FAKE_LOG")"
+grep '⏳' "$LOG" | grep 'm2' | grep -q 'm1' || fail "主 change m2 要記等 m1：$(cat "$LOG")"
+grep '⏳' "$LOG" | grep 'feature g' | grep -q 'm1' || fail "feature g 要記等 m1：$(cat "$LOG")"
+
+# m1 合了：m2 照舊單獨派（f 沒有依賴，不是 session feature），g 開一個 session，m3 不單獨派
+sess_wp merged
+round || fail "rc: $(cat "$FX/out")"
+assert_grep "^opsx dispatch m2 --agent claude" "$OPSX_FAKE_LOG"
+assert_grep "^opsx dispatch --feature g --agent claude --mode autopilot --repo $R" "$OPSX_FAKE_LOG"
+assert_not_grep "^opsx dispatch m3" "$OPSX_FAKE_LOG"
+
+# g 已經有 session：不再開
+printf '{"demo/m3":{"mode":"autopilot","agent":"claude","pane":"w1:p9","feature":"g","herdr_name":"g","via":"g"}}' > "$DISP"
+cards '[{"slug":"m3","section":"進行中","dispatch":{"mode":"autopilot","agent":"claude","pane":"w1:p9","feature":"g","drive_pid":null},"agent_status":"working"}]'
+round || fail "rc: $(cat "$FX/out")"
+assert_not_grep "^opsx dispatch --feature g" "$OPSX_FAKE_LOG"
+
+# 主 change 合併、agent 不在：PR 標 merged，還沒 done 的子 change 一起標 done
+sess_wp merged
+printf '{"demo/m2":{"mode":"stopped","agent":"claude","pane":"w1:p3","drive_pid":null,"branch":"feat/m2/u"}}' > "$DISP"
+cards "[$(merged m2 2026-11-07T12:00:00Z null null)]"
+round || fail "rc: $(cat "$FX/out")"
+assert_grep '^openspec archive m2 -y$' "$OPSX_FAKE_LOG"
+assert_eq "$(wp_status m2)" merged "主 change 的 PR 要標 merged"
+assert_eq "$(wp_change t1)" done "主 change 底下的子 change 要標 done"
+cp "$WP0" "$R/openspec/workplan.yaml"; printf '{}' > "$DISP"
 echo "coordinate: ok"

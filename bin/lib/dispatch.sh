@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
 # opsx dispatch <slug> --agent claude|codex --model <id> --mode interactive|autopilot --kind <kind> [--repo <path>]
+# opsx dispatch --feature <feature> --agent … --mode …：一個 session 代管 workplan 一個 feature 現在能開工的主 change
 # 把一張卡派出去：開 worktree，在 repo 掛的 workspace 開 herdr tab，agent start，送第一句 prompt，記進 dispatch.json。
 # 要求檔 §3.6「派」、§3.6 自主程度表、§3.1。herdr 的每個呼叫都可以被 PATH 上的假 herdr 取代（tests/fakes）。
 
 opsx_dispatch() {
-  local slug="" agent=claude model="" mode=autopilot kind="" top=""
+  local slug="" agent=claude model="" mode=autopilot kind="" top="" feature="" plan=""
   while [ $# -gt 0 ]; do
     case "$1" in
+      --feature) feature="$2"; shift 2 ;;
       --agent) agent="$2"; shift 2 ;;
       --model) model="$2"; shift 2 ;;
       --mode) mode="$2"; shift 2 ;;
@@ -16,15 +18,24 @@ opsx_dispatch() {
       *) [ -z "$slug" ] && slug="$1" || die "dispatch: 多餘的參數 $1"; shift ;;
     esac
   done
+  if [ -n "$feature" ]; then
+    [ -z "$slug" ] || die "dispatch: slug 與 --feature 只能給一個"
+    slug="$feature"   # herdr agent 名、worktree、tab 都用 feature 名
+  fi
   [ -n "$slug" ] || die "dispatch: 要給 slug"
   [ -n "$top" ] || top="$(git_toplevel)"
   [ -n "$top" ] || die "dispatch: 不在 git repo 裡，或給 --repo"
   top="$(cd "$top" && pwd -P)"
   case "$agent" in claude|codex) ;; *) die "dispatch: --agent 只收 claude|codex" ;; esac
   case "$mode" in interactive|autopilot) ;; drive) mode=autopilot ;; *) die "dispatch: --mode 只收 interactive|autopilot（drive 是 autopilot 的舊名）" ;; esac
-  local d="$top/openspec/changes/$slug" repo; repo="$(basename "$top")"
-  [ -d "$d" ] || die "dispatch: 沒有這張卡：$d"
   printf '%s' "$slug" | grep -qE '^[a-z][a-z0-9_-]{0,31}$' || die "dispatch: slug 要符合 [a-z][a-z0-9_-]{0,31}（herdr agent 名）：$slug"
+  local card="$slug"
+  if [ -n "$feature" ]; then
+    plan="$("$OPSX_PY" -I "$OPSX_ROOT/bin/lib/chain.py" feature "$top" "$feature")" || exit 2
+    card="$(printf '%s' "$plan" | head -1 | cut -f1)"
+  fi
+  local d="$top/openspec/changes/$card" repo; repo="$(basename "$top")"
+  [ -d "$d" ] || die "dispatch: 沒有這張卡：$d"
   command -v herdr >/dev/null || die "dispatch: 找不到 herdr"
   ensure_dir "$OPSX_STATE_DIR"
 
@@ -54,7 +65,7 @@ PY
   [ -n "$model" ] || model="$(default_model "$agent" "$kind")"
 
   # branch：workplan 有就用，沒有就 {type}/{slug}/{user}
-  local branch; branch="$(workplan_branch "$top" "$slug")"
+  local branch; branch="$(workplan_branch "$top" "$card")"
   if [ -z "$branch" ]; then
     local t=feat; case "$kind" in bug-fix) t=fix ;; refactoring) t=refactor ;; ops|chore) t=chore ;; esac
     local user="${OPSX_USER:-$(git -C "$top" config user.name 2>/dev/null | tr ' ' '-' | tr '[:upper:]' '[:lower:]')}"
@@ -154,26 +165,40 @@ $(herdr pane read "$pane" 2>/dev/null | tail -20)"
   done
 
   # dispatch.json
-  OPSX_KEY="$repo/$slug" OPSX_WS="$ws" OPSX_WSID="$ws_id" OPSX_TAB="$tab" OPSX_PANE="$pane" OPSX_AGENT="$agent" OPSX_MODEL="$model" OPSX_MODE="$mode" OPSX_KIND="$kind" OPSX_WT="$wt" OPSX_BR="$branch" OPSX_AT="$(now_iso)" OPSX_LIB="$OPSX_ROOT/bin/lib" \
+  # 一般卡一筆；feature session 每個能開工的主 change 一筆，共用 pane，herdr_name / via / feature 都是 feature 名
+  [ -n "$plan" ] || plan="$card"$'\t'"$branch"$'\t'"$kind"
+  OPSX_REPO="$repo" OPSX_FEATURE="$feature" OPSX_PLAN="$plan" OPSX_WS="$ws" OPSX_WSID="$ws_id" OPSX_TAB="$tab" OPSX_PANE="$pane" OPSX_AGENT="$agent" OPSX_MODEL="$model" OPSX_MODE="$mode" OPSX_WT="$wt" OPSX_AT="$(now_iso)" OPSX_LIB="$OPSX_ROOT/bin/lib" \
   "$OPSX_PY" -I - "$OPSX_STATE_DIR/dispatch.json" <<'PY'
 import os, sys
 sys.path.insert(0, os.environ["OPSX_LIB"]); import jsonfile
 e = os.environ
 def put(d):
-    d[e["OPSX_KEY"]] = {"workspace": e["OPSX_WS"], "workspace_id": e["OPSX_WSID"], "tab": e["OPSX_TAB"], "pane": e["OPSX_PANE"], "agent": e["OPSX_AGENT"],
-                        "model": e["OPSX_MODEL"], "mode": e["OPSX_MODE"], "kind": e["OPSX_KIND"], "worktree": e["OPSX_WT"], "branch": e["OPSX_BR"],
-                        "grants": [], "once": [], "started_at": e["OPSX_AT"], "drive_pid": None}
+    for line in e["OPSX_PLAN"].splitlines():
+        card, branch, kind = line.split("\t")
+        entry = {"workspace": e["OPSX_WS"], "workspace_id": e["OPSX_WSID"], "tab": e["OPSX_TAB"], "pane": e["OPSX_PANE"], "agent": e["OPSX_AGENT"],
+                 "model": e["OPSX_MODEL"], "mode": e["OPSX_MODE"], "kind": kind, "worktree": e["OPSX_WT"], "branch": branch,
+                 "grants": [], "once": [], "started_at": e["OPSX_AT"], "drive_pid": None}
+        if e["OPSX_FEATURE"]:
+            entry["herdr_name"] = entry["via"] = entry["feature"] = e["OPSX_FEATURE"]
+        d["%s/%s" % (e["OPSX_REPO"], card)] = entry
 jsonfile.update(sys.argv[1], put)
 PY
 
   # 第一句：照狀態
-  local first; first="$(stage_name "$top" "$slug")"
+  local first; first="$(stage_name "$top" "$card")"
   case "$first" in explore|grill|propose|apply|review|pr|babysit) ;; *) first=explore ;; esac
-  herdr agent prompt "$slug" "/$first $slug" >/dev/null
-  log_row "$d" 你 已指派 "指派給 ${agent}，第一句 /${first}" "${agent} · ${mode} · ${model}"
-  say "dispatch: $repo/$slug → $agent $model · $mode · kind $kind · $ws $pane · 第一句 /$first"
+  herdr agent prompt "$slug" "/$first $card" >/dev/null
+  local c via=""
+  [ -n "$feature" ] && via="（session ${feature}）"
+  for c in $(printf '%s\n' "$plan" | cut -f1); do
+    log_row "$top/openspec/changes/$c" 你 已指派 "指派給 ${agent}${via}，第一句 /${first} ${card}" "${agent} · ${mode} · ${model}"
+  done
+  say "dispatch: $repo/$slug → $agent $model · $mode · kind $kind · $ws $pane · 第一句 /$first $card"
 
-  if [ "$mode" = autopilot ]; then
+  if [ -n "$feature" ]; then
+    # drive 對 herdr agent 名 = 卡名送話；session 代管多張卡，跟 fan-out 的代管卡一樣不起 drive
+    say "dispatch: session $feature 代管 $(printf '%s\n' "$plan" | cut -f1 | tr '\n' ' ')；不起 drive"
+  elif [ "$mode" = autopilot ]; then
     # pid 由 drive 自己寫進 dispatch.json（手動 opsx drive 也一樣），這裡只負責起
     nohup bash "$OPSX_ROOT/bin/opsx" drive "$slug" --repo "$top" >> "$OPSX_STATE_DIR/drive-$repo-$slug.log" 2>&1 &
     say "dispatch: drive 跑起來了（pid $!），log 在 $OPSX_STATE_DIR/drive-$repo-$slug.log"

@@ -78,7 +78,27 @@ def _kind(card_dir: str) -> str:
     return m.group(1) if m else "dev"
 
 
+def find_pr(prs: list, slug: str):
+    """slug 是 PR 名（主 change 的殼名）或 PR 底下的 change 名，回它所屬的 PR；workplan 裡沒有回 None。"""
+    for pr in prs:
+        if pr.get("name") == slug:
+            return pr
+    for pr in prs:
+        if any(c.get("name") == slug for c in pr.get("changes") or []):
+            return pr
+    return None
+
+
+def card_of(top: str, pr: dict, todo: list) -> str:
+    """PR 對到的卡：主殼 openspec/changes/<PR 名>/ 在就是它；舊的一 PR 一 change 卡是第一個還沒 done 的 change。"""
+    if os.path.isdir(os.path.join(top, "openspec", "changes", pr["name"])):
+        return pr["name"]
+    return todo[0]   # 一個 PR 一條 branch；同 PR 的其他 change 由接手的 agent 依序做
+
+
 def children(top: str, repo: str, parent: str, dispatch_path: str) -> list:
+    """父卡的條目有 feature（一個 session 代管整個 feature）時，同 feature 的主 change 印 session 行，
+    別的 feature 由 coordinate 依 feature 的 depends-on 開新 session，這裡不接。"""
     dispatch = jsonfile.load(dispatch_path)
     me = dispatch.get("%s/%s" % (repo, parent))
     if not me:
@@ -90,22 +110,27 @@ def children(top: str, repo: str, parent: str, dispatch_path: str) -> list:
     wp_path = os.path.join(top, "openspec", "workplan.yaml")
     if not os.path.exists(wp_path):
         return [("skip", "沒有 openspec/workplan.yaml，不知道誰依賴 %s" % parent)]
-    prs = [pr for f in load_workplan(wp_path).get("features") or [] for pr in f.get("prs") or []]
-    mine = [pr for pr in prs if any(c.get("name") == parent for c in pr.get("changes") or [])]
-    if not mine:
+    features = load_workplan(wp_path).get("features") or []
+    prs = [pr for f in features for pr in f.get("prs") or []]
+    feature_of = {pr.get("name"): f.get("name") for f in features for pr in f.get("prs") or []}
+    mine = find_pr(prs, parent)
+    if mine is None:
         return [("skip", "workplan 裡沒有 %s" % parent)]
+    session = me.get("feature")
     status = {pr.get("name"): pr.get("status") for pr in prs}
     out = []
     for pr in prs:
         deps = pr.get("depends-on") or []
-        if mine[0].get("name") not in deps or pr.get("status") == "merged":
+        if mine.get("name") not in deps or pr.get("status") == "merged":
+            continue
+        if session and feature_of.get(pr.get("name")) != session:
             continue
         if any(status.get(dep) != "merged" for dep in deps):
             continue
         todo = [c.get("name") for c in pr.get("changes") or [] if c.get("status") != "done"]
         if not todo:
             continue
-        slug = todo[0]   # 一個 PR 一條 branch；同 PR 的其他 change 由接手的 agent 依序做
+        slug = card_of(top, pr, todo)
         card = os.path.join(top, "openspec", "changes", slug)
         if not os.path.exists(os.path.join(card, "tasks.md")):
             continue
@@ -114,8 +139,36 @@ def children(top: str, repo: str, parent: str, dispatch_path: str) -> list:
             continue
         if not pr.get("branch"):
             sys.exit("chain: workplan 的 PR「%s」沒有 branch，續接不知道要開哪條 branch；在 workplan 補上 branch" % pr.get("name"))
-        out.append(("child", slug, pr["branch"], _kind(card)))
+        out.append(("session" if session else "child", slug, pr["branch"], _kind(card)))
     return out or [("skip", "沒有可以接的子卡")]
+
+
+def feature_plan(top: str, feature: str) -> list:
+    """opsx dispatch --feature：feature 底下現在能開工的主 change，(卡名, branch, kind) 依 workplan 順序。
+    能開工 = PR 沒合、depends-on 都合了、還有沒 done 的 change、卡有 tasks.md。沒有這個 feature 或一個都不能開工就 exit。"""
+    wp_path = os.path.join(top, "openspec", "workplan.yaml")
+    features = load_workplan(wp_path).get("features") if os.path.exists(wp_path) else []
+    hit = [f for f in features or [] if f.get("name") == feature]
+    if not hit:
+        sys.exit("dispatch: workplan 沒有 feature「%s」" % feature)
+    status = {pr.get("name"): pr.get("status") for f in features for pr in f.get("prs") or []}
+    out = []
+    for pr in hit[0].get("prs") or []:
+        if pr.get("status") == "merged" or any(status.get(d) != "merged" for d in pr.get("depends-on") or []):
+            continue
+        todo = [c.get("name") for c in pr.get("changes") or [] if c.get("status") != "done"]
+        if not todo:
+            continue
+        slug = card_of(top, pr, todo)
+        card = os.path.join(top, "openspec", "changes", slug)
+        if not os.path.exists(os.path.join(card, "tasks.md")):
+            continue
+        if not pr.get("branch"):
+            sys.exit("dispatch: workplan 的 PR「%s」沒有 branch" % pr.get("name"))
+        out.append((slug, pr["branch"], _kind(card)))
+    if not out:
+        sys.exit("dispatch: feature「%s」現在沒有能開工的主 change（都合了、依賴沒合，或還沒 propose）" % feature)
+    return out
 
 
 def _child_entry(me: dict, slug: str, branch: str, kind: str, model: str, mode: str, worktree, now: str) -> dict:
@@ -136,6 +189,17 @@ def register_continue(d: dict) -> None:
     me["handed_to"] = [slug]
     me["handed_at"] = e["OPSX_AT"]
     me["herdr_name"] = slug
+
+
+def register_session(d: dict) -> None:
+    """jsonfile.update 的 mutate：feature session 接下一個主 change。pane、herdr 名、feature 沿用父主 change 的條目，父主 change 不記交接。"""
+    e = os.environ
+    me = d[e["OPSX_KEY"]]
+    repo = e["OPSX_KEY"].split("/", 1)[0]
+    slug, branch, kind, model = e["OPSX_PLAN"].split("\t")
+    entry = _child_entry(me, slug, branch, kind, model, me.get("mode"), me.get("worktree"), e["OPSX_AT"])
+    entry["herdr_name"] = entry["via"] = entry["feature"] = me["feature"]
+    d["%s/%s" % (repo, slug)] = entry
 
 
 def register_fan_out(d: dict) -> None:
@@ -165,8 +229,14 @@ if __name__ == "__main__":
         old_name, mode = me.get("herdr_name") or os.environ["OPSX_PARENT"], me.get("mode")
         jsonfile.update(sys.argv[2], register_continue)
         print(old_name, mode)   # 寫成功才印：chain.sh 靠退出碼判斷寫入成敗
+    elif len(sys.argv) == 4 and sys.argv[1] == "feature":
+        for row in feature_plan(sys.argv[2], sys.argv[3]):
+            print("\t".join(row))
+    elif len(sys.argv) == 3 and sys.argv[1] == "session":
+        jsonfile.update(sys.argv[2], register_session)
+        print(jsonfile.load(sys.argv[2])[os.environ["OPSX_KEY"]]["feature"])
     elif len(sys.argv) == 3 and sys.argv[1] == "fan-out":
         print(jsonfile.load(sys.argv[2])[os.environ["OPSX_KEY"]].get("mode"))
         jsonfile.update(sys.argv[2], register_fan_out)
     else:
-        sys.exit("用法：chain.py children <top> <repo> <父卡 slug> <dispatch.json> | chain.py fan-out <dispatch.json>")
+        sys.exit("用法：chain.py children <top> <repo> <父卡 slug> <dispatch.json> | chain.py feature <top> <feature> | chain.py continue|session|fan-out <dispatch.json>")

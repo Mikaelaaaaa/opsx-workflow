@@ -116,4 +116,9 @@ gates; : > "$OPSX_FAKE_LOG"
 printf '{"Agentory-AI/x":{"mode":"autopilot","pane":"p4","agent":"claude","grants":[],"herdr_name":"x"}}' > "$OPSX_STATE_DIR/dispatch.json"
 out="$(opsx answer x --gate g2 "選 B" 2>&1)"; assert_eq "$?" 0 "續接卡 answer: $out"
 assert_grep '^agent prompt x 選 B$' "$OPSX_FAKE_LOG"
+# feature session 代管的主 change（opsx dispatch --feature 寫的形狀）：送到 feature 名的 session，前綴 [<主>]
+gates; : > "$OPSX_FAKE_LOG"
+printf '{"Agentory-AI/x":{"mode":"autopilot","pane":"p4","agent":"claude","grants":[],"herdr_name":"fs","via":"fs","feature":"fs"}}' > "$OPSX_STATE_DIR/dispatch.json"
+out="$(opsx answer x --gate g2 "選 B" 2>&1)"; assert_eq "$?" 0 "session 代管卡 answer: $out"
+assert_grep '^agent prompt fs \[x\] 選 B$' "$OPSX_FAKE_LOG"
 echo ok

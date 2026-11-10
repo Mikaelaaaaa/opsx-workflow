@@ -229,4 +229,62 @@ python3 -I -c 'import json,sys;p=sys.argv[1];d=json.load(open(p));d["Other-Repo/
 : > "$OPSX_FAKE_LOG"
 out="$(opsx dispatch coord3 --agent claude --mode autopilot 2>&1)"; [ $? -eq 2 ] || fail "fan-out 父卡的 pane 還活著，同名要拒絕: $out"
 assert_eq "$(cat "$OPSX_FAKE_LOG")" "" "拒絕時不碰 herdr"
+
+# --- feature session：一個 pane、每個可做的主 change 一筆 ---
+RF="$(mk_repo Feat-Repo)"; mkdir -p "$OPSX_STATE_DIR"
+cat > "$RF/openspec-wp.yaml" <<'EOF'
+features:
+  - name: fs
+    depends-on: []
+    prs:
+      - name: m1
+        branch: feat/m1/mikaela
+        status: pending
+        depends-on: []
+        changes:
+          - name: a1
+            status: pending
+      - name: m2
+        branch: feat/m2/mikaela
+        status: pending
+        depends-on: []
+        changes:
+          - name: m2
+            status: pending
+      - name: m3
+        branch: feat/m3/mikaela
+        status: pending
+        depends-on: [m1]
+        changes:
+          - name: m3
+            status: pending
+EOF
+mkdir -p "$RF/openspec"; mv "$RF/openspec-wp.yaml" "$RF/openspec/workplan.yaml"
+for s in m1 m2 m3; do mkdir -p "$RF/openspec/changes/$s"; printf 'schema: opsx\nkind: dev\n' > "$RF/openspec/changes/$s/.openspec.yaml"; printf -- '- [ ] 1.1 x\n' > "$RF/openspec/changes/$s/tasks.md"; done
+cd "$RF"; printf '{}' > "$OPSX_STATE_DIR/dispatch.json"; : > "$OPSX_FAKE_LOG"
+
+# 沒有這個 feature：拒絕，不開 pane
+out="$(opsx dispatch --feature nope --agent claude --mode autopilot 2>&1)"; [ $? -eq 2 ] || fail "沒有的 feature 要拒絕: $out"
+echo "$out" | grep -q nope || fail "訊息要說 nope: $out"
+assert_eq "$(cat "$OPSX_FAKE_LOG")" "" "沒有的 feature 不碰 herdr"
+assert_rc 2 opsx dispatch --feature "Bad Name" --agent claude
+assert_rc 2 opsx dispatch m1 --feature fs --agent claude
+
+# 派 fs：m1、m2 沒依賴，m3 等 m1，不寫
+out="$(opsx dispatch --feature fs --agent claude --mode autopilot 2>&1)"; assert_eq "$?" 0 "feature dispatch: $out"
+assert_eq "$(grep -c '^agent start' "$OPSX_FAKE_LOG")" 1 "一個 feature 只開一個 agent"
+assert_grep '^agent start fs --kind claude ' "$OPSX_FAKE_LOG"
+assert_grep '^tab create .* --label fs' "$OPSX_FAKE_LOG"
+assert_grep '^agent prompt fs /apply m1$' "$OPSX_FAKE_LOG"
+J="$OPSX_STATE_DIR/dispatch.json"
+assert_eq "$(jq -r '."Feat-Repo/m1" | [.herdr_name, .via, .feature, .pane, .branch] | join(" ")' "$J")" "fs fs fs w1:pE feat/m1/mikaela" "m1 的條目"
+assert_eq "$(jq -r '."Feat-Repo/m2" | [.herdr_name, .via, .feature, .pane, .branch] | join(" ")' "$J")" "fs fs fs w1:pE feat/m2/mikaela" "m2 跟 m1 共用 pane"
+assert_eq "$(jq -r '."Feat-Repo/m3" // "none"' "$J")" none "依賴沒滿足的主 change 不寫"
+assert_eq "$(git -C "$RF/.claude/worktrees/fs" rev-parse --abbrev-ref HEAD)" "feat/m1/mikaela" "worktree 叫 feature 名，從第一個主 change 的 branch 開"
+assert_grep '已指派' "$RF/openspec/changes/m2/decisions.tsv"
+
+# 再派一次：session 還在，拒絕
+: > "$OPSX_FAKE_LOG"
+out="$(opsx dispatch --feature fs --agent claude --mode autopilot 2>&1)"; [ $? -eq 2 ] || fail "session 還在要拒絕: $out"
+assert_eq "$(cat "$OPSX_FAKE_LOG")" "" "拒絕時不碰 herdr"
 echo ok

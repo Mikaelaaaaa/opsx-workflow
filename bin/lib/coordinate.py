@@ -171,8 +171,14 @@ class Round:
         if pr is None:
             self.log("-- %s 不在 %s，沒有 PR 要標 merged" % (slug, path))
             return True
-        pending = [x.get("name") for x in pr.get("changes") or [] if x.get("name") != slug and x.get("status") != "done"]
-        marks = [("changes", slug, "done")] + ([] if pending else [("prs", pr["name"], "merged")])
+        names = [x.get("name") for x in pr.get("changes") or []]
+        if slug not in names:
+            # 主 change 合併：PR 標 merged，還沒 done 的子 change 一起標 done
+            pending = []
+            marks = [("changes", x.get("name"), "done") for x in pr.get("changes") or [] if x.get("status") != "done"] + [("prs", pr["name"], "merged")]
+        else:
+            pending = [x.get("name") for x in pr.get("changes") or [] if x.get("name") != slug and x.get("status") != "done"]
+            marks = [("changes", slug, "done")] + ([] if pending else [("prs", pr["name"], "merged")])
         if self.dry:
             self.log("DRY workplan %s 標 %s" % (path, "、".join("%s %s" % (n, v) for _, n, v in marks)))
             return True
@@ -296,6 +302,10 @@ class Round:
                 continue   # 人在板上停掉的
             if not os.path.isfile(os.path.join(c["path"], "tasks.md")) or c["mr"]:
                 continue
+            owner = self.session_feature_of(top, c["slug"])
+            if owner:
+                self.log("-- %s 屬於 feature %s，由那個 session 做，不單獨派" % (key, owner))
+                continue
             missing = deps_unmerged(c["slug"], self.workplan(top))
             if missing:
                 self.log("⏳ %s 等 %s merged 才派" % (key, "、".join(missing)))
@@ -320,6 +330,40 @@ class Round:
                 self.log("?? %s 派不出去：%s" % (key, err[:200]))
                 continue
             self.memo["_parked"].pop(key, None)
+        return n
+
+    def session_feature_of(self, top, slug):
+        pr = pr_of(self.workplan(top), slug)
+        for f in session_features(read_features(os.path.join(top, "openspec", "workplan.yaml"))):
+            if pr is not None and any(p.get("name") == pr.get("name") for p in f.get("prs") or []):
+                return f.get("name")
+        return None
+
+    def dispatch_features(self, repo_paths, n):
+        """feature 的 depends-on 都合了、還沒有 session、還有沒合的 PR：開一個 session（opsx dispatch --feature）。"""
+        for repo, top in sorted(repo_paths.items()):
+            prs = self.workplan(top)
+            status = {p.get("name"): p.get("status") for p in prs}
+            for f in session_features(read_features(os.path.join(top, "openspec", "workplan.yaml"))):
+                name = f.get("name")
+                if all(p.get("status") == "merged" for p in f.get("prs") or []):
+                    continue
+                missing = [d for d in f["depends-on"] if status.get(d) != "merged"]
+                if missing:
+                    self.log("⏳ %s 的 feature %s 等 %s merged 才開 session" % (repo, name, "、".join(missing)))
+                    continue
+                if any(k.startswith(repo + "/") and v.get("feature") == name and v.get("mode") != "stopped" for k, v in self.dispatch_file.items()):
+                    continue
+                if not AGENT_NAME.match(name):
+                    self.log("-- %s 的 feature %s 不是合法的 agent 名，跳過" % (repo, name))
+                    continue
+                if n >= MAX_DISPATCH:
+                    self.log("-- 這輪派滿 %d 個，feature %s 下輪" % (MAX_DISPATCH, name))
+                    continue
+                rc, _, err = self.act(["opsx", "dispatch", "--feature", name, "--agent", "claude", "--mode", "autopilot", "--repo", top])
+                n += 1
+                if rc != 0:
+                    self.log("?? %s 的 feature %s 開不了 session：%s" % (repo, name, err[:200]))
 
 
 def card_key(c):
@@ -338,11 +382,16 @@ def read_json(path, what):
         raise CoordinateError("%s（%s）不是合法 JSON：%s" % (what, path, e)) from e
 
 
-def read_prs(path):
-    """workplan.yaml 所有 feature 底下的 PR，用 chain.py 同一個 parser。沒有檔就是沒有 PR、沒有依賴。"""
+def read_features(path):
+    """workplan.yaml 的 features，用 chain.py 同一個 parser。沒有檔就是沒有 feature。"""
     if not os.path.exists(path):
         return []
-    return [pr for f in chain.load_workplan(path).get("features") or [] for pr in f.get("prs") or []]
+    return chain.load_workplan(path).get("features") or []
+
+
+def read_prs(path):
+    """workplan.yaml 所有 feature 底下的 PR。沒有檔就是沒有 PR、沒有依賴。"""
+    return [pr for f in read_features(path) for pr in f.get("prs") or []]
 
 
 def merged_prs(prs):
@@ -350,11 +399,13 @@ def merged_prs(prs):
 
 
 def pr_of(prs, slug):
-    """change 所屬的 PR（PR 名常常跟 change 名不同）；workplan 裡沒有就是 None。"""
-    for pr in prs:
-        if any(c.get("name") == slug for c in pr.get("changes") or []):
-            return pr
-    return None
+    """卡所屬的 PR：卡名是 PR 名（主 change）或 PR 底下的 change 名；workplan 裡沒有就是 None。"""
+    return chain.find_pr(prs, slug)
+
+
+def session_features(features):
+    """有 depends-on 的 feature 由一個 session 代管：依賴合了才由 coordinate 開 session，它的卡不單獨派。"""
+    return [f for f in features if f.get("depends-on")]
 
 
 def deps_unmerged(slug, prs):
@@ -443,7 +494,7 @@ def main():
             r.redispatch(c, repo_paths[c["repo"]], "agent 不在 herdr 裡（pane %s）" % c["dispatch"].get("pane"))
         elif drive_dead(c["dispatch"]):
             r.redispatch(c, repo_paths[c["repo"]], "drive pid %s 已經不在" % c["dispatch"]["drive_pid"])
-    r.dispatch_new(live, repo_paths)
+    r.dispatch_features(repo_paths, r.dispatch_new(live, repo_paths))
     r.save()
     r.log("== 結束：%d 張卡，收尾 %d 張" % (len(live), len(done)))
 
