@@ -92,6 +92,20 @@ On FAIL: read the log, fix, with a scope guard (a fix that needs files outside t
 
 Autopilot never touches `main`, never force-pushes, never merges. Those are level three and the hook denies them regardless of mode.
 
+## When the main change has subs/
+
+A change with `openspec/changes/<main>/subs/` is a main change (`../../references/work-split.md`). You are the session: the main change's PR branch is yours, and each sub-change becomes one commit on it.
+
+1. 先 propose 沒有 tasks.md 的子殼, one after another in workplan order, through the `propose` skill. They share your context; a subagent would have to rebuild it.
+2. Pick the sub-changes whose workplan `depends-on` is empty or already stacked (checked in the main shell's tasks.md). Hand each to its own subagent, all at once: one Agent call per sub-change, `isolation: "worktree"`, `run_in_background: true`. A sub-change whose dependencies are not stacked yet waits until they are.
+3. The brief follows `../../references/fan-out.md` ("Spawning") with these differences:
+   - Start point: the PR branch's current HEAD, not `<remote>/main`. Branch: `git switch --no-track -c <action>/<主>--<子>/<user> <PR branch>`. opsx maps `<主>--<子>` to `subs/<子>/`: `opsx status` writes the sub-shell's status.json and the commit gate reads the sub-shell's tasks.md.
+   - The workflow: call the `apply` skill for the sub-change, on its own tasks.md. Name the skill.
+   - It commits once and stops: 不 push, no review, no pr. The harness may remove its worktree when it ends, and a resumed subagent does not get the old worktree back; the commit stays on its branch in the shared `.git`, which is all stacking needs. A follow-up for a finished sub-change goes to a new subagent on that branch, not a resumed one.
+   - Report contract: `DONE <子> <sha>`, or `NEEDS-USER <子>` followed by the question, the options and the evidence.
+4. On `NEEDS-USER <子>`, write the gate in 子殼的 gates.md (`subs/<子>/gates.md`), not the main shell's, and keep going with the others.
+5. When a subagent cannot write the main repo's `openspec/` from its worktree, write its status for it: `opsx status <phase> <n>/<total> "<label>" --sub <子> --worker subagent-<子>`.
+
 ## When this pane coordinates other cards
 
 After `opsx chain` fans out (see `archive` step 6b), this pane hands each child card to a subagent and stays the only place that talks to the user. What goes to a subagent (independent cards whose tasks need nobody), what stays here (anything that needs the user, and cards that depend on each other), how prompts for a child arrive (`[<slug>] …`) and how a subagent's `NEEDS-USER` report becomes a gate in that card's `gates.md`: `../../references/fan-out.md`.
