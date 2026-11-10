@@ -20,6 +20,10 @@ for k in 'opsx stack' 'workplan 順序' '退出 3' 'session 自己重做' '/revi
   has "$k" "$SUBS"
 done
 
+# --- grant-action：授權 gate 要寫 action:，值取自 hook 的 deny 訊息 ---
+has 'action: <value>' "$SK"
+has "grant hook's deny message" "$SK"
+
 # --- review-fix-in-scope：apply 接 review 退回的 task；pr 在有待修時拒絕 ---
 has '## R<N>. review 退回' "$SK"
 has '測試先紅再修' "$SK"

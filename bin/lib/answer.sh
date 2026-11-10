@@ -42,13 +42,11 @@ opsx_answer() {
   result="$(OPSX_A_DIR="$d" OPSX_A_GATE="$gate" OPSX_A_GRANT="$grant" OPSX_A_TEXT="$answer" OPSX_A_REPO="$repo" OPSX_A_SLUG="$slug" \
             OPSX_A_SD="$OPSX_STATE_DIR" OPSX_A_NOW="$(now_iso)" OPSX_LIB="$OPSX_ROOT/bin/lib" "$OPSX_PY" -I - <<'PY'
 import os, re, sys, tomllib
-sys.path.insert(0, os.environ["OPSX_LIB"]); import authz, gatetype, jsonfile
+sys.path.insert(0, os.environ["OPSX_LIB"]); import authz, gatetype, grantactions, jsonfile
 e = os.environ
 d, gate, grant, text, repo, slug, sd, now = (e["OPSX_A_DIR"], e["OPSX_A_GATE"], e["OPSX_A_GRANT"], e["OPSX_A_TEXT"],
                                              e["OPSX_A_REPO"], e["OPSX_A_SLUG"], e["OPSX_A_SD"], e["OPSX_A_NOW"])
 key = "%s/%s" % (repo, slug)
-ACTION_RE = re.compile(r"^[a-z][a-z0-9_-]{0,31}$")   # 要當 grants.toml 的 key 與 hook 的比對字串，只准這些字元
-
 def fail(msg):
     print(msg, file=sys.stderr); sys.exit(2)
 
@@ -77,8 +75,8 @@ if grant == "repo" and action == "merge":
     fail("answer: merge 永遠要人，不能給「這個 repo 永遠」")
 if grant and not action:
     fail("answer: gate「%s」沒寫 action:，不知道要授權哪個動作" % gate)
-if grant and not ACTION_RE.match(action):
-    fail("answer: gate「%s」的 action「%s」不合格（只准 [a-z][a-z0-9_-]，最多 32 字），不能當授權的 key" % (gate, action))
+if grant and action not in grantactions.ACTIONS:
+    fail("answer: gate「%s」的 action「%s」不是閘門會查的動作，授權不會生效；合法值：%s" % (gate, action, ", ".join(grantactions.ACTIONS)))
 
 dispatch_path = os.path.join(sd, "dispatch.json")
 dispatch = jsonfile.load(dispatch_path)
