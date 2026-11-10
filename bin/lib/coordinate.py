@@ -272,11 +272,18 @@ class Round:
         # 送出就存：這輪後面的步驟出錯時，下一輪不會把同一則再送一次
         self.save()
 
-    def forget_waiting(self, c):
-        """卡沒在等人了：清掉它 gate 與 blocked 的通知紀錄，同一個 pane 之後再卡、或 gate id 被重用時才會再通知。"""
+    def forget_waiting(self, c, live):
+        """卡沒在等人了：清掉它 gate 與 blocked 的通知紀錄，同一個 pane 之後再卡、或 gate id 被重用時才會再通知。
+        session 的 blocked 鍵是整個 session 的：同 session 還有卡在等那個 pane 就留著，不然下一張還卡著的卡會再送一次。"""
         prefixes = tuple("%s/%s/" % (card_key(c), kind) for kind in ("gate", "blocked"))
         for key in [k for k in self.memo["_notified"] if k.startswith(prefixes)]:
             del self.memo["_notified"][key]
+        scope = session_scope(c)
+        if scope:
+            still = {"%s/blocked/%s" % (scope, o["dispatch"].get("pane")) for o in live
+                     if session_scope(o) == scope and o["waiting"] and o["waiting"]["type"] == "終端機等待輸入"}
+            for key in [k for k in self.memo["_notified"] if k.startswith(scope + "/blocked/") and k not in still]:
+                del self.memo["_notified"][key]
 
     def notify_gate(self, c, w, why):
         self.notify(c, "gate", w["gate_id"], "gate %s %s" % (w["gate_id"], why), "看板：" + one_line(w.get("question") or ""))
@@ -299,7 +306,8 @@ class Round:
         if w["type"] == "終端機等待輸入":
             pane = c["dispatch"].get("pane")
             self.log("?? %s 在 pane %s 等終端機輸入（autopilot 不該問 pane），要人看" % (key, pane))
-            self.notify(c, "blocked", pane, "在終端機等輸入", "pane %s：%s" % (pane, one_line(w.get("question") or "")))
+            self.notify(c, "blocked", pane, "在終端機等輸入", "pane %s：%s" % (pane, one_line(w.get("question") or "")),
+                        scope=session_scope(c))
             return
         if w["type"] == "type 不明":
             self.log("?? %s gate %s 的 type 沒寫或不在 approval | decision，不代答，要人看：%s" % (key, w["gate_id"], (w.get("question") or "")[:100]))
@@ -495,6 +503,13 @@ def card_key(c):
     return "%s/%s" % (c["repo"], c["slug"])
 
 
+def session_scope(c):
+    """卡屬於 feature session 時的通知鍵前綴 <repo>/@<feature>，否則 None。session 內的卡共用 pane，一件事不分卡。"""
+    if c["dispatch"] and c["dispatch"].get("feature"):
+        return "%s/@%s" % (c["repo"], c["dispatch"]["feature"])
+    return None
+
+
 def one_line(text):
     return text.split("\n", 1)[0][:100]
 
@@ -666,7 +681,7 @@ def one_round(state, dry):
     for c in live:
         w = c["waiting"]
         if not w:
-            r.forget_waiting(c)
+            r.forget_waiting(c, live)
         if c["dispatch"] and w and w["type"] != "可以合併":
             r.handle_gate(c, repo_paths[c["repo"]])
         if c["mr"] and c["mr"]["state"] == "ready":

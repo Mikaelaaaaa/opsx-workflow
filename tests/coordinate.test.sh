@@ -870,6 +870,20 @@ last="$(memo_get _redispatched demo/@g)"
 [ -n "$(memo_get _notified "demo/@g/dead/$last")" ] || fail "_notified 要有 demo/@g/dead/<上次重派時間>：$(cat "$MEMO")"
 round || fail "rc: $(cat "$FX/out")"
 assert_eq "$(notes)" 0 "同一次重派只通知一次"
+# session 共用 pane 卡在終端機：兩張卡一件事一則，兩張都不等了才清鍵
+rm -f "$MEMO"
+BW='"waiting":{"type":"終端機等待輸入","gate_id":null,"question":"agent 在終端機等輸入","recommended":"開啟 pane","options":["開啟 pane"]}'
+cards '[{"slug":"m3","section":"待處理","dispatch":'"$GD"',"agent_status":"blocked",'"$BW"'},{"slug":"m4","section":"待處理","dispatch":'"$GD"',"agent_status":"blocked",'"$BW"'}]'
+round || fail "rc: $(cat "$FX/out")"
+assert_eq "$(notes)" 1 "共用 pane 卡住兩張卡只通知一次：$(cat "$OPSX_FAKE_LOG")"
+[ -n "$(memo_get _notified demo/@g/blocked/w1:p9)" ] || fail "_notified 要有 demo/@g/blocked/w1:p9：$(cat "$MEMO")"
+cards '[{"slug":"m3","section":"進行中","dispatch":'"$GD"',"agent_status":"working"},{"slug":"m4","section":"待處理","dispatch":'"$GD"',"agent_status":"blocked",'"$BW"'}]'
+round || fail "rc: $(cat "$FX/out")"
+assert_eq "$(notes)" 0 "m4 還卡著：m3 不等了不能讓鍵被清而重送：$(cat "$OPSX_FAKE_LOG")"
+[ -n "$(memo_get _notified demo/@g/blocked/w1:p9)" ] || fail "m4 還卡著，鍵要留著：$(cat "$MEMO")"
+cards '[{"slug":"m3","section":"進行中","dispatch":'"$GD"',"agent_status":"working"},{"slug":"m4","section":"進行中","dispatch":'"$GD"',"agent_status":"working"}]'
+round || fail "rc: $(cat "$FX/out")"
+assert_eq "$(memo_get _notified demo/@g/blocked/w1:p9)" "" "兩張都不等了要清鍵：$(cat "$MEMO")"
 rm -f "$MEMO"
 cp "$WP0" "$R/openspec/workplan.yaml"; printf '{}' > "$DISP"
 echo "coordinate: ok"
