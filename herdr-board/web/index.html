@@ -151,6 +151,8 @@ main{flex:1;min-width:0;padding-left:max(16px,env(safe-area-inset-left,0px));pad
 .checks li{display:flex;gap:8px;align-items:center;color:var(--fg-2)}
 .checks .yes{color:var(--success);font-family:var(--font-mono)}.checks .no{color:var(--danger);font-family:var(--font-mono)}
 .drawer .note-row{font-size:13px;padding:3px 0;word-break:break-word}
+.drawer .note-row.sending{color:var(--fg-3);font-style:italic}
+.ask.sending,.row.sending .main,.row.sending .act,.tree.sending{opacity:.55}
 #note-add{width:100%;margin-top:8px}
 .drawer .foot{display:flex;gap:8px;flex-wrap:wrap;align-items:center;padding-top:16px}
 .drawer .foot .path{margin-left:auto;font-family:var(--font-mono);font-size:11px;color:var(--fg-3);word-break:break-all}
@@ -309,7 +311,7 @@ const noteBody=(c,text)=>({slug:c.slug,text,repo:repoTop(c)});
 function notesSection(c){
   const list=c.notes||[];const add=!(c.open_gates||[]).length&&c.section!=='已完成';
   if(!list.length&&!add)return '';
-  const rows=list.map(n=>`<div class="note-row"><span class="mono faint">${esc(String(n.at).replace('T',' ').slice(0,16))}</span> ${esc(n.text)}</div>`).join('');
+  const rows=list.map(n=>`<div class="note-row${n.sending?' sending':''}"><span class="mono faint">${esc(String(n.at).replace('T',' ').slice(0,16))}</span> ${esc(n.text)}${n.sending?' <span class="badge line">送出中</span>':''}</div>`).join('');
   return `<section><h3>派工指示 <span class="src">inbox.md</span></h3>${rows}${add?`<input type="text" id="note-add" aria-label="追加派工指示" placeholder="追加一條指示，Enter 送出">`:''}</section>`;
 }
 /* 派工指示 end */
@@ -319,6 +321,34 @@ function ago(iso){
   if(s<60)return '剛剛';if(s<3600)return Math.floor(s/60)+' 分鐘';if(s<86400)return Math.floor(s/3600)+' 小時';return Math.floor(s/86400)+' 天';
 }
 const since=c=>ago(c.status&&c.status.at||c.dispatch&&c.dispatch.started_at||c.since);
+
+/* ---------- 送出中：answer、note、dispatch 的 POST 還沒回來或剛成功時，畫面疊上這份清單；data 保持 collect 原樣。tests/board-pending.test.sh 切片執行 ---------- */
+/* 送出中 start */
+/* 項目：{id, key, kind:'answer'|'note'|'dispatch', gate|text+at, state:'sending'|'done', doneAt}。key 是卡的 key，session 樹的子 change 再加子 change */
+const pendKey=(repo,slug,sub)=>repo+'/'+slug+(sub?'/'+sub:'');
+function pendApply(x,k,list){
+  const es=list.filter(e=>e.key===k);if(!es.length)return x;
+  const o={...x};
+  for(const e of es){
+    if(e.kind==='answer'&&e.state==='done'){if(o.waiting&&o.waiting.gate_id===e.gate)o.waiting=null;o.open_gates=(o.open_gates||[]).filter(g=>g.id!==e.gate);}
+    else if(e.kind==='answer'){if(o.waiting&&o.waiting.gate_id===e.gate)o.waiting={...o.waiting,sending:true};}
+    else if(e.kind==='note')o.notes=[...(o.notes||[]),{at:e.at,text:e.text,sending:e.state==='sending'}];
+    else if(e.kind==='dispatch')o.dispatching=e.state;
+  }
+  return o;
+}
+function pendSession(s,list){
+  if(!list.length)return s;
+  return {...s,mains:s.mains.map(m=>({...pendApply(m,pendKey(s.repo,m.slug),list),subs:m.subs.map(x=>pendApply(x,pendKey(s.repo,m.slug,x.slug),list))}))};
+}
+const pendDone=(list,id,at)=>list.map(e=>e.id===id?{...e,state:'done',doneAt:at}:e);
+const pendDrop=(list,id)=>list.filter(e=>e.id!==id);
+/* 在 POST 成功之後才送出的 GET，拿到的一定是之後才開始的 collect（server 動作後作廢快取），它回來時已成功的項目就交給 collect */
+function pendClear(list,sentAt){const left=list.filter(e=>!(e.state==='done'&&e.doneAt<sentAt));return left.length===list.length?list:left;}
+const pendBadge=x=>x.dispatching==='sending'?'<span class="badge accent">派工中</span>':x.dispatching==='done'?'<span class="badge ok">已派出</span>':'';
+/* 送出中 end */
+/* 時間點用遞增的序號：GET 送出與 POST 成功在同一毫秒時，Date.now() 分不出先後 */
+let pending=[],pendSeq=0;
 
 /* ---------- 等級與 milestone：collect 的 priority 與 milestones，tests/priority-board.test.sh 切片執行 ---------- */
 const PRIO_BADGE={P0:'danger',P1:'warn',P2:'line'};
@@ -378,16 +408,20 @@ function bot(c,size){
 /* ---------- 列 ---------- */
 function rowAttn(c){
   const w=c.waiting;let l2='',act='';
-  const rec=w.recommended?`<span class="sep">·</span>${w.needs==='run'?'在終端機跑':'建議'}：${esc(w.recommended)}`:'';
-  if(w.type==='等待授權'){l2=`<span class="q">${esc(w.question||w.action||'')}</span>${rec}`;
+  const rec=w&&w.recommended?`<span class="sep">·</span>${w.needs==='run'?'在終端機跑':'建議'}：${esc(w.recommended)}`:'';
+  /* waiting 是 null：gate 剛回答成功（送出中清單），下一份 collect 才知道卡往哪走 */
+  if(!w)l2='<span class="faint">gate 已回答，等下一次 collect</span>';
+  else if(w.type==='等待授權'){l2=`<span class="q">${esc(w.question||w.action||'')}</span>${rec}`;
     act=(w.options||[]).map((o,i)=>o==='拒絕'?`<button class="sm ghost danger" data-act="answer" data-text="拒絕">拒絕</button>`:`<button class="sm ${i===0?'primary':''}" data-act="answer" data-grant="${GRANT_OF[o]||''}" data-text="允許">${esc(o)}</button>`).join('');}
   else if(w.type==='等待決定'){l2=`<span class="q">${esc(w.question||'')}</span>${rec}`;act=(w.recommended&&w.needs!=='run'?`<button class="primary sm" data-act="answer" data-text="${esc(w.recommended)}">照建議</button>`:'')+`<button class="sm ${w.needs==='run'?'primary':''}" data-act="open">${w.needs==='run'?'貼結果':'自己選'}</button>`;}
   else if(w.type==='type 不明'){l2=`<span class="q">${esc(w.question||'')}</span><span class="sep">·</span>gates.md 的 type 要寫 approval | decision`;act=`<button class="sm" data-act="open">看詳情</button>`;}
   else if(w.type==='可以合併'){l2=`<span class="q">MR 五個條件都通過</span><span class="sep">·</span><span class="mono">${esc(c.mr.head_sha||'').slice(0,8)}</span>`;act=`<button class="primary sm" data-act="merge">合併</button><a class="sm" href="${esc(c.mr.url)}" target="_blank" rel="noopener"><button class="sm">開啟 MR</button></a>`;}
   else {l2=`<span class="q">${esc(w.question)}</span>`;act=`<button class="primary sm" data-act="pane">開啟 pane</button><button class="sm" data-act="stop">停止</button>`;}
-  return `<div class="row" data-key="${esc(key(c))}" role="button" tabindex="0" aria-selected="${ui.sel===key(c)}">
+  const sending=w&&w.sending;if(sending)act=act.replace(/<button /g,'<button disabled ');
+  const badge=!w?'<span class="badge ok">已回答</span>':`<span class="badge ${WAIT_BADGE[w.type]}">${esc(w.type)}</span>${sending?'<span class="badge line">送出中</span>':''}`;
+  return `<div class="row${sending?' sending':''}" data-key="${esc(key(c))}" role="button" tabindex="0" aria-selected="${ui.sel===key(c)}">
     <div class="avatar">${bot(c,30)}</div>
-    <div class="main"><div class="l1"><span class="badge ${WAIT_BADGE[w.type]}">${esc(w.type)}</span>${priorityBadge(c)}<span class="title">${esc(c.title)}</span><span class="meta">${esc(c.repo)} · ${esc(since(c))}</span></div><div class="l2">${l2}</div></div>
+    <div class="main"><div class="l1">${badge}${pendBadge(c)}${priorityBadge(c)}<span class="title">${esc(c.title)}</span><span class="meta">${esc(c.repo)} · ${esc(since(c))}</span></div><div class="l2">${l2}</div></div>
     <div class="act">${act}</div></div>`;
 }
 function rowRunning(c){
@@ -405,7 +439,7 @@ function rowRunning(c){
 function rowReady(c){
   return `<div class="row" data-key="${esc(key(c))}" role="button" tabindex="0" aria-selected="${ui.sel===key(c)}">
     <div class="avatar plain">${c.stage==='apply'?'RDY':'NEW'}</div>
-    <div class="main"><div class="l1"><span class="badge line">${esc(KIND[c.kind]||c.kind)}</span>${priorityBadge(c)}<span class="title">${esc(c.title)}</span><span class="meta">${esc(c.repo)} · 階段 ${esc(c.stage)} · ${esc(since(c))}</span></div></div>
+    <div class="main"><div class="l1"><span class="badge line">${esc(KIND[c.kind]||c.kind)}</span>${pendBadge(c)}${priorityBadge(c)}<span class="title">${esc(c.title)}</span><span class="meta">${esc(c.repo)} · 階段 ${esc(c.stage)} · ${esc(since(c))}</span></div></div>
     <div class="act"><button class="primary sm" data-act="dispatch">指派</button></div></div>`;
 }
 function rowDone(c){
@@ -453,7 +487,7 @@ function rowSession(s){
 const panel=(title,n,sub,body)=>`<section class="panel"><div class="panel-h"><span class="h2">${title}</span><span class="n">${n}</span>${sub?`<span class="sub">${sub}</span>`:''}</div>${body}</section>`;
 
 function renderHome(){
-  const H=name=>homeSect(data.cards.filter(inScope),data.sessions.filter(inScope),name);
+  const H=name=>homeSect(data.cards.filter(inScope).map(c=>pendApply(c,key(c),pending)),data.sessions.filter(inScope),name);
   const A=H('待處理'),R=H('進行中'),Y=H('待指派'),D=H('已完成');
   const n=x=>x.sessions.length+x.cards.length;
   const list=(x,row)=>x.sessions.map(rowSession).join('')+x.cards.map(row).join('');
@@ -478,7 +512,7 @@ function rowInbox(c){
   const gone=c.upstream==='closed'?'上游已關閉':c.stale?'註解已刪':'';
   return `<div class="row${gone?' gone':''}" data-key="${esc(key(c))}" role="button" tabindex="0" aria-selected="${ui.sel===key(c)}">
     <div class="avatar plain">NEW</div>
-    <div class="main"><div class="l1"><span class="badge line">${esc(KIND[c.kind]||c.kind)}</span>${gone?`<span class="badge line">${gone}</span>`:''}${priorityBadge(c)}<span class="title">${esc(c.title)}</span><span class="meta">${esc(c.repo)} · ${esc(c.source||'沒有 source')} · ${esc(since(c))}</span></div></div>
+    <div class="main"><div class="l1"><span class="badge line">${esc(KIND[c.kind]||c.kind)}</span>${gone?`<span class="badge line">${gone}</span>`:''}${pendBadge(c)}${priorityBadge(c)}<span class="title">${esc(c.title)}</span><span class="meta">${esc(c.repo)} · ${esc(c.source||'沒有 source')} · ${esc(since(c))}</span></div></div>
     <div class="act">${prioCtl(c)}<button class="primary sm" data-act="dispatch">指派</button><button class="sm" data-act="explore">先 explore</button>${dropCtl(key(c))}</div></div>`;
 }
 /* 改等級就地選等級、填理由；理由空白時送出鈕不能按（server 也會回 400）。打到一半的字存在 ui.prioText，重畫不丟 */
@@ -502,7 +536,7 @@ function rowUnfiled(u){
     <div class="act"><select aria-label="選 repo"><option value="">選 repo…</option>${opts}</select><button class="primary sm" data-act="file">建卡</button>${dropCtl('unfiled:'+u.slug)}</div></div>`;
 }
 function renderInbox(){
-  const I=sect('收件匣'),U=data.unfiled||[];
+  const I=sect('收件匣').map(c=>pendApply(c,key(c),pending)),U=data.unfiled||[];
   const ls=data.last_sync;
   const la=ls?ago(ls.at):'';
   const sl=`<div class="syncline"><span>上次同步 ${ls?esc(la==='剛剛'?la:la+'前')+' · 新建 '+ls.created+' · 更新 '+ls.updated+(ls.errors?` · <span style="color:var(--danger)">錯誤 ${ls.errors}：${esc(ls.first_error)}</span>`:''):'還沒跑過'}</span><span class="faint">GitLab · GitHub · shortcut</span><button class="sm" data-act="sync">立即同步</button></div>`;
@@ -644,18 +678,18 @@ function flowLine(c){
   return PHASES.filter(p=>p!=='babysit').map((p,i)=>`<span class="${i<ci?'done':i===ci?'here':''}">${PHASE_LABEL[p]}</span>`).join(' › ');
 }
 function renderTree(){
-  const s=data.sessions.find(s=>skey(s)===ui.open);if(!s){closeDrawer();return;}
+  const s0=data.sessions.find(s=>skey(s)===ui.open);if(!s0){closeDrawer();return;}const s=pendSession(s0,pending);
   const ans=r=>{const w=r.waiting;if(!w||!w.gate_id)return '';
-    const b=(o,text,grant)=>`<button class="sm ${o===w.recommended?'primary':''}${o==='拒絕'?' ghost danger':''}" data-act="tree-answer" data-main="${esc(r.main)}" data-sub="${esc(r.sub||'')}" data-gate="${esc(w.gate_id)}" data-text="${esc(text)}" data-grant="${esc(grant||'')}">${esc(o)}</button>`;
-    return `<div class="answers">${(w.options||[]).map(o=>w.type==='等待授權'&&o!=='拒絕'?b(o,'允許',GRANT_OF[o]):b(o,o)).join('')}</div>`;};
+    const b=(o,text,grant)=>`<button${w.sending?' disabled':''} class="sm ${o===w.recommended?'primary':''}${o==='拒絕'?' ghost danger':''}" data-act="tree-answer" data-main="${esc(r.main)}" data-sub="${esc(r.sub||'')}" data-gate="${esc(w.gate_id)}" data-text="${esc(text)}" data-grant="${esc(grant||'')}">${esc(o)}</button>`;
+    return `<div class="answers">${w.sending?'<span class="badge line">送出中</span>':''}${(w.options||[]).map(o=>w.type==='等待授權'&&o!=='拒絕'?b(o,'允許',GRANT_OF[o]):b(o,o)).join('')}</div>`;};
   /* 主 change 那行可開回卡片抽屜：合併、開啟 pane、停止與自由回覆都在那裡，樹上只回有選項的 gate */
-  const rows=treeRows(s).map(r=>`<div class="tree${r.sub?' sub':''}"><span class="slug">${esc(r.sub||r.main)}</span><span class="t">${esc(r.text)}</span>${r.sub?'':`<button class="sm ghost" data-act="ev-open" data-key="${esc(s.repo+'/'+r.main)}">開卡</button>`}${ans(r)}</div>`).join('');
+  const rows=treeRows(s).map(r=>`<div class="tree${r.sub?' sub':''}${r.waiting&&r.waiting.sending?' sending':''}"><span class="slug">${esc(r.sub||r.main)}</span><span class="t">${esc(r.text)}</span>${r.sub?'':`<button class="sm ghost" data-act="ev-open" data-key="${esc(s.repo+'/'+r.main)}">開卡</button>`}${ans(r)}</div>`).join('');
   $('#drawer').innerHTML=`<header><div class="ttl"><h2>${esc(s.feature)}</h2><div class="flow">${esc(sessionLine(s))}</div></div><button class="x" data-act="close" aria-label="關閉">×</button></header><div class="body"><section><h3>主 change → 子 change <span class="src">workplan · subs/</span></h3>${rows}</section></div>`;
   $('#drawer').hidden=false;$('#scrim').hidden=false;
 }
 function renderDrawer(){
   if(ui.open.startsWith('session:')){renderTree();return;}
-  const c=byKey(ui.open);if(!c){closeDrawer();return;}
+  const c0=byKey(ui.open);if(!c0){closeDrawer();return;}const c=pendApply(c0,ui.open,pending);
   /* 重畫前留住打到一半的回覆和焦點，畫完放回去（每 5 秒重拉會走到這裡） */
   const oldReply=$('#reply');const keep=oldReply?{v:oldReply.value,focus:document.activeElement===oldReply,s:oldReply.selectionStart}:null;
   const oldNote=$('#note-add');const keepNote=oldNote?{v:oldNote.value,focus:document.activeElement===oldNote,s:oldNote.selectionStart}:null;
@@ -669,7 +703,8 @@ function renderDrawer(){
     else if(w.type==='可以合併')answers=`<button class="primary" data-act="merge">合併</button><a href="${esc(c.mr.url)}" target="_blank" rel="noopener"><button>開啟 MR</button></a>`;
     else answers=`<button class="primary" data-act="pane">開啟 pane</button><button data-act="stop">停止</button><button data-act="dispatch">重新指派</button>`;
     const kv=[['建議',w.recommended],['證據',w.evidence],['風險',w.risk],['未回覆時',w.default_if_unanswered],['已確認',w.confirmed]].filter(x=>x[1]).map(x=>`<dt>${x[0]}</dt><dd>${esc(x[1])}</dd>`).join('');
-    ask=`<section><h3>等待你 <span class="src">${w.gate_id?'gates.md · '+esc(w.gate_id):w.type==='可以合併'?'glab':'herdr agent list'}</span></h3><div class="ask ${w.type==='終端機等待輸入'?'critical':w.type==='可以合併'?'ok':''}"><div class="q">${esc(w.question||'')}</div>${kv?`<dl class="kv">${kv}</dl>`:''}<div class="answers">${answers}</div></div></section>`;
+    if(w.sending)answers=answers.replace(/<(button|input) /g,'<$1 disabled ');
+    ask=`<section><h3>等待你 <span class="src">${w.gate_id?'gates.md · '+esc(w.gate_id):w.type==='可以合併'?'glab':'herdr agent list'}</span>${w.sending?'<span class="badge line">送出中</span>':''}</h3><div class="ask ${w.type==='終端機等待輸入'?'critical':w.type==='可以合併'?'ok':''}${w.sending?' sending':''}"><div class="q">${esc(w.question||'')}</div>${kv?`<dl class="kv">${kv}</dl>`:''}<div class="answers">${answers}</div></div></section>`;
   }
   const d=c.dispatch||{};
   const facts=`<section><dl class="facts">${[['Repo',c.repo],['分支',d.branch],['Agent',d.agent?`${d.agent}${d.model?' · '+d.model:''}`:''],['模式',d.mode?MODE_LABEL[d.mode]||d.mode:''],['Workspace',d.workspace],['Pane',d.pane],['類型',KIND[c.kind]||c.kind],['herdr',c.agent_status]].filter(x=>x[1]).map(x=>`<div><dt>${x[0]}</dt><dd title="${esc(x[1])}">${esc(x[1])}</dd></div>`).join('')}</dl>${d.grants&&d.grants.length?`<div class="faint mono" style="font-size:11px;margin-top:10px">這張卡已允許：${d.grants.map(k=>esc(GRANT_LABEL[k]||k)).join('、')}（dispatch.json，卡結束即失效）</div>`:''}</section>`;
@@ -682,7 +717,7 @@ function renderDrawer(){
   const logSec=`<section><h3>紀錄 <span class="src">decisions.tsv</span></h3>${tlErr?`<div class="faint" style="color:var(--danger)">${esc(tlErr)}</div>`:!tl?'<div class="faint">載入中…</div>':mine.length?`<div class="panel" style="margin-top:0">${mine.map(evRow).join('')}</div>`:'<div class="faint">這張卡還沒有紀錄</div>'}</section>`;
   const foot=`<div class="foot">${d.pane?`<button class="ghost sm" data-act="pane">開啟 pane ${esc(d.pane)}</button><button class="ghost sm" data-act="stop">停止</button>`:''}${c.section!=='已完成'?`<button class="ghost sm" data-act="dispatch">${d.pane?'重新指派':'指派'}</button>`:''}<span class="path">${esc(c.path||'')}</span></div>`;
   const prioSec=c.priority?`<section><h3>等級 <span class="src">opsx priority</span></h3><div>${priorityBadge(c,true)}</div></section>`:'';
-  const headBadge=w?`<span class="badge ${WAIT_BADGE[w.type]}">${esc(w.type)}</span>`:c.agent_status==='working'?'<span class="badge ok"><span class="dot live"></span>執行中</span>':'';
+  const headBadge=(w?`<span class="badge ${WAIT_BADGE[w.type]}">${esc(w.type)}</span>`:c.agent_status==='working'?'<span class="badge ok"><span class="dot live"></span>執行中</span>':'')+pendBadge(c);
   $('#drawer').innerHTML=`<header><div style="padding-top:2px">${bot(c,40)}</div><div class="ttl"><h2>${esc(c.title)}${headBadge}</h2><div class="flow">${flowLine(c)}</div></div><button class="x" data-act="close" aria-label="關閉">×</button></header><div class="body">${ask}${prioSec}${notesSection(c)}${facts}${prog}${out}${mr}${logSec}${foot}</div>`;
   $('#drawer').hidden=false;$('#scrim').hidden=false;
   const nr=$('#reply');if(nr&&keep){nr.value=keep.v;if(keep.focus){nr.focus();try{nr.setSelectionRange(keep.s,keep.s);}catch(e){}}}
@@ -699,10 +734,12 @@ function closeDrawer(){ui.open=null;$('#drawer').hidden=true;$('#scrim').hidden=
 /* ---------- 動作（全部打 server，server 再叫 opsx）---------- */
 let toastT;
 function toast(msg,bad){const t=$('#toast');t.textContent=msg;t.classList.toggle('bad',!!bad);t.classList.add('on');clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove('on'),bad?6000:2800);}
-async function act(label,fn){
+/* p：要先畫成送出中的項目（answer、note、dispatch 才有） */
+async function act(label,fn,p){
   if(ui.busy)return;ui.busy=true;
-  try{const r=await fn();toast(label+(r&&r.stdout?'\n'+r.stdout.trim():''));await refresh(true);}
-  catch(e){toast(label+' 失敗：'+e.message,true);}
+  const id=++pendSeq;if(p){pending=[...pending,{...p,id,state:'sending'}];render();}
+  try{const r=await fn();if(p){pending=pendDone(pending,id,++pendSeq);render();}toast(label+(r&&r.stdout?'\n'+r.stdout.trim():''));await refresh(true);}
+  catch(e){if(p){pending=pendDrop(pending,id);render();}toast(label+' 失敗：'+e.message,true);}
   finally{ui.busy=false;}
 }
 /* 指示寫進 inbox.md 才清輸入框（重畫抽屜會保留輸入框的值，所以要在重畫前清）。
@@ -712,16 +749,17 @@ function submitNote(c,text){
   act(`opsx note ${c.slug} -- "${text}"`,async()=>{
     try{const r=await api.post('note',noteBody(c,text));clear();return r;}
     catch(e){if(e.message.includes('inbox.md 已寫'))clear();throw e;}
-  });
+  },{key:key(c),kind:'note',text,at:new Date().toLocaleString('sv')});
 }
 function answer(c,text,grant){
   if(!c.waiting||!c.waiting.gate_id){toast('這一項沒有 gate 可回',true);return;}
-  act(`opsx answer ${c.slug} --gate ${c.waiting.gate_id}${grant?' --grant '+grant:''} "${text}"`,()=>api.post('answer',{slug:c.slug,gate:c.waiting.gate_id,grant:grant||'',text,repo:repoTop(c)}));
+  act(`opsx answer ${c.slug} --gate ${c.waiting.gate_id}${grant?' --grant '+grant:''} "${text}"`,()=>api.post('answer',{slug:c.slug,gate:c.waiting.gate_id,grant:grant||'',text,repo:repoTop(c)}),{key:key(c),kind:'answer',gate:c.waiting.gate_id});
 }
 function copyText(t){navigator.clipboard.writeText(t).then(()=>toast('已複製'),()=>toast('複製失敗，請手動選取',true));}
 function answerTree(s,b){
   act(`opsx answer ${b.main}${b.sub?' --sub '+b.sub:''} --gate ${b.gate}${b.grant?' --grant '+b.grant:''} "${b.text}"`,
-    ()=>api.post('answer',{...answerBody(b.main,b.sub,b.gate,b.text),grant:b.grant,repo:(data.repo_paths||{})[s.repo]}));
+    ()=>api.post('answer',{...answerBody(b.main,b.sub,b.gate,b.text),grant:b.grant,repo:(data.repo_paths||{})[s.repo]}),
+    {key:pendKey(s.repo,b.main,b.sub),kind:'answer',gate:b.gate});
 }
 function merge(c){act(`opsx merge ${c.slug}`,()=>api.post('merge',{slug:c.slug,repo:repoTop(c)}));}
 function stop(c){act(`opsx stop ${c.slug}`,()=>api.post('stop',{slug:c.slug,repo:repoTop(c)}));}
@@ -742,7 +780,7 @@ function submitNew(){
 }
 
 /* 先 explore：互動模式派出，第一句由 dispatch 從 stage 推，收件卡一定是 /explore（board-inbox D5） */
-function exploreFirst(c){act(`opsx dispatch ${c.slug} --mode interactive --kind ${c.kind}`,()=>api.post('dispatch',{slug:c.slug,mode:'interactive',kind:c.kind,repo:repoTop(c)}));}
+function exploreFirst(c){act(`opsx dispatch ${c.slug} --mode interactive --kind ${c.kind}`,()=>api.post('dispatch',{slug:c.slug,mode:'interactive',kind:c.kind,repo:repoTop(c)}),{key:key(c),kind:'dispatch'});}
 function submitDrop(id,text){
   ui.drop=null;ui.dropText='';
   if(id.startsWith('unfiled:')){const slug=id.slice(8);act(`opsx drop ${slug} -- ${text}`,()=>api.post('drop',{slug,text}));return;}
@@ -797,7 +835,7 @@ function doDispatch(){
   const kind=kb?kb.dataset.kind:c.kind;const model=agent==='codex'?'gpt-5':(mb?mb.dataset.model:MODEL_BY_KIND[kind]);
   const body=dispatchBody(c,{agent,model,mode,kind,note:$('#dlg-note').value});
   closeDispatch();
-  act(`opsx dispatch ${c.slug} --agent ${agent} --model ${model} --mode ${mode} --kind ${kind}${body.note?` --note "${body.note}"`:''}`,()=>api.post('dispatch',body));
+  act(`opsx dispatch ${c.slug} --agent ${agent} --model ${model} --mode ${mode} --kind ${kind}${body.note?` --note "${body.note}"`:''}`,()=>api.post('dispatch',body),{key:key(c),kind:'dispatch'});
 }
 
 /* ---------- 範圍選單 ---------- */
@@ -915,8 +953,9 @@ async function refresh(force){
   let s=refreshStep(rs,force?'force':'poll');rs=s.st;
   while(s.fetch){
     try{
-      const j=await api.collect();const {generated_at,...rest}=j;const raw=JSON.stringify(rest);
-      if(s.force||raw!==lastRaw){lastRaw=raw;data=j;render();}
+      const sentAt=++pendSeq;const j=await api.collect();const {generated_at,...rest}=j;const raw=JSON.stringify(rest);
+      const left=pendClear(pending,sentAt),cleared=left!==pending;pending=left;
+      if(s.force||cleared||raw!==lastRaw){lastRaw=raw;data=j;render();}
       else{data.generated_at=generated_at;$('#stamp').textContent='collect '+ago(generated_at);}
     }catch(e){
       if(!lastRaw)setView($('#view'),`<div class="empty" style="color:var(--danger)">${esc(e.message)}</div>`,false);
