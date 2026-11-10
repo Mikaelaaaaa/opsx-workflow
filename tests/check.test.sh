@@ -74,4 +74,37 @@ printf '%s' "$out" | jq -r '.reason' | grep -q 'subs/a/tasks.md' || fail "stop: 
 mk_main stopper >/dev/null   # 補齊後回到原本的判斷（tasks 沒勾）
 out="$(printf '{"cwd":"%s","stop_hook_active":false}' "$R" | bash "$H/openspec-stop-gate.sh" 2>/dev/null)"
 printf '%s' "$out" | jq -r '.reason' | grep -q 'task 沒勾' || fail "stop: 子殼齊了就照舊擋未勾: $out"
+
+# --- explore.md 步驟紀錄（驗收：openspec/changes/node-steps-wired/specs/node-step-wiring/spec.md） ---
+STEP_NAMES=("讀卡" "how" "影響範圍" "why" "prototype" "查資料" "對照 code" "待決" "unslop")
+mk_explore() { # <slug> [<步驟號> <內容>]...：九步預設都填「已知」，後面成對參數覆寫某一步（內容空字串表示該行留白，內容 x 表示整行拿掉）
+  local c="$R/openspec/changes/$1" i val; shift
+  mkdir -p "$c"; printf 'schema: opsx\nkind: bug-fix\n' > "$c/.openspec.yaml"
+  { printf '## 已知\n\n- x\n\n## 待決\n\n- \n\n## 不做\n\n- \n\n## 步驟\n\n'
+    for i in 1 2 3 4 5 6 7 8 9; do
+      val="已知"; set -- "${@}"
+      local rest=("$@"); while [ ${#rest[@]} -ge 2 ]; do [ "${rest[0]}" = "$i" ] && val="${rest[1]}"; rest=("${rest[@]:2}"); done
+      [ "$val" = x ] && continue
+      printf -- '- %s %s：%s\n' "$i" "${STEP_NAMES[$((i-1))]}" "$val"
+    done; } > "$c/explore.md"
+}
+mk_explore steps-ok 3 "skip：沒有符號被別處引用"
+out="$(chk steps-ok)" || fail "九步齊全（含有原因的 skip）要回 0: $out"
+
+mk_explore steps-gap 3 x
+out="$(chk steps-gap)" && fail "缺一步要非零"
+printf '%s' "$out" | grep -q '3 影響範圍' || fail "要指出缺的是 3 影響範圍: $out"
+
+mk_explore steps-noreason 4 "skip："
+out="$(chk steps-noreason)" && fail "skip 沒原因要非零"
+printf '%s' "$out" | grep -q '4 why' || fail "要指出 4 why: $out"
+
+mk_explore steps-blank 2 ""
+out="$(chk steps-blank)" && fail "該行留白要非零"
+printf '%s' "$out" | grep -q '2 how' || fail "要指出 2 how: $out"
+
+mkdir -p "$R/openspec/changes/steps-none"; printf 'schema: opsx\n' > "$R/openspec/changes/steps-none/.openspec.yaml"
+printf '## 已知\n\n- x\n\n## 待決\n\n無\n' > "$R/openspec/changes/steps-none/explore.md"
+out="$(chk steps-none)" && fail "沒有 ## 步驟 段要非零"
+printf '%s' "$out" | grep -q '1 讀卡' || fail "沒有步驟段要列出全部步驟: $out"
 echo ok

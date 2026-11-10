@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# opsx check <主 change>：檢查 openspec/changes/<主>/subs/ 底下每個子殼齊不齊。openspec CLI 只管主殼，子殼靠這支。
-# 一個缺項一行「subs/<子>/<檔>: <缺什麼>」，有缺項退出 1。只用 bash 與 awk：Stop hook 直接 source 它，不能依賴 python。
+# opsx check <主 change>：檢查 openspec/changes/<主>/subs/ 底下每個子殼齊不齊（openspec CLI 只管主殼，子殼靠這支），
+# 以及 explore.md 的 ## 步驟 九行齊不齊。
+# 一個缺項一行「subs/<子>/<檔>: <缺什麼>」或「explore.md 步驟 <號> <名>: <缺什麼>」，有缺項退出 1。只用 bash 與 awk：Stop hook 直接 source 它，不能依賴 python。
 # 驗收：openspec/changes/split-plan/specs/subchange-propose/spec.md「opsx check 檢查子殼」。
 
 opsx_check() {
@@ -9,10 +10,34 @@ opsx_check() {
   [ -n "$top" ] || die "check: 不在 git repo 裡"
   local dir="$top/openspec/changes/$1"
   [ -d "$dir" ] || die "check: 沒有這張卡：$dir"
-  local out; out="$(check_subs "$dir")"
+  local out; out="$(check_explore "$dir"; check_subs "$dir")"
   [ -z "$out" ] && return 0
   printf '%s\n' "$out"
   exit 1
+}
+
+# 步驟名與順序要跟 skills/explore/SKILL.md 的 Steps 表、schemas/opsx/templates/explore.md 一致
+check_explore() { # <卡目錄>：explore.md 不存在什麼都不印；存在就逐步檢查 ## 步驟，缺行、留白、skip 沒原因各印一行
+  [ -f "$1/explore.md" ] || return 0
+  awk '
+    BEGIN { n = split("讀卡|how|影響範圍|why|prototype|查資料|對照 code|待決|unslop", names, "|") }
+    /^## / { on = ($0 == "## 步驟"); next }
+    on && /^- [0-9] / {
+      num = substr($0, 3, 1); prefix = "- " num " " names[num]
+      if (index($0, prefix) != 1) next
+      rest = substr($0, length(prefix) + 1)
+      if (!sub(/^：/, "", rest) && !sub(/^:/, "", rest)) next
+      gsub(/^[ \t]+|[ \t]+$/, "", rest)
+      seen[num] = (rest == "") ? "blank" : (rest ~ /^skip[：:][ \t]*$/ ? "noreason" : "ok")
+    }
+    END {
+      for (i = 1; i <= n; i++) {
+        if (seen[i] == "ok") continue
+        why = (seen[i] == "blank") ? "該行沒有內容" : (seen[i] == "noreason") ? "skip 沒有原因" : "缺紀錄"
+        printf "explore.md 步驟 %d %s: %s\n", i, names[i], why
+      }
+    }
+  ' "$1/explore.md"
 }
 
 check_subs() { # <主殼目錄>：印缺項，一行一個；沒有 subs/ 或全齊什麼都不印
