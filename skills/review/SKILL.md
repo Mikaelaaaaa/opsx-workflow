@@ -23,7 +23,7 @@ Read `openspec/changes/<slug>/tasks.md` and `status.json`. For every checked tas
 
 A main change with `subs/`: also run `opsx check <slug>`. Any line it prints is a sub-change shell that is incomplete; stop the same way and name the lines.
 
-Read the round from report.md: its title is `# Review · <slug> · 第 <N> 輪 · …`; no report.md means N is 0, and this run is round N+1. When N is already 2, two rounds are done: review does not start a reviewer. If report.md still lists items under `### 待修（範圍內）` and their `R` tasks in tasks.md are not all checked, send them back to `/apply <slug>` (Step 4). If those tasks are checked, run the confirm pass in Step 4. Write a gate in `gates.md` (`type: decision`) only for an item that needs a user decision and cannot be fixed; if nothing is open, say the review budget is used up and continue to the next node.
+Read the round from report.md: its title is `# Review · <slug> · 第 <N> 輪 · …`; no report.md means N is 0, and this run is round N+1. When N is already 2 or more, two rounds are done (the confirm pass in Step 4 edits report.md in place, keeps the 第 2 輪 title and is not a round): review does not start a reviewer. If report.md still lists items under `### 待修（範圍內）` and their `R` tasks in tasks.md are not all checked, send them back to `/apply <slug>` (Step 4). If those tasks are checked, run the confirm pass in Step 4. Write a gate in `gates.md` (`type: decision`) only for an item that needs a user decision and cannot be fixed; if nothing is open, say the review budget is used up and continue to the next node.
 
 Decide small or not by `../../references/continue.md`, "Light flow" (kind chore or bug-fix, at most 3 tasks, one first path component outside tests). A small card runs one merged reviewer in step 2; any other card runs three.
 
@@ -79,7 +79,7 @@ Read `../interrogate/references/lead-judgment.md`. Merge: same file:line from tw
 
 Evidence you cannot verify downgrades the finding one level, so an unverifiable finding in scope goes to Consider, not back to apply.
 
-Then scope every BUG and MUST_FIX left in Act on. 範圍內 = the failure scenario cannot happen on main (a caller this change broke counts); run the scenario on main when you can. When it cannot be run, 範圍內 = the cited file:line is inside the added or changed lines of `git diff -U0 main...HEAD`. 範圍外 = the scenario happens on main too. Only 範圍內 BUG and MUST_FIX are sent back to `/apply`.
+Then scope every BUG and MUST_FIX left in Act on. 範圍內 = the failure scenario cannot happen on main (a caller this change broke counts); run the scenario on main when you can. When it cannot be run, 範圍內 = the cited file:line is inside the added or changed lines of `git diff -U0 main...HEAD` (take `main` as the remote default branch, `origin/main` after `git fetch`; a stale local main pulls already-merged code into scope, and the "on main" scenario runs on the same base). 範圍外 = the scenario happens on main too. Only 範圍內 BUG and MUST_FIX are sent back to `/apply`.
 
 Seed the report's D 對照 table from Agent A's `D_TABLE` (followed → 照做, violated → 偏離) and keep every row, followed ones included. After bucketing, a row whose finding you dismissed becomes 照做, and a row that a B or C finding in Act on or Consider contradicts becomes 偏離. Cite file:line, not a finding number. Agents B and C write `d_id: none`.
 
@@ -92,7 +92,7 @@ In this step review changes no code: it touches only `tasks.md`, `report.md` and
 - **範圍內, verified.** Append a group `## R<N>. review 退回` to tasks.md, one task per finding, each with the same `驗收：` and `測試：` sub-lines as any task (the `測試：` is the finding's regression test). List each under `### 待修（範圍內）` in report.md with its file:line. Then invoke `/apply <slug>` in this turn: apply writes the test first, fixes, checks the task off.
 - **範圍外.** Do not fix it in this PR. Run `opsx new -- "<finding, failure scenario, file:line, 優先度 P2>"` (a security or data-loss incident takes the priority workplan-priority gives it instead of P2), and write `開卡 <slug>` on the finding's line in Consider.
 - **Unverifiable or a design question.** Consider, as before.
-- **Confirm pass** (round 2 is done and its R tasks are checked): re-read only the diff of the fixed items, not the whole change. Move each confirmed item from `待修（範圍內）` to Act on with the fixing commit, and write one line `確認: <sha>` (the current HEAD) in report.md. An item that is still wrong and needs a user decision gets a gate; the others stay in `待修（範圍內）` and go back to `/apply`. No third full review.
+- **Confirm pass** (round 2 is done and its R tasks are checked): re-read only the diff of the fixed items, not the whole change. Move each confirmed item from `待修（範圍內）` to Act on with the fixing commit, and write one line `確認: <sha>` (the current HEAD) in report.md. An item that is still wrong is not sent back to `/apply` (every R task is already checked, so apply would have nothing to do and the card would loop): it gets a `type: decision` gate, and the flow waits for the user. No third full review.
 
 If a hook or safety check blocks any action here, follow `../../references/harness-claude-code.md`; do not reword the command to get past it. The suite is the test agent's job inside apply; review does not run a fix cycle.
 
