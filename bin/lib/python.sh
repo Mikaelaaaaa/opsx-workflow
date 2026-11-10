@@ -14,3 +14,8 @@ opsx_python_load() {
     OPSX_PY_ERR="$f 記的 python 不是可執行檔：${OPSX_PY}（pyenv 換過版本，或 venv 被刪了？）。跑 opsx init --global"; OPSX_PY=""; return 1
   fi
 }
+
+# 寫沙盒可寫目錄裡的固定檔名：內容從 stdin 來，路徑是 symlink 時退出 2 並說明路徑，目標不動。specs/symlink-safe-writes。
+# 要先 opsx_python_load；OPSX_PY 是空的就是「找不到指令」，不退回 shell 的 >> 與 >。
+opsx_append()  { "$OPSX_PY" -I "$OPSX_ROOT/bin/lib/safefile.py" append "$1"; }
+opsx_replace() { "$OPSX_PY" -I "$OPSX_ROOT/bin/lib/safefile.py" replace "$1"; }

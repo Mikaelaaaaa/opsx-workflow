@@ -74,14 +74,14 @@ titled_gate_open() { # <dir> <站>
 write_auto_gate() { # <dir> <slug> <站>
   local f="$1/gates.md" n=0
   [ -f "$f" ] && n="$(grep -cE "^## 卡在接 /$3( #[0-9]+)?$" "$f" || true)"
-  [ -s "$f" ] && printf '\n' >> "$f"
   {
+    [ -s "$f" ] && printf '\n'
     printf '## 卡在接 /%s #%s\ntype: decision\nstatus: open\nopened_at: %s\n' "$3" "$((n + 1))" "$(now_iso)"
     printf '問題: opsx：%s 連續 %s 次停在 /%s 之前沒有 invoke，卡在哪？\n' "$2" "$MAX_BLOCKS" "$3"
     printf '選項: 重做 /%s 一次，做不完就把卡在哪寫進 gates.md (Recommended) | 停在這裡，把卡在哪寫進 gates.md 等人\n' "$3"
     printf '建議: 先看 pane 和 report.md 再回\n'
     printf '預設: hook 不再擋這一站\n'
-  } >> "$f"
+  } | opsx_append "$f"
 }
 
 d="$(card_dir)"
@@ -112,12 +112,12 @@ if [ "$last_stage" != "$want" ] || [ "$last_fp" != "$fp" ]; then n=0; gated="-";
 if [ "$n" -ge "$MAX_BLOCKS" ]; then
   titled_gate_open "$d" "$want" || [ "$gated" = gated ] || write_auto_gate "$d" "$slug" "$want"
   if titled_gate_open "$d" "$want"; then
-    printf '%s %s gated %s\n' "$want" "$n" "$fp" > "$state"
+    printf '%s %s gated %s\n' "$want" "$n" "$fp" | opsx_replace "$state"
     exit 0
   fi
   n=0; gated="-"   # gate 被回答了，重算
 fi
 
 mkdir -p "$(dirname "$state")"
-printf '%s %s - %s\n' "$want" "$((n + 1))" "$fp" > "$state"
+printf '%s %s - %s\n' "$want" "$((n + 1))" "$fp" | opsx_replace "$state"
 stop_block "$reason"

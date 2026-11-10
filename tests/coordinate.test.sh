@@ -7,6 +7,8 @@ mkdir -p "$R/openspec/changes"
 use_fakes opsx git openspec gh herdr
 export OPSX_FAKE_LOG="$FX/fake.log" OPSX_TEST_COLLECT_JSON="$FX/collect.json"
 LOG="$OPSX_STATE_DIR/coordinator.log"; MEMO="$OPSX_STATE_DIR/coordinator-memo.json"; DISP="$OPSX_STATE_DIR/dispatch.json"
+# symlink-safe-writes：沙盒內的人把固定檔名換成指向 VICTIM 的 symlink，沙盒外的 coordinate 不能寫到它
+VICTIM="$FX/victim"; victim_reset() { printf 'keep me\n' > "$VICTIM"; }
 
 # cards '<卡的 JSON 陣列，只寫跟預設不同的欄位>' ['<errors JSON 陣列>']：寫成 opsx collect 的輸出
 cards() {
@@ -180,7 +182,10 @@ mkcard g; mkdir -p "$R/.claude/worktrees/g-wt"
 printf '{"demo/g":{"mode":"stopped","agent":"claude","pane":"w1:p2","drive_pid":null,"branch":"feat/g/m","worktree":"%s"}}' "$R/.claude/worktrees/g-wt" > "$DISP"
 G="$(merged g 2026-11-07T12:00:00Z null null)"
 cards "[$G]"
+victim_reset; ln -s "$VICTIM" "$R/openspec/workplan.yaml.coordinate.tmp"
 round || fail "rc: $(cat "$FX/out")"
+assert_eq "$(cat "$VICTIM")" "keep me" "workplan 的舊暫存檔名上的 symlink 不能被寫"
+rm -f "$R/openspec/workplan.yaml.coordinate.tmp"
 got="$(grep -E '^(git|opsx stop|openspec)' "$OPSX_FAKE_LOG")"
 want="git -C $R rev-parse --abbrev-ref HEAD
 git -C $R status --porcelain
@@ -623,6 +628,13 @@ grep -q -- '--' "$LOG" || fail "要記一行 --：$(cat "$LOG")"
 rm -f "$RERUN"
 round --dry
 assert_no_file "$RERUN"
+# rerun 標記是 symlink：拒絕、非 0、目標不變
+victim_reset; ln -s "$VICTIM" "$RERUN"
+round; rc=$?
+[ $rc -ne 0 ] || fail "rerun 是 symlink 要非 0：$(cat "$FX/out")"
+assert_grep coordinator.rerun "$FX/out"
+assert_eq "$(cat "$VICTIM")" "keep me" "rerun 不能截斷 symlink 的目標"
+rm -f "$RERUN"
 kill "$HOLDER"; wait "$HOLDER" 2>/dev/null
 rm -f "$RERUN" "$MEMO"
 
@@ -673,6 +685,15 @@ assert_eq "$rc" 0 "kick 起不來也要以 0 結束：$(cat "$FX/out")"
 grep -q 'kick' "$LOG" || fail "kick 起不來要在 coordinator.log 記原因：$(cat "$LOG")"
 rmdir "$OPSX_STATE_DIR/coordinate.out"; rm -f "$MEMO"
 
+# --- coordinate.out 是 symlink：不起背景那輪、記一行原因、以 0 結束、目標不變 ---
+: > "$LOG"; victim_reset; ln -s "$VICTIM" "$OPSX_STATE_DIR/coordinate.out"
+bash "$OPSX_ROOT/bin/opsx" coordinate --kick > "$FX/out" 2>&1; rc=$?
+assert_eq "$rc" 0 "coordinate.out 是 symlink 也要以 0 結束：$(cat "$FX/out")"
+grep -q 'coordinate.out' "$LOG" || fail "要在 coordinator.log 記原因並含路徑：$(cat "$LOG")"
+sleep 2
+assert_eq "$(cat "$VICTIM")" "keep me" "coordinate.out 不能附加到 symlink 的目標"
+rm -f "$OPSX_STATE_DIR/coordinate.out" "$MEMO"
+
 notes() { count '^notification show'; }
 
 # --- 要人的 gate 通知一次 ---
@@ -687,6 +708,21 @@ assert_grep ' --body 看板.*這段怎麼驗 --sound request$' "$FX/note1"
 assert_not_grep '第二行' "$FX/note1"
 [ -n "$(memo_get _notified demo/a1/gate/g1)" ] || fail "_notified 要有 demo/a1/gate/g1：$(cat "$MEMO")"
 assert_eq "$(count '^opsx answer')" 0 "要人的 gate 不代答"
+
+# --- memo 的舊暫存檔名被 symlink 占住：不寫到目標，memo 照常更新 ---
+rm -f "$MEMO"; victim_reset; ln -s "$VICTIM" "$MEMO.tmp"
+round || fail "rc: $(cat "$FX/out")"
+assert_eq "$(cat "$VICTIM")" "keep me" "memo 的舊暫存檔名上的 symlink 不能被寫"
+[ -n "$(memo_get _notified demo/a1/gate/g1)" ] || fail "memo 要照常更新：$(cat "$MEMO")"
+rm -f "$MEMO.tmp"
+
+# --- coordinator.log 是 symlink：拒絕、非 0、目標不變 ---
+rm -f "$LOG"; victim_reset; ln -s "$VICTIM" "$LOG"
+bash "$OPSX_ROOT/bin/opsx" coordinate > "$FX/out" 2>&1; rc=$?
+[ $rc -ne 0 ] || fail "log 是 symlink 要非 0：$(cat "$FX/out")"
+assert_grep coordinator.log "$FX/out"
+assert_eq "$(cat "$VICTIM")" "keep me" "log 不能附加到 symlink 的目標"
+rm -f "$LOG" "$MEMO"
 
 # --- --dry 只印，不送不記 ---
 rm -f "$MEMO"

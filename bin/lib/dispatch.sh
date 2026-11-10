@@ -123,8 +123,8 @@ PY
     ws="$repo"
     ws_id="$(herdr workspace create --label "$repo" --cwd "$top" --no-focus 2>/dev/null | jq -r '.result.workspace.workspace_id // .result.workspace_id // .result.workspace // empty' 2>/dev/null || true)"
     [ -n "$ws_id" ] || die "dispatch: herdr workspace create 沒回 workspace id"
-    grep -q '^\[repos\]' "$OPSX_STATE_DIR/workspaces.toml" 2>/dev/null || printf '\n[repos]\n' >> "$OPSX_STATE_DIR/workspaces.toml"   # 第二台機器沒跑過 init 時檔案是空的
-    printf '"%s" = "%s"\n' "$repo" "$ws" >> "$OPSX_STATE_DIR/workspaces.toml"
+    grep -q '^\[repos\]' "$OPSX_STATE_DIR/workspaces.toml" 2>/dev/null || { printf '\n[repos]\n' | opsx_append "$OPSX_STATE_DIR/workspaces.toml" || die "dispatch: 寫不進 $OPSX_STATE_DIR/workspaces.toml"; }   # 第二台機器沒跑過 init 時檔案是空的
+    printf '"%s" = "%s"\n' "$repo" "$ws" | opsx_append "$OPSX_STATE_DIR/workspaces.toml" || die "dispatch: 寫不進 $OPSX_STATE_DIR/workspaces.toml"
     say "dispatch: 新 workspace ${ws}（${ws_id}）記進 workspaces.toml"
   fi
 
@@ -214,8 +214,11 @@ PY
     say "dispatch: session $feature 代管 $(printf '%s\n' "$plan" | cut -f1 | tr '\n' ' ')；不起 drive"
   elif [ "$mode" = autopilot ]; then
     # pid 由 drive 自己寫進 dispatch.json（手動 opsx drive 也一樣），這裡只負責起
-    nohup bash "$OPSX_ROOT/bin/opsx" drive "$slug" --repo "$top" >> "$OPSX_STATE_DIR/drive-$repo-$slug.log" 2>&1 &
-    say "dispatch: drive 跑起來了（pid $!），log 在 $OPSX_STATE_DIR/drive-$repo-$slug.log"
+    local drivelog="$OPSX_STATE_DIR/drive-$repo-$slug.log"
+    # shortcut: 檢查到開檔之間有空窗，沙盒內要在毫秒內換成 symlink 才打得中，且只能附加 drive 的輸出；要補就改成 O_NOFOLLOW 的 wrapper
+    [ ! -L "$drivelog" ] || die "dispatch: refuse to write through symlink: ${drivelog}（卡已派出，drive 沒起）"
+    nohup bash "$OPSX_ROOT/bin/opsx" drive "$slug" --repo "$top" >> "$drivelog" 2>&1 &
+    say "dispatch: drive 跑起來了（pid $!），log 在 $drivelog"
   fi
 }
 

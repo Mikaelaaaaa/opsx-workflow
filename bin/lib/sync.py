@@ -21,7 +21,10 @@ import sys
 import tempfile
 import tomllib
 
-SOURCES = ("gitlab", "github", "debt")
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import safefile  # noqa: E402
+
+SOURCES =("gitlab", "github", "debt")
 FRONTMATTER = re.compile(r"\A---\n(.*?\n)---\n", re.S)
 
 
@@ -282,7 +285,7 @@ def main() -> int:
     a = ap.parse_args()
 
     a.state.mkdir(parents=True, exist_ok=True)
-    lock = open(a.state / "sync.lock", "a")
+    lock = safefile.open_lock(a.state / "sync.lock")
     try:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError:

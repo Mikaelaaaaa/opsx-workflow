@@ -14,8 +14,9 @@ opsx_coordinate() {
 # HERDR_ENV=1 跟 launchd 那輪一樣：沒有它 collect 不問 herdr，coordinate 會整輪拒跑。輸出跟 launchd 寫同一個檔。
 coordinate_kick() {
   local out="$OPSX_STATE_DIR/coordinate.out"
-  if ! : 2>/dev/null >> "$out"; then
-    printf '%s ?? coordinate --kick 起不來：寫不了 %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$out" >> "$OPSX_STATE_DIR/coordinator.log"
+  # shortcut: -L 檢查到開檔之間有空窗，沙盒內要在毫秒內換成 symlink 才打得中，且只能附加 coordinate 的輸出；要補就改成 O_NOFOLLOW 的 wrapper
+  if [ -L "$out" ] || ! : 2>/dev/null >> "$out"; then
+    printf '%s ?? coordinate --kick 起不來：寫不了 %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$out" | opsx_append "$OPSX_STATE_DIR/coordinator.log"
     return 0
   fi
   HERDR_ENV=1 nohup bash "$OPSX_ROOT/bin/opsx" coordinate < /dev/null >> "$out" 2>&1 &

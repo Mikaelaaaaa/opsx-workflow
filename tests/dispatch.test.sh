@@ -146,10 +146,26 @@ python3 -I -c 'import json,sys;d=json.load(open(sys.argv[1]))["permissions"];ass
 # interactive 重派不能蓋掉 autopilot 那份的 allow / deny
 python3 -I -c 'import json,sys;d=json.load(open(sys.argv[1]))["permissions"];assert d["allow"] and "Bash(git push --force:*)" in d["deny"],d' "$S" || fail "interactive 重派蓋掉了 autopilot 的 settings"
 
+# symlink-safe-writes：drive log 是 symlink → dispatch 拒絕起 drive，非 0、訊息含路徑、目標不變
+wait_drive Agentory-CS retry-backoff
+opsx stop retry-backoff >/dev/null 2>&1 || fail "stop before drive-log symlink case"
+DL="$OPSX_STATE_DIR/drive-Agentory-CS-retry-backoff.log"; rm -f "$DL"; printf 'keep me\n' > "$FX/victim"; ln -s "$FX/victim" "$DL"
+out="$(opsx dispatch retry-backoff --agent claude --mode autopilot 2>&1)"; [ $? -ne 0 ] || fail "drive log 是 symlink 要失敗：$out"
+case "$out" in *drive-Agentory-CS-retry-backoff.log*) ;; *) fail "訊息要含 drive log 路徑：$out" ;; esac
+sleep 1
+assert_eq "$(cat "$FX/victim")" "keep me" "drive log 不能附加到 symlink 的目標"
+rm -f "$DL"
+
 # --- 沒掛 workspace 的 repo → 開新 workspace 並記下來 ---
 R2="$(mk_repo scam-guard https://github.com/Mikaelaaaaa/scam-guard.git)"
 mkdir -p "$R2/openspec/changes/rdap-timeout"; printf 'schema: opsx\n' > "$R2/openspec/changes/rdap-timeout/.openspec.yaml"
 : > "$OPSX_FAKE_LOG"; cd "$R2"
+# symlink-safe-writes：workspaces.toml 是 symlink → dispatch 拒絕並說出路徑，目標不變
+cp "$OPSX_STATE_DIR/workspaces.toml" "$FX/ws.real"; printf '[repos]\n' > "$FX/victim"; rm "$OPSX_STATE_DIR/workspaces.toml"; ln -s "$FX/victim" "$OPSX_STATE_DIR/workspaces.toml"
+out="$(opsx dispatch rdap-timeout --agent claude --mode autopilot --kind dev 2>&1)"; [ $? -ne 0 ] || fail "workspaces.toml 是 symlink 要失敗：$out"
+case "$out" in *workspaces.toml*) ;; *) fail "訊息要含 workspaces.toml：$out" ;; esac
+assert_eq "$(cat "$FX/victim")" "[repos]" "workspaces.toml 不能附加到 symlink 的目標"
+rm "$OPSX_STATE_DIR/workspaces.toml"; cp "$FX/ws.real" "$OPSX_STATE_DIR/workspaces.toml"; : > "$OPSX_FAKE_LOG"
 opsx dispatch rdap-timeout --agent claude --mode autopilot --kind dev >/dev/null 2>&1 || fail "dispatch unmapped repo"
 assert_grep '^workspace create --label scam-guard' "$OPSX_FAKE_LOG"
 assert_grep '^"scam-guard" = "scam-guard"$' "$OPSX_STATE_DIR/workspaces.toml"   # 記 label，id 在 dispatch.json

@@ -14,7 +14,7 @@ log_row() { # <card dir> <who> <tag> <文字> [證據]
   [ -n "$who" ] || die "log: who 不能是空的"
   [ -n "$text" ] || die "log: 文字不能是空的"
   case " $OPSX_TAGS " in *" $tag "*) ;; *) die "log: 不認得的 tag「${tag}」，要是其中之一：$OPSX_TAGS" ;; esac
-  printf '%s\t%s\t%s\t%s\t%s\n' "$(now_iso)" "$(log_cell "$who")" "$tag" "$(log_cell "$text")" "$(log_cell "$ev")" >> "$d/decisions.tsv"
+  printf '%s\t%s\t%s\t%s\t%s\n' "$(now_iso)" "$(log_cell "$who")" "$tag" "$(log_cell "$text")" "$(log_cell "$ev")" | opsx_append "$d/decisions.tsv" || die "log: 寫不進 $d/decisions.tsv"
 }
 
 sync_row() { # <source> <新卡數> <文字>
@@ -22,14 +22,14 @@ sync_row() { # <source> <新卡數> <文字>
   case "$2" in ""|*[!0-9]*) die "log --sync: 新卡數要是非負整數，收到「${2}」" ;; esac
   [ -n "$3" ] || die "log --sync: 文字不能是空的"
   mkdir -p "$OPSX_STATE_DIR"
-  printf '%s\t%s\t%s\t%s\n' "$(now_iso)" "$(log_cell "$1")" "$2" "$(log_cell "$3")" >> "$OPSX_STATE_DIR/sync.log"
+  printf '%s\t%s\t%s\t%s\n' "$(now_iso)" "$(log_cell "$1")" "$2" "$(log_cell "$3")" | opsx_append "$OPSX_STATE_DIR/sync.log" || die "log: 寫不進 $OPSX_STATE_DIR/sync.log"
 }
 
 reap_row() { # <repo/slug 或 pane> <文字>：卡目錄已不在時，stop / reap 的紀錄寫這裡
   [ -n "$1" ] || die "log: reap 紀錄的對象不能是空的"
   [ -n "$2" ] || die "log: reap 紀錄的文字不能是空的"
   mkdir -p "$OPSX_STATE_DIR"
-  printf '%s\t%s\t%s\n' "$(now_iso)" "$(log_cell "$1")" "$(log_cell "$2")" >> "$OPSX_STATE_DIR/reap.log"
+  printf '%s\t%s\t%s\n' "$(now_iso)" "$(log_cell "$1")" "$(log_cell "$2")" | opsx_append "$OPSX_STATE_DIR/reap.log" || die "log: 寫不進 $OPSX_STATE_DIR/reap.log"
 }
 
 opsx_log() {

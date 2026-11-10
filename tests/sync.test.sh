@@ -80,6 +80,14 @@ wait "$holder"
 assert_eq "$rc" 3 "拿不到鎖要退出 3：$err"
 case "$err" in *同步進行中*) ;; *) fail "要印同步進行中：$err" ;; esac
 assert_eq "$(wc -l < "$LOG" | tr -d ' ')" "$n"
+
+# --- sync.lock 是 symlink（symlink-safe-writes）：拒絕、不是 0 也不是 3、目標不變 ---
+printf 'keep me\n' > "$FX/victim"; rm -f "$OPSX_STATE_DIR/sync.lock"; ln -s "$FX/victim" "$OPSX_STATE_DIR/sync.lock"
+err="$(sync_debt 2>&1)"; rc=$?
+{ [ $rc -ne 0 ] && [ $rc -ne 3 ]; } || fail "sync.lock 是 symlink 要拒絕（rc ${rc}）：$err"
+case "$err" in *sync.lock*) ;; *) fail "訊息要含 sync.lock：$err" ;; esac
+assert_eq "$(cat "$FX/victim")" "keep me" "sync.lock 不能被改"
+rm -f "$OPSX_STATE_DIR/sync.lock"
 # ========== gitlab / github ==========
 CS="$(mk_opsx_repo Agentory-CS)"; mv "$CS" "$ROOT/Agentory-CS"; CS="$(cd "$ROOT/Agentory-CS" && pwd -P)"
 B="$(mk_opsx_repo b)"; mv "$B" "$ROOT/b"; B="$(cd "$ROOT/b" && pwd -P)"
