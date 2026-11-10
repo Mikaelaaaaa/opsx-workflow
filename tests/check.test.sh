@@ -120,4 +120,45 @@ printf '%s' "$out" | jq -r '.reason' | grep -q 'kind_of_work' || fail "stop: 理
 mk_inbox f-stop "source: agent:q${NL}kind_of_work: planned"
 out="$(printf '{"cwd":"%s","stop_hook_active":false}' "$R" | bash "$H/openspec-stop-gate.sh" 2>/dev/null)"
 printf '%s' "$out" | jq -r '.reason' | grep -q 'task 沒勾' || fail "stop: 事實欄位齊了就照舊判斷: $out"
+
+# --- review 退回的邊界 ---
+# 模板原樣的 incident：impact 與 evidence 還是 <!-- … -->
+mk_inbox f-ph "source: agent:p${NL}kind_of_work: incident${NL}impact: <!-- incident 才填 -->${NL}evidence: <!-- 有 impact 就要 evidence -->"
+out="$(chk f-ph)" && fail "模板佔位字不能算有填"
+printf '%s' "$out" | grep -q 'incident 缺 impact' || fail "佔位的 impact 要報缺: $out"
+printf '%s' "$out" | grep -q 'incident 缺 evidence' || fail "佔位的 evidence 要報缺: $out"
+# 尾端空白、CRLF：開出去的卡仍被掃到
+mk_inbox f-ws 'source: me'; mk_inbox f-ws-child "source: agent:f-ws "
+out="$(chk f-ws)" && fail "source 尾端空白的卡缺 kind 要非零"
+printf '%s' "$out" | grep -q 'f-ws-child/inbox.md: ' || fail "尾端空白: $out"
+mk_inbox f-cr 'source: me'; mkdir -p "$R/openspec/changes/f-cr-child"
+printf -- '---\r\nsource: agent:f-cr\r\n---\r\n\r\n## 一句話\r\n\r\nx\r\n' > "$R/openspec/changes/f-cr-child/inbox.md"
+out="$(chk f-cr)" && fail "CRLF 的卡缺 kind 要非零"
+printf '%s' "$out" | grep -q 'f-cr-child/inbox.md: ' || fail "CRLF: $out"
+printf -- '---\r\nsource: agent:f-cr\r\nkind_of_work: planned\r\n---\r\n' > "$R/openspec/changes/f-cr-child/inbox.md"
+out="$(chk f-cr)" || fail "CRLF 補齊要通過: $out"
+
+stop() { printf '{"cwd":"%s","stop_hook_active":false}' "$R" | bash "$H/openspec-stop-gate.sh" 2>/dev/null; }
+# 它開出去的卡缺 kind：Stop 擋，理由含那張卡
+mk_inbox f-sp 'source: me'; printf '## 1. x\n\n- [ ] 1.1 a\n' > "$R/openspec/changes/f-sp/tasks.md"; mk_inbox f-sp-child 'source: agent:f-sp'
+git -C "$R" checkout -q -b feat/f-sp/mikaela
+out="$(stop)"; assert_eq "$(printf '%s' "$out" | jq -r '.decision // ""')" block "stop: 開出去的卡缺欄位要擋"
+printf '%s' "$out" | jq -r '.reason' | grep -q 'f-sp-child/inbox.md' || fail "stop: 理由要含子卡: $out"
+# 等待中不擋：有會擋的 open gate、或 review 的 subagent 還在跑
+mk_inbox f-wait 'source: agent:q'; printf '## 1. x\n\n- [ ] 1.1 a\n' > "$R/openspec/changes/f-wait/tasks.md"
+git -C "$R" checkout -q -b feat/f-wait/mikaela
+printf '## g1\ntype: decision\nstatus: open\n' > "$R/openspec/changes/f-wait/gates.md"
+assert_eq "$(stop)" "" "stop: 有 open gate 時事實欄位不擋"
+rm "$R/openspec/changes/f-wait/gates.md"
+printf '## 1. x\n\n- [x] 1.1 a\n' > "$R/openspec/changes/f-wait/tasks.md"   # review 在跑時 task 都已勾
+printf '{"phase":"review","step":2,"total":7,"tests":"green"}' > "$R/openspec/changes/f-wait/status.json"
+assert_eq "$(stop)" "" "stop: review 在跑時事實欄位不擋"
+rm "$R/openspec/changes/f-wait/status.json"
+# 擋滿 3 次：自動 gate 標題是 /facts，文字說的是事實欄位
+mk_inbox f-loop 'source: agent:q'; printf '## 1. x\n\n- [ ] 1.1 a\n' > "$R/openspec/changes/f-loop/tasks.md"
+git -C "$R" checkout -q -b feat/f-loop/mikaela
+stop >/dev/null; stop >/dev/null; stop >/dev/null; stop >/dev/null
+assert_grep '^## 卡在接 /facts #1$' "$R/openspec/changes/f-loop/gates.md"
+assert_grep '^問題: .*事實欄位' "$R/openspec/changes/f-loop/gates.md"
+assert_not_grep '沒有 invoke' "$R/openspec/changes/f-loop/gates.md"
 echo ok

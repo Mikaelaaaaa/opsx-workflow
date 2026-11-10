@@ -27,7 +27,7 @@ check_fact_flags() { # <source> <kind> <impact> <evidence>
 }
 
 opsx_new() {
-  local top="" text="" source="" kind="" impact="" evidence="" prefix=me files=() names=() f b stem ext cand n taken=$'\n' i wt
+  local top="" text="" source="" kind="" impact="" evidence="" prefix=me files=() names=() f b stem ext cand n taken=$'\n' i wt mt
   while [ $# -gt 0 ]; do
     case "$1" in
       --repo) top="$2"; shift 2 ;;
@@ -43,7 +43,14 @@ opsx_new() {
   single_line "$text"
   if [ -z "$source" ]; then
     wt="$(git_worktree_top)"
-    case "$wt" in */.claude/worktrees/*/*) ;; */.claude/worktrees/*) source="agent:${wt##*/}" ;; esac
+    case "$wt" in
+      */.claude/worktrees/*/*) ;;
+      */.claude/worktrees/*)
+        # 卡名比照 hooks/_lib.sh 的 card_slug：branch 對得到卡就用卡名，對不到才用資料夾名（Claude Code 自己開的 worktree 叫 agent-a<hex>）
+        b="$(slug_from_branch "$(git_branch)")"; mt="$(git_toplevel)"
+        [ -n "$b" ] && [ -d "$mt/openspec/changes/$b" ] || b="${wt##*/}"
+        source="agent:$b" ;;
+    esac
   fi
   [ -z "$source" ] || [[ "$source" =~ ^(me|agent:[A-Za-z0-9][A-Za-z0-9._-]*)$ ]] || die "new: --source 要是 me 或 agent:<slug>，拿到：$source"
   check_fact_flags "$source" "$kind" "$impact" "$evidence"

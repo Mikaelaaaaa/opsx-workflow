@@ -157,4 +157,16 @@ assert_eq "$(opsx priority "$out" --repo "$A" | cut -f1)" P0 "寫進去的事實
 out="$(cd "$W" && opsx new --kind-of-work planned --repo "$A" -- 想做的)"; assert_grep '^kind_of_work: planned$' "$A/openspec/changes/$out/inbox.md"
 # 使用者開的卡不強制：沒帶就是 planned（既有行為）
 out="$(cd "$A" && opsx new --repo "$A" -- 使用者的卡二)"; assert_grep '^kind_of_work: planned$' "$A/openspec/changes/$out/inbox.md"
+
+# --- review 退回的邊界 ---
+# 明確 --source me 只關偵測，帶附件仍是 paste
+out="$(cd "$W" && opsx new --source me --repo "$A" --attach "$T/shot.png" -- 明確我加附件)"; assert_eq "$(src "$out")" paste
+# worktree 子目錄
+mkdir -p "$W/sub"; out="$(cd "$W/sub" && opsx new --kind-of-work planned --repo "$A" -- 子目錄)"; assert_eq "$(src "$out")" agent:foo
+# worktree 資料夾名與卡名不同：branch 對得到卡就用卡名，對不到才用資料夾名
+mkdir -p "$A/openspec/changes/real-card"; printf 'schema: opsx\n' > "$A/openspec/changes/real-card/.openspec.yaml"
+git -C "$A" worktree add -q -b feat/real-card/mikaela "$A/.claude/worktrees/agent-a1b2c3" || fail "第二棵 worktree 建不起來"
+out="$(cd "$A/.claude/worktrees/agent-a1b2c3" && opsx new --kind-of-work planned --repo "$A" -- 卡名在 branch)"; assert_eq "$(src "$out")" agent:real-card
+git -C "$A" worktree add -q -b scratch/nothing/mikaela "$A/.claude/worktrees/agent-d4e5f6" || fail "第三棵 worktree 建不起來"
+out="$(cd "$A/.claude/worktrees/agent-d4e5f6" && opsx new --kind-of-work planned --repo "$A" -- branch 對不到卡)"; assert_eq "$(src "$out")" agent:agent-d4e5f6
 echo ok

@@ -77,9 +77,9 @@ check_facts() { # <卡目錄>：印本卡與它開出去的卡（source: agent:<
 facts_of_inbox() { # <inbox.md> <顯示名> <只看這個 source，空字串是任何 agent:*>
   [ -f "$1" ] || return 0
   awk -v label="$2" -v only="$3" '
-    function val(line) { sub(/^[^:]*:[ \t]*/, "", line); gsub(/^["\047]|["\047]$/, "", line); return line }
-    NR == 1 && $0 == "---" { fm = 1; next }
-    fm && $0 == "---" { exit }
+    function val(line) { sub(/^[^:]*:[ \t]*/, "", line); gsub(/<!--.*-->/, "", line); sub(/[ \t\r]+$/, "", line); gsub(/^["\047]|["\047]$/, "", line); return line }
+    NR == 1 && $0 ~ /^---[ \t\r]*$/ { fm = 1; next }
+    fm && $0 ~ /^---[ \t\r]*$/ { exit }
     !fm { next }
     /^source:/ { source = val($0); nested = 0; next }
     /^kind_of_work:/ { kind = val($0); nested = 0; next }
