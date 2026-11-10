@@ -7,6 +7,7 @@ GET /            回 web/index.html。
 GET /healthz     回 {"ok": true, "app": "opsx-board"}，不用 token，給 open-board.sh 探活，app 欄讓它認得是我們的。
 GET /api/collect 回 `opsx collect` 的輸出；--collect 給了檔就回那個檔（測試用）。同一時間只跑一支 collect，其他請求等它，
                  結果快取 CACHE_S 秒；頁面每 5 秒拉而 ThreadingHTTPServer 每個請求一個 thread，沒有這個會疊成十幾支 collect。
+                 動作 POST 呼叫過 opsx 後快取作廢，下一個 GET 拿到的是動作之後才開始的 collect。
 GET /api/log[?since=<iso>] 回 `opsx timeline [--since …]` 的輸出（紀錄 tab、抽屜、banner 用，開才拉，不快取）。
 GET /api/output?pane=<id> 跑 `herdr agent read <id> --lines 10 --format text`，回 {ok, text} 或 {ok: false, error}（抽屜「最後輸出」）。
 POST /api/seen {at} 把 at 寫進 <state>/last-seen（banner 按「關閉」時送）。
@@ -95,7 +96,9 @@ class Config:
         self.collect_file = collect_file
         self.token = load_token(state / "board-token")
         self.lock = threading.Lock()
-        self.cached: tuple[float, int, dict] = (0.0, 0, {})   # (at, status, payload)
+        self.cached: tuple[float, float, int, dict] = (0.0, 0.0, 0, {})   # (at, started, status, payload)
+        # 動作 POST 呼叫完 opsx 的時間。不拿 lock：在這之前開始的 collect 結束時仍會寫快取，靠比開始時間把它當作過期
+        self.invalidated_at = 0.0
 
 
 def load_token(path: pathlib.Path) -> str:
@@ -298,9 +301,10 @@ class Handler(BaseHTTPRequestHandler):
             except (FileNotFoundError, json.JSONDecodeError) as e:
                 return 500, {"error": "--collect 檔讀不到或不是 JSON：%s" % e}
         with cfg.lock:   # single-flight：排隊的請求進來時快取多半已經新鮮，直接拿
-            at, status, payload = cfg.cached
-            if time.monotonic() - at < CACHE_S:
+            at, started, status, payload = cfg.cached
+            if time.monotonic() - at < CACHE_S and started > cfg.invalidated_at:
                 return status, payload
+            started = time.monotonic()
             r = run(["bash", str(OPSX), "collect"], COLLECT_TIMEOUT, self.opsx_env())
             if not r["ok"]:
                 status, payload = 502, {"error": "opsx collect 失敗", "stderr": r["stderr"]}
@@ -309,7 +313,7 @@ class Handler(BaseHTTPRequestHandler):
                     status, payload = 200, json.loads(r["stdout"])
                 except json.JSONDecodeError as e:
                     status, payload = 502, {"error": "opsx collect 回的不是 JSON：%s" % e}
-            cfg.cached = (time.monotonic(), status, payload)
+            cfg.cached = (time.monotonic(), started, status, payload)
             return status, payload
 
     def do_GET(self) -> None:  # noqa: N802
@@ -411,8 +415,10 @@ class Handler(BaseHTTPRequestHandler):
             with tempfile.TemporaryDirectory(prefix="opsx-paste.") as d:
                 attach = write_attachments(pathlib.Path(d), files)
                 r = run(["bash", str(OPSX), "new", *repo_args, *attach, "--", one_liner], ACTION_TIMEOUT, self.opsx_env())
+            self.cfg.invalidated_at = time.monotonic()
             self.send_json(200, r); return
         r = run(["bash", str(OPSX), *args], ACTION_TIMEOUT, self.opsx_env())
+        self.cfg.invalidated_at = time.monotonic()
         # sync 的退出碼 3 是已有一支在跑；reap 的退出碼 2 是指定的 pane 不是孤兒
         self.send_json(409 if action == "sync" and r["rc"] == 3 else 422 if action == "reap" and r["rc"] == 2 else 200, r)
 
