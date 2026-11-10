@@ -1,24 +1,52 @@
 #!/usr/bin/env bash
-# opsx new [--repo <path>] [--attach <file>]… -- <一句話>：＋新增一張收件卡，印出 slug。
+# opsx new [--repo <path>] [--source <me|agent:<slug>>] [--kind-of-work <incident|planned>] [--impact <值,…>] [--evidence <一行>] [--attach <file>]… -- <一句話>：＋新增一張收件卡，印出 slug。
 # 給了 repo 就在那裡建殼；沒給就寫 <state>/unfiled/<slug>.md，等 opsx file 選 repo（board-inbox D6）。
-# slug 是 me-<YYYYMMDD-HHMM>，同名依序加 -2（D2）。specs/board-actions「新增到收件匣」「新增時附檔」。
+# slug 是 me-<YYYYMMDD-HHMM>，同名依序加 -2（D2）。specs/board-actions「新增到收件匣」「新增時附檔」「agent 開的卡標明來源」。
 # --attach 的檔複製進卡的 attachments/（待分類是 unfiled/<slug>/attachments/），有附件時 source: paste。
+# 在 dispatch 的 worktree（<top>/.claude/worktrees/<slug>）裡呼叫是 agent 開的：source: agent:<slug>、slug 前綴 agent-；--source me 蓋過偵測。
+# agent 開的卡必帶 --kind-of-work；incident 還要 --impact 與 --evidence（references/priority.md 的事實欄位）。使用者開的卡不強制，沒帶是 planned。
 
 OPSX_ATTACH_MAX=10485760
 
 lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
 
+# 事實欄位（references/priority.md）：值域、incident 要 impact 與 evidence、planned 不填 impact；agent 開的卡一定要有 kind。
+check_fact_flags() { # <source> <kind> <impact> <evidence>
+  local src="$1" kind="$2" impact="$3" evidence="$4" v
+  case "$src" in agent:*) [ -n "$kind" ] || die "new: agent 開的卡要帶 --kind-of-work incident|planned（incident 還要 --impact 與 --evidence）" ;; esac
+  case "$kind" in ""|incident|planned) ;; *) die "new: --kind-of-work 要是 incident 或 planned，拿到：$kind" ;; esac
+  case "$impact$evidence" in *$'\n'*|*$'\r'*) die "new: --impact 與 --evidence 不能有換行" ;; esac
+  for v in $(printf '%s' "$impact" | tr ',' ' '); do
+    case "$v" in security|data|prod_or_main|workaround_exists|blocks_all_agents) ;; *) die "new: --impact 不認得「${v}」，要是 security、data、prod_or_main、workaround_exists、blocks_all_agents 之一" ;; esac
+  done
+  [ "$kind" = incident ] || [ -z "${impact//[[:space:],]/}" ] || die "new: --impact 只有 incident 填（kind 是「${kind:-planned}」）"
+  if [ "$kind" = incident ]; then
+    [ -n "${impact//[[:space:],]/}" ] || die "new: incident 要帶 --impact"
+    [ -n "${evidence//[[:space:]]/}" ] || die "new: incident 要帶 --evidence（沒有證據不能填 impact）"
+  fi
+}
+
 opsx_new() {
-  local top="" text="" files=() names=() f b stem ext cand n taken=$'\n' i
+  local top="" text="" source="" kind="" impact="" evidence="" prefix=me files=() names=() f b stem ext cand n taken=$'\n' i wt
   while [ $# -gt 0 ]; do
     case "$1" in
       --repo) top="$2"; shift 2 ;;
+      --source) [ $# -ge 2 ] || die "new: --source 後面要給 me 或 agent:<slug>"; source="$2"; shift 2 ;;
+      --kind-of-work) [ $# -ge 2 ] || die "new: --kind-of-work 後面要給 incident 或 planned"; kind="$2"; shift 2 ;;
+      --impact) [ $# -ge 2 ] || die "new: --impact 後面要給值"; impact="$2"; shift 2 ;;
+      --evidence) [ $# -ge 2 ] || die "new: --evidence 後面要給一行證據"; evidence="$2"; shift 2 ;;
       --attach) [ $# -ge 2 ] || die "new: --attach 後面要給檔案"; files+=("$2"); shift 2 ;;
       --) shift; text="$*"; break ;;
-      *) die "new: 用法 opsx new [--repo <path>] [--attach <file>]… -- <一句話>" ;;
+      *) die "new: 用法 opsx new [--repo <path>] [--source <me|agent:<slug>>] [--kind-of-work <incident|planned>] [--impact <值,…>] [--evidence <一行>] [--attach <file>]… -- <一句話>" ;;
     esac
   done
   single_line "$text"
+  if [ -z "$source" ]; then
+    wt="$(git_worktree_top)"
+    case "$wt" in */.claude/worktrees/*/*) ;; */.claude/worktrees/*) source="agent:${wt##*/}" ;; esac
+  fi
+  [ -z "$source" ] || [[ "$source" =~ ^(me|agent:[A-Za-z0-9][A-Za-z0-9._-]*)$ ]] || die "new: --source 要是 me 或 agent:<slug>，拿到：$source"
+  check_fact_flags "$source" "$kind" "$impact" "$evidence"
   [ -z "$top" ] || top="$(opsx_repo_top "$top")"
   for f in ${files[@]+"${files[@]}"}; do
     [ -f "$f" ] || die "new: --attach 不存在或不是一般檔案：$f"
@@ -34,10 +62,16 @@ opsx_new() {
   done
 
   text="$(printf '%s' "$text" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')"
-  local slug body source=me; slug="me-$(date '+%Y%m%d-%H%M')"; body="$(mktemp "${TMPDIR:-/tmp}/opsx-new.XXXXXX")"
+  case "$source" in
+    agent:*) prefix=agent ;;
+    *) source=me; [ ${#names[@]} -eq 0 ] || source=paste ;;
+  esac
+  local slug body; slug="$prefix-$(date '+%Y%m%d-%H%M')"; body="$(mktemp "${TMPDIR:-/tmp}/opsx-new.XXXXXX")"
   trap 'rm -f "$body"' RETURN
-  [ ${#names[@]} -eq 0 ] || source=paste
-  printf -- '---\ntype: 功能\nsource: %s\nfound: %s\nrelated:\nkind_of_work: planned\n---\n\n## 一句話\n\n%s\n\n' "$source" "$(date '+%Y-%m-%d')" "$text" > "$body"
+  printf -- '---\ntype: 功能\nsource: %s\nfound: %s\nrelated:\nkind_of_work: %s\n' "$source" "$(date '+%Y-%m-%d')" "${kind:-planned}" > "$body"
+  [ -z "$impact" ] || printf 'impact: %s\n' "$impact" >> "$body"
+  [ -z "$evidence" ] || printf 'evidence: %s\n' "$evidence" >> "$body"
+  printf -- '---\n\n## 一句話\n\n%s\n\n' "$text" >> "$body"
   if [ ${#names[@]} -gt 0 ]; then
     printf '## 附件\n\n' >> "$body"
     printf -- '- attachments/%s\n' "${names[@]}" >> "$body"

@@ -142,7 +142,7 @@ class ServerTest(unittest.TestCase):
         out = json.loads(body)
         self.assertTrue(out["ok"], out)
         self.assertIn("ok: new", out["stdout"])
-        d = self.paste_dir(r"new --attach (\S+)/shot\.png -- 鍵盤蓋住輸入框")
+        d = self.paste_dir(r"new --source me --attach (\S+)/shot\.png -- 鍵盤蓋住輸入框")
         self.assertEqual((self.attached / "shot.png").read_bytes(), data)
         self.assertFalse(d.exists(), "回應後暫存資料夾要刪掉")
 
@@ -150,28 +150,28 @@ class ServerTest(unittest.TestCase):
         text = "第一行\nhttps://example.com/x\n第三行"
         status, _, body = self.req("/api/paste", {"text": text, "files": []}, token=self.token)
         self.assertEqual(status, 200, body)
-        d = self.paste_dir(r"new --attach (\S+)/paste\.md -- 第一行")
+        d = self.paste_dir(r"new --source me --attach (\S+)/paste\.md -- 第一行")
         self.assertEqual((self.attached / "paste.md").read_text(encoding="utf-8"), text)
         self.assertFalse(d.exists())
         self.log.write_text("")
         status, _, body = self.req("/api/paste", {"text": "\n  標題  \n內文", "files": [{"name": "a.txt", "data": b64(b"a")}]}, token=self.token)
         self.assertEqual(status, 200, body)
-        self.paste_dir(r"new --attach (\S+)/paste\.md --attach \S+/a\.txt -- 標題")
+        self.paste_dir(r"new --source me --attach (\S+)/paste\.md --attach \S+/a\.txt -- 標題")
 
     def test_paste_single_line_with_file_has_no_paste_md(self):
         self.req("/api/paste", {"text": "  一行  \n\n", "files": [{"name": "a.txt", "data": b64(b"a")}]}, token=self.token)
-        self.paste_dir(r"new --attach (\S+)/a\.txt -- 一行")
+        self.paste_dir(r"new --source me --attach (\S+)/a\.txt -- 一行")
 
     def test_paste_only_files(self):
         status, _, body = self.req("/api/paste", {"text": "", "files": [{"name": "log.txt", "data": b64(b"x")}, {"name": "b.txt", "data": ""}]}, token=self.token)
         self.assertEqual(status, 200, body)
-        self.paste_dir(r"new --attach (\S+)/log\.txt --attach \S+/b\.txt -- 附件：log\.txt")
+        self.paste_dir(r"new --source me --attach (\S+)/log\.txt --attach \S+/b\.txt -- 附件：log\.txt")
 
     def test_paste_with_repo(self):
         r = str(self.repo)
         status, _, body = self.req("/api/paste", {"text": "x", "repo": r, "files": [{"name": "a.png", "data": b64(b"p")}]}, token=self.token)
         self.assertEqual(status, 200, body)
-        self.paste_dir(r"new --repo %s --attach (\S+)/a\.png -- x" % re.escape(r))
+        self.paste_dir(r"new --source me --repo %s --attach (\S+)/a\.png -- x" % re.escape(r))
         status, _, body = self.req("/api/paste", {"text": "x", "repo": "/tmp", "files": []}, token=self.token)
         self.assertEqual(status, 400, body)
 
@@ -195,7 +195,7 @@ class ServerTest(unittest.TestCase):
         text = "x" * (2 * 1024 * 1024)
         status, _, body = self.req("/api/paste", {"text": text, "files": []}, token=self.token)
         self.assertEqual(status, 200, body)
-        m = re.fullmatch(r"new --attach \S+/paste\.md -- (x+)", self.log.read_text().strip())
+        m = re.fullmatch(r"new --source me --attach \S+/paste\.md -- (x+)", self.log.read_text().strip())
         self.assertIsNotNone(m)
         self.assertLessEqual(len(m.group(1)), 200)
         self.assertEqual((self.attached / "paste.md").read_text(encoding="utf-8"), text)
@@ -307,7 +307,7 @@ class ServerTest(unittest.TestCase):
         self.assertEqual(status, 200, body)
         status, _, body = self.req("/api/new", {"text": "試試看", "repo": r}, token=self.token)
         self.assertEqual(status, 200, body)
-        self.assertEqual(self.log.read_text().strip().split("\n"), ["new -- 試試看", "new --repo %s -- 試試看" % r])
+        self.assertEqual(self.log.read_text().strip().split("\n"), ["new --source me -- 試試看", "new --source me --repo %s -- 試試看" % r])
 
     def test_new_rejects_empty_or_multiline_text(self):
         for text in ("", "a\nb"):

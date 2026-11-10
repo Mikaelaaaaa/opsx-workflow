@@ -74,4 +74,50 @@ printf '%s' "$out" | jq -r '.reason' | grep -q 'subs/a/tasks.md' || fail "stop: 
 mk_main stopper >/dev/null   # 補齊後回到原本的判斷（tasks 沒勾）
 out="$(printf '{"cwd":"%s","stop_hook_active":false}' "$R" | bash "$H/openspec-stop-gate.sh" 2>/dev/null)"
 printf '%s' "$out" | jq -r '.reason' | grep -q 'task 沒勾' || fail "stop: 子殼齊了就照舊擋未勾: $out"
+
+# --- Scenario：agent 開的卡要有事實欄位（board-actions「agent 開的卡要帶事實欄位」）---
+mk_inbox() { # <slug> <frontmatter 內容>；source 寫在內容裡
+  mkdir -p "$R/openspec/changes/$1"; printf 'schema: opsx\n' > "$R/openspec/changes/$1/.openspec.yaml"
+  printf -- '---\n%s\n---\n\n## 一句話\n\nx\n' "$2" > "$R/openspec/changes/$1/inbox.md"
+}
+NL=$'\n'
+mk_inbox f-nokind 'source: agent:p'
+out="$(chk f-nokind)" && fail "agent 卡沒有 kind_of_work 要非零"
+printf '%s' "$out" | grep 'inbox.md: ' | grep -q 'kind_of_work' || fail "要指出 kind_of_work: $out"
+mk_inbox f-badkind "source: agent:p${NL}kind_of_work: urgent"
+out="$(chk f-badkind)" && fail "kind_of_work 值域外要非零"
+printf '%s' "$out" | grep -q 'urgent' || fail "要指出值 urgent: $out"
+mk_inbox f-inc "source: agent:p${NL}kind_of_work: incident"
+out="$(chk f-inc)" && fail "incident 缺 impact 與 evidence 要非零"
+printf '%s' "$out" | grep -q 'impact' || fail "要指出 impact: $out"
+printf '%s' "$out" | grep -q 'evidence' || fail "要指出 evidence: $out"
+mk_inbox f-inc2 "source: agent:p${NL}kind_of_work: incident${NL}impact: data"
+out="$(chk f-inc2)" && fail "incident 缺 evidence 要非零"
+printf '%s' "$out" | grep -q 'evidence' || fail "要指出 evidence: $out"
+mk_inbox f-okinc "source: agent:p${NL}kind_of_work: incident${NL}impact: data${NL}evidence: tests/x.test.sh"
+out="$(chk f-okinc)" || fail "incident 事實齊要通過: $out"
+mk_inbox f-nested "source: agent:p${NL}kind_of_work: incident${NL}impact:${NL}  workaround_exists: true${NL}  evidence: \"log 在 ## 證據\""
+out="$(chk f-nested)" || fail "巢狀寫法的 impact 與 evidence 要通過: $out"
+mk_inbox f-planned "source: agent:p${NL}kind_of_work: planned"
+out="$(chk f-planned)" || fail "planned 不需要 evidence: $out"
+mk_inbox f-me 'source: me'
+out="$(chk f-me)" || fail "使用者開的卡不強制: $out"
+mk_inbox f-gitlab 'source: gitlab:a#1'
+out="$(chk f-gitlab)" || fail "同步來的卡不強制: $out"
+# 這張卡開出去的卡（source: agent:<這張卡>）也要齊
+mk_inbox f-parent 'source: me'; mk_inbox f-child 'source: agent:f-parent'
+out="$(chk f-parent)" && fail "它開的卡缺 kind 要非零"
+printf '%s' "$out" | grep -q 'f-child/inbox.md: ' || fail "要指出 f-child/inbox.md: $out"
+mk_inbox f-child "source: agent:f-parent${NL}kind_of_work: planned"
+out="$(chk f-parent)" || fail "它開的卡補齊就通過: $out"
+
+# --- Scenario：Stop hook 擋事實欄位不齊 ---
+mk_inbox f-stop 'source: agent:q'; printf '## 1. x\n\n- [ ] 1.1 a\n' > "$R/openspec/changes/f-stop/tasks.md"
+git -C "$R" checkout -q -b feat/f-stop/mikaela
+out="$(printf '{"cwd":"%s","stop_hook_active":false}' "$R" | bash "$H/openspec-stop-gate.sh" 2>/dev/null)"
+assert_eq "$(printf '%s' "$out" | jq -r '.decision // ""')" block "stop: 事實欄位缺要擋"
+printf '%s' "$out" | jq -r '.reason' | grep -q 'kind_of_work' || fail "stop: 理由要含缺的欄位: $out"
+mk_inbox f-stop "source: agent:q${NL}kind_of_work: planned"
+out="$(printf '{"cwd":"%s","stop_hook_active":false}' "$R" | bash "$H/openspec-stop-gate.sh" 2>/dev/null)"
+printf '%s' "$out" | jq -r '.reason' | grep -q 'task 沒勾' || fail "stop: 事實欄位齊了就照舊判斷: $out"
 echo ok

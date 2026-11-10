@@ -3,6 +3,7 @@
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 use_fakes date
 export OPSX_TEST_NOW="2026-11-06 14:30"
+cd "$FX"   # 從 dispatch 的 worktree 跑時，cwd 不能讓 opsx new 把 fixture 的卡當成 agent 開的
 A="$(mk_opsx_repo a)"
 
 # --- 分類：內容原樣、unfiled 的檔不在了 ---

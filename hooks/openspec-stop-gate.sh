@@ -17,6 +17,14 @@ export OPSX_MR_TIMEOUT="${OPSX_MR_TIMEOUT:-5}"
 # 印要擋的原因；空字串表示放行。
 stop_reason() { # <dir> <slug> <stage>
   local d="$1" slug="$2" stage="$3" open missing last_commit report_ts confirmed head_sha
+  source "$OPSX_ROOT/bin/lib/check.sh"
+  missing="$(check_facts "$d")"
+  if [ -n "$missing" ]; then
+    printf '%s' "${stage:-apply}|opsx：${slug} 或它開出去的卡缺事實欄位（opsx check ${slug}）：
+$missing
+開卡用 opsx new --kind-of-work …（incident 加 --impact 與 --evidence）；手寫的卡補 inbox.md 的 kind_of_work、impact、evidence。補齊再停。"
+    return 0
+  fi
   if [ -f "$d/tasks.md" ]; then
     if [ -d "$d/subs" ] && [ "$(st_open_gates "$d")" -eq 0 ]; then
       source "$OPSX_ROOT/bin/lib/check.sh"

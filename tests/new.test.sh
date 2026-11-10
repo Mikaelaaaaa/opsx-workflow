@@ -3,6 +3,7 @@
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 use_fakes date
 export OPSX_TEST_NOW="2026-11-06 14:30"
+cd "$FX"   # 從 dispatch 的 worktree 跑測試時，cwd 不能讓 opsx new 把 fixture 的卡當成 agent 開的
 A="$(mk_opsx_repo a)"; B="$(mk_opsx_repo b)"
 snap() { find "$A/openspec/changes" "$B/openspec/changes" | sort; }
 
@@ -105,4 +106,55 @@ assert_rc 2 opsx new --attach "$nl" -- 換行
 assert_eq "$(snap)" "$before"; assert_eq "$(find "$OPSX_STATE_DIR/unfiled" | sort)" "$ub"
 out="$(opsx new --repo "$A" --attach "$T/edge.bin" -- 剛好十MB)"; assert_eq "$?" 0 "剛好 10 MB 要收：$out"
 assert_file "$A/openspec/changes/$out/attachments/edge.bin"
+
+# --- agent 開的卡標明來源（board-actions「agent 開的卡標明來源」）---
+export OPSX_TEST_NOW="2026-11-10 16:30"
+W="$A/.claude/worktrees/foo"; mkdir -p "$A/.claude/worktrees"
+git -C "$A" worktree add -q -b fix/foo/mikaela "$W" || fail "worktree 建不起來"
+W="$(cd "$W" && pwd -P)"
+src() { awk -F': ' '$1=="source"{print $2}' "$A/openspec/changes/$1/inbox.md"; }
+
+# agent worktree 裡開卡
+out="$(cd "$W" && opsx new --kind-of-work planned --repo "$A" -- 發現一個問題)"; assert_eq "$?" 0 "agent new: $out"
+assert_eq "$out" agent-20261110-1630; assert_eq "$(src "$out")" agent:foo
+# 使用者終端機開卡（repo 根目錄）
+out="$(cd "$A" && opsx new --repo "$A" -- 使用者的卡)"; assert_eq "$out" me-20261110-1630; assert_eq "$(src "$out")" me
+# 明確 --source 蓋過偵測
+out="$(cd "$W" && opsx new --source me --repo "$A" -- 明確是我)"; assert_eq "$out" me-20261110-1630-2; assert_eq "$(src "$out")" me
+# 明確 --source agent:<slug> 在 repo 根目錄也成立
+out="$(cd "$A" && opsx new --source agent:bar --kind-of-work planned --repo "$A" -- 明確是 agent)"; assert_eq "$out" agent-20261110-1630-2; assert_eq "$(src "$out")" agent:bar
+# agent 帶附件：來源取 agent，附件照常
+out="$(cd "$W" && opsx new --kind-of-work planned --repo "$A" --attach "$T/shot.png" -- 有截圖)"; assert_eq "$(src "$out")" agent:foo
+assert_eq "$(cat "$A/openspec/changes/$out/attachments/shot.png")" png-bytes
+assert_grep '^- attachments/shot.png$' "$A/openspec/changes/$out/inbox.md"
+# agent 沒給 repo：進待分類，來源一樣
+out="$(cd "$W" && opsx new --kind-of-work planned -- 沒指定 repo)"; assert_grep '^source: agent:foo$' "$OPSX_STATE_DIR/unfiled/$out.md"
+# 不合格的 --source：退出非零、stderr 含該值、什麼都不寫
+before="$(snap)"; ub="$(find "$OPSX_STATE_DIR/unfiled" | sort)"
+err="$(opsx new --source robot --repo "$A" -- x 2>&1 >/dev/null)"; assert_eq "$?" 2 "robot: $err"
+case "$err" in *robot*) ;; *) fail "stderr 要含 robot：$err" ;; esac
+assert_rc 2 opsx new --source agent: --repo "$A" -- x
+assert_rc 2 opsx new --source --repo "$A" -- x
+assert_eq "$(snap)" "$before"; assert_eq "$(find "$OPSX_STATE_DIR/unfiled" | sort)" "$ub"
+
+# --- 開卡的事實欄位（board-actions「agent 開的卡要帶事實欄位」）---
+before="$(snap)"; ub="$(find "$OPSX_STATE_DIR/unfiled" | sort)"
+fact_err() { local e; e="$(cd "$W" && opsx new "$@" 2>&1 >/dev/null)"; assert_eq "$?" 2 "要退出 2：$*"; printf '%s' "$e"; }
+case "$(fact_err --repo "$A" -- 沒帶 kind)" in *kind-of-work*) ;; *) fail "agent 沒帶 --kind-of-work 的訊息要含 kind-of-work" ;; esac
+case "$(fact_err --kind-of-work incident --evidence e --repo "$A" -- 缺 impact)" in *impact*) ;; *) fail "incident 缺 impact 的訊息要含 impact" ;; esac
+case "$(fact_err --kind-of-work incident --impact data --repo "$A" -- 缺 evidence)" in *evidence*) ;; *) fail "incident 缺 evidence 的訊息要含 evidence" ;; esac
+case "$(fact_err --kind-of-work urgent --repo "$A" -- 錯值)" in *urgent*) ;; *) fail "不認得的 kind 要在訊息裡" ;; esac
+case "$(fact_err --kind-of-work incident --impact slow --evidence e --repo "$A" -- 錯 impact)" in *slow*) ;; *) fail "不認得的 impact 要在訊息裡" ;; esac
+case "$(fact_err --kind-of-work planned --impact data --repo "$A" -- planned 帶 impact)" in *impact*) ;; *) fail "planned 帶 impact 要拒絕並提到 impact" ;; esac
+assert_eq "$(snap)" "$before"; assert_eq "$(find "$OPSX_STATE_DIR/unfiled" | sort)" "$ub" "缺欄位不能寫任何檔"
+# incident 全帶：三個欄位各一行
+out="$(cd "$W" && opsx new --kind-of-work incident --impact "data, prod_or_main" --evidence "tests/x.test.sh 第 2 案紅" --repo "$A" -- 出事)"
+assert_grep '^kind_of_work: incident$' "$A/openspec/changes/$out/inbox.md"
+assert_grep '^impact: data, prod_or_main$' "$A/openspec/changes/$out/inbox.md"
+assert_grep '^evidence: tests/x.test.sh 第 2 案紅$' "$A/openspec/changes/$out/inbox.md"
+assert_eq "$(opsx priority "$out" --repo "$A" | cut -f1)" P0 "寫進去的事實算得出等級"
+# planned 不需要 evidence
+out="$(cd "$W" && opsx new --kind-of-work planned --repo "$A" -- 想做的)"; assert_grep '^kind_of_work: planned$' "$A/openspec/changes/$out/inbox.md"
+# 使用者開的卡不強制：沒帶就是 planned（既有行為）
+out="$(cd "$A" && opsx new --repo "$A" -- 使用者的卡二)"; assert_grep '^kind_of_work: planned$' "$A/openspec/changes/$out/inbox.md"
 echo ok

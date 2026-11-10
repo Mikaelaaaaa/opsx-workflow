@@ -141,7 +141,7 @@ def build_args(action: str, body: dict) -> list[str]:
     for k in (("slug",) if spec["slug"] else ()) + spec["required"]:
         if not isinstance(body.get(k), str) or not body[k].strip():
             raise ValueError("缺 %s" % k)
-    args = [action]
+    args = [action, "--source", "me"] if action == "new" else [action]   # 看板是使用者按的，不因 server 從 agent worktree 啟動就變 agent
     if spec["slug"]:
         if not SLUG_RE.match(body["slug"]):
             raise ValueError("slug 不合格：%r" % body["slug"])
@@ -410,7 +410,7 @@ class Handler(BaseHTTPRequestHandler):
         if action == "paste":
             with tempfile.TemporaryDirectory(prefix="opsx-paste.") as d:
                 attach = write_attachments(pathlib.Path(d), files)
-                r = run(["bash", str(OPSX), "new", *repo_args, *attach, "--", one_liner], ACTION_TIMEOUT, self.opsx_env())
+                r = run(["bash", str(OPSX), "new", "--source", "me", *repo_args, *attach, "--", one_liner], ACTION_TIMEOUT, self.opsx_env())
             self.send_json(200, r); return
         r = run(["bash", str(OPSX), *args], ACTION_TIMEOUT, self.opsx_env())
         # sync 的退出碼 3 是已有一支在跑；reap 的退出碼 2 是指定的 pane 不是孤兒
