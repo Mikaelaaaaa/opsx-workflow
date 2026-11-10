@@ -130,7 +130,7 @@ mk_blast() { # <步驟 3 的內容>：九步齊全，只有步驟 3 變
 mk_blast "skip：沒有符號被別處引用"
 printf 'echo lib2\n' > "$B/lib.sh"; printf 'echo alone2\n' > "$B/alone.sh"
 git -C "$B" commit -qam change
-out="$(cd "$B" && opsx check blast 2>&1)" && fail "skip 但 lib.sh 被 user.sh 引用要非零: $out"
+out="$(cd "$B" && opsx check blast 2>&1)" || fail "只有 Must-fix 候選時退出碼要 0（propose 與 review 讀退出碼）: $out"
 printf '%s' "$out" | grep -q 'Must-fix 候選' || fail "要印 Must-fix 候選: $out"
 printf '%s' "$out" | grep -q 'lib.sh.*user.sh' || fail "候選要點名被引用的檔與引用處: $out"
 printf '%s' "$out" | grep -q 'alone.sh' && fail "沒被別處引用的 alone.sh 不該列: $out"

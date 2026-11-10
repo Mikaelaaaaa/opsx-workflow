@@ -10,7 +10,8 @@ opsx_check() {
   [ -n "$top" ] || die "check: 不在 git repo 裡"
   local dir="$top/openspec/changes/$1"
   [ -d "$dir" ] || die "check: 沒有這張卡：$dir"
-  local out; out="$(check_explore "$dir"; check_blast "$top" "$dir"; check_subs "$dir")"
+  local out cand; out="$(check_explore "$dir"; check_subs "$dir")"; cand="$(check_blast "$top" "$dir")"
+  [ -z "$cand" ] || printf '%s\n' "$cand"
   [ -z "$out" ] && return 0
   printf '%s\n' "$out"
   exit 1
