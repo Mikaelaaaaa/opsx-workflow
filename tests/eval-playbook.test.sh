@@ -22,6 +22,9 @@ assert_file "$OPSX_ROOT/$runner"
 # --- Scenario：沒有 runner 時有可照抄的指令 ---
 grep -E 'claude .*-p' "$FX/step4" | grep -qF -- '--setting-sources project,local' || fail "no claude -p command line with --setting-sources in step 4"
 grep -E 'claude .*-p' "$FX/step4" | grep -qF -- '--session-id' || fail "no claude -p command line with --session-id in step 4"
+for k in '--settings' '--permission-mode' '--allowedTools'; do
+  grep -E 'claude .*-p' "$FX/step4" | grep -qF -- "$k" || fail "claude -p command line in step 4 lacks $k (runner passes it)"
+done
 has '.claude/skills/' "$FX/step4"
 
 # --- Scenario：autopilot 停在 gate ---
