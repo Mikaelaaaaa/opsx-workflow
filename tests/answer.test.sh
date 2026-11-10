@@ -67,14 +67,29 @@ assert_eq "$(tail -1 "$C/decisions.tsv" | cut -f2-5)" $'你\t已允許\t允許\t
 # --- 授權：這張卡 ---
 gates; printf '# grants\n' > "$OPSX_STATE_DIR/grants.toml"
 out="$(opsx answer x --gate g1 --grant card "允許" 2>&1)"; assert_eq "$?" 0 "answer g1 card: $out"
-assert_eq "$(jq -c '."Agentory-AI/x".grants' "$OPSX_STATE_DIR/dispatch.json")" '["push"]'
+PD="${OPSX_STATE_DIR}-protected"   # 這張卡 / 這次的授權只落受保護位置，dispatch.json 不寫（protected-authorization）
+assert_eq "$(jq -c '."Agentory-AI/x".grants' "$PD/authz.json")" '["push"]'
+assert_eq "$(jq -c '."Agentory-AI/x".grants' "$OPSX_STATE_DIR/dispatch.json")" '[]' "card 授權不該寫進 dispatch.json"
 assert_not_grep 'push' "$OPSX_STATE_DIR/grants.toml"
 
 # --- 授權：這次 → 記進 once（閘門用掉就刪），grants 與 grants.toml 都不動 ---
-gates; printf '{"Agentory-AI/x":{"mode":"autopilot","pane":"p4","agent":"x","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"
+gates; printf '{"Agentory-AI/x":{"mode":"autopilot","pane":"p4","agent":"x","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"; rm -rf "$PD"
 out="$(opsx answer x --gate g1 --grant this "允許" 2>&1)"; assert_eq "$?" 0 "answer g1 this: $out"
 assert_eq "$(jq -c '."Agentory-AI/x".grants' "$OPSX_STATE_DIR/dispatch.json")" '[]'; assert_not_grep 'push' "$OPSX_STATE_DIR/grants.toml"
-assert_eq "$(jq -c '."Agentory-AI/x".once' "$OPSX_STATE_DIR/dispatch.json")" '["push"]'
+assert_eq "$(jq -c '."Agentory-AI/x".once' "$PD/authz.json")" '["push"]'
+assert_eq "$(jq -r '."Agentory-AI/x" | has("once")' "$OPSX_STATE_DIR/dispatch.json")" false "once 不該寫進 dispatch.json"
+
+# --- 受保護位置寫不進去（沙盒內）：非零退出、訊息含路徑，gates.md / decisions / dispatch.json 都不動，不送 prompt ---
+gates; rm -rf "$PD"; mkdir -p "$PD"; chmod 500 "$PD"; : > "$OPSX_FAKE_LOG"
+cp "$C/gates.md" "$FX/before.md"; cp "$C/decisions.tsv" "$FX/before.tsv"; cp "$OPSX_STATE_DIR/dispatch.json" "$FX/dispatch.before"
+for g in card this; do
+  out="$(opsx answer x --gate g1 --grant "$g" "允許" 2>&1)"; [ $? -ne 0 ] || fail "$g：受保護位置唯讀要非零退出"
+  echo "$out" | grep -qF "$PD" || fail "$g：訊息要含受保護路徑: $out"
+  cmp -s "$C/gates.md" "$FX/before.md" || fail "$g：gates.md 不該變"; cmp -s "$C/decisions.tsv" "$FX/before.tsv" || fail "$g：decisions 不該變"
+  cmp -s "$OPSX_STATE_DIR/dispatch.json" "$FX/dispatch.before" || fail "$g：dispatch.json 不該變"
+done
+assert_eq "$(cat "$OPSX_FAKE_LOG")" "" "寫不進去不該送 prompt"
+chmod 700 "$PD"
 
 # --- 答案含換行：壓成一行，不能變成新欄位把 gate 重開 ---
 gates
@@ -149,14 +164,17 @@ printf '{"Agentory-AI/bt":{"mode":"autopilot","pane":"p5","agent":"claude","gran
 out="$(opsx answer bt --sub as --gate g1 選 A 2>&1)"; assert_eq "$?" 0 "sub 代管: $out"
 assert_grep '^agent prompt p \[bt/as\] 選 A$' "$OPSX_FAKE_LOG"
 
-# 卡級 / 這次的授權記在主 change 的條目；子 change 不進 dispatch.json
+# 卡級 / 這次的授權記在主 change 的條目（受保護位置）；子 change 沒有自己的條目，dispatch.json 不寫授權
+chmod -R u+w "$PD" 2>/dev/null; rm -rf "$PD"
 subgates; printf '{"Agentory-AI/bt":{"mode":"autopilot","pane":"p5","agent":"claude","grants":[],"herdr_name":"fb"}}' > "$OPSX_STATE_DIR/dispatch.json"
 out="$(opsx answer bt --sub as --gate g2 --grant card 允許 2>&1)"; assert_eq "$?" 0 "sub card: $out"
-assert_eq "$(jq -c '."Agentory-AI/bt".grants' "$OPSX_STATE_DIR/dispatch.json")" '["push"]'
+assert_eq "$(jq -c '."Agentory-AI/bt".grants' "$PD/authz.json")" '["push"]'
+assert_eq "$(jq -c '."Agentory-AI/bt".grants' "$OPSX_STATE_DIR/dispatch.json")" '[]' "card 授權不該寫進 dispatch.json"
 assert_eq "$(tail -1 "$S/decisions.tsv" | cut -f2-5)" $'你\t已允許\t允許\tg2 · card'
 subgates
 out="$(opsx answer bt --sub as --gate g2 --grant this 允許 2>&1)"; assert_eq "$?" 0 "sub this: $out"
-assert_eq "$(jq -c '."Agentory-AI/bt".once' "$OPSX_STATE_DIR/dispatch.json")" '["push"]'
+assert_eq "$(jq -c '."Agentory-AI/bt".once' "$PD/authz.json")" '["push"]'
+assert_eq "$(jq -c 'keys' "$PD/authz.json")" '["Agentory-AI/bt"]' "子 change 沒有自己的授權條目"
 assert_eq "$(jq -c 'keys' "$OPSX_STATE_DIR/dispatch.json")" '["Agentory-AI/bt"]' "子 change 不進 dispatch.json"
 assert_no_file "$B/decisions.tsv"
 echo ok

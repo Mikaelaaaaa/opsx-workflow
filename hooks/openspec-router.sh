@@ -16,7 +16,7 @@ rule=""
 slug="$(card_slug)"
 if [ -n "$slug" ] && [ -n "${OPSX_PY:-}" ]; then
   case "$(card_mode "$(basename "$top")" "$slug" 2>/dev/null || true)" in
-    autopilot|drive) rule=" · autopilot：要問人的事寫 gates.md（等待決定 / 等待授權），不用 AskUserQuestion、不在 pane 問；不是產品取捨、也可逆的題採 Recommended，記「自動採用」" ;;
+    autopilot|drive) rule=" · autopilot：要問人的事寫 gates.md（等待決定 / 等待授權），不用 AskUserQuestion、不在 pane 問；不是產品取捨、也可逆的題採 Recommended，記「自動採用」 · Bash 會被 dontAsk 拒的寫法：for / while（不寫迴圈）、把命令替換的結果賦值給變數再展開、命令替換裡放 pipe、{ } 群組、source 或 .、bash -c 跑多段、印 \$?；一個 Bash 呼叫做一件事，讀多個檔用 Read 或 cat a b c，記決定用 opsx log，路徑寫字面絕對路徑" ;;
     interactive) rule=" · interactive：要授權就直接問，不寫 gate" ;;
   esac
 fi
