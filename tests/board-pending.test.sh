@@ -12,8 +12,8 @@ const START = '/* 送出中 start */', END = '/* 送出中 end */';
 const s = html.indexOf(START), e = html.indexOf(END);
 if (s < 0) throw new Error(`index.html 找不到標記 ${START}`);
 if (e < s) throw new Error(`index.html 找不到 ${START} 之後的標記 ${END}`);
-const {pendKey, pendApply, pendSession, pendDone, pendDrop, pendClear, pendBadge} =
-  new Function(html.slice(s, e) + ';return {pendKey, pendApply, pendSession, pendDone, pendDrop, pendClear, pendBadge};')();
+const {pendKey, pendApply, pendSession, pendDone, pendDrop, pendClear, pendBadge, pendNoteBase} =
+  new Function(html.slice(s, e) + ';return {pendKey, pendApply, pendSession, pendDone, pendDrop, pendClear, pendBadge, pendNoteBase};')();
 
 const G1 = {type: '等待決定', gate_id: 'g1', question: '要不要 X', options: ['好', '不要']};
 const card = (more) => ({repo: 'r', slug: 'x', section: '待處理', waiting: G1, open_gates: [{id: 'g1', opened_at: null}], notes: [], ...more});
@@ -101,6 +101,16 @@ assert.deepStrictEqual(view(N1, lint('done')).notes.map(n => n.text), ['舊的',
 const old = {...N0, notes: [{at: '2026-11-09T10:00:00+08:00', text: '先跑 lint'}]};
 assert.deepStrictEqual(view(old, [{...lint('sending')[0], base: 1}]).notes.map(n => n.sending), [undefined, true], '重複的舊指示不會吃掉新的暫存列');
 assert.deepStrictEqual(view({...old, notes: [...old.notes, {at: 'b', text: '先跑 lint'}]}, [{...lint('done')[0], base: 1}]).notes.length, 2, '新的那條回來後不再追加');
+// 同一句話連送兩次：第一條已成功、collect 還沒帶回時送第二條，base 要算進第一條的暫存列
+const E0 = card({waiting: null, open_gates: [], notes: []});
+const e1 = {id: 20, key: KX, kind: 'note', text: '繼續', at: 'a', base: 0, state: 'done', doneAt: 2};
+const base2 = pendNoteBase(E0, KX, '繼續', [e1]);
+assert.strictEqual(base2, 1, 'base 從疊加後的畫面算，含還沒清掉的第一條');
+assert.strictEqual(pendNoteBase(E0, KX, '繼續', []), 0, '沒有暫存項目時就是 collect 的條數');
+// 強制 collect 帶回第一條、清掉 e1；第二條還在送出中，畫面要有兩列，第二列是送出中
+const E1 = {...E0, notes: [{at: 'x', text: '繼續'}]};
+const e2 = {id: 21, key: KX, kind: 'note', text: '繼續', at: 'b', base: base2, state: 'sending'};
+assert.deepStrictEqual(view(E1, pendClear([e1, e2], 3)).notes.map(n => n.sending), [undefined, true], '第二條在 POST 進行中仍顯示送出中');
 
 // 指派送出中：派工中 → 已派出 → 失敗移除
 const R = card({section: '待指派', waiting: null, open_gates: []});
@@ -201,6 +211,16 @@ const states = R => R.live.pending.map(e => e.state);
   await a5.catch(() => {});
   assert.deepStrictEqual(states(R), ['done'], 'POST 已成功：項目維持 done');
   assert.ok(!R.log.some(l => l[0] === 'toast' && l[1] === true), '不 toast 失敗');
+  assert.strictEqual(R.ui.busy, false);
+
+  // 送出 POST 前畫送出中就出錯：移除項目、toast 失敗、不送 POST
+  R = mk();
+  R.aenv.render = () => { throw new Error('render'); };
+  let posted = false;
+  await runAct(R.aenv, 'x', () => { posted = true; return Promise.resolve({ok: true}); }, P).catch(() => {});
+  assert.deepStrictEqual(states(R), [], '不留永久的送出中');
+  assert.strictEqual(posted, false, '沒有送 POST');
+  assert.ok(R.log.some(l => l[0] === 'toast' && l[1] === true), 'toast 失敗');
   assert.strictEqual(R.ui.busy, false);
 
   // 有排隊的強制刷新時重畫連續出錯：刷新回到閒置並排下一輪，不會卡死

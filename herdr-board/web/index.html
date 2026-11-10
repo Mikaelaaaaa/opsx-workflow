@@ -346,6 +346,8 @@ const pendDone=(list,id,at)=>list.map(e=>e.id===id?{...e,state:'done',doneAt:at}
 const pendDrop=(list,id)=>list.filter(e=>e.id!==id);
 /* 在 POST 成功之後才送出的 GET，拿到的一定是之後才開始的 collect（server 動作後作廢快取），它回來時已成功的項目就交給 collect */
 function pendClear(list,sentAt){const left=list.filter(e=>!(e.state==='done'&&e.doneAt<sentAt));return left.length===list.length?list:left;}
+/* 按下時畫面上已有幾條同一句話：要算疊加後的畫面，前一條同文字的暫存列還沒清掉時也要算進去 */
+const pendNoteBase=(c,k,text,list)=>(pendApply(c,k,list).notes||[]).filter(n=>n.text===text).length;
 const pendBadge=x=>x.dispatching==='sending'?'<span class="badge accent">派工中</span>':x.dispatching==='done'?'<span class="badge ok">已派出</span>':'';
 /* 送出中 end */
 /* pending 是送出中清單；seq 同時給項目 id、POST 成功與 GET 送出的時間點（同一毫秒時 Date.now() 分不出先後）；rs 是刷新排程狀態，刷新排程段定義初值 */
@@ -744,7 +746,7 @@ function submitNote(c,text){
   act(`opsx note ${c.slug} -- "${text}"`,async()=>{
     try{const r=await api.post('note',noteBody(c,text));clear();return r;}
     catch(e){if(e.message.includes('inbox.md 已寫'))clear();throw e;}
-  },{key:key(c),kind:'note',text,at:new Date().toLocaleString('sv'),base:(c.notes||[]).filter(n=>n.text===text).length});
+  },{key:key(c),kind:'note',text,at:new Date().toLocaleString('sv'),base:pendNoteBase(c,key(c),text,live.pending)});
 }
 function answer(c,text,grant){
   if(!c.waiting||!c.waiting.gate_id){toast('這一項沒有 gate 可回',true);return;}
@@ -949,10 +951,9 @@ async function runAct(env,label,fn,p){
   const {live,ui}=env;if(ui.busy)return;ui.busy=true;
   const id=++live.seq;
   try{
-    if(p){live.pending=[...live.pending,{...p,id,state:'sending'}];env.render();}
     let r;
-    try{r=await fn();}
-    catch(e){if(p){live.pending=pendDrop(live.pending,id);env.render();}env.toast(label+' 失敗：'+e.message,true);return;}
+    try{if(p){live.pending=[...live.pending,{...p,id,state:'sending'}];env.render();}r=await fn();}
+    catch(e){if(p)live.pending=pendDrop(live.pending,id);env.toast(label+' 失敗：'+e.message,true);if(p)env.render();return;}
     if(p){live.pending=pendDone(live.pending,id,++live.seq);env.render();}
     env.toast(label+(r&&r.stdout?'\n'+r.stdout.trim():''));
     await env.refresh(true);
