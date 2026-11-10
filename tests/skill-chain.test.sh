@@ -29,7 +29,7 @@ awk '/^\| babysit /{f=1} f' "$CONT" | grep -qF 'opsx next' || fail "continue.md 
 stop_line="$(awk '/^\| babysit /{f=1} f' "$CONT" | grep -F '`[<slug>] stop`')"
 [ -n "$stop_line" ] || fail "continue.md 的 feature session 段要寫收到 [<slug>] stop 怎麼做"
 printf '%s' "$stop_line" | grep -qF 'leave it in the worktree' && fail "半成品留在 worktree 會被帶到下一張的 branch：$stop_line"
-for w in '`wip:` commit' 'clean' 'opsx next' 'opsx dispatch <slug>'; do
+for w in '`wip:` commit' '[no-change]' 'clean' 'opsx next' 'opsx dispatch <slug>' 'git reset --soft HEAD^'; do
   printf '%s' "$stop_line" | grep -qF -- "$w" || fail "收到 [<slug>] stop 那段要提到 $w：$stop_line"
 done
 
