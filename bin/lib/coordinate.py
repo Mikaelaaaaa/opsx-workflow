@@ -206,6 +206,9 @@ class Round:
     def handle_gate(self, c, top):
         """派出去的卡的第一個 open gate，照固定規則答、停、或留給人。"""
         w, key = c["waiting"], card_key(c)
+        if w.get("needs") == "run":
+            self.log("?? %s gate %s 要人在終端機跑指令再貼結果，不代答：%s" % (key, w["gate_id"], (w.get("recommended") or "")[:100]))
+            return
         if w["type"] == "等待授權":
             # 合併永遠由人按：action 不一定剛好寫成 merge（mr-merge、external 打合併 API），題目也要看
             if any(k in ((w["action"] or "") + " " + (w.get("question") or "")).lower() for k in MERGE_WORDS):
@@ -215,6 +218,9 @@ class Round:
             return
         if w["type"] == "終端機等待輸入":
             self.log("?? %s 在 pane %s 等終端機輸入（autopilot 不該問 pane），要人看" % (key, c["dispatch"].get("pane")))
+            return
+        if w["type"] == "type 不明":
+            self.log("?? %s gate %s 的 type 沒寫或不在 approval | decision，不代答，要人看：%s" % (key, w["gate_id"], (w.get("question") or "")[:100]))
             return
         q = w.get("question") or ""
         pick = w.get("recommended") or (w.get("options") or [None])[0]
