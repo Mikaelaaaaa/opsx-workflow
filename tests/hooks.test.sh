@@ -463,6 +463,9 @@ out="$(sg)"; assert_eq "$out" "" "stop: approval gate 只有人能答，問要�
 printf '## 1. x\n\n- [ ] 1.1 a\n- [ ] 1.2 b\n' > "$C/tasks.md"
 printf '## 要不要接 /apply\nstatus: open\n' > "$C/gates.md"
 out="$(sg)"; assert_eq "$(decision "$out")" block "stop: apply 站「要不要接」gate 不放行"; reason "$out" | grep -q 'invoke /apply' || fail "stop: apply 站 reason 要叫 invoke /apply"
+# approval 旗標只管自己那個 gate：前一個 approval 不能把後面沒有 type 的「要不要接」gate 變成會擋的
+printf '## 核准 push\ntype: approval\nstatus: answered\n\n## 要不要接 /apply\nstatus: open\n' > "$C/gates.md"
+out="$(sg)"; assert_eq "$(decision "$out")" block "stop: approval 旗標不帶到下一個 gate"; reason "$out" | grep -q 'invoke /apply' || fail "stop: approval 後接「要不要接」gate，reason 要叫 invoke /apply"
 rm -f "$C/gates.md" "$C/tasks.md"
 
 # 擋的次數：同一站 3 次，第 4 次 hook 寫 gate 放行；第 5 次不寫第二個
@@ -485,6 +488,15 @@ assert_eq "$(grep -c '^## 卡在接 /propose' "$C/gates.md")" 1 "stop: 答完後
 out="$(KEEP=1 sg)"; out="$(KEEP=1 sg)"
 out="$(KEEP=1 sg)"; assert_eq "$out" "" "stop: 第二輪擋滿放行"
 assert_grep '^## 卡在接 /propose #1$' "$C/gates.md"; assert_grep '^## 卡在接 /propose #2$' "$C/gates.md"
+# 流水號取最大值加一：較早的 gate 不在了（Write 覆寫、人手刪），數量小於最大號
+printf '## 卡在接 /propose #2\ntype: decision\nstatus: answered\n' > "$C/gates.md"; rm -rf "$STOP_STATE"
+out="$(KEEP=1 sg)"; out="$(KEEP=1 sg)"; out="$(KEEP=1 sg)"; out="$(KEEP=1 sg)"
+assert_grep '^## 卡在接 /propose #3$' "$C/gates.md"
+assert_eq "$(grep -c '^## 卡在接 /propose #2$' "$C/gates.md")" 1 "stop: 缺較早 gate 時新 gate 不與 #2 同名"
+# 舊格式標題尾端多一個空白也要算進去
+printf '## 卡在接 /propose \ntype: decision\nstatus: answered\n' > "$C/gates.md"; rm -rf "$STOP_STATE"
+out="$(KEEP=1 sg)"; out="$(KEEP=1 sg)"; out="$(KEEP=1 sg)"; out="$(KEEP=1 sg)"
+assert_grep '^## 卡在接 /propose #2$' "$C/gates.md"
 rm -f "$C/gates.md"
 # stop_hook_active 為 true 次數未滿仍擋
 out="$(sg true)"; assert_eq "$(decision "$out")" block "stop: stop_hook_active 為 true 仍擋"
@@ -508,6 +520,12 @@ assert_eq "$(cut -d' ' -f1,2 "$STOP_STATE/Agentory-AI-eval-core")" "apply 2" "st
 printf '## 1. x\n\n- [x] 1.1 a\n- [ ] 1.2 b\n- [ ] 1.3 c\n' > "$C/tasks.md"
 out="$(KEEP=1 sg)"; assert_eq "$(decision "$out")" block "stop: 勾了 task 後仍擋"
 assert_eq "$(cut -d' ' -f1,2 "$STOP_STATE/Agentory-AI-eval-core")" "apply 1" "stop: 有進度次數重算"
+# apply 站 HEAD 算進度：同一組未勾 task，中間多一個 commit，次數歸零
+out="$(KEEP=1 sg)"
+assert_eq "$(cut -d' ' -f1,2 "$STOP_STATE/Agentory-AI-eval-core")" "apply 2" "stop: HEAD 不變次數累計"
+git -C "$R" commit -q --allow-empty -m "chore: between apply stops"
+out="$(KEEP=1 sg)"; assert_eq "$(decision "$out")" block "stop: apply 站 commit 後仍擋"
+assert_eq "$(cut -d' ' -f1,2 "$STOP_STATE/Agentory-AI-eval-core")" "apply 1" "stop: apply 站 commit 算進度，次數歸零"
 # 現有檢查共用次數：tests red 擋 3 次，第 4 次寫「卡在接 /apply」
 printf '## 1. x\n\n- [x] 1.1 a\n' > "$C/tasks.md"
 printf '{"phase":"apply","step":8,"total":8,"label":"x","tests":"red","at":"2026-11-05T15:00:00+08:00"}' > "$C/status.json"
