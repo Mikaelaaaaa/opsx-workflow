@@ -25,4 +25,22 @@ assert_rc 2 opsx file nope --repo "$A"
 assert_rc 2 opsx file me-20261106-1430
 assert_rc 2 opsx file ../x --repo "$A"
 assert_eq "$(find "$A/openspec/changes" | sort)" "$before"
+
+# --- 分類帶著附件 ---
+printf 'png-bytes' > "$FX/shot.png"
+export OPSX_TEST_NOW="2026-11-06 15:00"
+assert_eq "$(opsx new --attach "$FX/shot.png" -- 有附件)" me-20261106-1500
+out="$(opsx file me-20261106-1500 --repo "$A")"; assert_eq "$?" 0 "file 附件: $out"
+assert_eq "$out" me-20261106-1500
+assert_eq "$(cat "$A/openspec/changes/me-20261106-1500/attachments/shot.png")" png-bytes
+assert_no_file "$OPSX_STATE_DIR/unfiled/me-20261106-1500.md"; assert_no_file "$OPSX_STATE_DIR/unfiled/me-20261106-1500"
+
+# --- 分類撞名時附件跟著改名的殼 ---
+printf 'other' > "$FX/b.txt"
+assert_eq "$(opsx new --attach "$FX/b.txt" -- 撞名的附件)" me-20261106-1500
+assert_eq "$(opsx file me-20261106-1500 --repo "$A")" me-20261106-1500-2
+assert_eq "$(cat "$A/openspec/changes/me-20261106-1500-2/attachments/b.txt")" other
+assert_no_file "$A/openspec/changes/me-20261106-1500/attachments/b.txt"
+assert_eq "$(ls "$A/openspec/changes/me-20261106-1500/attachments")" shot.png "原本的殼不變"
+assert_no_file "$OPSX_STATE_DIR/unfiled/me-20261106-1500"
 echo ok
