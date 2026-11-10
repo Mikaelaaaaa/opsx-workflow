@@ -88,4 +88,10 @@ assert_eq "$(cat "$TW/AGENTS.md")" "repo-rule-xyz" "tracked 的 AGENTS.md 不能
 has "$(cat "$TW/AGENTS.override.md")" 'repo-rule-xyz' override
 has "$(cat "$TW/AGENTS.override.md")" "$(rule_interactive)" override
 assert_eq "$(git -C "$TW" status --porcelain)" "" "override 不進 git"
+
+# git dir 沒有 info/（自訂 template 的 repo）：exclude 要建得起來，AGENTS.md 不能留成會進 git 的檔
+G="$(mk_repo NoInfo)"
+rm -rf "$G/.git/info"
+assert_rc 0 place_agents_md "$G" autopilot
+assert_eq "$(git -C "$G" status --porcelain)" "" "沒有 info/ 時 AGENTS.md 也不進 git"
 echo ok

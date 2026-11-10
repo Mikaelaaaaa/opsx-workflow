@@ -7,10 +7,12 @@
 source "$OPSX_ROOT/bin/lib/rules.sh"
 
 render_agents_md() { # <interactive|autopilot>
-  local mode_rule
+  local mode_rule grant_note=""
   case "$1" in
     autopilot) mode_rule="$(rule_autopilot)" ;;
-    interactive) mode_rule="$(rule_interactive)" ;;
+    interactive)
+      mode_rule="$(rule_interactive)"
+      grant_note='本卡是 interactive：下表凡寫「寫 gate」「一律 gate」處，一律改成在 pane 直接問人，不寫 gate。' ;;
     *) echo "render_agents_md: 模式只收 interactive|autopilot，拿到「$1」" >&2; return 1 ;;
   esac
   printf '# opsx 規則\n\n'
@@ -21,6 +23,7 @@ render_agents_md() { # <interactive|autopilot>
   printf '\n## 接續規則\n\n'
   cat "$OPSX_ROOT/references/continue.md"
   printf '\n## 授權\n\n'
+  [ -z "$grant_note" ] || printf '%s\n\n' "$grant_note"
   cat "$OPSX_ROOT/references/grants.md"
   printf '\n## 合併\n\nmerge 永遠是人：不自己 merge，不替自己的 MR 按核准；到「等合併」就停。\n'
 }
@@ -36,6 +39,7 @@ place_agents_md() { # <worktree> <mode>
     printf '%s\n' "$body" > "$wt/AGENTS.md"
   fi
   excl="$(git -C "$wt" rev-parse --path-format=absolute --git-path info/exclude)"
+  mkdir -p "$(dirname "$excl")"
   for name in /AGENTS.md /AGENTS.override.md; do
     grep -qxF "$name" "$excl" 2>/dev/null || printf '%s\n' "$name" >> "$excl"
   done
