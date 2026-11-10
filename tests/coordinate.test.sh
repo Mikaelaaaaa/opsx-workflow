@@ -318,6 +318,12 @@ cards '[{"slug":"a1","section":"待處理","dispatch":'"$D"',"agent_status":"idl
 round || fail "rc: $(cat "$FX/out")"
 assert_grep "^opsx answer a1 --gate g1 --grant this --repo $R -- 允許\$" "$OPSX_FAKE_LOG"
 
+# --- 答 gate：action 不是閘門會查的動作（沙盒 / dontAsk 擋下的授權題）→ 照樣回「允許」，但不帶 --grant（grant-action） ---
+cards '[{"slug":"a1","section":"待處理","dispatch":'"$D"',"agent_status":"idle","waiting":{"type":"等待授權","gate_id":"g2","action":"run-tests","question":"要跑測試","recommended":null,"options":["拒絕"]}}]'
+round || fail "rc: $(cat "$FX/out")"
+assert_grep "^opsx answer a1 --gate g2 --repo $R -- 允許\$" "$OPSX_FAKE_LOG"
+assert_eq "$(count '^opsx answer .*--grant')" 0 "表外 action 不帶 --grant：$(cat "$OPSX_FAKE_LOG")"
+
 # --- 答 gate：合併的授權題不代答（合併永遠由人按，D3） ---
 cards '[{"slug":"a1","section":"待處理","dispatch":'"$D"',"agent_status":"idle","waiting":{"type":"等待授權","gate_id":"g8","action":"merge","question":"要合併","recommended":null,"options":["這次"]}}]'
 round || fail "rc: $(cat "$FX/out")"

@@ -17,6 +17,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import chain  # noqa: E402
+import grantactions  # noqa: E402
 import jsonfile  # noqa: E402
 import priority  # noqa: E402
 
@@ -291,7 +292,7 @@ class Round:
                 self.log("?? %s gate %s 要合併授權，不代答：合併由人在板上按" % (key, w["gate_id"]))
                 self.notify_gate(c, w, "要合併授權")
                 return
-            self.answer(c, top, w["gate_id"], "允許", grant=True)
+            self.answer(c, top, w["gate_id"], "允許", grant=w["action"] in grantactions.ACTIONS)
             return
         if w["type"] == "終端機等待輸入":
             pane = c["dispatch"].get("pane")
