@@ -217,6 +217,110 @@ out="$(gg Bash '{"command":""}')"; assert_eq "$out" "" "grant: 空指令不出�
 mkdir -p "$FX/noperl"; printf '#!/usr/bin/env bash\nexit 127\n' > "$FX/noperl/perl"; chmod +x "$FX/noperl/perl"
 out="$(PATH="$FX/noperl:$PATH" gg Bash "$(cmdj 'ls')")"; assert_eq "$(decision "$out")" deny "grant: perl 失敗要 deny，不是放行"
 reason "$out" | grep -q perl || fail "grant: perl 失敗的 deny 要說是 perl: $(reason "$out")"
+mkdir -p "$FX/noperl-l3"
+printf '#!/usr/bin/env bash\ncase "$1" in *cmd-containers.pl) exit 1 ;; esac\nexec %s "$@"\n' "$(command -v perl)" > "$FX/noperl-l3/perl"; chmod +x "$FX/noperl-l3/perl"
+out="$(PATH="$FX/noperl-l3:$PATH" gg Bash "$(cmdj 'ls')")"; assert_eq "$(decision "$out")" deny "grant: 只有 cmd-containers.pl 失敗也要 deny"
+
+# 白名單容器的「容器本身」不能變成繞過口（review 第 2 輪）：已授權 push 串在前面時閘門會明確 allow，所以每個都要 deny
+deny3() { local cmd out; cmd="$(cat)"; out="$(gg Bash "$(cmdj "$cmd")")"; assert_eq "$(decision "$out")" deny "$1"; }
+allow3() { local cmd out; cmd="$(cat)"; out="$(gg Bash "$(cmdj "$cmd")")"; assert_eq "$out" "" "$1"; }
+deny3 "grant 容器: 引號內的 git commit -m 不是容器" <<'X'
+git push gitlab feat/eval-core/mikaela && echo "git commit -m '" && git push --force gitlab main && echo "'"
+X
+deny3 "grant 容器: eval 後的 git commit -m 不是容器" <<'X'
+git push gitlab feat/eval-core/mikaela && eval git commit -m '; git push --force gitlab main'
+X
+deny3 "grant 容器: 引號內 git commit -m 字串裡的命令替換仍會執行" <<'X'
+git push gitlab feat/eval-core/mikaela && echo "git commit -m '$(git push --force gitlab main)'"
+X
+deny3 "grant 容器: 註解內的 git commit -m 不是容器" <<'X'
+git push gitlab feat/eval-core/mikaela
+# git commit -m '
+git push --force gitlab main
+# '
+X
+deny3 "grant 容器: 引號內的 opsx answer 不是容器" <<'X'
+git push gitlab feat/eval-core/mikaela && echo "opsx answer a b -- "; git push --force gitlab main; echo ""
+X
+deny3 "grant 容器: 同上，換成 merge（merge_gate 也不能被繞過）" <<'X'
+git push gitlab feat/eval-core/mikaela && echo "git commit -m '" && glab mr merge 212 && echo "'"
+X
+deny3 "grant 容器: commit 標準寫法後面緊接命令替換" <<'X'
+git commit -m "$(cat <<'EOF'
+msg
+EOF
+)$(git push --force gitlab main)$(cat <<'EOF'
+EOF
+)"
+X
+deny3 "grant 容器: commit heredoc 在第一個結尾行就結束，後面的行會執行" <<'X'
+git commit -m "$(cat <<'EOF'
+msg
+EOF
+xx; git push -f gitlab main
+EOF
+)"
+X
+deny3 "grant 容器: 跨行單引號內的假 heredoc opener" <<'X'
+echo '
+cat > f <<EOF
+'; git push -f gitlab main
+EOF
+X
+deny3 "grant 容器: opener 行尾反斜線續行接 pipe 進 sh" <<'X'
+cat <<EOF \
+| sh
+git push --force gitlab main
+EOF
+X
+deny3 "grant 容器: delimiter 是混合寫法 <<\"E\"OF" <<'X'
+cat > f <<"E"OF
+x
+EOF
+git push --force gitlab main
+E
+X
+deny3 "grant 容器: delimiter 是 EOF-1" <<'X'
+cat > f <<EOF-1
+x
+EOF-1
+git push --force gitlab main
+EOF
+X
+deny3 "grant 容器: 前面定義了 cat 函式" <<'X'
+git push gitlab feat/eval-core/mikaela
+cat() { bash; }
+cat <<'EOF'
+git push --force gitlab main
+EOF
+X
+deny3 "grant 容器: 扣掉 commit 訊息後，串在後面的第三級仍擋" <<'X'
+git commit -m 'a' && git push --force gitlab main
+X
+deny3 "grant 容器: 扣掉 answer 答案後，串在後面的第三級仍擋" <<'X'
+opsx answer s --gate g1 'a' ; git push --force gitlab main
+X
+deny3 "grant 容器: 扣掉 heredoc 本體後，後面的第三級仍擋" <<'X'
+cat > f <<'EOF'
+x
+EOF
+git push --force gitlab main
+X
+allow3 "grant 容器: opsx answer 真實用法（--gate、單引號文字）不觸發" <<'X'
+opsx answer s --gate g1 'git push --force gitlab main 之後再說'
+X
+allow3 "grant 容器: opsx answer 帶 --grant 與雙引號文字不觸發" <<'X'
+opsx answer s --gate g1 --grant this "glab mr merge 之後再說"
+X
+allow3 "grant 容器: cd 之後的 cat heredoc 不觸發" <<'X'
+cd x && cat > f <<'EOF'
+git push --force gitlab main
+EOF
+X
+big="$(head -c 40000 /dev/zero | tr '\0' a)"
+out="$(gg Bash "$(cmdj "git commit -m \"$big git push --force gitlab main\"")")"; assert_eq "$(decision "$out")" deny "grant 容器: 超過長度上限就整段原樣比對（不扣容器）"
+many="$(printf 'cat > f <<EOF\n%.0s' $(seq 1 1500))"
+out="$(gg Bash "$(cmdj "$many")")"; assert_eq "$(decision "$out")" allow "grant 容器: 一堆沒有結尾的 heredoc opener 不會拖到逾時"
 
 # ---------- grant gate：合併的一次性核准（herdr-board D5 / 3.3）----------
 FAKES="$OPSX_ROOT/tests/fakes"; mkdir -p "$FX/fakebin"
@@ -422,6 +526,24 @@ EOF')"; assert_eq "$(decision "$out")" deny "guard: heredoc 餵給 git commit -F
 out="$(PATH="$FX/noperl:$PATH" sd 'git commit -m x')"; assert_eq "$(decision "$out")" deny "guard: perl 失敗要 deny"
 out="$(PATH="$FX/noperl:$PATH" mg 'ls')"; assert_eq "$(decision "$out")" deny "mr: perl 失敗要 deny"
 out="$(PATH="$FX/noperl:$PATH" cg 'git commit -m x')"; assert_eq "$(decision "$out")" deny "commit: perl 失敗要 deny"
+# 署名寫法的變體（spec 署名寫法的變體）
+out="$(sd "git commit -m \$'x\nCo-Authored-By: Claude <a@b.c>'")"; assert_eq "$(decision "$out")" deny "guard: \$'…' 內的字面 \\n 後接署名"
+out="$(sd 'printf "x\n\nCo-Authored-By: Claude <a@b.c>\n" | git commit -F -')"; assert_eq "$(decision "$out")" deny "guard: printf 的 \\n 後接署名"
+out="$(sd 'echo -e "x\nCo-Authored-By: Claude" | git commit -F -')"; assert_eq "$(decision "$out")" deny "guard: echo -e 的 \\n 後接署名"
+out="$(sd 'git commit -m "x
+   Co-Authored-By: Claude <a@b.c>"')"; assert_eq "$(decision "$out")" deny "guard: 署名行前面有縮排空白"
+out="$(sd 'GIT_AUTHOR_EMAIL=noreply@anthropic.com git commit -m x')"; assert_eq "$(decision "$out")" deny "guard: GIT_AUTHOR_EMAIL"
+# 骨架的寫法（bash -e -c、bash -lc、$'…'、heredoc 餵 bash）由第二級、MR 閘門、commit 閘門用，各自要看得到
+out="$(mg 'bash -e -c "gh pr create --fill"')"; assert_eq "$(decision "$out")" deny "mr: bash -e -c 內的 create 仍擋"
+out="$(mg 'bash -lc "gh pr create --fill"')"; assert_eq "$(decision "$out")" deny "mr: bash -lc 內的 create 仍擋"
+out="$(mg "bash -c \$'gh pr create --fill'")"; assert_eq "$(decision "$out")" deny "mr: bash -c \$'…' 內的 create 仍擋"
+out="$(mg 'bash <<EOF
+gh pr create --fill
+EOF')"; assert_eq "$(decision "$out")" deny "mr: heredoc 餵給 bash 的 create 仍擋"
+out="$(cg 'bash -e -c "git commit -m x"')"; assert_eq "$(decision "$out")" deny "commit: bash -e -c 內的 commit 仍擋"
+out="$(cg 'bash <<EOF
+git commit -m x
+EOF')"; assert_eq "$(decision "$out")" deny "commit: heredoc 餵給 bash 的 commit 仍擋"
 # 署名只抓署名形式：內文提到 claude / anthropic 放行
 out="$(sd 'git commit -m "fix: claude 路徑處理"')"; assert_eq "$(decision "$out")" allow "guard: 內文提到 claude"
 out="$(sd 'git commit -m "feat: x" -m "改用 Anthropic SDK 的 retry"')"; assert_eq "$(decision "$out")" allow "guard: 第二個 -m 提到 anthropic"
