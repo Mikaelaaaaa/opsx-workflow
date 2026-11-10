@@ -194,7 +194,20 @@ export OPSX_TEST_ON_PROMPT="$FX/archive_on_prompt.sh"
 out="$(opsx drive retry-backoff 2>&1)"; assert_eq "$?" 0 "drive 卡被歸檔: $out"
 assert_eq "$(grep -c '^agent prompt' "$OPSX_FAKE_LOG")" 1 "歸檔後不該再送 prompt: $(cat "$OPSX_FAKE_LOG")"
 echo "$out" | grep -q "已歸檔" || fail "要說已歸檔: $out"
-[ ! -e "$C/gates.md" ] || fail "不該在不存在的卡目錄寫 gate"
+[ ! -e "$R/openspec/changes/archive/2026-11-10-retry-backoff/gates.md" ] || fail "歸檔之後不該有人再寫 gate"
+
+# --- 第一輪等 agent settle 的時候卡被搬走（手動掛 drive 時 agent 正在跑 /archive）→ 一個 prompt 都不送 ---
+rm -rf "$R/openspec/changes/archive/2026-11-10-retry-backoff"; mkdir -p "$C"
+printf 'schema: opsx\nkind: bug-fix\n' > "$C/.openspec.yaml"; reset_apply
+printf '{"Agentory-CS/retry-backoff":{"mode":"drive","pane":"p42","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"
+cat > "$FX/archive_on_wait.sh" <<EOF
+mv "$C" "$R/openspec/changes/archive/2026-11-10-retry-backoff"
+EOF
+export OPSX_TEST_ON_WAIT="$FX/archive_on_wait.sh"
+out="$(opsx drive retry-backoff 2>&1)"; assert_eq "$?" 0 "drive 第一輪 settle 時卡被歸檔: $out"
+assert_eq "$(grep -c '^agent prompt' "$OPSX_FAKE_LOG")" 0 "settle 時被歸檔不該送任何 prompt: $(cat "$OPSX_FAKE_LOG")"
+echo "$out" | grep -q "已歸檔" || fail "要說已歸檔: $out"
+unset OPSX_TEST_ON_WAIT
 
 # --- 卡目錄被直接刪掉（archive/ 底下也沒有）→ 同樣結束，訊息不同 ---
 rm -rf "$R/openspec/changes/archive/2026-11-10-retry-backoff"; mkdir -p "$C"
