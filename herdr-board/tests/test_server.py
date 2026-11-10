@@ -174,6 +174,34 @@ class ServerTest(unittest.TestCase):
             self.assertEqual(status, 400, body)
         self.assertEqual(self.log.read_text(), "")
 
+    def test_note_forwards_to_opsx(self):
+        r = str(self.repo)
+        status, _, body = self.req("/api/note", {"slug": "x", "text": "先跑 lint", "repo": r}, token=self.token)
+        self.assertEqual(status, 200, body)
+        self.assertTrue(json.loads(body)["ok"], body)
+        status, _, body = self.req("/api/note", {"slug": "x", "text": "-v 也要跑"}, token=self.token)
+        self.assertEqual(status, 200, body)
+        self.assertEqual(self.log.read_text().strip().split("\n"), ["note x --repo %s -- 先跑 lint" % r, "note x -- -v 也要跑"])
+
+    def test_note_rejects_missing_empty_or_multiline_text(self):
+        for body_ in ({"slug": "x"}, {"slug": "x", "text": "   "}, {"slug": "x", "text": "第一行\nsource: evil"}, {"text": "沒有 slug"}):
+            status, _, body = self.req("/api/note", body_, token=self.token)
+            self.assertEqual(status, 400, (body_, body))
+        self.assertEqual(self.log.read_text(), "")
+
+    def test_dispatch_forwards_note(self):
+        self.req("/api/dispatch", {"slug": "x", "mode": "autopilot", "note": "先跑 lint"}, token=self.token)
+        self.req("/api/dispatch", {"slug": "x", "mode": "autopilot", "note": ""}, token=self.token)
+        self.req("/api/dispatch", {"slug": "x", "mode": "autopilot"}, token=self.token)
+        self.assertEqual(self.log.read_text().strip().split("\n"),
+                         ["dispatch x --mode autopilot --note 先跑 lint", "dispatch x --mode autopilot", "dispatch x --mode autopilot"])
+
+    def test_dispatch_rejects_multiline_or_huge_note(self):
+        for note in ("第一行\nsource: evil", "a\rb", "a\0b", "x" * 2001):
+            status, _, body = self.req("/api/dispatch", {"slug": "x", "note": note}, token=self.token)
+            self.assertEqual(status, 400, body)
+        self.assertEqual(self.log.read_text(), "")
+
     def test_file_needs_slug_and_repo(self):
         r = str(self.repo)
         status, _, body = self.req("/api/file", {"slug": "me-1", "repo": r}, token=self.token)

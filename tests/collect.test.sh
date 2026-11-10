@@ -261,6 +261,25 @@ GE="$(printf '%s' "$J" | python3 -I -c 'import json,sys;print(json.dumps([e for 
 assert_eq "$(printf '%s' "$GE" | python3 -I -c 'import json,sys;print(len(json.load(sys.stdin)))')" 3 "三個壞值各一筆 error：$E"
 for want in "g1.*$FUT" "g2.*2026-11-06 14:05" "g3.*昨天"; do printf '%s' "$GE" | grep -Eq "$want" || fail "errors 要有 gate id 與原值（$want）：$E"; done
 case "$E" in *g4*|*g5*) fail "寬限內與 answered 的 gate 不該進 errors：$E" ;; esac
+# ---------- 派工指示（specs/board-collect「卡帶派工指示」） ----------
+RN="$FX/code-notes"; mkdir -p "$RN/rn/.git"
+mknote() { # <slug> <inbox 內容>
+  local d="$RN/rn/openspec/changes/$1"; mkdir -p "$d"
+  printf 'schema: opsx\ncreated: 2026-11-05\nkind: dev\n' > "$d/.openspec.yaml"; printf '%s' "$2" > "$d/inbox.md"
+}
+mknote n1 $'## 一句話\n\n兩條\n\n## 派工指示\n\n- 2026-11-10T14:00:00+08:00 先跑 lint\n- 2026-11-10T15:00:00+08:00 不要動 README\n\n## 備註\n\n- 2026-11-10T16:00:00+08:00 這不是指示\n'
+mknote n2 $'## 一句話\n\n沒有指示\n'
+mknote n3 $'## 一句話\n\n壞行\n\n## 派工指示\n\n- 2026-11-10T14:00:00+08:00 先跑 lint\n隨手寫的一行\n'
+mknote n4 $'## 一句話\n\n空段\n\n## 派工指示\n\n'
+J="$(opsx collect --root "$RN")"; assert_eq "$?" 0 "notes collect rc: $J"
+assert_eq "$(q "$(card "$J" rn n1)" notes)" '[{"at": "2026-11-10T14:00:00+08:00", "text": "先跑 lint"}, {"at": "2026-11-10T15:00:00+08:00", "text": "不要動 README"}]'
+assert_eq "$(q "$(card "$J" rn n2)" notes)" '[]'
+assert_eq "$(q "$(card "$J" rn n4)" notes)" '[]'
+assert_eq "$(q "$(card "$J" rn n3)" notes)" '[{"at": "2026-11-10T14:00:00+08:00", "text": "先跑 lint"}]'
+NE="$(printf '%s' "$J" | python3 -I -c 'import json,sys;print(json.dumps([e for e in json.load(sys.stdin)["errors"] if e["source"].endswith("/n3/inbox.md")],ensure_ascii=False))')"
+assert_eq "$(printf '%s' "$NE" | python3 -I -c 'import json,sys;print(len(json.load(sys.stdin)))')" 1 "壞行一筆 error：$(q "$J" errors)"
+printf '%s' "$NE" | grep -q 'n3.*隨手寫的一行' || fail "error 要有 slug 與那一行：$NE"
+case "$(q "$J" errors)" in *n1*|*n2*|*n4*) fail "好卡不該進 errors：$(q "$J" errors)" ;; esac
 
 # ---------- generated_at 在讀任何來源之前取：卡片迴圈裡的 glab 慢 4 秒也不會往後（banner-same-second） ----------
 # 慢的是迴圈裡的 mr_json：它比 herdr 早讀，取時點放在迴圈之後的實作會被抓到

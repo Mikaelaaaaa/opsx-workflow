@@ -8,7 +8,7 @@
 #       milestones{repo: {current, goal, remaining}}（只列設了 current_milestone 的 repo）}
 # 每張卡：{repo, slug, title, kind, stage, section, since, waiting, open_gates[{id, opened_at}], dispatch, status, agent_status, mr,
 #        source, upstream, stale, priority{level, reason, overridden}（已歸檔或算不出來時 null）,
-#        session（收進 session 的主 change 才有："<repo>/<feature>"）}
+#        notes[{at, text}]（inbox.md ## 派工指示，舊的在前）, session（收進 session 的主 change 才有："<repo>/<feature>"）}
 # sessions[]：{repo, feature, section, main_done, main_total, sub_done, sub_total, current{slug, stage}|null,
 #   mains[{slug, pr_status, stage, section, dispatch, agent_status, open_gates, waiting, subs[{slug, status, stage, worker, open_gates, waiting}]}]}
 #   section ∈ 待處理 | 進行中 | 待指派 | 收件匣 | 已完成（收件匣＝沒派出、stage 還是 explore）；waiting.type ∈ 等待授權 | 等待決定 | type 不明 | 可以合併 | 終端機等待輸入；waiting.needs ∈ run | null
@@ -233,6 +233,20 @@ def frontmatter(inbox, key):
     m = re.search(r"^%s:\s*(.*)$" % key, inbox, re.M)
     return m.group(1).strip() or None if m else None
 
+# 段落範圍跟 note.sh 的 note_append 寫入時認的一樣，兩邊認定不同就會寫得進去、看板看不到
+def notes_of(inbox, slug, path):
+    lines = inbox.splitlines()
+    head = next((i for i, l in enumerate(lines) if re.fullmatch(r"## 派工指示\s*", l)), None)
+    if head is None: return []
+    notes = []
+    for l in lines[head + 1:]:
+        if l.startswith("## "): break
+        if not l.strip(): continue
+        m = re.fullmatch(r"- (\S+) (.+)", l)
+        if m: notes.append({"at": m.group(1), "text": m.group(2).strip()})
+        else: errors.append({"source": path, "message": "%s 的派工指示格式不對：%s" % (slug, l)})
+    return notes
+
 def kind_of(d):
     m = re.search(r"^kind:\s*(\S+)", read(os.path.join(d, ".openspec.yaml")), re.M)
     return m.group(1) if m else "dev"
@@ -308,6 +322,7 @@ for line in read(os.path.join(work, "cards.tsv")).split("\n"):
         "grants_repo": grants.get(c["repo"]), "path": d,
         "source": frontmatter(inbox, "source"), "upstream": frontmatter(inbox, "upstream"), "stale": frontmatter(inbox, "stale") == "true",
         "priority": priority_of(c["repo"], c["slug"], c["archived"], os.path.join(d, "inbox.md")),
+        "notes": notes_of(inbox, c["slug"], os.path.join(d, "inbox.md")),
     })
 
 order = {"待處理": 0, "進行中": 1, "待指派": 2, "收件匣": 3, "已完成": 4}
