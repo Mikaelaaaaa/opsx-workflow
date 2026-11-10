@@ -57,7 +57,7 @@ stage_of() { # <top> <slug>
     printf 'review · %s · %s · skills/review/SKILL.md · skills/review/references/ponytail-review.md\n' "$slug" "$kind"; return
   fi
   if [ -f "$d/explore.md" ]; then
-    if st_pending_nonempty "$d" && [ ! -f "$d/grill.md" ]; then printf 'grill · %s · %s · skills/grill/SKILL.md\n' "$slug" "$kind"; return; fi
+    if st_pending_nonempty "$d" && [ ! -f "$d/grill.md" ] && [ "$kind" != chore ] && [ "$kind" != bug-fix ]; then printf 'grill · %s · %s · skills/grill/SKILL.md\n' "$slug" "$kind"; return; fi
     printf 'propose · %s · %s · skills/propose/SKILL.md\n' "$slug" "$kind"; return
   fi
   printf 'explore · %s · %s · skills/explore/SKILL.md\n' "$slug" "$kind"
