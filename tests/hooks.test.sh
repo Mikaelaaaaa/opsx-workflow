@@ -499,9 +499,11 @@ printf '{"Cards/eval-core":{"mode":"autopilot","grants":[]}}' > "$OPSX_STATE_DIR
 assert_eq "$(kg "$KW")" deny "card: authz 閘門在 PR 名不同的 worktree 裡仍生效"
 git -C "$KW" checkout -q feat/other-card/mikaela
 printf '{"Cards/eval-core":{"mode":"autopilot","grants":[]},"Cards/other-card":{"mode":"interactive","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"
-r="$(rt "$KW")"; case "$r" in "opsx："*"· eval-core"*) ;; *) fail "card: worktree 與 branch 指向不同卡 → 聽 worktree: $r" ;; esac
-case "$r" in *other-card*|*"interactive："*) fail "card: 不該照 branch 的 other-card: $r" ;; esac
-assert_eq "$(kg "$KW")" deny "card: 授權閘門照 worktree 那張卡的 autopilot"
+# feature session 的形狀：worktree 名是一張卡，branch 已切到另一張卡
+r="$(rt "$KW")"; case "$r" in "opsx："*"· other-card"*) ;; *) fail "card: worktree 與 branch 指向不同卡 → 聽 branch: $r" ;; esac
+assert_eq "$(kg "$KW")" deny "card: 授權閘門取兩張卡裡受管的那個（worktree autopilot、branch interactive）"
+printf '{"Cards/eval-core":{"mode":"interactive","grants":[]},"Cards/other-card":{"mode":"autopilot","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"
+assert_eq "$(kg "$KW")" deny "card: 授權閘門取兩張卡裡受管的那個（worktree interactive、branch autopilot）"
 git -C "$KW" checkout -q feat/core-pr/mikaela
 # 不在 dispatch worktree：主 checkout、名稱對不到卡的 worktree、巢狀在卡 worktree 底下的 subagent worktree
 printf '{"Cards/eval-core":{"mode":"autopilot","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"
