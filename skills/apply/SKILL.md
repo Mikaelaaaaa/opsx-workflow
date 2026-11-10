@@ -109,6 +109,10 @@ A change with `openspec/changes/<main>/subs/` is a main change (`../../reference
 7. `opsx stack` 退出 3 means conflict: it already aborted and logged a line in decisions.tsv. session 自己重做 that sub-change on the PR branch, through the same sub-shell (`--sub <子>`, worker `session`), test first, one commit. 不在衝突標記上手解: the subagent's tests were green on the old base, nobody would re-verify a hand merge. Then hand the sub-changes that depended on it to new subagents from the new HEAD.
 8. When every item in the main shell's tasks.md is checked, run the whole test suite once on the PR branch, then continue to `/review <主>` and `/pr <主>` once for the main change (`../../references/continue.md`). Sub-changes get no review or pr of their own.
 
+## When review sent tasks back
+
+A `## R<N>. review 退回` group at the end of tasks.md holds in-scope findings from review round N. They are ordinary tasks: same skeleton, 測試先紅再修 (the regression test must be red on the current code before the fix), checked off only when green, one commit for the group (`fix(<scope>): address review findings`, one body line per finding). Do not edit report.md; review moves the `待修（範圍內）` lines when it re-reads your fix. When the group is done, continue to `/review <slug>` as usual.
+
 ## When this pane coordinates other cards
 
 After `opsx chain` fans out (see `archive` step 6b), this pane hands each child card to a subagent and stays the only place that talks to the user. What goes to a subagent (independent cards whose tasks need nobody), what stays here (anything that needs the user, and cards that depend on each other), how prompts for a child arrive (`[<slug>] …`) and how a subagent's `NEEDS-USER` report becomes a gate in that card's `gates.md`: `../../references/fan-out.md`.
