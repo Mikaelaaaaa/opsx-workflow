@@ -372,14 +372,16 @@ got="$(python3 -I "$OPSX_ROOT/bin/lib/chain.py" children "$R4" sess m1 "$J")"
 assert_eq "$got" "$(printf 'child\tm2\tfeat/m2/u\tdev')" "主 change 合併後找得到依賴它的主 change（不是 changes[0] 的 t1）；m3 在有 depends-on 的 feature g，由 coordinate 開 session，chain 不接"
 
 # --- feature session：m1 合併後同一個 session 接 m2（同 feature），m3 在別的 feature 留給 coordinate ---
-printf '{"sess/m1":{"mode":"autopilot","pane":"w5:pQ","tab":"w5:tJ","workspace":"opsx","workspace_id":"w5","agent":"claude","kind":"dev","grants":[],"worktree":"%s","branch":"feat/m1/u","herdr_name":"f","via":"f","feature":"f"}}' "$R4" > "$J"
+# m1 的 pane 是舊值（session 重派過）：新成員的 pane 要取自 session 條目 sess/@f
+printf '{"sess/@f":{"mode":"autopilot","pane":"w5:pS","tab":"w5:tK","workspace":"opsx","workspace_id":"w5","agent":"claude","model":"m","worktree":"%s","started_at":"t","drive_pid":null},"sess/m1":{"mode":"autopilot","pane":"w5:pQ","tab":"w5:tJ","workspace":"opsx","workspace_id":"w5","agent":"claude","kind":"dev","grants":[],"worktree":"%s","branch":"feat/m1/u","herdr_name":"f","via":"@f","feature":"f"}}' "$R4" "$R4" > "$J"
 cd "$R4"; : > "$OPSX_FAKE_LOG"
 printf 'keep me\n' > "$FX/victim"; ln -s "$FX/victim" "$OPSX_STATE_DIR/herdr-queue/sess-m2.tsv"   # symlink-safe-writes
 out="$(opsx chain m1 2>&1)"; assert_eq "$?" 0 "feature 續接: $out"
 assert_eq "$(cat "$FX/victim")" "keep me" "session 佇列檔名上的 symlink 不能被寫到目標"
 assert_eq "$(cat "$OPSX_FAKE_LOG")" "" "feature 續接不開 pane、chain 不直接叫 herdr"
 assert_eq "$(cat "$OPSX_STATE_DIR/herdr-queue/sess-m2.tsv")" "$(printf 'prompt\tf\t[m2] /apply m2')" "佇列：送進同一個 session，前綴 [m2]"
-assert_eq "$(jq -r '."sess/m2" | [.herdr_name, .via, .feature, .pane, .branch, .worktree] | join(" ")' "$J")" "f f f w5:pQ feat/m2/u $R4" "m2 掛在同一個 session"
+assert_eq "$(jq -r '."sess/m2" | [.herdr_name, .via, .feature, .pane, .branch, .worktree] | join(" ")' "$J")" "f @f f w5:pS feat/m2/u $R4" "m2 掛在同一個 session，pane 取自 session 條目"
+assert_eq "$(jq -r '."sess/m2".tab' "$J")" "w5:tK" "tab 也取自 session 條目"
 assert_eq "$(jq -r '."sess/m1".handed_to // "none"' "$J")" none "session 沒交出去，父主 change 不記交接"
 assert_eq "$(jq -r '."sess/m3" // "none"' "$J")" none "別的 feature 不由 chain 開"
 assert_eq "$(git -C "$R4" branch --show-current)" "feat/m1/mikaela" "chain 不替 session 切 branch"

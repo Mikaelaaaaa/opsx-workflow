@@ -198,14 +198,19 @@ def feature_plan(top: str, feature: str) -> list:
     return out
 
 
-def session_siblings(top: str, repo: str, slug: str, dispatch_path: str) -> list:
-    """opsx next：<slug> 的條目帶 feature 時，同 feature、沒停掉的其他卡，依 workplan 的 PR 順序；不是 session 代管回空。"""
-    dispatch = jsonfile.load(dispatch_path)
+def session_siblings(top: str, repo: str, slug: str, dispatch: dict) -> list:
+    """<slug> 的條目帶 feature 時，同 feature 還活著的其他成員（session_members 去掉自己）；不是 session 代管回空。coordinate 用。"""
     feature = (dispatch.get("%s/%s" % (repo, slug)) or {}).get("feature")
     if not feature:
         return []
+    return [c for c in session_members(top, repo, feature, dispatch) if c != slug]
+
+
+def session_members(top: str, repo: str, feature: str, dispatch: dict) -> list:
+    """同 repo、feature 是 <feature>、沒停掉、卡還沒歸檔的卡，依 workplan 的 PR 順序。opsx next 與 session_siblings 共用。
+    session 共用時歸檔的卡條目不一定標 stopped，所以用卡的資料夾還在不在判斷。"""
     cards = [k.split("/", 1)[1] for k, v in dispatch.items()
-             if k.startswith(repo + "/") and k != "%s/%s" % (repo, slug) and v.get("feature") == feature and v.get("mode") != "stopped"
+             if k.startswith(repo + "/") and not k.startswith(repo + "/@") and v.get("feature") == feature and v.get("mode") != "stopped"
              and os.path.isdir(os.path.join(top, "openspec", "changes", k.split("/", 1)[1]))]   # 已歸檔的卡不算
     wp_path = os.path.join(top, "openspec", "workplan.yaml")
     prs = [pr for f in load_workplan(wp_path).get("features") or [] for pr in f.get("prs") or []] if os.path.exists(wp_path) else []
@@ -215,6 +220,16 @@ def session_siblings(top: str, repo: str, slug: str, dispatch_path: str) -> list
         pr = find_pr(prs, c)
         rank[c] = order.index(pr["name"]) if pr else len(order)   # workplan 裡沒有的排最後
     return sorted(cards, key=rank.__getitem__)
+
+
+def session_alive(entry: dict) -> bool:
+    """session 條目還代表一個活的 pane：沒停、pane 沒被 opsx stop 關掉、沒被 reap 收掉（reap 只記 reaped_at，不改 mode）。"""
+    return entry.get("mode") != "stopped" and not entry.get("pane_closed_at") and not entry.get("reaped_at")
+
+
+def human_stopped(entry, feature: str) -> bool:
+    """這個 session 的成員條目被人停了。單卡派過再停掉的舊條目（沒有 via @<feature>）不算：它不是這個 session 的成員。"""
+    return bool(entry) and entry.get("mode") == "stopped" and entry.get("via") == "@" + feature
 
 
 def sub_deps(top: str, main: str, sub: str) -> list:
@@ -251,13 +266,19 @@ def register_continue(d: dict) -> None:
 
 
 def register_session(d: dict) -> None:
-    """jsonfile.update 的 mutate：feature session 接下一個主 change。pane、herdr 名、feature 沿用父主 change 的條目，父主 change 不記交接。"""
+    """jsonfile.update 的 mutate：feature session 接下一個主 change。pane 層的欄位取自 session 條目 <repo>/@<feature>，
+    herdr 名、feature、mode 沿用父主 change 的條目，父主 change 不記交接。"""
     e = os.environ
     me = d[e["OPSX_KEY"]]
     repo = e["OPSX_KEY"].split("/", 1)[0]
+    session_key = "%s/@%s" % (repo, me["feature"])
+    if session_key not in d:
+        sys.exit("chain: %s 帶 feature %s，但 dispatch.json 沒有 session 條目 %s" % (e["OPSX_KEY"], me["feature"], session_key))
+    session = d[session_key]
     slug, branch, kind, model = e["OPSX_PLAN"].split("\t")
-    entry = _child_entry(me, slug, branch, kind, model, me.get("mode"), me.get("worktree"), e["OPSX_AT"])
-    entry["herdr_name"] = entry["via"] = entry["feature"] = me["feature"]
+    entry = _child_entry(session, slug, branch, kind, model, me.get("mode"), session.get("worktree"), e["OPSX_AT"])
+    entry["herdr_name"] = entry["feature"] = me["feature"]
+    entry["via"] = "@" + me["feature"]
     d["%s/%s" % (repo, slug)] = entry
 
 
@@ -289,7 +310,12 @@ if __name__ == "__main__":
         jsonfile.update(sys.argv[2], register_continue)
         print(old_name, mode)   # 寫成功才印：chain.sh 靠退出碼判斷寫入成敗
     elif len(sys.argv) == 6 and sys.argv[1] == "siblings":
-        print("\n".join(session_siblings(*sys.argv[2:])))
+        top, repo, wt, d = sys.argv[2], sys.argv[3], os.path.realpath(sys.argv[4]), jsonfile.load(sys.argv[5])
+        # 單卡與 session 的 worktree 都在 .claude/worktrees/<名>，名字會撞：認 session 條目記下的 worktree，不認目錄名
+        hit = [k.split("/@", 1)[1] for k, v in d.items()
+               if k.startswith(repo + "/@") and v.get("worktree") and os.path.realpath(v["worktree"]) == wt]
+        if hit:
+            print("\n".join(session_members(top, repo, hit[0], d)))
     elif len(sys.argv) == 5 and sys.argv[1] == "deps":
         print("\n".join(sub_deps(*sys.argv[2:])))
     elif len(sys.argv) == 4 and sys.argv[1] == "feature":
@@ -302,4 +328,4 @@ if __name__ == "__main__":
         print(jsonfile.load(sys.argv[2])[os.environ["OPSX_KEY"]].get("mode"))
         jsonfile.update(sys.argv[2], register_fan_out)
     else:
-        sys.exit("用法：chain.py children <top> <repo> <父卡 slug> <dispatch.json> | chain.py feature <top> <feature> | chain.py deps <top> <主> <子> | chain.py continue|session|fan-out <dispatch.json>")
+        sys.exit("用法：chain.py children <top> <repo> <父卡 slug> <dispatch.json> | chain.py feature <top> <feature> | chain.py deps <top> <主> <子> | chain.py siblings <top> <repo> <worktree> <dispatch.json> | chain.py continue|session|fan-out <dispatch.json>")
