@@ -6,6 +6,7 @@
 用法：coordinate.py <state dir> [--dry]
 """
 import datetime
+import fcntl
 import functools
 import glob
 import json
@@ -17,6 +18,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import chain  # noqa: E402
 import jsonfile  # noqa: E402
+import priority  # noqa: E402
 
 MAX_DISPATCH = 6
 REDISPATCH_MINUTES = 10
@@ -49,6 +51,9 @@ class Round:
         self.memo = None
         self.dispatch_file = None
         self.plans = {}
+        self.levels = {}
+        self.level_errors = {}
+        self.orders = {}
 
     def log(self, msg):
         line = "%s %s" % (self.now.strftime("%Y-%m-%d %H:%M:%S"), msg)
@@ -81,7 +86,7 @@ class Round:
         if herdr:
             raise CoordinateError("herdr 讀不到，agent 狀態不可得，這輪不動：%s" % "；".join(herdr))
         self.memo = read_json(self.memo_path, "coordinator memo")
-        for k in ("_parked", "_redispatched"):
+        for k in ("_parked", "_redispatched", "_notified"):
             self.memo.setdefault(k, {})   # 沒有這個 key 就是還沒記過任何一張
         self.dispatch_file = read_json(os.path.join(self.state, "dispatch.json"), "dispatch.json")
         return data
@@ -98,6 +103,28 @@ class Round:
         if top not in self.plans:
             self.plans[top] = read_prs(os.path.join(top, "openspec", "workplan.yaml"))
         return self.plans[top]
+
+    def level(self, top, slug):
+        """卡的 {level, reason, overridden}，算不出來是 {error}。workplan 的 milestone 欄位不合格時那個 repo 每張卡都是 error。"""
+        if top not in self.levels and top not in self.level_errors:
+            try:
+                self.levels[top] = priority.levels(top)
+            except priority.PriorityError as e:
+                self.level_errors[top] = str(e)
+        if top in self.level_errors:
+            return {"error": self.level_errors[top]}
+        if slug not in self.levels[top]:
+            return {"error": "%s 不在 openspec/changes 也不在 workplan" % slug}
+        return self.levels[top][slug]
+
+    def rank(self, c, top):
+        """派工順序：(等級, 不在 workplan, milestone 位置, workplan 位置)；算不出等級的排最後，反正不派。"""
+        got = self.level(top, c["slug"])
+        lv = priority.LEVELS.index(got["level"]) if "level" in got else len(priority.LEVELS)
+        if top not in self.orders:
+            self.orders[top] = plan_order(os.path.join(top, "openspec", "workplan.yaml"))
+        pos = self.orders[top].get(c["slug"])
+        return (lv, 1, 0, 0) if pos is None else (lv, 0) + pos
 
     def nobody_archiving(self, c):
         """已合併但 agent 還在：歸檔、標 workplan、叫 chain 都是它自己 /archive 的事，這裡不搶。
@@ -228,6 +255,30 @@ class Round:
         elif rc != 0:
             self.log("?? %s gate %s 回不了：%s" % (card_key(c), gate, err[:200]))
 
+    def notify(self, c, kind, ident, event, body):
+        """這裡處理不了、要人去處理的事。每輪從狀態重算，送過的鍵記在 _notified，所以事件觸發那輪漏掉的由定時那輪補，也不會重送。
+        herdr 的通知沒有點擊動作，內文要寫去哪裡處理。"""
+        key = "%s/%s/%s" % (card_key(c), kind, ident)
+        if key in self.memo["_notified"]:
+            return
+        rc, out, err = self.act(["herdr", "notification", "show", "[%s] %s" % (card_key(c), event),
+                                 "--body", body, "--sound", "request"])
+        if rc != 0:
+            self.log("?? 通知 %s 送不出去，下一輪再送：%s" % (key, (err or out).replace("\n", " ")[:200]))
+            return
+        self.memo["_notified"][key] = self.now.isoformat(timespec="seconds")
+        # 送出就存：這輪後面的步驟出錯時，下一輪不會把同一則再送一次
+        self.save()
+
+    def forget_waiting(self, c):
+        """卡沒在等人了：清掉它 gate 與 blocked 的通知紀錄，同一個 pane 之後再卡、或 gate id 被重用時才會再通知。"""
+        prefixes = tuple("%s/%s/" % (card_key(c), kind) for kind in ("gate", "blocked"))
+        for key in [k for k in self.memo["_notified"] if k.startswith(prefixes)]:
+            del self.memo["_notified"][key]
+
+    def notify_gate(self, c, w, why):
+        self.notify(c, "gate", w["gate_id"], "gate %s %s" % (w["gate_id"], why), "看板：" + one_line(w.get("question") or ""))
+
     def handle_gate(self, c, top):
         """派出去的卡的第一個 open gate，照固定規則答、停、或留給人。"""
         w, key = c["waiting"], card_key(c)
@@ -238,11 +289,14 @@ class Round:
             # 合併永遠由人按：action 不一定剛好寫成 merge（mr-merge、external 打合併 API），題目也要看
             if any(k in ((w["action"] or "") + " " + (w.get("question") or "")).lower() for k in MERGE_WORDS):
                 self.log("?? %s gate %s 要合併授權，不代答：合併由人在板上按" % (key, w["gate_id"]))
+                self.notify_gate(c, w, "要合併授權")
                 return
             self.answer(c, top, w["gate_id"], "允許", grant=True)
             return
         if w["type"] == "終端機等待輸入":
-            self.log("?? %s 在 pane %s 等終端機輸入（autopilot 不該問 pane），要人看" % (key, c["dispatch"].get("pane")))
+            pane = c["dispatch"].get("pane")
+            self.log("?? %s 在 pane %s 等終端機輸入（autopilot 不該問 pane），要人看" % (key, pane))
+            self.notify(c, "blocked", pane, "在終端機等輸入", "pane %s：%s" % (pane, one_line(w.get("question") or "")))
             return
         if w["type"] == "type 不明":
             self.log("?? %s gate %s 的 type 沒寫或不在 approval | decision，不代答，要人看：%s" % (key, w["gate_id"], (w.get("question") or "")[:100]))
@@ -261,6 +315,7 @@ class Round:
         # merge 永遠人：合併授權綁 head sha，代答「重試合併」這類題就等於替人決定合併
         if any(k in text.lower() for k in MERGE_WORDS):
             self.log("?? %s gate %s 是合併類決定題，不代答：%s → %s" % (key, w["gate_id"], q[:100], (pick or "")[:60]))
+            self.notify_gate(c, w, "是合併的決定")
             return
         if any(k in q for k in VERIFY_WORDS):
             self.answer(c, top, w["gate_id"], VERIFY_ANSWER)
@@ -270,9 +325,11 @@ class Round:
             return
         if not pick:
             self.log("?? %s gate %s 沒有選項也沒有建議，要人看：%s" % (key, w["gate_id"], q[:120]))
+            self.notify_gate(c, w, "沒有選項也沒有建議")
             return
         if any(k in pick for k in HUMAN_WORDS) or any(k in q for k in HUMAN_QUESTION):
             self.log("?? %s gate %s 要人動手，不代答：%s → %s" % (key, w["gate_id"], q[:100], pick[:60]))
+            self.notify_gate(c, w, "要你動手")
             return
         self.answer(c, top, w["gate_id"], pick)
 
@@ -316,6 +373,8 @@ class Round:
         last = self.memo["_redispatched"].get(key)
         if last and self.now - datetime.datetime.fromisoformat(last) < datetime.timedelta(minutes=REDISPATCH_MINUTES):
             self.log("-- %s %s，%d 分鐘內重派過，這輪不再派" % (key, why, REDISPATCH_MINUTES))
+            self.notify(c, "dead", last, "重派後 %d 分鐘內又掛了" % REDISPATCH_MINUTES,
+                        "pane %s：%s；看板上重派或停掉" % (c["dispatch"].get("pane"), why))
             return
         if "agent" not in c["dispatch"]:
             self.log("?? %s %s，但 dispatch.json 沒記 agent，不知道派給誰" % (key, why))
@@ -326,7 +385,8 @@ class Round:
         self.memo["_redispatched"][key] = self.now.isoformat(timespec="seconds")
 
     def settle_parked(self, cards):
-        """人接手過的 parked 卡不再由這裡管：人手動重派了，或人在板上把那個 gate 答掉了。"""
+        """人手動重派了的 parked 卡不再由這裡管。人在板上把那個 gate 答掉了，記成已答，
+        dispatch_new 照 coordinator 自己答過的一樣重派：卡是 coordinator 停的，不重派就沒有 agent 讀得到答案。"""
         for c in cards:
             key = card_key(c)
             parked = self.memo["_parked"].get(key)
@@ -334,15 +394,15 @@ class Round:
                 continue
             if c["dispatch"]:
                 self.log("-- %s 已經又派出去，不再 parked" % key)
+                del self.memo["_parked"][key]
             elif not parked.get("answered") and parked["gate"] not in [g["id"] for g in c["open_gates"]]:
-                self.log("-- %s 等的 gate %s 已經被人答掉，不再 parked" % (key, parked["gate"]))
-            else:
-                continue
-            del self.memo["_parked"][key]
+                self.log("-- %s 等的 gate %s 被人答掉，記成已答，照派卡規則重派" % (key, parked["gate"]))
+                parked["answered"] = True
 
     def dispatch_new(self, cards, repo_paths):
         n = 0
-        for c in cards:
+        ranked = sorted((self.rank(c, repo_paths[c["repo"]]), i, c) for i, c in enumerate(cards))
+        for _, _, c in ranked:
             key, top = card_key(c), repo_paths[c["repo"]]
             entry = self.dispatch_file.get(key)
             parked = self.memo["_parked"].get(key)
@@ -373,7 +433,17 @@ class Round:
             if not AGENT_NAME.match(c["slug"]):
                 self.log("-- %s 不是合法的 agent 名，跳過" % key)
                 continue
-            if n >= MAX_DISPATCH:
+            got = self.level(top, c["slug"])
+            if "error" in got:
+                self.log("?? %s 等級算不出來：%s" % (key, got["error"]))
+                continue
+            # parked 的卡是這裡自己停下的，重派是接回原本的工作，不算自動派新卡
+            if got["level"] == "P2" and not parked:
+                self.log("-- %s 是 P2（%s），不自動派" % (key, got["reason"]))
+                continue
+            # P0（自己判出或繼承來的）排最前、一起派，不佔每輪上限；在跑的卡一律不停
+            p0 = got["level"] == "P0"
+            if not p0 and n >= MAX_DISPATCH:
                 self.log("-- 這輪派滿 %d 張，%s 下輪" % (MAX_DISPATCH, key))
                 continue
             if parked and not parked.get("answered"):
@@ -385,7 +455,8 @@ class Round:
                 parked["answered"] = True
             agent = entry["agent"] if entry and "agent" in entry else "claude"
             rc, _, err = self.act(["opsx", "dispatch", c["slug"], "--agent", agent, "--mode", "autopilot", "--kind", c["kind"], "--repo", top])
-            n += 1
+            if not p0:
+                n += 1
             if rc != 0:
                 self.log("?? %s 派不出去：%s" % (key, err[:200]))
                 continue
@@ -415,6 +486,10 @@ def card_key(c):
     return "%s/%s" % (c["repo"], c["slug"])
 
 
+def one_line(text):
+    return text.split("\n", 1)[0][:100]
+
+
 def read_json(path, what):
     """不存在等於空的；存在但讀不懂就失敗，不當成空的（parked 會無聲消失）。"""
     if not os.path.exists(path):
@@ -437,6 +512,21 @@ def read_features(path):
 def read_prs(path):
     """workplan.yaml 所有 feature 底下的 PR。沒有檔就是沒有 PR、沒有依賴。"""
     return [pr for f in read_features(path) for pr in f.get("prs") or []]
+
+
+def plan_order(path):
+    """change 名到 (所屬 feature 的 milestone 在 milestones 的位置, 在 workplan 出現的位置)。feature 沒寫 milestone 排在有寫的後面。"""
+    if not os.path.exists(path):
+        return {}
+    wp = chain.load_workplan(path)
+    names = [m.get("name") for m in wp.get("milestones") or []]
+    out = {}
+    for f in wp.get("features") or []:
+        ms = names.index(f.get("milestone")) if f.get("milestone") in names else len(names)
+        for pr in f.get("prs") or []:
+            for c in pr.get("changes") or []:
+                out.setdefault(c.get("name"), (ms, len(out)))
+    return out
 
 
 def merged_prs(prs):
@@ -518,13 +608,34 @@ def owner_gone(c):
 
 
 def main():
-    state = sys.argv[1]
-    r = Round(state, "--dry" in sys.argv[2:])
+    state, dry = sys.argv[1], "--dry" in sys.argv[2:]
+    rerun = os.path.join(state, "coordinator.rerun")
+    # process 死掉時 kernel 會放掉 flock，所以不用處理殘留的 lock 檔
+    with open(os.path.join(state, "coordinator.lock"), "a", encoding="utf-8") as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            # 不等也不搶：同時跑兩輪會答同一個 gate、重派同一張卡兩次。拿著 lock 的那輪結束前會看到記號補跑
+            if not dry:
+                with open(rerun, "w", encoding="utf-8"):
+                    pass
+            Round(state, dry).log("-- 另一輪 coordinator 在跑，留下重跑記號")
+            return 0
+        rc = one_round(state, dry)
+        # 補跑一次為限：事件連發時不一直跑下去，之後的記號留給下一次
+        if not dry and os.path.exists(rerun):
+            os.remove(rerun)
+            rc = one_round(state, dry) or rc
+    return rc
+
+
+def one_round(state, dry):
+    r = Round(state, dry)
     try:
         data = r.load()
     except CoordinateError as e:
         r.log("!! coordinator 這輪不跑：%s" % e)
-        sys.exit(1)
+        return 1
     r.log("== coordinator 開始" + ("（dry）" if r.dry else ""))
     repo_paths = data["repo_paths"]
     cards = [c for c in data["cards"] if not c["archived"]]
@@ -545,8 +656,13 @@ def main():
 
     for c in live:
         w = c["waiting"]
+        if not w:
+            r.forget_waiting(c)
         if c["dispatch"] and w and w["type"] != "可以合併":
             r.handle_gate(c, repo_paths[c["repo"]])
+        if c["mr"] and c["mr"]["state"] == "ready":
+            # 推了新 commit 再全綠是新的一次可以合併，所以綁 head sha
+            r.notify(c, "ready", c["mr"]["head_sha"], "可以合併", "看板按「合併」：" + c["mr"]["url"])
     for c in live:
         if not c["dispatch"] or card_key(c) in r.memo["_parked"]:
             continue
@@ -558,7 +674,8 @@ def main():
     r.act(["opsx", "reap"])   # 失敗 act 已經記 log；孤兒的判斷與關閉條件都在 opsx reap
     r.save()
     r.log("== 結束：%d 張卡，收尾 %d 張" % (len(live), len(done)))
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

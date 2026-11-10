@@ -11,6 +11,7 @@ st_card_dir() { # <top> <slug>
 }
 st_card_kind() { local d="$1"; [ -f "$d/.openspec.yaml" ] && sed -n 's/^kind: *//p' "$d/.openspec.yaml" | head -1 || true; }
 st_status_tests() { local d="$1"; [ -f "$d/status.json" ] && jq -r '.tests // "unknown"' "$d/status.json" 2>/dev/null || printf 'unknown'; }
+st_review_running() { local d="$1"; [ -f "$d/status.json" ] && jq -e '.phase == "review" and .step < .total' "$d/status.json" >/dev/null 2>&1; }
 st_tasks_open() { [ -f "$1/tasks.md" ] || { printf 0; return; }; grep -cE '^\s*- \[ \]' "$1/tasks.md" || true; }
 st_tasks_done() { [ -f "$1/tasks.md" ] || { printf 0; return; }; grep -cE '^\s*- \[x\]' "$1/tasks.md" || true; }
 st_pending_nonempty() {
@@ -24,9 +25,10 @@ st_open_gates() { [ -f "$1/gates.md" ] || { printf 0; return; }; grep -cE '^stat
 st_open_gates_blocking() {
   [ -f "$1/gates.md" ] || { printf 0; return; }
   awk '
-    function flush() { if (open && !ask) n++; open = 0; ask = 0 }
+    function flush() { if (open && (!ask || appr)) n++; open = 0; ask = 0; appr = 0 }
     /^## / { flush() }
     /^status:[ \t]*open[ \t]*$/ { open = 1 }
+    /^type:[ \t]*approval[ \t]*$/ { appr = 1 }   # 核准只有人能答，不管問法
     /^(## |問題:).*要不要(接|派|繼續)([ ]*\/|[ ]*下一|\?|？|$)/ { ask = 1 }
     END { flush(); print n + 0 }
   ' "$1/gates.md"

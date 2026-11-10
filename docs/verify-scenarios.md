@@ -7,6 +7,15 @@
 - **新版**：本 repo 的 `skills/` 與 `references/`。**舊版**：`~/.claude/plugins/cache/opsx-workflow/opsx-workflow/0.1.0/skills/` 加上 `~/.claude/skills/grill-me`（舊版沒有 grill）。那個目錄名叫 0.1.0，但裡面的 `plugin.json` 寫 0.2.0；12 個檔的日期是 2026-05-26 到 06-18，2026-08-31 安裝，都早於改寫 commit `f321dc6`（11-05），所以是改寫前的版本，只是版號標錯。改寫 commit 沒有 parent，git 裡沒有更可靠的基線。量測當時的內容雜湊（`find . -type f | LC_ALL=C sort | xargs shasum -a 256 | shasum -a 256` 前 16 碼）：舊版 skills `32c535b73ba72a8e`、grill-me `3ba7a6558b999b93`；重跑前先比對，不同就不是同一個基線。
 - 五個題目，情境 1 拆成 grill、propose、review 三段分開測，每段的輸入事先寫好。題目在 `skills/<skill>/evals/fixtures/`，判分條件在 `skills/<skill>/evals/evals.json`，`bash tests/run.sh scenarios` 驗題目的前置條件。
 - 每題新舊各跑 3 次，同一句 prompt，skill 放在工作 repo 的 `.claude/skills/`（`evals/prepare-run.sh`）。
+- 候選者用 `evals/run-candidate.sh` 跑，每次一個獨立的 `claude --setting-sources project,local -p` session，要在 sandbox 外的終端機執行。user 層的 plugin、skill、hooks 不載入，skill 只有工作 repo `.claude/skills/` 那份；認證用平常的登入，不需要 API key。runner 在 `$TMPDIR` 底下建工作 repo，專案名是 fixture 名，路徑含 `claude` 或題目禁用字就拒跑。題目帶 `second_turn` 時，runner 用同一個 session id `--resume` 跑第二輪。跑完把 transcript 複製到結果目錄的 `<session id>.jsonl`，並印出 `work:`、`session:`、`transcript:` 三行。grader 讀那一份 transcript 和工作 repo。本表兩輪還沒有 runner，是主 session 開 subagent 跑的（見限制）。以 grill 段為例，跑完先確認隔離有效：
+
+  ```bash
+  bash evals/run-candidate.sh grill 0 new "$HOME/opsx-results/grill"
+  t=<上一步印的 transcript 路徑>
+  grep -c 'opsx-workflow' "$t"           # 要是 0
+  grep -c 'skills/grill/evals' "$t"      # 要是 0
+  grep -m1 'Primary working directory' "$t"   # 要是上一步印的 work 路徑
+  ```
 - 每題一個 grader 一次判完 6 次執行，只看到 A / B 標籤；過程題（先重現、讀了哪些檔、有沒有繞過 hook）讀執行紀錄，不採信自述。
 - 第一輪（每組 1 次）用來修題目與判分條件，不併入下表。
 
@@ -67,6 +76,7 @@
 - grill 段原本的 93% vs 48%（對「沒 skill」）的題目已失傳，本次重建後不可直接比較。
 - 盲評有漏：執行紀錄裡有 candidate 列出 `.claude/skills/` 的輸出，舊版那邊會出現 `grill-me`，新版會出現 `references/`，grader 讀紀錄就看得出是哪一版；review 段的 grader 在回饋裡直接講到「B 那支 skill 的修一輪」。下一輪要在交給 grader 前把 skill 目錄名中性化。
 - 本表的通過率是用 grader 當時拿到的判分條件算的；那些條件已同步回 `evals.json`（grill 段多一條「沒把使用者沒選的事編成 D」，情境 3 的 commit 條件寫明被 hook 擋的情形），重跑要用同一版 `evals.json`。
+- 前兩輪的候選者是主 session 開的 subagent，隔離不完整。它繼承主 session 的 user skill 和 opsx-workflow plugin，所以舊版那組也拿得到新版 skill。它的環境段也帶主 worktree 路徑和列出答案檔的 git status。沒有候選者真的去讀，但那是因為它們沒去看，不是看不到。下一輪改用 `evals/run-candidate.sh`。
 - 新版 review 的時間取自各次的 `timing.json`；第 2 次在交出結果後又跑了 448 秒，`aggregate_benchmark` 產的 benchmark.json 還是舊的 234 秒，所以那格是 333 秒、不是 184 秒。
 
 ## 開的卡

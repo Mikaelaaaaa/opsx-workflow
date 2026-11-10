@@ -174,6 +174,34 @@ class ServerTest(unittest.TestCase):
             self.assertEqual(status, 400, body)
         self.assertEqual(self.log.read_text(), "")
 
+    def test_note_forwards_to_opsx(self):
+        r = str(self.repo)
+        status, _, body = self.req("/api/note", {"slug": "x", "text": "先跑 lint", "repo": r}, token=self.token)
+        self.assertEqual(status, 200, body)
+        self.assertTrue(json.loads(body)["ok"], body)
+        status, _, body = self.req("/api/note", {"slug": "x", "text": "-v 也要跑"}, token=self.token)
+        self.assertEqual(status, 200, body)
+        self.assertEqual(self.log.read_text().strip().split("\n"), ["note x --repo %s -- 先跑 lint" % r, "note x -- -v 也要跑"])
+
+    def test_note_rejects_missing_empty_or_multiline_text(self):
+        for body_ in ({"slug": "x"}, {"slug": "x", "text": "   "}, {"slug": "x", "text": "第一行\nsource: evil"}, {"text": "沒有 slug"}):
+            status, _, body = self.req("/api/note", body_, token=self.token)
+            self.assertEqual(status, 400, (body_, body))
+        self.assertEqual(self.log.read_text(), "")
+
+    def test_dispatch_forwards_note(self):
+        self.req("/api/dispatch", {"slug": "x", "mode": "autopilot", "note": "先跑 lint"}, token=self.token)
+        self.req("/api/dispatch", {"slug": "x", "mode": "autopilot", "note": ""}, token=self.token)
+        self.req("/api/dispatch", {"slug": "x", "mode": "autopilot"}, token=self.token)
+        self.assertEqual(self.log.read_text().strip().split("\n"),
+                         ["dispatch x --mode autopilot --note 先跑 lint", "dispatch x --mode autopilot", "dispatch x --mode autopilot"])
+
+    def test_dispatch_rejects_multiline_or_huge_note(self):
+        for note in ("第一行\nsource: evil", "a\rb", "a\0b", "x" * 2001):
+            status, _, body = self.req("/api/dispatch", {"slug": "x", "note": note}, token=self.token)
+            self.assertEqual(status, 400, body)
+        self.assertEqual(self.log.read_text(), "")
+
     def test_file_needs_slug_and_repo(self):
         r = str(self.repo)
         status, _, body = self.req("/api/file", {"slug": "me-1", "repo": r}, token=self.token)
@@ -218,6 +246,38 @@ class ServerTest(unittest.TestCase):
         self.rc_file.write_text("3")
         status, _, body = self.req("/api/merge", {"slug": "x"}, token=self.token)
         self.assertEqual(status, 200, "只有 sync 的退出碼 3 是 409：%s" % body)
+
+    def test_priority_forwards_to_opsx(self):
+        # specs/board-web「改等級轉呼叫 opsx」
+        r = str(self.repo)
+        status, _, body = self.req("/api/priority", {"repo": r, "slug": "card-a", "level": "P0", "reason": "客戶明天上線"}, token=self.token)
+        self.assertEqual(status, 200, body)
+        out = json.loads(body)
+        self.assertTrue(out["ok"], out)
+        self.assertEqual(self.log.read_text().strip(), "priority card-a --set P0 --reason 客戶明天上線 --repo %s" % r)
+        self.assertIn("ok: priority", out["stdout"])
+
+    def test_priority_needs_reason(self):
+        # specs/board-web「沒有理由」
+        for reason in ("", "   ", None):
+            status, _, body = self.req("/api/priority", {"repo": str(self.repo), "slug": "card-a", "level": "P0", "reason": reason}, token=self.token)
+            self.assertEqual(status, 400, "%r: %s" % (reason, body))
+        self.assertEqual(self.log.read_text(), "")
+
+    def test_priority_rejects_unknown_level(self):
+        # specs/board-web「不合格的等級」
+        for level in ("P3", "p0", "", None):
+            status, _, body = self.req("/api/priority", {"repo": str(self.repo), "slug": "card-a", "level": level, "reason": "x"}, token=self.token)
+            self.assertEqual(status, 400, "%r: %s" % (level, body))
+        self.assertEqual(self.log.read_text(), "")
+
+    def test_priority_needs_token_and_real_repo(self):
+        status, _, _ = self.req("/api/priority", {"repo": str(self.repo), "slug": "card-a", "level": "P0", "reason": "x"})
+        self.assertEqual(status, 401)
+        for repo in ("/tmp", None):
+            status, _, body = self.req("/api/priority", {"repo": repo, "slug": "card-a", "level": "P0", "reason": "x"}, token=self.token)
+            self.assertEqual(status, 400, "%r: %s" % (repo, body))
+        self.assertEqual(self.log.read_text(), "")
 
     def test_index_has_the_orphan_row_and_its_buttons(self):
         _, _, body = self.req("/")
@@ -356,7 +416,7 @@ class ServerTest(unittest.TestCase):
 
 
 class NoHerdrTest(unittest.TestCase):
-    """server 不在 herdr 裡（HERDR_ENV 沒設）：最後輸出回 ok false，不叫 herdr（specs/board-log「herdr 不可用」）。"""
+    """server 不在 herdr pane 裡（HERDR_ENV 沒設）：最後輸出照樣叫 herdr（specs/board-log「server 不在 herdr pane 裡」）。"""
 
     @classmethod
     def setUpClass(cls):
@@ -388,9 +448,9 @@ class NoHerdrTest(unittest.TestCase):
         with urllib.request.urlopen(r, timeout=5) as resp:
             self.assertEqual(resp.status, 200)
             out = json.loads(resp.read().decode())
-        self.assertFalse(out["ok"])
-        self.assertIn("HERDR_ENV", out["error"])
-        self.assertFalse(self.herdr_log.exists(), "不在 herdr 裡就不該叫 herdr")
+        self.assertTrue(out["ok"], out)
+        self.assertEqual(out["text"], "line\n")
+        self.assertIn("agent read w5:pH --lines 10 --format text", self.herdr_log.read_text())
 
 
 if __name__ == "__main__":

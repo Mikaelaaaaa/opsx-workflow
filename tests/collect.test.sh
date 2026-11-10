@@ -195,15 +195,23 @@ printf '{"id":"cli:agent:list","result":{"agents":[],"type":"agent_list"}}' > "$
 J5="$(opsx collect --root "$ROOT")"; assert_eq "$(q "$(card "$J5" a x4)" agent_status)" unknown; assert_eq "$(q "$J5" errors)" '[]'
 printf '{"id":"cli:agent:list","result":{"agents":[{"agent":"claude","pane_id":"p4","agent_status":"working"},{"agent":"claude","pane_id":"p9","agent_status":"blocked"},{"agent":"claude","pane_id":"p7","agent_status":"idle","cwd":"/Users/me","workspace_id":"w9","terminal_title_stripped":"foo"}],"type":"agent_list"}}' > "$OPSX_TEST_HERDR_AGENTS"
 
-# ---------- 不在 herdr 內 ----------
+# ---------- 不在 pane 裡（HERDR_ENV 未設）也問 herdr ----------
 export HERDR_ENV=""
 : > "$OPSX_FAKE_LOG"
 J="$(opsx collect --root "$ROOT")"; assert_eq "$?" 0
+assert_eq "$(q "$(card "$J" a x4)" agent_status)" working
+assert_eq "$(q "$J" errors)" '[]'
+assert_grep '^agent list' "$OPSX_FAKE_LOG"
+
+# ---------- herdr 叫不通：HERDR_ENV 設或未設都一樣，原文進 errors ----------
+: > "$OPSX_FAKE_LOG"
+J="$(OPSX_TEST_HERDR_LIST_FAIL='socket gone: /x/herdr.sock' opsx collect --root "$ROOT")"; assert_eq "$?" 0
 assert_eq "$(q "$(card "$J" a x4)" agent_status)" null
 assert_eq "$(q "$J" errors.0.source)" herdr
+q "$J" errors.0.message | grep -q 'socket gone: /x/herdr.sock' || fail "herdr 錯誤要帶原文: $(q "$J" errors)"
 assert_eq "$(q "$J" unmatched_agents)" '[]'
-assert_not_grep '^agent list' "$OPSX_FAKE_LOG"
 C="$(card "$J" b y1)"; assert_eq "$(q "$C" waiting)" null "沒 herdr 就判不出 blocked"; assert_eq "$(q "$C" section)" 進行中
+J="$(HERDR_ENV=1 OPSX_TEST_HERDR_LIST_FAIL='socket gone' opsx collect --root "$ROOT")"; assert_eq "$(q "$(card "$J" a x4)" agent_status)" null "HERDR_ENV 設了也一樣"
 
 # ---------- sources.toml 登記的 repo 不在 root 底下也要算（D1）；重複的去重；不存在的跳過 ----------
 Z="$FX/elsewhere/z"; mkdir -p "$Z/openspec/changes" "$Z/.git"
@@ -213,7 +221,7 @@ J="$(opsx collect --root "$ROOT")"; assert_eq "$?" 0 "collect with sources.toml:
 assert_eq "$(printf '%s' "$J" | python3 -I -c 'import json,sys;print(sorted(r for s in json.load(sys.stdin)["scopes"] for r in s["repos"]))')" "['a', 'b', 'z']"
 assert_eq "$(q "$(card "$J" z z1)" section)" 收件匣
 assert_eq "$(printf '%s' "$J" | python3 -I -c 'import json,sys;print(sum(1 for c in json.load(sys.stdin)["cards"] if c["repo"]=="a" and c["slug"]=="x1"))')" 1 "a 兩邊都有，卡不能重複"
-assert_eq "$(q "$J" errors.0.source)" herdr; assert_eq "$(printf '%s' "$J" | python3 -I -c 'import json,sys;print(len(json.load(sys.stdin)["errors"]))')" 1 "不存在的 path 不該進 errors"
+assert_eq "$(q "$J" errors)" '[]' "不存在的 path 不該進 errors（herdr 通，所以 errors 是空的）"
 # ---------- 舊卡在算 stage 之前就濾掉，只計數（collect-perf） ----------
 R2="$FX/code2"; mkdir -p "$R2/r/.git" "$R2/r/openspec/changes"
 for o in old-1 old-2 old-ws old-ideo old-nbsp sd-inbox; do mkdir -p "$R2/r/openspec/changes/$o"; printf 'schema: spec-driven\n' > "$R2/r/openspec/changes/$o/.openspec.yaml"; done
@@ -245,7 +253,7 @@ printf 'schema: spec-driven\n' > "$D/.openspec.yaml"
 printf '# report\n\n## MR\nhttps://gitlab.tsg-navigator.com/agentory/r3/-/merge_requests/4242\n' > "$D/report.md"
 : > "$FX/glab-empty.json"; : > "$OPSX_FAKE_LOG"
 J="$(OPSX_TEST_GLAB_JSON="$FX/glab-empty.json" OPSX_TEST_GLAB_JSON_BY_IID= opsx collect --root "$R3")"; assert_eq "$?" 0
-[ ! -s "$OPSX_FAKE_LOG" ] || fail "只有舊卡的 repo 不該叫 glab / gh：$(cat "$OPSX_FAKE_LOG")"
+[ -z "$(grep -v '^agent list' "$OPSX_FAKE_LOG")" ] || fail "只有舊卡的 repo 不該叫 glab / gh（herdr agent list 除外）：$(cat "$OPSX_FAKE_LOG")"
 assert_eq "$(q "$J" legacy)" '{"r3": 1}'
 E="$(q "$J" errors)" || fail "errors 讀不到：$J"
 case "$E" in *legacy-mr*|*glab*) fail "errors 不該指名舊卡：$E" ;; esac
@@ -261,6 +269,25 @@ GE="$(printf '%s' "$J" | python3 -I -c 'import json,sys;print(json.dumps([e for 
 assert_eq "$(printf '%s' "$GE" | python3 -I -c 'import json,sys;print(len(json.load(sys.stdin)))')" 3 "三個壞值各一筆 error：$E"
 for want in "g1.*$FUT" "g2.*2026-11-06 14:05" "g3.*昨天"; do printf '%s' "$GE" | grep -Eq "$want" || fail "errors 要有 gate id 與原值（$want）：$E"; done
 case "$E" in *g4*|*g5*) fail "寬限內與 answered 的 gate 不該進 errors：$E" ;; esac
+# ---------- 派工指示（specs/board-collect「卡帶派工指示」） ----------
+RN="$FX/code-notes"; mkdir -p "$RN/rn/.git"
+mknote() { # <slug> <inbox 內容>
+  local d="$RN/rn/openspec/changes/$1"; mkdir -p "$d"
+  printf 'schema: opsx\ncreated: 2026-11-05\nkind: dev\n' > "$d/.openspec.yaml"; printf '%s' "$2" > "$d/inbox.md"
+}
+mknote n1 $'## 一句話\n\n兩條\n\n## 派工指示\n\n- 2026-11-10T14:00:00+08:00 先跑 lint\n- 2026-11-10T15:00:00+08:00 不要動 README\n\n## 備註\n\n- 2026-11-10T16:00:00+08:00 這不是指示\n'
+mknote n2 $'## 一句話\n\n沒有指示\n'
+mknote n3 $'## 一句話\n\n壞行\n\n## 派工指示\n\n- 2026-11-10T14:00:00+08:00 先跑 lint\n隨手寫的一行\n'
+mknote n4 $'## 一句話\n\n空段\n\n## 派工指示\n\n'
+J="$(opsx collect --root "$RN")"; assert_eq "$?" 0 "notes collect rc: $J"
+assert_eq "$(q "$(card "$J" rn n1)" notes)" '[{"at": "2026-11-10T14:00:00+08:00", "text": "先跑 lint"}, {"at": "2026-11-10T15:00:00+08:00", "text": "不要動 README"}]'
+assert_eq "$(q "$(card "$J" rn n2)" notes)" '[]'
+assert_eq "$(q "$(card "$J" rn n4)" notes)" '[]'
+assert_eq "$(q "$(card "$J" rn n3)" notes)" '[{"at": "2026-11-10T14:00:00+08:00", "text": "先跑 lint"}]'
+NE="$(printf '%s' "$J" | python3 -I -c 'import json,sys;print(json.dumps([e for e in json.load(sys.stdin)["errors"] if e["source"].endswith("/n3/inbox.md")],ensure_ascii=False))')"
+assert_eq "$(printf '%s' "$NE" | python3 -I -c 'import json,sys;print(len(json.load(sys.stdin)))')" 1 "壞行一筆 error：$(q "$J" errors)"
+printf '%s' "$NE" | grep -q 'n3.*隨手寫的一行' || fail "error 要有 slug 與那一行：$NE"
+case "$(q "$J" errors)" in *n1*|*n2*|*n4*) fail "好卡不該進 errors：$(q "$J" errors)" ;; esac
 
 # ---------- generated_at 在讀任何來源之前取：卡片迴圈裡的 glab 慢 4 秒也不會往後（banner-same-second） ----------
 # 慢的是迴圈裡的 mr_json：它比 herdr 早讀，取時點放在迴圈之後的實作會被抓到
@@ -274,6 +301,76 @@ J="$(PATH="$SLOW:$PATH" opsx collect --root "$R4")"; assert_eq "$?" 0
 grep -q '^mr view 9 ' "$OPSX_FAKE_LOG" || fail "glab 要真的被叫到，慢才有意義：$(cat "$OPSX_FAKE_LOG")"
 G="$(printf '%s' "$J" | python3 -I -c 'import datetime,json,sys;print(int(datetime.datetime.fromisoformat(json.load(sys.stdin)["generated_at"]).timestamp()))')"
 [ "$G" -le $((S + 2)) ] || fail "generated_at 要在讀來源前取：呼叫前 ${S}，generated_at ${G}"
+
+# ---------- 卡的等級與目前 milestone（workplan-priority/priority-board，specs/board-collect「卡的等級」「目前 milestone」） ----------
+R8="$FX/code8"; mkdir -p "$R8/p/.git" "$R8/q/.git" "$R8/w/.git"
+pcard() { # <repo> <slug> [frontmatter 行…]
+  local d="$R8/$1/openspec/changes/$2"; shift 2; mkdir -p "$d"
+  printf 'schema: opsx\ncreated: 2026-11-10\nkind: dev\n' > "$d/.openspec.yaml"
+  { printf -- '---\ntype: 功能\nsource: me\nfound: 2026-11-10\nrelated:\n'; printf '%s\n' "$@"; printf -- '---\n\n## 一句話\n\n%s\n' "$(basename "$d")"; } > "$d/inbox.md"
+}
+pcard p hot 'kind_of_work: incident' 'impact: security' 'evidence: tests/auth.test.sh 第 3 案'
+pcard p held 'priority: P1' 'priority_reason: 等客戶'
+pcard p bad 'kind_of_work: incident' 'impact: data'
+pcard p plain
+D="$R8/p/openspec/changes/archive/2026-11-01-gone"; mkdir -p "$D"; printf 'schema: opsx\n' > "$D/.openspec.yaml"; printf '## 一句話\n\n舊的\n' > "$D/inbox.md"
+cat > "$R8/p/openspec/workplan.yaml" <<'EOF'
+milestones:
+  - name: "1.0"
+    goal: "能開單出貨"
+  - name: "2.0"
+    goal: "能退貨"
+current_milestone: "1.0"
+features:
+  - name: order
+    milestone: "1.0"
+    prs:
+      - name: p-order
+        branch: feat/p-order/m
+        status: pending
+        depends-on: []
+        changes:
+          - name: c1
+            status: done
+          - name: c2
+            status: pending
+          - name: c3
+            status: in-progress
+  - name: refund
+    milestone: "2.0"
+    prs:
+      - name: p-refund
+        branch: feat/p-refund/m
+        status: pending
+        depends-on: []
+        changes:
+          - name: c4
+            status: pending
+EOF
+pcard q q1
+printf 'milestones:\n  - name: "1.0"\n    goal: "先上線"\nfeatures:\n  - name: f\n    milestone: "1.0"\n' > "$R8/q/openspec/workplan.yaml"
+pcard w w1 'kind_of_work: incident' 'impact: security' 'evidence: x'
+printf 'milestones:\n  - name: "1.0"\n    goal: "先上線"\ncurrent_milestone: "9.9"\n' > "$R8/w/openspec/workplan.yaml"
+J="$(opsx collect --root "$R8")"; assert_eq "$?" 0 "priority collect rc: $J"
+# 卡帶等級與理由
+C="$(card "$J" p hot)"; assert_eq "$(q "$C" priority.level)" P0; assert_eq "$(q "$C" priority.overridden)" false
+case "$(q "$C" priority.reason)" in *security*) ;; *) fail "hot 的理由要含 security：$(q "$C" priority)" ;; esac
+# 覆寫的卡
+C="$(card "$J" p held)"; assert_eq "$(q "$C" priority.level)" P1; assert_eq "$(q "$C" priority.overridden)" true
+# 算不出來：那張 null、errors 指名卡與 evidence；同 repo 其他卡照常
+assert_eq "$(q "$(card "$J" p bad)" priority)" null
+PE="$(printf '%s' "$J" | python3 -I -c 'import json,sys;print(json.dumps([e for e in json.load(sys.stdin)["errors"] if "bad" in e["message"] and "evidence" in e["message"]],ensure_ascii=False))')"
+assert_eq "$(printf '%s' "$PE" | python3 -I -c 'import json,sys;print(len(json.load(sys.stdin)))')" 1 "bad 的 error 要有一筆，含卡名與 evidence：$(q "$J" errors)"
+assert_eq "$(q "$(card "$J" p plain)" priority.level)" P2
+# 已歸檔的卡沒有等級
+assert_eq "$(q "$(card "$J" p gone)" priority)" null
+# workplan 壞了：那個 repo 的卡都 null，errors 記 workplan 路徑
+assert_eq "$(q "$(card "$J" w w1)" priority)" null
+WE="$(printf '%s' "$J" | python3 -I -c 'import json,sys;print(json.dumps([e for e in json.load(sys.stdin)["errors"] if e["source"].endswith("/w/openspec/workplan.yaml")],ensure_ascii=False))')"
+case "$WE" in *9.9*) ;; *) fail "壞 workplan 要記進 errors 並指名值：$(q "$J" errors)" ;; esac
+assert_eq "$(q "$(card "$J" q q1)" priority.level)" P2
+# 還差幾張；沒設目前 milestone 的 repo 沒有 key
+assert_eq "$(q "$J" milestones)" '{"p": {"current": "1.0", "goal": "能開單出貨", "remaining": 2}}'
 
 # ---------- 孤兒 pane：cwd 在 opsx worktree 底下，且卡已歸檔 / split / stopped / 目錄不在（specs/opsx-reap「孤兒 pane 的判定」、board-collect「orphans 清單」） ----------
 RP6="$FX/code-reap6"; mkdir -p "$RP6/o/.git" "$RP6/o/openspec/changes/archive"
@@ -315,7 +412,7 @@ assert_eq "$(printf '%s' "$J" | python3 -I -c 'import json,sys;print(json.dumps(
   '{"w1:p3": true, "w1:p4": true, "w1:p5": false, "w1:p7": false, "w1:p9": false}' "unmatched_agents 的 orphan 欄；p9 在 .claude/worktrees/ 底下但 dispatch.json 沒記，是使用者自己的 session"
 # herdr 不可用：orphans 是 []
 export HERDR_ENV=""
-J="$(opsx collect --root "$RP6")"; assert_eq "$(q "$J" orphans)" '[]'
+J="$(OPSX_TEST_HERDR_LIST_FAIL='socket gone' opsx collect --root "$RP6")"; assert_eq "$(q "$J" orphans)" '[]'
 
 # ---------- review 第 1 輪的回歸測試：人或活卡的 pane 不能被當成孤兒（三個重現情境，同一個 orphan_reason） ----------
 # (a) slug 先歸檔、後來又建了活卡：活卡的 pane 與同 cwd 的人工 pane 都不是孤兒
@@ -334,6 +431,32 @@ printf '{"o/foo":{"pane":"w1:p1","mode":"autopilot"},"x/lv":{"pane":"w1:p4","mod
 export HERDR_ENV=1
 J="$(OPSX_TEST_HERDR_AGENTS="$FX/agents7.json" opsx collect --root "$RP7")"; assert_eq "$?" 0 "回歸 collect: $J"
 assert_eq "$(q "$J" orphans)" '[]' "活卡的 pane、未掃描 repo 的活卡、人自己開的 pane 都不能是孤兒"
+export HERDR_ENV=""
+
+# ---------- review 第 2 輪的兩個 BUG：回歸測試 ----------
+# (1) opsx 已經關掉的 pane（stop 記 pane_closed_at、reap 記 reaped_at），條目還記著 pane id；herdr 之後把同一個 id 發給別人，
+#     人在那棵 worktree 開的 pane 三個條件都符合，不能因此被當成孤兒
+RP8="$FX/code-reap8"; mkdir -p "$RP8/o/.git" "$RP8/o/openspec/changes/st" "$RP8/o/openspec/changes/archive/2026-11-01-ar"
+O8="$(cd "$RP8/o" && pwd -P)"
+for d in "$RP8/o/openspec/changes/st" "$RP8/o/openspec/changes/archive/2026-11-01-ar"; do printf 'schema: opsx\nkind: dev\n' > "$d/.openspec.yaml"; printf '## 一句話\n\nx\n' > "$d/inbox.md"; done
+printf '{"o/st":{"pane":"w1:p3","mode":"stopped","pane_closed_at":"2026-11-10T10:00:00+08:00"},"o/ar":{"pane":"w1:p5","mode":"autopilot","reaped_at":"2026-11-10T10:00:00+08:00"}}' > "$OPSX_STATE_DIR/dispatch.json"
+{ printf '{"id":"cli:agent:list","result":{"agents":['
+  agent6 w1:p3 idle "$O8/.claude/worktrees/st"; printf ','
+  agent6 w1:p5 idle "$O8/.claude/worktrees/ar"
+  printf '],"type":"agent_list"}}'; } > "$FX/agents8.json"
+export HERDR_ENV=1
+J="$(OPSX_TEST_HERDR_AGENTS="$FX/agents8.json" opsx collect --root "$RP8")"; assert_eq "$?" 0 "回歸 1 collect: $J"
+assert_eq "$(q "$J" orphans)" '[]' "已經關掉的 pane（pane_closed_at / reaped_at）的 id 被重用時，新的 pane 不是孤兒"
+# (2) 兩個條目共用一棵 worktree 與一個 pane（chain 續接）：條目順序讓最後一筆是已歸檔的，活著的續接 pane 也不能列成孤兒
+RP9="$FX/code-reap9"; mkdir -p "$RP9/o/.git" "$RP9/o/openspec/changes/kid" "$RP9/o/openspec/changes/archive/2026-11-01-par"
+O9="$(cd "$RP9/o" && pwd -P)"
+for d in "$RP9/o/openspec/changes/kid" "$RP9/o/openspec/changes/archive/2026-11-01-par"; do printf 'schema: opsx\nkind: dev\n' > "$d/.openspec.yaml"; printf '## 一句話\n\nx\n' > "$d/inbox.md"; done
+printf '{"o/kid":{"pane":"w1:p1","mode":"autopilot","worktree":"%s/.claude/worktrees/par"},"o/par":{"pane":"w1:p1","mode":"autopilot","worktree":"%s/.claude/worktrees/par"}}' "$O9" "$O9" > "$OPSX_STATE_DIR/dispatch.json"
+{ printf '{"id":"cli:agent:list","result":{"agents":['
+  agent6 w1:p1 idle "$O9/.claude/worktrees/par"
+  printf '],"type":"agent_list"}}'; } > "$FX/agents9.json"
+J="$(OPSX_TEST_HERDR_AGENTS="$FX/agents9.json" opsx collect --root "$RP9")"; assert_eq "$?" 0 "回歸 2 collect: $J"
+assert_eq "$(q "$J" orphans)" '[]' "共用 worktree 與 pane 的活卡（kid）還在，不能列成孤兒"
 export HERDR_ENV=""
 
 # ---------- gate type 同義詞、type 不明、needs: run（gate-type-normalize） ----------
