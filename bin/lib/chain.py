@@ -14,6 +14,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import jsonfile  # noqa: E402
+import priority  # noqa: E402
 
 
 def _scalar(v: str):
@@ -144,7 +145,29 @@ def children(top: str, repo: str, parent: str, dispatch_path: str) -> list:
         if not pr.get("branch"):
             sys.exit("chain: workplan 的 PR「%s」沒有 branch，續接不知道要開哪條 branch；在 workplan 補上 branch" % pr.get("name"))
         out.append(("session" if session else "child", slug, pr["branch"], _kind(card)))
-    return out or [("skip", "沒有可以接的子卡")]
+    if not out:
+        return [("skip", "沒有可以接的子卡")]
+    return _by_level(top, out)
+
+
+def _by_level(top: str, rows: list) -> list:
+    """可接的子卡濾掉 P2 與等級算不出來的，其餘照等級排（同等級保留 workplan 順序）。"""
+    try:
+        lv = priority.levels(top)
+    except priority.PriorityError as e:
+        return [("skip", "等級算不出來，不自動續接：%s" % e)]
+    keep, held = [], []
+    for i, row in enumerate(rows):
+        got = lv[row[1]]
+        if "error" in got:
+            held.append("%s 等級算不出來（%s）" % (row[1], got["error"]))
+        elif got["level"] == "P2":
+            held.append("%s 是 P2（%s）" % (row[1], got["reason"]))
+        else:
+            keep.append((priority.LEVELS.index(got["level"]), i, row))
+    if not keep:
+        return [("skip", "可接的子卡都是 P2 或等級算不出來，不自動續接：%s" % "；".join(held))]
+    return [row for _, _, row in sorted(keep)]
 
 
 def feature_plan(top: str, feature: str) -> list:
