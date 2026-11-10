@@ -241,6 +241,10 @@ printf '{"Agentory-AI/eval-core":{"mode":"autopilot"' > "$OPSX_STATE_DIR/dispatc
 out="$(ugg "$UW1" 'git push --force origin main')"; assert_eq "$(decision "$out")" deny "unmapped: dispatch.json 壞掉且有這個 repo 的卡，先擋"
 printf '{"Agentory-AI/bt":{"mode":"autopilot"' > "$OPSX_STATE_DIR/dispatch.json"
 out="$(ugg "$UW2" 'git push --force origin main')"; assert_eq "$(decision "$out")" deny "unmapped: 有 slug 的分支，壞掉的 dispatch.json 裡有這張卡的 key 就擋"
+git -C "$R" worktree add -q "$R/.claude/worktrees/feat1" -b feat/chg-a/u
+UW3="$(cd "$R/.claude/worktrees/feat1" && pwd -P)"
+printf '{"Agentory-AI/feat1":{"mode":"interactive"},"Agentory-AI/other":{"mode":"autopilot"}}' > "$OPSX_STATE_DIR/dispatch.json"
+out="$(ugg "$UW3" 'git push --force origin main')"; assert_eq "$(decision "$out")" allow "unmapped: worktree 名對到 interactive 的卡是已登記的 session，不當成對不到卡"
 printf '{"Agentory-AI/eval-core":{"mode":"autopilot","grants":["migrate"]}}' > "$OPSX_STATE_DIR/dispatch.json"
 
 # ---------- mr format gate ----------

@@ -26,12 +26,14 @@ if [ -n "$slug" ]; then
   mode="$(card_mode "$repo" "$slug")" || dispatch_broken
 fi
 # dispatch.json 的 key 是派工時的名字，也就是 worktree 名（feature session 是 feature 名），可以跟 branch 的卡不同：兩個有一個受管就照受管的那個
+wmode=""
 case "$mode" in autopilot|drive) ;; *)
   if [ -n "$wt" ] && [ "$wt" != "$slug" ]; then
     wmode="$(card_mode "$repo" "$wt" || true)"
     case "$wmode" in autopilot|drive) slug="$wt"; mode="$wmode" ;; esac
   fi ;;
 esac
+[ -n "$mode" ] || mode="$wmode"   # worktree 名對到 interactive / stopped 的卡也是已登記的 session，不是對不到卡
 if [ -z "$mode" ]; then
   rc=0; repo_has_live_card "$repo" || rc=$?
   case "$rc" in 0) UNMAPPED=1 ;; 1) exit 0 ;; *) dispatch_broken ;; esac
