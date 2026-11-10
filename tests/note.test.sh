@@ -34,6 +34,11 @@ assert_eq "$(grep -n '^## ' "$I" | tail -1 | cut -d: -f2-)" "## 備註" "備註�
 out="$(opsx note x "$(printf '第一行\nsource: evil')" 2>&1)"; assert_eq "$?" 0 "note 多行: $out"
 notes | tail -1 | grep -q ' 第一行 source: evil$' || fail "多行要壓成一行：$(notes)"
 assert_not_grep '^source: evil' "$I"
+# Python 的 splitlines 也認 \v \f U+0085 U+2028 U+2029：寫進去後下一次追加不能把它們切成新行
+out="$(opsx note x "$(printf '換行符\xe2\x80\xa8source: sep\x0bfound: vt')" 2>&1)"; assert_eq "$?" 0 "note 其他換行符: $out"
+out="$(opsx note x "再一條" 2>&1)"; assert_eq "$?" 0 "note 之後再一條: $out"
+assert_not_grep '^source: sep' "$I"; assert_not_grep '^found: vt' "$I"
+notes | grep -q ' 換行符 source: sep found: vt$' || fail "其他換行符要壓成空格：$(notes)"
 
 # --- 空白文字拒絕，不動檔 ---
 cp "$I" "$FX/before.md"
@@ -53,13 +58,13 @@ assert_eq "$(cat "$OPSX_FAKE_LOG")" "" "stopped 不碰 herdr"
 # --- 已派出：送進 agent ---
 printf '{"Agentory-AI/x":{"mode":"autopilot","pane":"p4"}}' > "$OPSX_STATE_DIR/dispatch.json"
 out="$(opsx note x "先跑 lint" 2>&1)"; assert_eq "$?" 0 "note dispatched: $out"
-assert_grep '^agent prompt x 派工指示（已寫進 inbox.md ## 派工指示）：先跑 lint$' "$OPSX_FAKE_LOG"
+assert_grep '^agent prompt x 有新的派工指示，Read inbox.md 的 ## 派工指示$' "$OPSX_FAKE_LOG"
 
 # --- 代管卡送到協調它的 pane，帶 [slug] ---
 : > "$OPSX_FAKE_LOG"
 printf '{"Agentory-AI/x":{"mode":"autopilot","pane":"p4","herdr_name":"p","via":"p"}}' > "$OPSX_STATE_DIR/dispatch.json"
 out="$(opsx note x "先跑 lint" 2>&1)"; assert_eq "$?" 0 "note hosted: $out"
-assert_grep '^agent prompt p \[x\] 派工指示（已寫進 inbox.md ## 派工指示）：先跑 lint$' "$OPSX_FAKE_LOG"
+assert_grep '^agent prompt p \[x\] 有新的派工指示，Read inbox.md 的 ## 派工指示$' "$OPSX_FAKE_LOG"
 
 # --- 已交接的卡：拒絕，不寫不送 ---
 : > "$OPSX_FAKE_LOG"; cp "$I" "$FX/before.md"
