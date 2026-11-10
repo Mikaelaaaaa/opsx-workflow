@@ -564,6 +564,11 @@ t0="$(date +%s)"; out="$(OPSX_TEST_GLAB_SLEEP=6 OPSX_MR_TIMEOUT=1 sg)"; elapsed=
 assert_eq "$(decision "$out")" block "stop: 查詢逾時 → 擋"
 reason "$out" | grep -q '/babysit' || fail "stop: 逾時要叫 /babysit: $(reason "$out")"
 reason "$out" | grep -q 'glab mr view 212' || fail "stop: 逾時要帶錯誤文字: $(reason "$out")"
+# 不設 OPSX_MR_TIMEOUT：hook 自己的預設要在 10 秒內放棄
+t0="$(date +%s)"; out="$(unset OPSX_MR_TIMEOUT; OPSX_TEST_GLAB_SLEEP=9 sg)"; elapsed=$(( $(date +%s) - t0 ))
+[ "$elapsed" -lt 8 ] || fail "stop: 預設時限要小於 hook 的 10 秒，花了 ${elapsed} 秒"
+assert_eq "$(decision "$out")" block "stop: 預設時限逾時 → 擋"
+reason "$out" | grep -q '逾時' || fail "stop: 要說逾時: $(reason "$out")"
 printf '%s' "$OPEN_MR" > "$OPSX_TEST_GLAB_JSON"; done_report
 # 沒有卡的 branch 不擋
 git -C "$R" checkout -q -b scratch-x; out="$(sg)"; assert_eq "$out" "" "stop: branch 對不到卡不擋"

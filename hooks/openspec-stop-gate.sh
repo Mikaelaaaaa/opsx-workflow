@@ -11,6 +11,8 @@ source "$OPSX_ROOT/bin/lib/common.sh"
 source "$OPSX_ROOT/bin/lib/mr.sh"
 
 MAX_BLOCKS=3
+# 這支 hook 在 hooks.json 只有 10 秒：forge 查詢（mr_forge）限 5 秒，逾時當查不到
+export OPSX_MR_TIMEOUT="${OPSX_MR_TIMEOUT:-5}"
 
 # 印要擋的原因；空字串表示放行。
 stop_reason() { # <dir> <slug> <stage>

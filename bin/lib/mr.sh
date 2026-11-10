@@ -9,12 +9,25 @@
 #   OPSX_MR_CACHE_TTL 秒（預設 60，0 = 每次都抓）；抓不到不寫快取；寫入用 mktemp，並行不互撞。
 # gh 沒有未解 thread 的欄位（reviewThreads 不是 --json 的欄位），threads 條件用 reviewDecision != CHANGES_REQUESTED 近似。
 
-# forge CLI 的時間上限（秒，OPSX_MR_TIMEOUT，預設 5）：Stop hook 只有 10 秒。alarm 跨 exec 保留，逾時 SIGALRM 殺掉那支 CLI，
-# raw 變空，走下面「沒回東西」的 error。
-mr_forge() { perl -e 'alarm shift; exec @ARGV' "${OPSX_MR_TIMEOUT:-5}" "$@"; }
+# forge CLI 的時間上限：OPSX_MR_TIMEOUT 秒，沒設就不限時（只有 Stop hook 會設，它自己只有 10 秒）。
+# 逾時先 SIGTERM、1 秒後 SIGKILL：gh / glab 是 Go 程式，runtime 接住 SIGALRM 不處理，alarm 殺不掉。
+# 退出碼：124 逾時、127 找不到 perl 或那支 CLI；其餘照 CLI 的。
+mr_forge() {
+  [ -n "${OPSX_MR_TIMEOUT:-}" ] || { "$@"; return; }
+  perl -e '
+    my $t = shift; my $p = fork // die "fork: $!";
+    if (!$p) { exec @ARGV or exit 127 }
+    my $hit = 0;
+    $SIG{ALRM} = sub { $hit++; kill($hit == 1 ? "TERM" : "KILL", $p); alarm 1 };
+    alarm $t;
+    my $r; do { $r = waitpid($p, 0) } while ($r < 0 && $!{EINTR});
+    my $s = $?;
+    exit($hit ? 124 : ($s & 127) ? 128 + ($s & 127) : $s >> 8);
+  ' "$OPSX_MR_TIMEOUT" "$@"
+}
 
 mr_json() { # <card dir>
-  local d="$1" url ttl cache now mtime age raw forge iid proj host path out tmp
+  local d="$1" url ttl cache now mtime age raw rc=0 forge iid proj host path out tmp
   url="$(st_mr_url "$d")"
   if [ -z "$url" ]; then
     printf '{"url": null, "state": "none", "head_sha": null, "conditions": null, "blocked_on": null, "error": null, "created_at": null, "merged_at": null}\n'; return
@@ -29,18 +42,24 @@ mr_json() { # <card dir>
   host="$(printf '%s' "$url" | sed -E 's#^https?://([^/]+)/.*#\1#')"
   case "$url" in
     *github.com/*) forge=github; proj="$(printf '%s' "$url" | sed -E 's#^https?://[^/]+/([^/]+/[^/]+)/pull/.*#\1#')"
-      raw="$(mr_forge gh pr view "$iid" -R "$proj" --json state,isDraft,mergeable,mergeStateStatus,statusCheckRollup,reviewDecision,headRefOid,createdAt,mergedAt 2>/dev/null || true)" ;;
+      raw="$(mr_forge gh pr view "$iid" -R "$proj" --json state,isDraft,mergeable,mergeStateStatus,statusCheckRollup,reviewDecision,headRefOid,createdAt,mergedAt 2>/dev/null)" || rc=$? ;;
     *) forge=gitlab; path="$(printf '%s' "$url" | sed -E 's#^https?://[^/]+/(.*)/-/merge_requests/.*#\1#')"; proj="$host/$path"
-      raw="$(mr_forge glab mr view "$iid" -R "$proj" -F json 2>/dev/null || true)" ;;
+      raw="$(mr_forge glab mr view "$iid" -R "$proj" -F json 2>/dev/null)" || rc=$? ;;
   esac
-  out="$(OPSX_MR_RAW="$raw" "$OPSX_PY" -I - "$url" "$forge" "$proj" "$iid" <<'PY'
+  out="$(OPSX_MR_RAW="$raw" OPSX_MR_RC="$rc" "$OPSX_PY" -I - "$url" "$forge" "$proj" "$iid" <<'PY'
 import json, os, sys
 url, forge, proj, iid = sys.argv[1:5]
 raw = os.environ.get("OPSX_MR_RAW", "").strip()   # heredoc 占了 stdin，原始 JSON 走環境變數
 out = {"url": url, "state": "none", "head_sha": None, "conditions": None, "blocked_on": None, "error": None, "created_at": None, "merged_at": None}
 tool = "gh pr view %s -R %s" % (iid, proj) if forge == "github" else "glab mr view %s -R %s" % (iid, proj)
 if not raw:
-    out["error"] = "%s 沒回東西（沒登入、沒網路、或 project 不對）" % tool
+    rc = os.environ["OPSX_MR_RC"]
+    if rc == "124":
+        out["error"] = "%s 逾時（%s 秒）" % (tool, os.environ["OPSX_MR_TIMEOUT"])
+    elif rc == "127":
+        out["error"] = "%s 跑不起來：找不到 perl 或 %s" % (tool, tool.split()[0])
+    else:
+        out["error"] = "%s 沒回東西（沒登入、沒網路、或 project 不對）" % tool
     print(json.dumps(out)); sys.exit()
 try:
     d = json.loads(raw)
