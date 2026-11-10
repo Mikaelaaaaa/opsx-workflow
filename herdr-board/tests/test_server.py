@@ -364,6 +364,25 @@ class ServerTest(unittest.TestCase):
         status, _, body = self.req("/api/drop", {"slug": "x", "repo": r}, token=self.token)
         self.assertEqual(status, 400, "理由必填：%s" % body)
 
+    def test_merge_card_forwards_to_opsx(self):
+        # specs/board-web「server 轉呼叫 merge-card」
+        r = str(self.repo)
+        status, _, body = self.req("/api/merge-card", {"slug": "x", "into": "y", "repo": r}, token=self.token)
+        self.assertEqual(status, 200, body)
+        self.assertTrue(json.loads(body)["ok"], body)
+        self.assertEqual(self.log.read_text().strip(), "merge-card x --into y --repo %s" % r)
+
+    def test_merge_card_rejects_bad_fields(self):
+        # specs/board-web「merge-card 缺 into」
+        r = str(self.repo)
+        for b in ({"slug": "x", "repo": r}, {"slug": "x", "into": "../y", "repo": r},
+                  {"slug": "x", "into": "a/y", "repo": r}, {"slug": "x", "into": ""},
+                  {"slug": "x", "into": "y"}, {"into": "y", "repo": r},
+                  {"slug": "x", "into": "y", "repo": "/nonexistent-opsx-repo"}):
+            status, _, body = self.req("/api/merge-card", b, token=self.token)
+            self.assertEqual(status, 400, "%r: %s" % (b, body))
+        self.assertEqual(self.log.read_text(), "")
+
     def test_sync_with_and_without_source(self):
         status, _, body = self.req("/api/sync", {}, token=self.token)
         self.assertEqual(status, 200, body)
