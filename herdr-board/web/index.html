@@ -739,12 +739,13 @@ function focusAgent(agent){
 /* ＋新增：範圍選到單一 repo 就建在那個 repo，否則進待分類（board-inbox D6） */
 const newRepo=()=>ui.scope==='ws'&&ui.repo?(data.repo_paths||{})[ui.repo]||null:null;
 const MAX_ATTACH=10*1024*1024;
-/* 只有一行字而且沒有檔走 /api/new（source: me，跟以前一樣）；多行或有檔走 /api/paste，由 server 拆出一句話並把全文存成 paste.md */
+const ONE_LINER_MAX=200;  /* 同 herdr-board/server.py 的 ONE_LINER_MAX */
+/* 沒有檔、只有一行且不超過 ONE_LINER_MAX 字，走 /api/new（source: me，跟以前一樣）；多行、過長的一行或有檔走 /api/paste，由 server 拆出一句話並把全文存成 paste.md（/api/new 的 body 只有 64 KB） */
 function newRequest(text,files,repo){
   const lines=text.split(/\r\n|\r|\n/).filter(l=>l.trim());
   if(!lines.length&&!files.length)return null;
   const where=repo?{repo}:{};
-  if(lines.length===1&&!files.length)return {path:'new',body:{text:lines[0].trim(),...where}};
+  if(lines.length===1&&!files.length&&lines[0].trim().length<=ONE_LINER_MAX)return {path:'new',body:{text:lines[0].trim(),...where}};
   return {path:'paste',body:{text:text.trim(),files:files.map(f=>({name:f.name,data:f.data})),...where}};
 }
 function splitBySize(files){return [files.filter(f=>f.size<=MAX_ATTACH),files.filter(f=>f.size>MAX_ATTACH)];}
