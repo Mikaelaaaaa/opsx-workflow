@@ -27,6 +27,8 @@ $missing
     open="$(tasks_open "$d")"
     if [ "$open" -gt 0 ]; then
       [ "$(st_open_gates_blocking "$d")" -gt 0 ] && return 0
+      # 子 change 的 subagent 在背景做：session 只能等通知，不算沒接站
+      st_subagent_running "$d" && return 0
       printf '%s' "apply|opsx：$slug 的 tasks.md 還有 $open 個 task 沒勾。要停下來就先把做到一半的 task 做完勾起來（測試綠才准勾），或用 Edit 或 Write 寫 gates.md 說明卡在哪；不要帶著半個 task 收工。要繼續就 invoke /apply ${slug}，不要問要不要接。"
       return 0
     fi
@@ -72,14 +74,14 @@ titled_gate_open() { # <dir> <站>
 
 # 標題帶流水號：答完的舊 gate 跟新 gate 同名的話，opsx answer 只找得到第一個
 write_auto_gate() { # <dir> <slug> <站>
-  local f="$1/gates.md" n=0
+  local f="$1/gates.md" n=0 redo="重做 /$3 一次，做不完就把卡在哪寫進 gates.md"
   [ -f "$f" ] && n="$(grep -cE "^## 卡在接 /$3( #[0-9]+)?$" "$f" || true)"
   [ -s "$f" ] && printf '\n' >> "$f"
   {
     printf '## 卡在接 /%s #%s\ntype: decision\nstatus: open\nopened_at: %s\n' "$3" "$((n + 1))" "$(now_iso)"
     printf '問題: opsx：%s 連續 %s 次停在 /%s 之前沒有 invoke，卡在哪？\n' "$2" "$MAX_BLOCKS" "$3"
-    printf '選項: 重做 /%s 一次，做不完就把卡在哪寫進 gates.md (Recommended) | 停在這裡，把卡在哪寫進 gates.md 等人\n' "$3"
-    printf '建議: 先看 pane 和 report.md 再回\n'
+    printf '選項: %s (Recommended) | 停在這裡，把卡在哪寫進 gates.md 等人\n' "$redo"
+    printf '建議: %s\n' "$redo"
     printf '預設: hook 不再擋這一站\n'
   } >> "$f"
 }

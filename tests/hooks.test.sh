@@ -423,6 +423,41 @@ printf '{"phase":"review","step":7,"total":7,"label":"report.md 寫好","tests":
 out="$(sg)"; assert_eq "$(decision "$out")" block "stop: review 最後一步 report 後有新 commit 照擋"
 printf '{"phase":"apply","step":8,"total":8,"label":"x","tests":"green","at":"2026-11-05T15:00:00+08:00"}' > "$C/status.json"
 rm -f "$C/gates.md"; rm -rf "$STOP_STATE"
+# 子 change 的 subagent 在背景做：主殼未勾但只能等通知，不計次、不寫 gate
+mk_sub() { # <子> <worker> <at>
+  local s="$C/subs/$1"; mkdir -p "$s/specs/x"
+  printf 'schema: opsx\nparent: eval-core\n' > "$s/.openspec.yaml"
+  printf '## Why\n' > "$s/proposal.md"; printf '## Context\n' > "$s/design.md"
+  printf '## 1. a\n\n- [ ] 1.1 t\n  - 驗收：a\n  - 測試：b\n' > "$s/tasks.md"
+  printf '### Requirement: r\n\n#### Scenario: s\n' > "$s/specs/x/spec.md"
+  printf '{"phase":"apply","step":0,"total":4,"label":"x","tests":"unknown","at":"%s","worker":"%s"}' "$3" "$2" > "$s/status.json"
+}
+FRESH="$( source "$OPSX_ROOT/bin/lib/common.sh"; now_iso )"
+printf '## 1. x\n\n- [ ] 1.1 `attach-cli`：a\n- [x] 1.2 `attach-board`：b\n' > "$C/tasks.md"
+mk_sub attach-cli subagent-attach-cli "$FRESH"
+out="$(KEEP=1 sg)"; out="$(KEEP=1 sg)"; out="$(KEEP=1 sg)"; out="$(KEEP=1 sg)"; out="$(KEEP=1 sg)"
+assert_eq "$out" "" "stop: subagent 在做未疊的子 change，連停五次都放行"
+assert_eq "$([ -e "$C/gates.md" ] && echo y || echo n)" n "stop: subagent 在做不寫「卡在接 /apply」gate"
+assert_eq "$([ -e "$STOP_STATE/Agentory-AI-eval-core" ] && echo y || echo n)" n "stop: subagent 在做不留擋的次數"
+printf '## 1. x\n\n- [x] 1.1 `attach-cli`：a\n- [ ] 1.2 `attach-board`：b\n' > "$C/tasks.md"
+out="$(sg)"; assert_eq "$(decision "$out")" block "stop: 子 change 已疊（主殼已勾）、沒有別的 subagent 在跑"; reason "$out" | grep -q '1 個 task 沒勾' || fail "stop: 已疊要說幾個 task 沒勾"
+mk_sub attach-board subagent-attach-board "$FRESH"
+out="$(sg)"; assert_eq "$out" "" "stop: 另一個子 change 的 subagent 還在做"
+printf '## 1. x\n\n- [ ] 1.1 `attach-cli`：a\n- [x] 1.2 `attach-board`：b\n' > "$C/tasks.md"
+mk_sub attach-cli subagent-attach-cli "2020-01-01T00:00:00+08:00"
+out="$(sg)"; assert_eq "$(decision "$out")" block "stop: subagent status 超過 120 分鐘"
+mk_sub attach-cli session "$FRESH"
+out="$(sg)"; assert_eq "$(decision "$out")" block "stop: 子殼 worker 是 session"
+mk_sub attach-cli subagent-attach-cli "not-a-time"
+out="$(sg)"; assert_eq "$(decision "$out")" block "stop: at 解析不了照擋"
+rm -rf "$C/subs"; rm -f "$C/gates.md"; rm -rf "$STOP_STATE"
+# hook 自己寫的「卡在接」gate：建議是選項之一，不是 hook 內部說明
+printf '## 1. x\n\n- [ ] 1.1 a\n' > "$C/tasks.md"
+out="$(KEEP=1 sg)"; out="$(KEEP=1 sg)"; out="$(KEEP=1 sg)"; out="$(KEEP=1 sg)"
+assert_grep '^建議: 重做 /apply 一次，做不完就把卡在哪寫進 gates.md$' "$C/gates.md"
+assert_not_grep '先看 pane' "$C/gates.md"
+printf '## 1. x\n\n- [x] 1.1 a\n- [x] 1.2 b\n' > "$C/tasks.md"
+rm -f "$C/gates.md"; rm -rf "$STOP_STATE"
 # 卡在 linked worktree：只算卡自己 branch 的 commit，主 checkout 是別的 session 在用
 sgw() { [ -n "${KEEP:-}" ] || rm -rf "$STOP_STATE"; printf '{"cwd":"%s","stop_hook_active":false}' "$WT" | bash "$H/openspec-stop-gate.sh" 2>/dev/null; true; }
 done_report; sleep 1
