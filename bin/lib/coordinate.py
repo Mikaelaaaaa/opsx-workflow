@@ -169,7 +169,7 @@ class Round:
         key = card_key(c)
         entry = self.dispatch_file.get(key)
         self.log("++ %s 已在 forge 合併、agent 不在，收尾" % key)
-        shared = self.session_siblings(key, entry, top)
+        shared = self.session_siblings(key, top)
         if entry and entry.get("mode") != "stopped" and not shared:
             self.act(["opsx", "stop", c["slug"], "--repo", top])
         if not self.mark_merged(top, c["slug"]):
@@ -341,18 +341,14 @@ class Round:
             return
         self.answer(c, top, w["gate_id"], pick)
 
-    def session_siblings(self, key, entry, top):
-        """條目帶 feature 時，同 repo、同 feature、還沒停掉、卡還沒歸檔的其他卡的 key。
-        session 共用時歸檔的卡條目不標 stopped（標了要送 stop 給共用的 pane），所以用卡的資料夾還在不在判斷。"""
-        if not entry or not entry.get("feature"):
-            return []
-        repo = key.split("/", 1)[0]
-        return [k for k, v in self.dispatch_file.items()
-                if k != key and k.startswith(repo + "/") and v.get("feature") == entry["feature"] and v.get("mode") != "stopped"
-                and os.path.isdir(os.path.join(top, "openspec", "changes", k.split("/", 1)[1]))]
+    def session_siblings(self, key, top):
+        """同 feature 還活著的其他卡的 key（chain.session_siblings）。"""
+        repo, slug = key.split("/", 1)
+        return ["%s/%s" % (repo, s) for s in chain.session_siblings(top, repo, slug, self.dispatch_file)]
 
     def redispatch_feature(self, c, top, why):
-        """session 的 pane 不在了：同 feature 每張沒停的卡 stop 一次，再整個 feature 重派一次。memo 以 <repo>/@<feature> 記。"""
+        """session 的 pane 不在了：只停 session 條目 <repo>/@<feature>，再整個 feature 重派一次。memo 以同一個 key 記。
+        成員條目不動：還是 stopped 的就是人停的，dispatch --feature 會跳過它。"""
         feature = c["dispatch"]["feature"]
         key = "%s/@%s" % (c["repo"], feature)
         last = self.memo["_redispatched"].get(key)
@@ -366,11 +362,8 @@ class Round:
         if "agent" not in c["dispatch"]:
             self.log("?? %s %s，但 dispatch.json 沒記 agent，不知道派給誰" % (key, why))
             return
-        self.log("!! %s %s，各卡 stop 後整個 feature 重派" % (key, why))
-        mine = card_key(c)
-        for k in sorted([mine] + self.session_siblings(mine, self.dispatch_file.get(mine), top)):
-            self.act(["opsx", "stop", k.split("/", 1)[1], "--repo", top])
-            self.dispatch_file[k]["mode"] = "stopped"
+        self.log("!! %s %s，停 session 後整個 feature 重派" % (key, why))
+        self.act(["opsx", "stop", "@" + feature, "--repo", top])
         rc, _, err = self.act(["opsx", "dispatch", "--feature", feature, "--agent", c["dispatch"]["agent"], "--mode", "autopilot", "--repo", top])
         if rc != 0:
             self.log("?? %s 重派開不了 session：%s" % (key, err[:200]))

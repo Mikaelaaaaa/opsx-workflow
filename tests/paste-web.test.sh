@@ -67,7 +67,12 @@ const api = {post: async (path, body) => { posts.push({path, body}); return post
 const readers = [];
 class FileReader { readAsDataURL(f) { readers.push(() => { this.result = 'data:x;base64,' + f.b64; this.onload(); }); } }
 const ui = {busy: false, scope: 'all', repo: null};
-const env = {$, api, FileReader, ui, data: {}, refresh: async () => {}, esc: x => x, setTimeout: () => 0, clearTimeout: () => {}};
+// act 交給動作接線段的 runAct；那段與它用到的送出中、刷新排程段照 board-pending.test.sh 切出來，跑真的流程
+const cut = name => { const a = html.indexOf(`/* ${name} start */`), b = html.indexOf(`/* ${name} end */`);
+  if (a < 0 || b < a) throw new Error(`index.html 找不到標記 ${name} start / end`); return html.slice(a, b); };
+const {runAct} = new Function(cut('送出中') + cut('刷新排程') + cut('動作接線') + ';return {runAct};')();
+const env = {$, api, FileReader, ui, data: {}, refresh: async () => {}, esc: x => x, setTimeout: () => 0, clearTimeout: () => {},
+  runAct, live: {pending: [], seq: 0, rs: null}, render: () => {}};
 const names = Object.keys(env);
 // toast 是切片裡的 function 宣告，只能在切片裡換掉；訊息收進 globalThis.toasts
 globalThis.toasts = toasts;

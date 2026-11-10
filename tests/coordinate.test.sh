@@ -914,16 +914,18 @@ assert_grep '^opsx stop m4' "$OPSX_FAKE_LOG"
 assert_grep "worktree remove $R/.claude/worktrees/g" "$OPSX_FAKE_LOG"
 mv "$FX/m3-archived" "$R/openspec/changes/m3"
 
-# session 的 pane 不在了：同 feature 各卡 stop 一次，整個 feature 重派一次，不逐卡派
+# session 的 pane 不在了：只停 session 條目一次，整個 feature 重派一次，不逐卡 stop、不逐卡派，成員條目不動
 sess_wp merged; rm -f "$MEMO"
-printf '{"demo/m3":{%s,"branch":"feat/m3/u"},"demo/m4":{%s,"branch":"feat/m4/u"}}' "$G_SESS" "$G_SESS" > "$DISP"
+G_ENTRY='"mode":"autopilot","agent":"claude","pane":"w1:p9","drive_pid":null'
+printf '{"demo/@g":{%s},"demo/m3":{%s,"branch":"feat/m3/u"},"demo/m4":{%s,"branch":"feat/m4/u"}}' "$G_ENTRY" "$G_SESS" "$G_SESS" > "$DISP"
+cp "$DISP" "$FX/disp-before.json"
 GD='{"mode":"autopilot","agent":"claude","pane":"w1:p9","feature":"g","drive_pid":null}'
 cards '[{"slug":"m3","section":"進行中","dispatch":'"$GD"',"agent_status":"unknown"},{"slug":"m4","section":"進行中","dispatch":'"$GD"',"agent_status":"unknown"}]'
 round || fail "rc: $(cat "$FX/out")"
 got="$(grep -E '^opsx (stop|dispatch)' "$OPSX_FAKE_LOG")"
-assert_eq "$got" "opsx stop m3 --repo $R
-opsx stop m4 --repo $R
-opsx dispatch --feature g --agent claude --mode autopilot --repo $R" "session 死掉：各卡 stop、feature 重派一次"
+assert_eq "$got" "opsx stop @g --repo $R
+opsx dispatch --feature g --agent claude --mode autopilot --repo $R" "session 死掉：停 session 條目、feature 重派一次"
+assert_eq "$(jq -S '{m3: ."demo/m3", m4: ."demo/m4"}' "$DISP")" "$(jq -S '{m3: ."demo/m3", m4: ."demo/m4"}' "$FX/disp-before.json")" "成員條目不動"
 assert_eq "$(notes)" 0 "session 重派成功（含同一輪第二張卡）不通知：$(cat "$OPSX_FAKE_LOG")"
 # 十分鐘內第二次掛掉：新 memo、5 分鐘前重派過；兩張卡一件事，通知一次，鍵綁 feature 與那個時間
 rm -f "$MEMO"
@@ -949,6 +951,17 @@ assert_eq "$(notes)" 0 "m4 還卡著：m3 不等了不能讓鍵被清而重送�
 cards '[{"slug":"m3","section":"進行中","dispatch":'"$GD"',"agent_status":"working"},{"slug":"m4","section":"進行中","dispatch":'"$GD"',"agent_status":"working"}]'
 round || fail "rc: $(cat "$FX/out")"
 assert_eq "$(memo_get _notified demo/@g/blocked/w1:p9)" "" "兩張都不等了要清鍵：$(cat "$MEMO")"
+rm -f "$MEMO"
+
+# 人停的成員卡不被撿回（C-human-stop）：人先停 m4，之後 session 的 pane 不在了
+GS='{"mode":"stopped","agent":"claude","pane":"w1:p9","feature":"g","drive_pid":null}'
+printf '{"demo/@g":{%s},"demo/m3":{%s,"branch":"feat/m3/u"},"demo/m4":{"mode":"stopped","agent":"claude","pane":"w1:p9","herdr_name":"g","via":"@g","feature":"g","drive_pid":null,"branch":"feat/m4/u"}}' "$G_ENTRY" "$G_SESS" > "$DISP"
+cards '[{"slug":"m3","section":"進行中","dispatch":'"$GD"',"agent_status":"unknown"},{"slug":"m4","section":"進行中","dispatch":'"$GS"',"agent_status":"unknown"}]'
+round || fail "rc: $(cat "$FX/out")"
+got="$(grep -E '^opsx (stop|dispatch)' "$OPSX_FAKE_LOG")"
+assert_eq "$got" "opsx stop @g --repo $R
+opsx dispatch --feature g --agent claude --mode autopilot --repo $R" "人停 m4 後 session 死掉：只停 session 條目、feature 重派一次"
+assert_eq "$(jq -r '."demo/m4".mode' "$DISP")" stopped "人停的 m4 仍是 stopped"
 rm -f "$MEMO"
 cp "$WP0" "$R/openspec/workplan.yaml"; printf '{}' > "$DISP"
 echo "coordinate: ok"
