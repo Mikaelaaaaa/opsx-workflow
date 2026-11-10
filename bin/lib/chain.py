@@ -199,13 +199,18 @@ def feature_plan(top: str, feature: str) -> list:
 
 
 def session_siblings(top: str, repo: str, slug: str, dispatch: dict) -> list:
-    """<slug> 的條目帶 feature 時，同 repo、同 feature、沒停掉、卡還沒歸檔的其他卡，依 workplan 的 PR 順序；不是 session 代管回空。
-    opsx next 與 coordinate 共用。session 共用時歸檔的卡條目不一定標 stopped，所以用卡的資料夾還在不在判斷。"""
+    """<slug> 的條目帶 feature 時，同 feature 還活著的其他成員（session_members 去掉自己）；不是 session 代管回空。coordinate 用。"""
     feature = (dispatch.get("%s/%s" % (repo, slug)) or {}).get("feature")
     if not feature:
         return []
+    return [c for c in session_members(top, repo, feature, dispatch) if c != slug]
+
+
+def session_members(top: str, repo: str, feature: str, dispatch: dict) -> list:
+    """同 repo、feature 是 <feature>、沒停掉、卡還沒歸檔的卡，依 workplan 的 PR 順序。opsx next 與 session_siblings 共用。
+    session 共用時歸檔的卡條目不一定標 stopped，所以用卡的資料夾還在不在判斷。"""
     cards = [k.split("/", 1)[1] for k, v in dispatch.items()
-             if k.startswith(repo + "/") and k != "%s/%s" % (repo, slug) and v.get("feature") == feature and v.get("mode") != "stopped"
+             if k.startswith(repo + "/") and not k.startswith(repo + "/@") and v.get("feature") == feature and v.get("mode") != "stopped"
              and os.path.isdir(os.path.join(top, "openspec", "changes", k.split("/", 1)[1]))]   # 已歸檔的卡不算
     wp_path = os.path.join(top, "openspec", "workplan.yaml")
     prs = [pr for f in load_workplan(wp_path).get("features") or [] for pr in f.get("prs") or []] if os.path.exists(wp_path) else []
@@ -295,7 +300,9 @@ if __name__ == "__main__":
         jsonfile.update(sys.argv[2], register_continue)
         print(old_name, mode)   # 寫成功才印：chain.sh 靠退出碼判斷寫入成敗
     elif len(sys.argv) == 6 and sys.argv[1] == "siblings":
-        print("\n".join(session_siblings(sys.argv[2], sys.argv[3], sys.argv[4], jsonfile.load(sys.argv[5]))))
+        top, repo, feature, d = sys.argv[2], sys.argv[3], sys.argv[4], jsonfile.load(sys.argv[5])
+        if "%s/@%s" % (repo, feature) in d:   # 沒有 session 條目就不是 session，不列成員
+            print("\n".join(session_members(top, repo, feature, d)))
     elif len(sys.argv) == 5 and sys.argv[1] == "deps":
         print("\n".join(sub_deps(*sys.argv[2:])))
     elif len(sys.argv) == 4 and sys.argv[1] == "feature":
@@ -308,4 +315,4 @@ if __name__ == "__main__":
         print(jsonfile.load(sys.argv[2])[os.environ["OPSX_KEY"]].get("mode"))
         jsonfile.update(sys.argv[2], register_fan_out)
     else:
-        sys.exit("用法：chain.py children <top> <repo> <父卡 slug> <dispatch.json> | chain.py feature <top> <feature> | chain.py deps <top> <主> <子> | chain.py continue|session|fan-out <dispatch.json>")
+        sys.exit("用法：chain.py children <top> <repo> <父卡 slug> <dispatch.json> | chain.py feature <top> <feature> | chain.py deps <top> <主> <子> | chain.py siblings <top> <repo> <feature> <dispatch.json> |chain.py continue|session|fan-out <dispatch.json>")

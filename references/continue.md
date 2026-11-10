@@ -22,7 +22,7 @@ How:
 
 Merging is never part of this chain. The flow stops at "waiting for merge".
 
-A feature session (`opsx dispatch --feature`, the card's dispatch.json entry has `feature`) runs several main changes in one pane. When babysit stops at "waiting for merge", run `opsx next` on that card's branch. It prints `/<stage> <主>` for the next main change of the same feature that has no MR yet, or `none`. On a command, invoke it now: switch to that main change's PR branch (apply step 2 does) and continue. On `none`, stop. Main changes that wait on a merge are woken by `opsx chain` later.
+A feature session (`opsx dispatch --feature`, the card's dispatch.json entry has `feature`) runs several main changes in one pane. When babysit stops at "waiting for merge", run `opsx next` in the session's worktree. It prints `/<stage> <主>` for the next main change of the same feature that has no MR yet, or `none`. On a command, invoke it now: switch to that main change's PR branch (apply step 2 does) and continue. On `none`, stop. Main changes that wait on a merge are woken by `opsx chain` later.
 
 When a feature session receives `[<slug>] stop`, the user stopped that one main change on the board. If you are working on it, stop before the next commit boundary: do not commit the half-done work, leave it in the worktree. Do not pick that main change up again; `opsx next` skips it because its dispatch.json entry is `stopped`. Then run `opsx next` and continue with what it prints, or stop on `none`. The card comes back only when the user runs `opsx dispatch <slug>`, which sends `[<slug>] /<stage> <slug>` to this session.
 
