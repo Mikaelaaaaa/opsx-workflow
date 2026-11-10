@@ -7,7 +7,6 @@
 """
 import datetime
 import json
-import operator
 import os
 import re
 import subprocess
@@ -303,12 +302,6 @@ class Round:
 
     def dispatch_new(self, cards, repo_paths):
         n = 0
-        # collect 的快照裡，這一輪 handle_gate 剛停下並 park 的卡 dispatch 還在，不算進行中
-        running = [c for c in cards if c["dispatch"] and card_key(c) not in self.memo["_parked"]]
-        busy = len(running)
-        # P0 要位子時停的對象：slug 字母序；開了 MR 的卡在等合併或 babysit，停掉會中斷人要合的東西
-        p2 = sorted((c for c in running if not c["mr"] and self.level(repo_paths[c["repo"]], c["slug"]).get("level") == "P2"),
-                    key=operator.itemgetter("slug"))
         ranked = sorted((self.rank(c, repo_paths[c["repo"]]), i, c) for i, c in enumerate(cards))
         for _, _, c in ranked:
             key, top = card_key(c), repo_paths[c["repo"]]
@@ -345,19 +338,11 @@ class Round:
             if got["level"] == "P2" and not parked:
                 self.log("-- %s 是 P2（%s），不自動派" % (key, got["reason"]))
                 continue
+            # P0（自己判出或繼承來的）排最前、一起派，不佔每輪上限；在跑的卡一律不停
             p0 = got["level"] == "P0"
             if not p0 and n >= MAX_DISPATCH:
                 self.log("-- 這輪派滿 %d 張，%s 下輪" % (MAX_DISPATCH, key))
                 continue
-            if p0 and busy >= MAX_DISPATCH:
-                if p2:
-                    old = p2.pop(0)
-                    self.log("!! 停 %s（P2）讓 %s（P0）先跑" % (card_key(old), key))
-                    rc, _, _ = self.act(["opsx", "stop", old["slug"], "--repo", repo_paths[old["repo"]]])
-                    if rc == 0:
-                        busy -= 1
-                else:
-                    self.log("!! 進行中已有 %d 張、沒有 P2 可停，照派 P0 %s" % (busy, key))
             if parked and not parked.get("answered"):
                 text = "停下之後合進 main 的 PR：%s。照最新的 main 繼續；你等的那張還沒合就再開 gate。" % "、".join(newly)
                 rc, _, err = self.act(["opsx", "answer", c["slug"], "--gate", parked["gate"], "--repo", top, "--", text])
@@ -372,7 +357,6 @@ class Round:
             if rc != 0:
                 self.log("?? %s 派不出去：%s" % (key, err[:200]))
                 continue
-            busy += 1
             self.memo["_parked"].pop(key, None)
 
 

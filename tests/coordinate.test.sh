@@ -493,21 +493,12 @@ assert_grep '^opsx dispatch card-p0 ' "$OPSX_FAKE_LOG"
 assert_eq "$(count '^opsx dispatch q7 ')" 0 "第七張 P1 不派"
 grep '派滿' "$LOG" | grep -q q7 || fail "第七張 P1 要記派滿：$(cat "$LOG")"
 
-# 進行中滿了先停 P2：六張進行中，card-zz 與 card-old 是 P2，停 slug 字母序第一張 card-old
+# 在跑的卡一律不停：六張進行中（含兩張 P2）又來一張 P0，照派 P0、不 stop 任何卡
 busy() { printf '{"slug":"%s","section":"進行中","dispatch":%s,"agent_status":"working"}' "$1" "$D"; }
 cards "[$(busy r1),$(busy r2),$(busy r3),$(busy r4),$(busy card-zz),$(busy card-old),{\"slug\":\"card-p0\"}]"
 round || fail "rc: $(cat "$FX/out")"
-got="$(grep -E '^opsx (stop|dispatch)' "$OPSX_FAKE_LOG")"
-assert_eq "$got" "opsx stop card-old --repo $R
-opsx dispatch card-p0 --agent claude --mode autopilot --kind dev --repo $R" "先停 P2 再派 P0：$(cat "$OPSX_FAKE_LOG")"
-grep '!!' "$LOG" | grep 'card-old' | grep -q 'P0' || fail "停 P2 要記 !! 含 card-old 與 P0：$(cat "$LOG")"
-
-# 滿了但沒有 P2 可停：照派 P0、記 !!
-cards "[$(busy r1),$(busy r2),$(busy r3),$(busy r4),$(busy r5),$(busy r6),{\"slug\":\"card-p0\"}]"
-round || fail "rc: $(cat "$FX/out")"
-assert_eq "$(count '^opsx stop')" 0 "沒有 P2 不停：$(cat "$OPSX_FAKE_LOG")"
+assert_eq "$(count '^opsx stop')" 0 "在跑的卡不停：$(cat "$OPSX_FAKE_LOG")"
 assert_grep '^opsx dispatch card-p0 ' "$OPSX_FAKE_LOG"
-grep '!!' "$LOG" | grep -q 'card-p0' || fail "沒 P2 可停要記 !! 含 P0 的卡：$(cat "$LOG")"
 
 # 等級算不出來不派：impact 沒有 evidence；同一輪別的卡照派
 cards '[{"slug":"card-bad"},{"slug":"card-a"}]'

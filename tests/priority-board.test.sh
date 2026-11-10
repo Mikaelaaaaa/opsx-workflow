@@ -13,7 +13,12 @@ const s = html.indexOf(START), e = html.indexOf(END);
 if (s < 0) throw new Error(`index.html 找不到標記 ${START}`);
 if (e < s) throw new Error(`index.html 找不到 ${START} 之後的標記 ${END}`);
 const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[c]));
-const {priorityBadge, milestoneLine} = new Function('esc', html.slice(s, e) + ';return {priorityBadge, milestoneLine};')(esc);
+const {priorityBadge, milestoneLine, PRIO_HINT} = new Function('esc', html.slice(s, e) + ';return {priorityBadge, milestoneLine, PRIO_HINT};')(esc);
+
+// 改等級的提示：等級只排還沒派出去的卡，在跑的卡不受影響
+assert.ok(PRIO_HINT.includes('還沒派出去') && PRIO_HINT.includes('不會') && PRIO_HINT.includes('被停'), `提示文字：${PRIO_HINT}`);
+const ctl = html.slice(html.indexOf('function prioCtl'), html.indexOf('function prioCtl') + 1200);
+assert.ok((ctl.match(/PRIO_HINT/g) || []).length >= 2, `改等級按鈕與編輯列都要帶提示：${ctl}`);
 
 // 徽章與理由
 const p0 = {repo: 'r', slug: 'a', priority: {level: 'P0', reason: 'P0：security（附證據）', overridden: false}};

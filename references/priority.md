@@ -37,7 +37,8 @@ evidence: tests/auth.test.sh 第 3 案：未登入可讀 /admin（log 貼在 ## 
 - workplan 沒設 `current_milestone`：在 workplan 裡的 planned 卡一律 P1（照舊自動派）；設了才開始依 milestone 篩（D8）。
 - 不在 workplan 的 planned 卡是 P2。agent 自己開的卡預設 planned、不在 workplan，所以是 P2，等使用者升級才派。
 - 依賴繼承：沿 workplan 的 `depends-on`（PR 與 feature 層）反向走，有更高等級的卡直接或間接在等它，就升到那一級，理由寫「P0：<那張卡> 在等它」。
-- 使用者覆寫的卡以覆寫為準，不再往上升（見「使用者覆寫」）。
+- 使用者覆寫的卡以覆寫為準，不再往上升（見「使用者覆寫」）。覆寫只管那張卡自己，不切斷依賴傳遞。
+- 等級只影響還沒派出去的卡的排隊順序；已經在跑的卡不會因為等級變動（升或降）被停、被暫停或被搶位子。P0（自己判出或繼承來的）排最前、一起派、不受每輪上限。
 
 `opsx priority <slug>` 印 `<等級>\t<理由>`，例「P0：security（附證據）」「P1：在 <milestone>（<goal>）清單裡」「P2：不在 workplan」。
 

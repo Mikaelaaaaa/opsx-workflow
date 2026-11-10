@@ -298,6 +298,7 @@ const since=c=>ago(c.status&&c.status.at||c.dispatch&&c.dispatch.started_at||c.s
 
 /* ---------- 等級與 milestone：collect 的 priority 與 milestones，tests/priority-board.test.sh 切片執行 ---------- */
 const PRIO_BADGE={P0:'danger',P1:'warn',P2:'line'};
+const PRIO_HINT='等級只影響還沒派出去的卡的排隊順序；已經在跑的卡不會因為等級變動（升或降）被停、被暫停或被搶位子。';
 /* 列上只放徽章；withReason 給展開區，多放理由 */
 function priorityBadge(card,withReason){
   const p=card.priority;if(!p)return '';
@@ -415,9 +416,9 @@ function rowInbox(c){
 }
 /* 改等級就地選等級、填理由；理由空白時送出鈕不能按（server 也會回 400）。打到一半的字存在 ui.prioText，重畫不丟 */
 function prioCtl(c){
-  if(ui.prio!==key(c))return `<button class="sm" data-act="prio-open">改等級</button>`;
+  if(ui.prio!==key(c))return `<button class="sm" data-act="prio-open" title="${esc(PRIO_HINT)}">改等級</button>`;
   const cur=ui.prioLevel||(c.priority&&c.priority.level);
-  return `<select class="prio-level" aria-label="等級">${['P0','P1','P2'].map(l=>`<option${l===cur?' selected':''}>${l}</option>`).join('')}</select><input type="text" class="prio-reason" aria-label="改等級的理由" placeholder="理由（必填），Enter 送出" value="${esc(ui.prioText)}"><button class="primary sm" data-act="prio-go"${ui.prioText.trim()?'':' disabled'}>送出</button>`;
+  return `<select class="prio-level" aria-label="等級">${['P0','P1','P2'].map(l=>`<option${l===cur?' selected':''}>${l}</option>`).join('')}</select><input type="text" class="prio-reason" aria-label="改等級的理由" placeholder="理由（必填），Enter 送出" value="${esc(ui.prioText)}"><button class="primary sm" data-act="prio-go"${ui.prioText.trim()?'':' disabled'}>送出</button><span class="muted">${esc(PRIO_HINT)}</span>`;
 }
 /* 捨棄就地要一行理由：Enter 送出、Esc 取消；打到一半的字存在 ui.dropText，重畫不丟 */
 function dropCtl(id){
