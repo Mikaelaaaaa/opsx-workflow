@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # opsx stop <slug> [--repo <top>]：板上的「停止」。kill drive 迴圈、關掉 pane、dispatch.json 標 stopped。
-# worktree 和 branch 留著（重派會重用）。
+# worktree 和 branch 留著（重派會重用）。opsx stop @<feature> 停 feature session：關它的 pane、只標 session 條目，成員條目不動。
 
 # shellcheck source=/dev/null
 source "$OPSX_ROOT/bin/lib/route.sh"
@@ -42,8 +42,11 @@ def put(d):
     if os.environ["OPSX_CLOSED"]: e["pane_closed_at"] = os.environ["OPSX_AT"]
 jsonfile.update(sys.argv[1], put)
 PY
-  if [ -d "$top/openspec/changes/$slug" ]; then log_row "$top/openspec/changes/$slug" 你 已停止 停止
-  else reap_row "$repo/$slug" "停止（卡已歸檔）"; fi
+  case "$slug" in
+    @*) reap_row "$repo/$slug" "停止 session（成員條目不動）" ;;
+    *) if [ -d "$top/openspec/changes/$slug" ]; then log_row "$top/openspec/changes/$slug" 你 已停止 停止
+       else reap_row "$repo/$slug" "停止（卡已歸檔）"; fi ;;
+  esac
   say "stop: $repo/$slug 標 stopped"
 }
 

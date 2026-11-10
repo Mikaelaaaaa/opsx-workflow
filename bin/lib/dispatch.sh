@@ -36,30 +36,66 @@ opsx_dispatch() {
   case "$agent" in claude|codex) ;; *) die "dispatch: --agent 只收 claude|codex" ;; esac
   case "$mode" in interactive|autopilot) ;; drive) mode=autopilot ;; *) die "dispatch: --mode 只收 interactive|autopilot（drive 是 autopilot 的舊名）" ;; esac
   printf '%s' "$slug" | grep -qE '^[a-z][a-z0-9_-]{0,31}$' || die "dispatch: slug 要符合 [a-z][a-z0-9_-]{0,31}（herdr agent 名）：$slug"
-  local card="$slug"
-  if [ -n "$feature" ]; then
-    plan="$("$OPSX_PY" -I "$OPSX_ROOT/bin/lib/chain.py" feature "$top" "$feature")" || exit 2
-    card="$(printf '%s' "$plan" | head -1 | cut -f1)"
-  fi
-  local d="$top/openspec/changes/$card" repo; repo="$(basename "$top")"
-  [ -d "$d" ] || die "dispatch: 沒有這張卡：$d"
+  local card="$slug" repo; repo="$(basename "$top")"
   command -v herdr >/dev/null || die "dispatch: 找不到 herdr"
   ensure_dir "$OPSX_STATE_DIR"
 
   # herdr agent 只認名字（agent start <name>），新卡的名字 = slug。還在跑的條目用的 herdr 名（herdr_name，沒有就是它的 slug）
   # 跟這個 slug 一樣時，prompt 會送錯人，所以拒絕；代管卡的 herdr 名是協調它的 pane。
-  # 單一續接交出去的條目（herdr 名已改成子卡、列在 handed_to 裡）只是紀錄，不算；fan-out 的父卡 pane 還活著、名字還是父卡，照算
-  OPSX_KEY="$repo/$slug" OPSX_SLUG="$slug" OPSX_LIB="$OPSX_ROOT/bin/lib" "$OPSX_PY" -I - "$OPSX_STATE_DIR/dispatch.json" <<'PY' || exit 2
+  # 單一續接交出去的條目（herdr 名已改成子卡、列在 handed_to 裡）只是紀錄，不算；fan-out 的父卡 pane 還活著、名字還是父卡，照算。
+  # feature session 自己的條目是 <repo>/@<feature>，pane 活不活只看它：它還活著就算成員全停了，herdr 上 feature 名的 agent 也還在；
+  # 它停了，同 repo 成員條目（via @<feature>）的 agent 也跟著不在，不算撞名
+  local me_key="$repo/$slug"
+  [ -z "$feature" ] || me_key="$repo/@$feature"
+  OPSX_KEY="$me_key" OPSX_SLUG="$slug" OPSX_FEATURE="$feature" OPSX_LIB="$OPSX_ROOT/bin/lib" "$OPSX_PY" -I - "$OPSX_STATE_DIR/dispatch.json" <<'PY' || exit 2
 import os, sys
 sys.path.insert(0, os.environ["OPSX_LIB"]); import jsonfile
-d = jsonfile.load(sys.argv[1]); me = os.environ["OPSX_KEY"]; slug = os.environ["OPSX_SLUG"]
+d = jsonfile.load(sys.argv[1]); me = os.environ["OPSX_KEY"]; slug = os.environ["OPSX_SLUG"]; feature = os.environ["OPSX_FEATURE"]
 mine = d.get(me)
 if mine and mine.get("mode") != "stopped":
-    sys.exit("dispatch: %s 已經派出去了，在 %s · %s · %s（%s 起）。要換人先 opsx stop %s" % (me, mine.get("workspace"), mine.get("tab"), mine.get("pane"), mine.get("started_at"), slug))
-clash = [k for k, v in d.items() if k != me and v.get("mode") != "stopped" and (v.get("herdr_name") or k.split("/", 1)[1]) not in (v.get("handed_to") or []) and (v.get("herdr_name") or k.split("/", 1)[1]) == slug]
+    sys.exit("dispatch: %s 已經派出去了，在 %s · %s · %s（%s 起）。要換人先 opsx stop %s" % (me, mine.get("workspace"), mine.get("tab"), mine.get("pane"), mine.get("started_at"), me.split("/", 1)[1]))
+members = {k for k, v in d.items() if feature and k.startswith(me.split("/", 1)[0] + "/") and v.get("via") == "@" + feature}
+clash = [k for k, v in d.items() if k != me and k not in members and v.get("mode") != "stopped" and (v.get("herdr_name") or k.split("/", 1)[1]) not in (v.get("handed_to") or []) and (v.get("herdr_name") or k.split("/", 1)[1]) == slug]
 if clash:
     sys.exit("dispatch: herdr agent 名字就是 slug，而 %s 還在跑、用的 herdr 名也是 %s，herdr agent prompt 會送錯 agent。先 opsx stop 那張，或把這張卡改名" % ("、".join(clash), slug))
 PY
+
+  if [ -n "$feature" ]; then
+    plan="$("$OPSX_PY" -I "$OPSX_ROOT/bin/lib/chain.py" feature "$top" "$feature")" || exit 2
+    # 成員條目是 stopped 就是人停的：不寫它的條目、不給它第一句。feature_plan 只管 workplan 上能不能開工
+    plan="$(OPSX_PLAN="$plan" OPSX_REPO="$repo" OPSX_FEATURE="$feature" OPSX_LIB="$OPSX_ROOT/bin/lib" "$OPSX_PY" -I - "$OPSX_STATE_DIR/dispatch.json" <<'PY'
+import os, sys
+sys.path.insert(0, os.environ["OPSX_LIB"]); import jsonfile
+d = jsonfile.load(sys.argv[1]); e = os.environ
+keep, held = [], []
+for line in e["OPSX_PLAN"].splitlines():
+    key = "%s/%s" % (e["OPSX_REPO"], line.split("\t")[0])
+    (held if key in d and d[key].get("mode") == "stopped" else keep).append(line)
+if not keep:
+    sys.exit("dispatch: feature「%s」能開工的主 change（%s）都被人停了；要接回其中一張用 opsx dispatch <slug>"
+             % (e["OPSX_FEATURE"], "、".join(l.split("\t")[0] for l in held)))
+print("\n".join(keep))
+PY
+)" || exit 2
+    card="$(printf '%s' "$plan" | head -1 | cut -f1)"
+  fi
+  local d="$top/openspec/changes/$card"
+  [ -d "$d" ] || die "dispatch: 沒有這張卡：$d"
+  if [ -z "$feature" ]; then
+    # 人停掉的 session 成員卡：session 還活著就交回 session（grill D1），它的 branch 可能正被 session 的 worktree checkout，單卡派會被 git 拒絕
+    local session; session="$(OPSX_REPO="$repo" OPSX_SLUG="$slug" OPSX_LIB="$OPSX_ROOT/bin/lib" "$OPSX_PY" -I - "$OPSX_STATE_DIR/dispatch.json" <<'PY'
+import os, sys
+sys.path.insert(0, os.environ["OPSX_LIB"]); import jsonfile
+d = jsonfile.load(sys.argv[1]); repo = os.environ["OPSX_REPO"]
+mine = d.get("%s/%s" % (repo, os.environ["OPSX_SLUG"]))
+if mine and mine.get("feature"):
+    s = d.get("%s/@%s" % (repo, mine["feature"]))
+    if s and s.get("mode") != "stopped":
+        print(mine["feature"])
+PY
+)"
+    if [ -n "$session" ]; then send_to_session "$top" "$repo" "$slug" "$session" "$note"; return; fi
+  fi
 
   # kind：沒給就從 .openspec.yaml 讀，再沒有就是 dev；寫回 .openspec.yaml
   if [ -z "$kind" ]; then kind="$(st_card_kind "$d")"; kind="${kind:-dev}"; fi
@@ -221,6 +257,29 @@ PY
     nohup bash "$OPSX_ROOT/bin/opsx" drive "$slug" --repo "$top" >> "$OPSX_STATE_DIR/drive-$repo-$slug.log" 2>&1 &
     say "dispatch: drive 跑起來了（pid $!），log 在 $OPSX_STATE_DIR/drive-$repo-$slug.log"
   fi
+}
+
+send_to_session() { # <top> <repo> <slug> <feature> <note>：人停的成員卡交回活著的 session，不開 pane
+  local top="$1" repo="$2" slug="$3" feature="$4" note="$5" d="$1/openspec/changes/$3" first
+  first="$(stage_name "$top" "$slug")"
+  case "$first" in explore|grill|propose|apply|review|pr|babysit) ;; *) first=explore ;; esac
+  if [ -n "$note" ]; then note_append "$d" "$note" || die "dispatch: 寫不進 $d/inbox.md 的派工指示，沒送給 session"; fi
+  herdr agent prompt "$feature" "[$slug] /$first $slug" >/dev/null || die "dispatch: 送不到 session ${feature}，$repo/$slug 仍是 stopped"
+  # 送到了才清 stopped；pane 層的欄位重抄 session 條目，舊 pane 不會被拿去送話
+  OPSX_KEY="$repo/$slug" OPSX_SESSION="$repo/@$feature" OPSX_AT="$(now_iso)" OPSX_LIB="$OPSX_ROOT/bin/lib" "$OPSX_PY" -I - "$OPSX_STATE_DIR/dispatch.json" <<'PY'
+import os, sys
+sys.path.insert(0, os.environ["OPSX_LIB"]); import jsonfile
+def put(d):
+    e, s = d[os.environ["OPSX_KEY"]], d[os.environ["OPSX_SESSION"]]
+    for k in ("workspace", "workspace_id", "tab", "pane", "worktree", "agent", "model", "mode"):
+        e[k] = s[k]
+    e["started_at"] = os.environ["OPSX_AT"]
+    e.pop("stopped_at", None)
+    e.pop("pane_closed_at", None)
+jsonfile.update(sys.argv[1], put)
+PY
+  log_row "$d" 你 已指派 "交回 session ${feature}，送 [${slug}] /${first} ${slug}" "session ${feature}"
+  say "dispatch: $repo/$slug 交回 session ${feature}，送 [${slug}] /${first} ${slug}；不開 pane"
 }
 
 workplan_branch() { wp_pr_field "$1" "$2" branch; } # <top> <slug>：印 workplan 裡這張卡所屬 PR 的 branch，沒有就空

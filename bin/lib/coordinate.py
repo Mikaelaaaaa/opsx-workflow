@@ -339,7 +339,8 @@ class Round:
         return ["%s/%s" % (repo, s) for s in chain.session_siblings(top, repo, slug, self.dispatch_file)]
 
     def redispatch_feature(self, c, top, why):
-        """session 的 pane 不在了：同 feature 每張沒停的卡 stop 一次，再整個 feature 重派一次。memo 以 <repo>/@<feature> 記。"""
+        """session 的 pane 不在了：只停 session 條目 <repo>/@<feature>，再整個 feature 重派一次。memo 以同一個 key 記。
+        成員條目不動：還是 stopped 的就是人停的，dispatch --feature 會跳過它。"""
         feature = c["dispatch"]["feature"]
         key = "%s/@%s" % (c["repo"], feature)
         last = self.memo["_redispatched"].get(key)
@@ -349,11 +350,8 @@ class Round:
         if "agent" not in c["dispatch"]:
             self.log("?? %s %s，但 dispatch.json 沒記 agent，不知道派給誰" % (key, why))
             return
-        self.log("!! %s %s，各卡 stop 後整個 feature 重派" % (key, why))
-        mine = card_key(c)
-        for k in sorted([mine] + self.session_siblings(mine, top)):
-            self.act(["opsx", "stop", k.split("/", 1)[1], "--repo", top])
-            self.dispatch_file[k]["mode"] = "stopped"
+        self.log("!! %s %s，停 session 後整個 feature 重派" % (key, why))
+        self.act(["opsx", "stop", "@" + feature, "--repo", top])
         rc, _, err = self.act(["opsx", "dispatch", "--feature", feature, "--agent", c["dispatch"]["agent"], "--mode", "autopilot", "--repo", top])
         if rc != 0:
             self.log("?? %s 重派開不了 session：%s" % (key, err[:200]))

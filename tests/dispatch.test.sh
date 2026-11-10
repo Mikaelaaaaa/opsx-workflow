@@ -294,6 +294,51 @@ assert_grep '已指派' "$RF/openspec/changes/m2/decisions.tsv"
 out="$(opsx dispatch --feature fs --agent claude --mode autopilot 2>&1)"; [ $? -eq 2 ] || fail "session 還在要拒絕: $out"
 assert_eq "$(cat "$OPSX_FAKE_LOG")" "" "拒絕時不碰 herdr"
 
+# 人停 m2：只送 [m2] stop 給 session，不關 pane
+out="$(opsx stop m2 2>&1)" || fail "stop m2: $out"
+assert_grep '^agent prompt fs \[m2\] stop$' "$OPSX_FAKE_LOG"
+assert_not_grep '^pane close' "$OPSX_FAKE_LOG"
+# 成員都停了、session 條目還活著：再派 --feature 要拒絕（不然 herdr agent start fs 撞 agent_name_taken）
+python3 -I -c 'import json,sys;p=sys.argv[1];d=json.load(open(p));d["Feat-Repo/m1"]["mode"]="stopped";json.dump(d,open(p,"w"))' "$J"
+: > "$OPSX_FAKE_LOG"
+out="$(opsx dispatch --feature fs --agent claude --mode autopilot 2>&1)"; [ $? -eq 2 ] || fail "成員都停了但 session 還在，要拒絕: $out"
+echo "$out" | grep -q '@fs' || fail "訊息要指出 @fs: $out"
+assert_eq "$(cat "$OPSX_FAKE_LOG")" "" "拒絕時不碰 herdr"
+python3 -I -c 'import json,sys;p=sys.argv[1];d=json.load(open(p));d["Feat-Repo/m1"]["mode"]="autopilot";json.dump(d,open(p,"w"))' "$J"
+
+# 重派人停的成員卡、session 還活著：清掉 stopped、送 [m2] /apply m2 給 session，不開 pane
+: > "$OPSX_FAKE_LOG"
+out="$(opsx dispatch m2 --agent claude --mode autopilot 2>&1)"; assert_eq "$?" 0 "session 活著重派 m2: $out"
+assert_eq "$(cat "$OPSX_FAKE_LOG")" "agent prompt fs [m2] /apply m2" "只送一句給 session"
+assert_eq "$(jq -r '."Feat-Repo/m2" | [.mode, .pane, .via, .herdr_name, (has("stopped_at") | tostring)] | join(" ")' "$J")" "autopilot w1:pE @fs fs false" "m2 不再是 stopped，pane 取自 session"
+
+# opsx stop @fs：關 session pane、標 session 條目 stopped，成員條目不動
+jq -S '{m1: ."Feat-Repo/m1", m2: ."Feat-Repo/m2"}' "$J" > "$FX/members-before.json"
+: > "$OPSX_FAKE_LOG"
+out="$(opsx stop @fs 2>&1)" || fail "stop @fs: $out"
+assert_grep '^pane close w1:pE' "$OPSX_FAKE_LOG"
+assert_not_grep '^agent prompt' "$OPSX_FAKE_LOG"
+assert_eq "$(jq -r '."Feat-Repo/@fs".mode' "$J")" stopped "session 條目標 stopped"
+assert_eq "$(jq -S '{m1: ."Feat-Repo/m1", m2: ."Feat-Repo/m2"}' "$J")" "$(cat "$FX/members-before.json")" "stop @fs 不碰成員條目"
+assert_not_grep 'Feat-Repo/@fs.*已歸檔' "$OPSX_STATE_DIR/reap.log"
+
+# 人停的成員卡不被撿回（C-human-stop）：m1 人停了，session 重派 --feature 不寫 m1、第一句不是 m1
+python3 -I -c 'import json,sys;p=sys.argv[1];d=json.load(open(p));d["Feat-Repo/m1"]["mode"]="stopped";json.dump(d,open(p,"w"))' "$J"
+sed -i.bak 's/^"Feat-Repo" = .*/"Feat-Repo" = "agnetory-ai"/' "$OPSX_STATE_DIR/workspaces.toml"   # 第一次派新建的 workspace 不在假 herdr 的 workspace list 裡
+: > "$OPSX_FAKE_LOG"
+out="$(opsx dispatch --feature fs --agent claude --mode autopilot 2>&1)"; assert_eq "$?" 0 "session 重派: $out"
+assert_eq "$(jq -r '."Feat-Repo/m1".mode' "$J")" stopped "人停的 m1 仍是 stopped"
+assert_grep '^agent prompt fs /apply m2$' "$OPSX_FAKE_LOG"
+assert_not_grep '^agent prompt fs /.* m1$' "$OPSX_FAKE_LOG"
+
+# 重派人停的成員卡、session 不在：照單卡派（m2 的 branch 沒被 session 的 worktree checkout）
+out="$(opsx stop m2 2>&1)" || fail "stop m2: $out"
+out="$(opsx stop @fs 2>&1)" || fail "stop @fs: $out"
+: > "$OPSX_FAKE_LOG"
+out="$(opsx dispatch m2 --agent claude --mode interactive 2>&1)"; assert_eq "$?" 0 "session 不在重派 m2: $out"
+assert_grep '^agent start m2 ' "$OPSX_FAKE_LOG"
+assert_not_grep '^agent prompt fs' "$OPSX_FAKE_LOG"
+
 # --- dispatch --note：送第一句之前寫進 inbox.md 的 ## 派工指示（specs/dispatch-note「opsx dispatch --note 在第一句之前寫入」） ---
 cd "$R"
 N="$R/openspec/changes/note-card"; mkdir -p "$N"; printf 'schema: opsx\nkind: dev\n' > "$N/.openspec.yaml"
