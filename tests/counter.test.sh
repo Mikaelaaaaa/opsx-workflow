@@ -34,4 +34,13 @@ assert.strictEqual(counterHtml([card('a', '待處理'), card('b', '進行中')],
 
 assert.strictEqual(counterHtml(cards, all), '待處理 <b>3</b>', '全部範圍的計數不變');
 assert.strictEqual(counterHtml([], all), '<span class="faint">無待處理</span>', '沒有卡');
+
+// 切片外的接線：render() 經 counterHtml 寫頂列；「全部 N」的 data-act 在 click handler 裡轉按頂列「全部」鈕
+const r = html.indexOf('function render(){');
+assert.ok(r >= 0, 'index.html 找不到 function render(){');
+assert.ok(html.slice(r, html.indexOf('\n}', r)).includes("$('#counter').innerHTML=counterHtml(data.cards,inScope)"),
+  'render() 要經 counterHtml 寫頂列計數');
+const act = /data-act="([^"]+)"/.exec(scoped)[1];
+assert.ok(html.includes(`if(a==='${act}'){$('#scope-all').click();`),
+  `click handler 要處理 data-act="${act}"，並轉按頂列「全部」鈕`);
 JS
