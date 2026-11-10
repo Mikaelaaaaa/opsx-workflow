@@ -10,11 +10,11 @@ GET /api/collect 回 `opsx collect` 的輸出；--collect 給了檔就回那個�
 GET /api/log[?since=<iso>] 回 `opsx timeline [--since …]` 的輸出（紀錄 tab、抽屜、banner 用，開才拉，不快取）。
 GET /api/output?pane=<id> 跑 `herdr agent read <id> --lines 10 --format text`，回 {ok, text} 或 {ok: false, error}（抽屜「最後輸出」）。
 POST /api/seen {at} 把 at 寫進 <state>/last-seen（banner 按「關閉」時送）。
-POST /api/{answer,dispatch,merge,stop,new,file,drop,sync} 轉呼叫對應的 `opsx` 子命令，POST /api/focus 跑 herdr agent focus <slug>；都回 {ok, stdout, stderr}。
+POST /api/{answer,dispatch,merge,stop,new,file,drop,sync,note} 轉呼叫對應的 `opsx` 子命令，POST /api/focus 跑 herdr agent focus <slug>；都回 {ok, stdout, stderr}。
 
 /api/* 要 header X-Opsx-Token 等於 <state>/board-token（第一次啟動時產生，之後重用）。只聽 127.0.0.1。
 opsx 用 plugin 自己的 bin/opsx（不靠 PATH），並把 --state 透過 OPSX_STATE_DIR 傳下去，兩邊讀同一份狀態。
-動作本身在 bin/lib/{answer,merge,dispatch,stop,new,file,drop,sync}.sh；
+動作本身在 bin/lib/{answer,merge,dispatch,stop,new,file,drop,sync,note}.sh；
 sync 以退出碼 3 結束（另一支同步還在跑）回 409，這裡只做參數對應與驗證。
 """
 from __future__ import annotations
@@ -51,11 +51,12 @@ ACTIONS = {
     "answer": {"slug": True, "required": ("gate", "text"), "flags": ("sub", "gate", "grant", "repo"), "trailing": "text"},
     "merge": {"slug": True, "required": (), "flags": ("repo",), "trailing": None},
     "stop": {"slug": True, "required": (), "flags": ("repo",), "trailing": None},
-    "dispatch": {"slug": True, "required": (), "flags": ("agent", "model", "mode", "kind", "repo"), "trailing": None},
+    "dispatch": {"slug": True, "required": (), "flags": ("agent", "model", "mode", "kind", "repo", "note"), "trailing": None},
     "new": {"slug": False, "required": ("text",), "flags": ("repo",), "trailing": "text"},
     "file": {"slug": True, "required": ("repo",), "flags": ("repo",), "trailing": None},
     "drop": {"slug": True, "required": ("text",), "flags": ("repo",), "trailing": "text"},
     "sync": {"slug": False, "required": (), "flags": ("source",), "trailing": None},
+    "note": {"slug": True, "required": ("text",), "flags": ("repo",), "trailing": "text"},
 }
 FLAG_RE = {
     "sub": SLUG_RE,   # 會拼進 changes/<slug>/subs/<sub> 路徑，不能有 / 或 ..
@@ -67,6 +68,7 @@ FLAG_RE = {
     "kind": re.compile(r"^(dev|bug-fix|refactoring|perf|experiment|ops|chore)$"),
     "repo": re.compile(r"^/[^\0]{1,1024}$"),
     "source": re.compile(r"^(gitlab|github|debt)$"),
+    "note": re.compile(r"^[^\n\r\0]{1,2000}\Z"),   # \Z 不是 $：$ 會放過結尾的 \n
 }
 PANE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9:_-]{0,31}$")   # 不能以 - 開頭，免得被 herdr 當成旗標
 
