@@ -901,17 +901,28 @@ $('#scope-ws').onclick=e=>{e.stopPropagation();if($('#menu').hidden)openMenu(e.c
 
 /* ---------- 重新整理：上一次回來才排下一次（collect 慢時不會疊請求）；分頁藏起來就不拉；
    內容沒變就不重畫（比對時排除 generated_at，它每次都變），展開、捲動、打到一半的回覆都留著 ---------- */
-let inflight=false,timer=null;
+/* 刷新排程 start */
+/* 動作後的強制刷新碰上進行中的一輪不能丟，否則要等下一次輪詢；記下來，那一輪回來後補跑一次。輪詢碰上就放棄 */
+const REFRESH_IDLE={inflight:false,pendingForce:false};
+function refreshStep(st,ev){
+  if(ev==='done')return st.pendingForce?{st:{inflight:true,pendingForce:false},fetch:true,force:true}:{st:REFRESH_IDLE,fetch:false,force:false};
+  if(st.inflight)return {st:{inflight:true,pendingForce:st.pendingForce||ev==='force'},fetch:false,force:false};
+  return {st:{inflight:true,pendingForce:false},fetch:true,force:ev==='force'};
+}
+/* 刷新排程 end */
+let rs=REFRESH_IDLE,timer=null;
 async function refresh(force){
-  if(inflight)return;inflight=true;
-  try{
-    const j=await api.collect();const {generated_at,...rest}=j;const raw=JSON.stringify(rest);
-    if(force||raw!==lastRaw){lastRaw=raw;data=j;render();}
-    else{data.generated_at=generated_at;$('#stamp').textContent='collect '+ago(generated_at);}
-  }catch(e){
-    if(!lastRaw)setView($('#view'),`<div class="empty" style="color:var(--danger)">${esc(e.message)}</div>`,false);
-    else{data.errors=[{source:'board',message:e.message}];render();}
-  }finally{inflight=false;schedule();}
+  let s=refreshStep(rs,force?'force':'poll');rs=s.st;
+  while(s.fetch){
+    try{
+      const j=await api.collect();const {generated_at,...rest}=j;const raw=JSON.stringify(rest);
+      if(s.force||raw!==lastRaw){lastRaw=raw;data=j;render();}
+      else{data.generated_at=generated_at;$('#stamp').textContent='collect '+ago(generated_at);}
+    }catch(e){
+      if(!lastRaw)setView($('#view'),`<div class="empty" style="color:var(--danger)">${esc(e.message)}</div>`,false);
+      else{data.errors=[{source:'board',message:e.message}];render();}
+    }finally{s=refreshStep(rs,'done');rs=s.st;if(!s.fetch)schedule();}
+  }
 }
 function schedule(){clearTimeout(timer);timer=setTimeout(()=>{if(document.hidden){schedule();return;}refresh(false);},REFRESH_MS);}
 document.addEventListener('visibilitychange',()=>{if(!document.hidden){refresh(false);loadLog();}});
