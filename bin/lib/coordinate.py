@@ -320,7 +320,8 @@ class Round:
         self.memo["_redispatched"][key] = self.now.isoformat(timespec="seconds")
 
     def settle_parked(self, cards):
-        """人接手過的 parked 卡不再由這裡管：人手動重派了，或人在板上把那個 gate 答掉了。"""
+        """人手動重派了的 parked 卡不再由這裡管。人在板上把那個 gate 答掉了，記成已答，
+        dispatch_new 照 coordinator 自己答過的一樣重派：卡是 coordinator 停的，不重派就沒有 agent 讀得到答案。"""
         for c in cards:
             key = card_key(c)
             parked = self.memo["_parked"].get(key)
@@ -328,11 +329,10 @@ class Round:
                 continue
             if c["dispatch"]:
                 self.log("-- %s 已經又派出去，不再 parked" % key)
+                del self.memo["_parked"][key]
             elif not parked.get("answered") and parked["gate"] not in [g["id"] for g in c["open_gates"]]:
-                self.log("-- %s 等的 gate %s 已經被人答掉，不再 parked" % (key, parked["gate"]))
-            else:
-                continue
-            del self.memo["_parked"][key]
+                self.log("-- %s 等的 gate %s 被人答掉，記成已答，照派卡規則重派" % (key, parked["gate"]))
+                parked["answered"] = True
 
     def dispatch_new(self, cards, repo_paths):
         n = 0
