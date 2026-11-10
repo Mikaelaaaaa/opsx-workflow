@@ -35,4 +35,14 @@ sub_line="$(printf '%s\n' "$subs" | grep -F '## 派工指示')"
 printf '%s' "$sub_line" | grep -qF '<top>/openspec/changes/<主>/inbox.md' || fail "子 change 沒指到主殼 inbox.md：$sub_line"
 printf '%s' "$sub_line" | grep -qF 'NEEDS-USER <子>' || fail "子 change 的衝突回報不是 NEEDS-USER <子>：$sub_line"
 
+# --- subs-note-relay：開工後才到的指示轉給執行中的子 subagent ---
+# 驗收：openspec/changes/subs-note-relay/specs/fan-out-note-brief/spec.md
+relay_step="$(printf '%s\n' "$subs" | grep -F '有新的派工指示')"
+[ -n "$relay_step" ] || fail "apply 子 change 段沒有處理「有新的派工指示」的那一步"
+printf '%s' "$relay_step" | grep -qF 'SendMessage' || fail "轉送步沒寫 SendMessage：$relay_step"
+printf '%s' "$relay_step" | grep -qF '<top>/openspec/changes/<主>/inbox.md' || fail "轉送步沒帶主殼絕對路徑：$relay_step"
+for k in 'DONE' 'opsx stack' 'new subagent' 'type: decision'; do
+  printf '%s' "$relay_step" | grep -qF "$k" || fail "轉送步沒處理已 DONE 的子 change，缺 $k：$relay_step"
+done
+
 echo ok
