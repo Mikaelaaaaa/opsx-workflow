@@ -10,12 +10,12 @@
     "additionalDirectories": ["${OPSX_STATE_DIR}"]
   },
   "sandbox": {
-    "network": {"allowUnixSockets": ["${HOME}/.config/herdr/herdr.sock"]},
     "excludedCommands": ["gh pr *"],
     "filesystem": {
       "denyWrite": [
         "${OPSX_STATE_DIR}/grants.toml",
-        "${OPSX_STATE_DIR}/python"
+        "${OPSX_STATE_DIR}/python",
+        "${OPSX_STATE_DIR}/coordinator-settings.json"
       ]
     }
   }

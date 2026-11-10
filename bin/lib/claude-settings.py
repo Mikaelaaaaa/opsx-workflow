@@ -4,6 +4,7 @@
 --add-dir 追加 permissions.additionalDirectories。只追加不存在的元素，不動其他鍵；
 有變化且原檔存在時先備份成 <file>.opsx-bak（已有就不覆蓋）。
 檔案不是合法 JSON、或要寫的鍵路徑上的型別不符時直接失敗，不改檔。
+--render 把範本整份展開後印到 stdout（不需要 --file，不寫檔），給只想帶給單一 session 的 --settings 檔用。
 成功時 stdout 印 created（原檔不存在）、changed 或 unchanged。--check 只比對不寫：缺的逐行印出，有缺 exit 3。
 """
 import argparse
@@ -36,6 +37,17 @@ def flatten(node, keys, source):
     if isinstance(node, list) and all(isinstance(v, str) for v in node):
         return [(keys, [expand(v, source) for v in node])]
     raise SystemExit(f"claude-settings: {source} 的 {'.'.join(keys)} 要是字串陣列，實際是 {node!r}")
+
+
+def expand_tree(node, source):
+    """範本整份展開 ${NAME}（物件、陣列、字串），給 --render 印出。"""
+    if isinstance(node, dict):
+        return {k: expand_tree(v, source) for k, v in node.items()}
+    if isinstance(node, list):
+        return [expand_tree(v, source) for v in node]
+    if isinstance(node, str):
+        return expand(node, source)
+    raise SystemExit(f"claude-settings: {source} 只能有物件、陣列與字串，實際是 {node!r}")
 
 
 def load(path):
@@ -74,11 +86,21 @@ def merge(data, keys, values, path):
 
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument("--file", required=True)
+    p.add_argument("--file")
     p.add_argument("--template")
     p.add_argument("--add-dir", action="append", default=[])
     p.add_argument("--check", action="store_true")
+    p.add_argument("--render", action="store_true")
     args = p.parse_args()
+
+    if args.render:
+        if not args.template:
+            p.error("--render 要搭配 --template")
+        with open(args.template, encoding="utf-8") as f:
+            print(json.dumps(expand_tree(json.load(f), args.template), indent=2, ensure_ascii=False))
+        return
+    if not args.file:
+        p.error("要給 --file（或用 --render 印出展開後的範本）")
 
     wants = []
     if args.template:

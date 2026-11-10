@@ -86,6 +86,7 @@ init_global() {
     say "init --global: 沒有 herdr，看板 plugin 略過（裝了 herdr 再跑一次）"
   fi
   merge_claude_settings "$py" --template "$OPSX_ROOT/templates/settings.opsx.json"
+  write_coordinator_settings "$py" "$state"
   install_sync_job "$state" "$bindir"
   say "init --global: 設定在 $state"
 }
@@ -106,6 +107,20 @@ merge_claude_settings() { # <python> <claude-settings.py 的參數…>
   esac
 }
 
+# 主控 session（opsx coordinator）要呼叫 herdr，沙盒預設擋 herdr socket；使用者層標準設定不開它（任何 session 連上 herdr
+# 就能用 herdr pane run 在沒有沙盒的 pane 裡跑指令），所以只給主控 session：渲染成一個檔，啟動時用 claude --settings 帶。
+# 一般 agent 照 main 原設計走 hooks/opsx-herdr-queue.sh。這個檔在標準設定的 denyWrite 裡。
+write_coordinator_settings() { # <python> <state>
+  local py="$1" f="$2/coordinator-settings.json" new
+  new="$("$py" -I "$OPSX_ROOT/bin/lib/claude-settings.py" --render --template "$OPSX_ROOT/templates/settings.coordinator.json")" \
+    || die "init --global: 渲染主控 session 的設定失敗（上面是原因）"
+  if [ -f "$f" ] && [ "$(cat "$f")" = "$new" ]; then say "init --global: ${f} 已有"
+  else
+    printf '%s\n' "$new" > "$f"
+    say "init --global: 寫 ${f}；主控 session 用 claude --settings ${f} 啟動（開 herdr socket，一般 agent 不給）"
+  fi
+}
+
 # repo 根目錄會變成每個 session 的可寫目錄：它是 $HOME、$HOME 的上層、或 state 目錄的上層（家目錄是 git repo 時就會發生）
 # 就等於把家目錄或授權檔開給所有 session，直接拒絕。openspec/、sources.toml 與 settings 都還沒寫；state 目錄要先建好才能解析實體路徑。
 refuse_broad_writable() { # <repo 主 checkout 根>
@@ -115,6 +130,10 @@ refuse_broad_writable() { # <repo 主 checkout 根>
       "$top"/*) die "init: $top 是 ${d} 的上層（或就是它），開成可寫目錄範圍太大；到更深的 repo 根目錄再跑 opsx init" ;;
     esac
   done
+  # opsx 自己的 repo 本來就要登記，所以這裡只警告：登記後所有 session 都能改 opsx 程式碼，之後在沙盒外跑它就是執行被改過的程式
+  case "$(cd "$OPSX_ROOT" && pwd -P)/" in
+    "$top"/*) warn "$top 裡有 opsx 程式碼（OPSX_ROOT=${OPSX_ROOT}）：登記後所有 session 都能改它，之後在沙盒外跑 opsx（看板、opsx answer --grant）就是執行被改過的程式碼；這是 opsx 自己的 repo 就照做，否則請確認" ;;
+  esac
 }
 
 # opsx init --check：只讀。使用者層 settings 缺標準設定的項目就逐項印出、exit 1；在 repo 裡再看該 repo 是否在可寫目錄、有沒有信任

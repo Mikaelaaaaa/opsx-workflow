@@ -126,6 +126,13 @@ for r in "$RH" "$RP" "$RS"; do
 done
 assert_no_file "$RH/openspec"   # 守衛在寫任何東西之前
 
+# $OPSX_ROOT 在被登記的 repo 裡（opsx 自己的 repo）：只警告，不拒絕，照常登記
+RO="$(mk_repo oroot)"; mkdir "$RO/plug"; cp -R "$OPSX_ROOT/bin" "$OPSX_ROOT/templates" "$OPSX_ROOT/schemas" "$RO/plug/"
+cd "$RO"
+outo="$(OPSX_ROOT="$RO/plug" bash "$RO/plug/bin/opsx" init 2>&1)" || fail "opsx 程式碼在 repo 裡時要只警告、照常登記：$outo"
+case "$outo" in *"opsx 程式碼"*"$RO"*) ;; *) fail "要警告 opsx 程式碼對所有 session 可寫：$outo" ;; esac
+case "$(cj "$CR" permissions.additionalDirectories)" in *"\"$RO\""*) ;; *) fail "警告之後仍要登記 $RO" ;; esac
+
 # --- --global ---
 export CLAUDE_CONFIG_DIR="$FX/claude-config"   # repo 層那段用 $FX/cc-repo，這裡換回乾淨的
 cd "$FX"; use_fakes herdr launchctl; export OPSX_FAKE_LOG="$FX/herdr.log"; : > "$OPSX_FAKE_LOG"
@@ -151,21 +158,27 @@ assert_grep "x = 1" "$OPSX_STATE_DIR/grants.toml"
 CS="$CLAUDE_CONFIG_DIR/settings.json"
 assert_file "$CS"
 assert_eq "$(cj "$CS" permissions.additionalDirectories)" "[\"$OPSX_STATE_DIR\"]"
-assert_eq "$(cj "$CS" sandbox.network.allowUnixSockets)" "[\"$HOME/.config/herdr/herdr.sock\"]"
+assert_eq "$(cj "$CS" sandbox.network.allowUnixSockets)" MISSING "herdr socket 不放使用者層：一般 agent 走 hook 佇列，只有主控 session 用 coordinator-settings.json"
+CO="$OPSX_STATE_DIR/coordinator-settings.json"
+assert_file "$CO"
+assert_eq "$(cj "$CO" sandbox.network.allowUnixSockets)" "[\"$HOME/.config/herdr/herdr.sock\"]" "主控 session 的設定要開 herdr socket"
+case "$outg" in *"claude --settings $CO"*) ;; *) fail "要印主控 session 的啟動方式：$outg" ;; esac
+co_before="$(cat "$CO")"
 assert_eq "$(cj "$CS" sandbox.excludedCommands)" '["gh pr *"]' "只排除 gh pr *，不是整個 gh *"
-assert_eq "$(cj "$CS" sandbox.filesystem.denyWrite)" "[\"$OPSX_STATE_DIR/grants.toml\", \"$OPSX_STATE_DIR/python\"]" "grants.toml 與 hook 執行的 interpreter 路徑要拒絕沙盒寫入；dispatch.json 不能列（沙盒內的 chain / dispatch 要寫它）"
+assert_eq "$(cj "$CS" sandbox.filesystem.denyWrite)" "[\"$OPSX_STATE_DIR/grants.toml\", \"$OPSX_STATE_DIR/python\", \"$OPSX_STATE_DIR/coordinator-settings.json\"]" "grants.toml、hook 的 interpreter 路徑、主控 session 的設定檔要拒絕沙盒寫入；dispatch.json 不能列（沙盒內的 chain / dispatch 要寫它）"
 assert_eq "$(cj "$CS" sandbox.enabled)" MISSING "不替使用者開關沙盒"
 assert_no_file "$CS.opsx-bak"        # 第一次裝，原檔不存在，沒有東西可備份
 before="$(cat "$CS")"
 outs="$(opsx init --global 2>&1)"; assert_eq "$?" 0 "settings rerun: $outs"
 assert_eq "$(cat "$CS")" "$before" "重跑改了 settings.json"
+assert_eq "$(cat "$CO")" "$co_before" "重跑改了主控 session 的設定檔"
 assert_no_file "$CS.opsx-bak"        # no-op 不產生備份
 
 # CLAUDE_CONFIG_DIR 沒設：寫 $HOME/.claude/settings.json
 mkdir -p "$FX/home"
 env HOME="$FX/home" CLAUDE_CONFIG_DIR= opsx init --global >/dev/null 2>&1 || fail "global without CLAUDE_CONFIG_DIR"
 assert_file "$FX/home/.claude/settings.json"
-assert_eq "$(cj "$FX/home/.claude/settings.json" sandbox.network.allowUnixSockets)" "[\"$FX/home/.config/herdr/herdr.sock\"]"
+assert_eq "$(cj "$FX/home/.claude/settings.json" permissions.additionalDirectories)" "[\"$OPSX_STATE_DIR\"]"
 
 # 使用者已有設定：保留、追加、備份原檔
 mkdir -p "$FX/cc2"
@@ -174,7 +187,7 @@ orig="$(cat "$FX/cc2/settings.json")"
 CLAUDE_CONFIG_DIR="$FX/cc2" opsx init --global >/dev/null 2>&1 || fail "global with existing settings"
 assert_eq "$(cj "$FX/cc2/settings.json" theme)" '"dark"'
 assert_eq "$(cj "$FX/cc2/settings.json" sandbox.enabled)" true
-assert_eq "$(cj "$FX/cc2/settings.json" sandbox.network.allowUnixSockets)" "[\"/other.sock\", \"$HOME/.config/herdr/herdr.sock\"]"
+assert_eq "$(cj "$FX/cc2/settings.json" sandbox.network.allowUnixSockets)" '["/other.sock"]' "使用者自己的 socket 保留，標準設定不加 herdr"
 assert_eq "$(cat "$FX/cc2/settings.json.opsx-bak")" "$orig" "備份要是原內容"
 
 # 標準設定（templates/settings.opsx.json）是唯一來源：裝出來的 allow 與範本逐項相同，兩個乾淨環境裝出來一模一樣

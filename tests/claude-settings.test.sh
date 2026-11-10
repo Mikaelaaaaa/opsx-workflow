@@ -104,6 +104,14 @@ wait
 assert_eq "$(jget "$FX/par/settings.json" permissions.additionalDirectories | python3 -I -c 'import json,sys; print(len(set(json.load(sys.stdin))))')" 12 "並行寫入丟了項目"
 assert_eq "$(ls -A "$FX/par" | grep -c 'tmp$' || true)" 0 "並行後留下暫存檔"
 
+# --- --render：把範本的 ${NAME} 展開後整份印出（給單一 session 用 --settings 帶的檔），不需要 --file、不寫任何檔 ---
+printf '%s' "$(run --render --template "$T")" > "$FX/rendered.json"
+assert_eq "$(jget "$FX/rendered.json" sandbox.network.allowUnixSockets)" '["/h/herdr.sock"]'
+assert_eq "$(jget "$FX/rendered.json" permissions.additionalDirectories)" '["/x/state"]'
+printf '{"permissions": {"additionalDirectories": ["${NO_SUCH_VAR}/x"]}}' > "$FX/bad1.json"
+out="$(run --render --template "$FX/bad1.json" 2>&1)"; rc=$?
+[ "$rc" -ne 0 ] || fail "--render 遇到未定義變數也要失敗"
+
 # --- 壞 JSON：非 0、訊息含檔名、位元組不變、不備份 ---
 rm -f "$S.opsx-bak"
 printf '{"sandbox": ' > "$S"
