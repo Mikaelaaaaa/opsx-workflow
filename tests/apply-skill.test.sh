@@ -29,6 +29,13 @@ has 'anything that is not `NEEDS-USER`' "$SUBS"
 has 'action: <value>' "$SK"
 has "grant hook's deny message" "$SK"
 
+# --- grant-outbound-speech：Two modes 寫明對外發話是第三級、hook 不擋、發話前寫 gate；第二級列有 test-path ---
+MODES="$FX/modes"
+section "Two modes" > "$MODES"
+for k in 'customer or anyone outside the team' 'level three' 'the grant hook cannot see it' 'write a `type: approval` gate' 'test file in a directory with no tracked tests'; do
+  has "$k" "$MODES"
+done
+
 # --- review-fix-in-scope：apply 接 review 退回的 task；pr 在有待修時拒絕 ---
 has '## R<N>. review 退回' "$SK"
 has '測試先紅再修' "$SK"

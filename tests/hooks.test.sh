@@ -402,16 +402,18 @@ out="$(gg Bash "$(cmdj "git commit -m \"$big git push --force gitlab main\"")")"
 many="$(printf 'cat > f <<EOF\n%.0s' $(seq 1 1500))"
 out="$(gg Bash "$(cmdj "$many")")"; assert_eq "$(decision "$out")" allow "grant 容器: 一堆沒有結尾的 heredoc opener 不會拖到逾時"
 
-# 第二級 deny 帶精確的 action 值，agent 照抄寫 gate（grant-action）；一個授權都沒有的狀態下八個動作各擋一次
+# 第二級 deny 帶精確的 action 值，agent 照抄寫 gate（grant-action）；一個授權都沒有的狀態下九個動作各擋一次
 printf '# grants\n' > "$OPSX_STATE_DIR/grants.toml"; printf '{}' > "$PD/authz.json"
 for pair in "push|git push gitlab feat/eval-core/mikaela" "mr|glab mr create -F desc.md" "migrate|pnpm db:migrate" "delete|rm -rf build" \
             "install|pnpm add left-pad" "rebase|git rebase main" "external|curl https://api.example.com/x"; do
   out="$(gg Bash "$(cmdj "${pair#*|}")")"; assert_eq "$(decision "$out")" deny "grant-action: ${pair%%|*}"
   reason "$out" | grep -qF "action: ${pair%%|*}" || fail "grant-action: ${pair%%|*} 的 deny 要帶 action: ${pair%%|*}：$(reason "$out")"
-  assert_eq "$(reason "$out" | grep -oE 'action: [a-z]+' | wc -l | tr -d ' ')" 1 "grant-action: ${pair%%|*} 只能帶自己的一個 action"
+  assert_eq "$(reason "$out" | grep -oE 'action: [a-z-]+' | wc -l | tr -d ' ')" 1 "grant-action: ${pair%%|*} 只能帶自己的一個 action"
 done
 out="$(gg Write '{"file_path":"/x/.env.local","content":"A=1"}')"
 reason "$out" | grep -qF "action: env" || fail "grant-action: env 的 deny 要帶 action: env：$(reason "$out")"
+out="$(gg Write "{\"file_path\":\"$R/src/newdir/foo.test.ts\",\"content\":\"x\"}")"; assert_eq "$(decision "$out")" deny "grant-action: test-path"
+assert_eq "$(reason "$out" | grep -oE 'action: [a-z-]+')" "action: test-path" "grant-action: test-path 只帶自己的 action：$(reason "$out")"
 out="$(gg Bash "$(cmdj 'git push --force gitlab main')")"
 reason "$out" | grep -qF 'action:' && fail "grant-action: 第三級不帶 action：$(reason "$out")"
 printf '[repos."Agentory-AI"]\npush = true\nmr = false\nmigrate = false\n' > "$OPSX_STATE_DIR/grants.toml"
@@ -515,6 +517,73 @@ printf '{"Agentory-AI/eval-core":{"mode":"autopilot"' > "$OPSX_STATE_DIR/dispatc
 out="$(ugg "$UW1" 'git push --force origin main')"; assert_eq "$(decision "$out")" deny "unmapped: dispatch.json 壞掉且有這個 repo 的卡，先擋"
 printf '{"Agentory-AI/bt":{"mode":"autopilot"' > "$OPSX_STATE_DIR/dispatch.json"
 out="$(ugg "$UW2" 'git push --force origin main')"; assert_eq "$(decision "$out")" deny "unmapped: 有 slug 的分支，壞掉的 dispatch.json 裡有這張卡的 key 就擋"
+printf '{"Agentory-AI/eval-core":{"mode":"autopilot","grants":["migrate"]}}' > "$OPSX_STATE_DIR/dispatch.json"
+
+# ---------- grant gate：測試檔放非慣例位置（grant-test-path）----------
+# R 的分支追蹤 tests/a.test.sh 與 src/sub/d.test.ts；WT、UW1 的分支在這之前開出來，沒有這兩個檔
+tw() { run_hook opsx-grant-gate.sh "$(j "${2:-$R}" Write "{\"file_path\":\"$1\",\"content\":\"x\"}")"; }
+printf '{"Agentory-AI/eval-core":{"mode":"autopilot","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"; printf '{}' > "$PD/authz.json"
+mkdir -p "$R/tests" "$R/src/sub" "$R/src/newdir" "$R/lib"
+printf 'x\n' > "$R/tests/a.test.sh"; printf 'x\n' > "$R/src/sub/d.test.ts"; printf 'x\n' > "$R/lib/u.test.ts"
+git -C "$R" add tests/a.test.sh src/sub/d.test.ts; git -C "$R" commit -q -m "fixture: tests"
+out="$(tw "$R/src/newdir/foo.test.ts")"; assert_eq "$(decision "$out")" deny "test-path: 沒有測試的目錄寫測試檔"
+reason "$out" | grep -qF 'action: test-path' || fail "test-path: deny 要帶 action: test-path：$(reason "$out")"
+reason "$out" | grep -qF 'src/newdir/foo.test.ts' || fail "test-path: deny 要帶檔案路徑：$(reason "$out")"
+reason "$out" | grep -qF 'gates.md' || fail "test-path: deny 要叫它寫 gate：$(reason "$out")"
+for f in src/newdir/x.spec.ts src/newdir/test_x.py src/newdir/x_test.go; do
+  out="$(tw "$R/$f")"; assert_eq "$(decision "$out")" deny "test-path: ${f} 檔名像測試"
+done
+out="$(tw "$R/nope/deeper/x.test.ts")"; assert_eq "$(decision "$out")" deny "test-path: 目錄還不存在也算沒有測試"
+reason "$out" | grep -qF 'action: test-path' || fail "test-path: 不存在的目錄也帶 action: test-path：$(reason "$out")"
+out="$(tw "$R/tests/b.test.sh")"; assert_eq "$out" "" "test-path: 有測試的目錄不出聲"
+out="$(tw "$R/src/c.test.ts")"; assert_eq "$(decision "$out")" deny "test-path: 只有子目錄有測試不算"
+out="$(tw "$R/lib/v.test.ts")"; assert_eq "$(decision "$out")" deny "test-path: 沒被追蹤的測試檔不算慣例"
+out="$(tw "$R/src/newdir/helper.ts")"; assert_eq "$out" "" "test-path: 檔名不像測試不管"
+out="$(tw "$R/src/newdir/contest.py")"; assert_eq "$out" "" "test-path: contest.py 不是 test_*.py"
+ln -s "$R" "$FX/rlink"
+out="$(tw "$FX/rlink/src/newdir/foo.test.ts")"; assert_eq "$(decision "$out")" deny "test-path: 經 symlink 寫進 worktree 也要判"
+out="$(tw "$FX/rlink/tests/b.test.sh")"; assert_eq "$out" "" "test-path: 經 symlink 寫進有測試的目錄不出聲"
+# 相對路徑：hook 不能卡住到逾時（逾時等於放行），要 deny 並點名原值。alarm 讓卡住的 hook 在 10 秒被砍，輸出空字串就算放行
+twt() { printf '%s' "$(j "$R" Write "{\"file_path\":\"$1\",\"content\":\"x\"}")" | perl -e 'alarm 10; exec @ARGV' bash "$H/opsx-grant-gate.sh" 2>/dev/null; true; }
+for f in x.test.ts src/nope/x.test.ts; do
+  out="$(twt "$f")"; assert_eq "$(decision "$out")" deny "test-path: 相對路徑 ${f} 要 deny，不能逾時放行"
+  reason "$out" | grep -qF "$f" || fail "test-path: 相對路徑的 deny 要點名 ${f}：$(reason "$out")"
+done
+# 經 `..` 繞到 worktree 外再繞回來：檔案實際落在 worktree 裡沒有測試的目錄，不能因為往上找存在目錄時爬到外面就放行
+dotdot="$(dirname "$R")/nope/../$(basename "$R")/src/newdir/x.test.ts"
+out="$(tw "$dotdot")"; assert_eq "$(decision "$out")" deny "test-path: 含 .. 的路徑要 deny"
+reason "$out" | grep -qF "$dotdot" || fail "test-path: 含 .. 的 deny 要點名原值：$(reason "$out")"
+# 目標目錄還不存在時，上層有被追蹤的測試也不算這一層有
+out="$(tw "$R/tests/newsub/x.test.ts")"; assert_eq "$(decision "$out")" deny "test-path: 新子目錄的上層有測試也不算"
+# 這一層的被追蹤測試檔排在大量子目錄檔案前面（清單超過 pipe buffer）時仍要放行
+mkdir -p "$R/big/sub"; printf 'x\n' > "$R/big/a.test.sh"
+( cd "$R/big/sub" && seq -f 'padding-padding-padding-%06g.ts' 1 3000 | xargs touch )
+git -C "$R" add big; git -C "$R" commit -q -m "fixture: big dir"
+out="$(tw "$R/big/b.test.sh")"; assert_eq "$out" "" "test-path: 有測試的目錄、清單很大也不出聲"
+out="$(tw "$R/big/sub/c.test.ts")"; assert_eq "$(decision "$out")" deny "test-path: 大目錄底下只有上層有測試，這一層仍算沒有"
+# 進不去的目錄（cd 失敗）不能讓 hook 以非 0 結束而放行
+mkdir -p "$R/locked"; chmod 000 "$R/locked"
+out="$(tw "$R/locked/x.test.ts")"; chmod 755 "$R/locked"
+assert_eq "$(decision "$out")" deny "test-path: 進不去的目錄要 deny"
+# 有授權：repo 永遠、這張卡
+printf '[repos."Agentory-AI"]\ntest-path = true\n' > "$OPSX_STATE_DIR/grants.toml"
+out="$(tw "$R/src/newdir/foo.test.ts")"; assert_eq "$(printf '%s' "$out" | jq -r '.hookSpecificOutput.permissionDecision')" allow "test-path: grants.toml 有授權要明說 allow"
+printf '# grants\n' > "$OPSX_STATE_DIR/grants.toml"; printf '{"Agentory-AI/eval-core":{"grants":["test-path"]}}' > "$PD/authz.json"
+out="$(tw "$R/src/newdir/foo.test.ts")"; assert_eq "$(printf '%s' "$out" | jq -r '.hookSpecificOutput.permissionDecision')" allow "test-path: 這張卡的授權要明說 allow"
+printf '{}' > "$PD/authz.json"
+# 只看 hook cwd 所在的 worktree
+mkdir -p "$FX/scratch"
+out="$(tw "$FX/scratch/x.test.ts")"; assert_eq "$out" "" "test-path: worktree 外的檔不判"
+out="$(tw "$WT/src/newdir/x.test.ts")"; assert_eq "$out" "" "test-path: 主 checkout 寫巢狀在底下的別的 worktree 不判"
+out="$(tw "$WT/tests/b.test.sh" "$WT")"; assert_eq "$(decision "$out")" deny "test-path: 照 cwd 所在 worktree 的追蹤檔，不是主 repo 的"
+out="$(tw "$R/src/newdir/x.test.ts" "$WT")"; assert_eq "$out" "" "test-path: worktree 裡寫主 checkout 的檔不判"
+out="$(tw "$UW1/src/newdir/x.test.ts" "$UW1")"; assert_eq "$out" "" "test-path: 對不到卡放行"
+printf '{"Agentory-AI/eval-core":{"mode":"interactive","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"
+out="$(tw "$R/src/newdir/foo.test.ts")"; assert_eq "$out" "" "test-path: 互動模式不判"
+# 對外發話（grant-outbound-speech）：閘門不判，沒被其他規則分級的發話類指令照舊不出聲
+printf '{"Agentory-AI/eval-core":{"mode":"autopilot","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"
+out="$(gg Bash "$(cmdj 'mail -s "進度" customer@example.com < note.txt')")"; assert_eq "$out" "" "outbound: 寄信的本機 CLI 判定不變"
+printf '[repos."Agentory-AI"]\npush = true\nmr = false\nmigrate = false\n' > "$OPSX_STATE_DIR/grants.toml"
 printf '{"Agentory-AI/eval-core":{"mode":"autopilot","grants":["migrate"]}}' > "$OPSX_STATE_DIR/dispatch.json"
 
 # ---------- mr format gate ----------
