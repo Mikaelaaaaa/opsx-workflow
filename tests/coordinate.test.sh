@@ -433,7 +433,7 @@ for gid in "drive-review-1" "卡在接 /apply #1" "卡在接 /review"; do
   cards '[{"slug":"a1","section":"待處理","dispatch":'"$D"',"agent_status":"idle","waiting":{"type":"等待決定","needs":null,"gate_id":"'"$gid"'","question":"卡住了","recommended":"先看 pane 再回","options":["重做一次 (Recommended)","停在這裡"]}}]'
   round || fail "${gid} rc: $(cat "$FX/out")"
   assert_eq "$(count '^opsx answer')" 0 "${gid} 不代答：$(cat "$OPSX_FAKE_LOG")"
-  assert_eq "$(count '^agent prompt')" 0 "${gid} 沒有任何字送進 pane：$(cat "$OPSX_FAKE_LOG")"
+  assert_eq "$(count '^agent prompt a1 ')" 0 "${gid} 沒有任何字送進 pane：$(cat "$OPSX_FAKE_LOG")"
   assert_eq "$(count '^notification show')" 1 "${gid} 通知一次：$(cat "$OPSX_FAKE_LOG")"
   round || fail "${gid} 第二輪 rc: $(cat "$FX/out")"
   assert_eq "$(count '^notification show')" 0 "${gid} 第二輪不重送：$(cat "$OPSX_FAKE_LOG")"
@@ -920,7 +920,7 @@ cards "[$(idle r1),{\"slug\":\"q1\"}]"
 round || fail "rc: $(cat "$FX/out")"
 assert_eq "$(count '^opsx dispatch q1 ')" 1 "恢復後派卡：$(cat "$OPSX_FAKE_LOG")"
 assert_eq "$(count '^notification show')" 1 "恢復通知一次"
-assert_eq "$(count '^agent prompt')" 0 "不代送繼續"
+assert_eq "$(grep '^agent prompt' "$OPSX_FAKE_LOG" | grep -vc '^agent prompt opsx-coordinator ' || true)" 0 "不代送繼續（送協調者 session 的通知不算）"
 assert_eq "$(memo_get _usage_limit resets_at)" "" "恢復後清掉 _usage_limit"
 
 # 時刻沒到，畫面乾淨也不派
@@ -1194,7 +1194,7 @@ rm -f "$LOG" "$MEMO"
 # --- --dry 只印，不送不記 ---
 rm -f "$MEMO"
 round --dry || fail "dry rc: $(cat "$FX/out")"
-assert_grep 'DRY herdr notification show \[demo/a1\]' "$FX/out"
+assert_grep 'DRY herdr agent prompt opsx-coordinator \[demo/a1\]' "$FX/out"
 assert_eq "$(notes)" 0 "dry 不送"; assert_no_file "$MEMO"
 
 # --- 代答的 gate 不通知 ---
@@ -1213,6 +1213,36 @@ grep '??' "$LOG" | grep 'demo/a1/gate/g1' | grep -q boom || fail "失敗要記 ?
 assert_eq "$(memo_get _notified demo/a1/gate/g1)" "" "失敗不記進 _notified"
 OPSX_TEST_NOTIFY_ERR="$FX/nerr" round || fail "rc: $(cat "$FX/out")"
 assert_eq "$(notes)" 1 "下一輪再送一次"
+[ -n "$(memo_get _notified demo/a1/gate/g1)" ] || fail "成功後要記：$(cat "$MEMO")"
+rm -f "$MEMO"
+
+# --- 協調者在：事件走 agent prompt，不發桌面通知 ---
+cards "$HUMAN"
+OPSX_TEST_COORDINATOR_UP=1 round || fail "rc: $(cat "$FX/out")"
+c1="$(count '^agent prompt opsx-coordinator \[demo/a1\] gate g1 ')"; assert_eq "$(notes)" 0 "協調者在不發桌面通知"
+OPSX_TEST_COORDINATOR_UP=1 round || fail "rc: $(cat "$FX/out")"
+assert_eq "$((c1 + $(count '^agent prompt opsx-coordinator ')))" 1 "協調者在：兩輪只送一次：$(cat "$OPSX_FAKE_LOG")"
+assert_eq "$(notes)" 0 "協調者在第二輪也不發桌面通知"
+[ -n "$(memo_get _notified demo/a1/gate/g1)" ] || fail "協調者收到要記 _notified：$(cat "$MEMO")"
+rm -f "$MEMO"
+
+# --- 協調者 pane 卡住（agent_blocked）：退回桌面通知，人才收得到 ---
+printf 'agent_blocked\n' > "$FX/berr"
+cards "$HUMAN"
+OPSX_TEST_COORDINATOR_UP=1 OPSX_TEST_COORD_ERR="$FX/berr" round || fail "rc: $(cat "$FX/out")"
+assert_eq "$(notes)" 1 "協調者卡住要退回桌面通知：$(cat "$OPSX_FAKE_LOG")"
+[ -n "$(memo_get _notified demo/a1/gate/g1)" ] || fail "退回通知成功要記 _notified：$(cat "$MEMO")"
+rm -f "$MEMO"
+
+# --- 協調者那邊出別的錯：不退回桌面通知、不記，下一輪補送 ---
+printf 'boom\nok\n' > "$FX/cerr"
+cards "$HUMAN"
+OPSX_TEST_COORDINATOR_UP=1 OPSX_TEST_COORD_ERR="$FX/cerr" round || fail "rc: $(cat "$FX/out")"
+assert_eq "$(notes)" 0 "別的錯不退回桌面通知"
+grep '??' "$LOG" | grep 'demo/a1/gate/g1' | grep -q boom || fail "失敗要記 ?? 含去重鍵與 herdr 的錯：$(cat "$LOG")"
+assert_eq "$(memo_get _notified demo/a1/gate/g1)" "" "失敗不記進 _notified"
+OPSX_TEST_COORDINATOR_UP=1 OPSX_TEST_COORD_ERR="$FX/cerr" round || fail "rc: $(cat "$FX/out")"
+assert_eq "$(count '^agent prompt opsx-coordinator ')" 1 "下一輪補送"
 [ -n "$(memo_get _notified demo/a1/gate/g1)" ] || fail "成功後要記：$(cat "$MEMO")"
 rm -f "$MEMO"
 

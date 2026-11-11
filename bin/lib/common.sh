@@ -1,6 +1,16 @@
 #!/usr/bin/env bash
 # 共用：訊息、git 位置、TOML 小工具。被 bin/opsx source。
 
+COORDINATOR_AGENT=opsx-coordinator   # 協調者 session 在 herdr 的名字；bin/lib/coordinate.py 的 COORDINATOR 是同一個
+
+# 回報一行給協調者 session。送不出去（它不在、herdr 掛了）記 coordinator.log 並回 1；成功回 0。
+coordinator_say() { # <一行>
+  local err
+  err="$(herdr agent prompt "$COORDINATOR_AGENT" "$1" 2>&1 >/dev/null)" && return 0
+  printf '%s ?? 回報 %s 送不出去：%s\n' "$(now_iso)" "$COORDINATOR_AGENT" "$(printf '%s' "$err" | head -c 200 | tr '\n' ' ')" | opsx_append "$OPSX_STATE_DIR/coordinator.log" || true
+  return 1
+}
+
 say()  { printf '%s\n' "$*"; }
 warn() { printf 'opsx: %s\n' "$*" >&2; }
 die()  { printf 'opsx: %s\n' "$*" >&2; exit "${2:-2}"; }

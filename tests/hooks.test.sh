@@ -837,11 +837,18 @@ STOP_STATE="$OPSX_STATE_DIR/stop-chain"
 # 每次呼叫先清擋的次數；要測次數的 case 用 KEEP=1 sg 保留
 sg() { [ -n "${KEEP:-}" ] || rm -rf "$STOP_STATE"; printf '{"cwd":"%s","stop_hook_active":%s}' "$R" "${1:-false}" | bash "$H/openspec-stop-gate.sh" 2>/dev/null; true; }
 done_report() { printf '# report\n\n## MR\nhttps://gitlab.tsg-navigator.com/a/b/-/merge_requests/212 · opened 2026-11-10 · auto-merge: no\nbabysit: 2026-11-10T14:00:00+08:00\n' > "$C/report.md"; }
+# 放行時回報協調者：fake herdr 只在這個 PATH 前綴下才有，opsx-coordinator 在（OPSX_TEST_COORDINATOR_UP）
+CL="$FX/coord.log"; mkdir -p "$FX/cbin"
+printf '#!/usr/bin/env bash\nexec bash "%s/tests/fakes/herdr" "$@"\n' "$OPSX_ROOT" > "$FX/cbin/herdr"; chmod +x "$FX/cbin/herdr"
+sgc() { : > "$CL"; [ -n "${KEEP_SAID:-}" ] || rm -rf "$OPSX_STATE_DIR/stop-said"; PATH="$FX/cbin:$PATH" OPSX_FAKE_LOG="$CL" OPSX_TEST_COORDINATOR_UP=1 sg; }
 printf '## 1. x\n\n- [x] 1.1 a\n- [ ] 1.2 b\n' > "$C/tasks.md"
 out="$(sg)"; assert_eq "$(decision "$out")" block "stop: 有未勾"; reason "$out" | grep -q '1 個 task 沒勾' || fail "stop: 沒 gates.md 要說幾個 task 沒勾"
+out="$(sgc)"; assert_eq "$(decision "$out")" block "stop: 擋住時不回報協調者"; assert_eq "$(cat "$CL")" "" "stop: 擋住時不回報協調者"
 out="$(sg true)"; assert_eq "$(decision "$out")" block "stop: stop_hook_active 不再是放行條件"
 printf '## real-herdr\nstatus: open\n' > "$C/gates.md"
 out="$(sg)"; assert_eq "$out" "" "stop: 有未勾但有 open gate 放行"
+out="$(sgc)"; assert_eq "$out" "" "stop: open gate 放行（回報版）"
+assert_grep '^agent prompt opsx-coordinator \[eval-core\] 停住：等人答 gate（apply 站）' "$CL"
 printf '## real-herdr\nstatus: answered\n' > "$C/gates.md"
 out="$(sg)"; assert_eq "$(decision "$out")" block "stop: gate 都 answered 仍擋未勾"; reason "$out" | grep -q '1 個 task 沒勾' || fail "stop: answered gate 要說幾個 task 沒勾"
 printf '## real-herdr\nstatus: open (等 push 授權)\n' > "$C/gates.md"
@@ -858,18 +865,51 @@ printf '{"phase":"apply","step":8,"total":8,"label":"x","tests":"green","at":"20
 rm -f "$C/report.md"; out="$(sg)"; assert_eq "$(decision "$out")" block "stop: 沒 report"; reason "$out" | grep -q '/opsx-workflow:review' || fail "stop: 要叫跑 review"
 done_report; sleep 1
 out="$(sg)"; assert_eq "$out" "" "stop: 全齊放行"
+out="$(sgc)"; assert_eq "$out" "" "stop: 全齊放行（回報版）"
+assert_grep '^agent prompt opsx-coordinator \[eval-core\] 停住：babysit 一輪做完，等 MR 合併' "$CL"
+assert_not_grep '完成 → 下一站' "$CL"
+# 同一行不重送；內容變了才再送
+out="$(KEEP_SAID=1 sgc)"; assert_eq "$out" "" "stop: 同一行放行（去重）"; assert_eq "$(cat "$CL")" "" "stop: 同一行不重送"
+printf '## real-herdr\nstatus: open\n' > "$C/gates.md"
+out="$(KEEP_SAID=1 sgc)"; assert_eq "$out" "" "stop: 原因變了放行"
+assert_grep '^agent prompt opsx-coordinator \[eval-core\] 停住：等人答 gate' "$CL"
+# 放行、被擋、再放行同一原因：被擋代表卡又動過，要再送
+rm -f "$C/gates.md"; printf '## 1. x\n\n- [x] 1.1 a\n- [ ] 1.2 b\n' > "$C/tasks.md"
+out="$(sg)"; assert_eq "$(decision "$out")" block "stop: 夾在兩次放行之間的擋"
+printf '## 1. x\n\n- [x] 1.1 a\n- [x] 1.2 b\n' > "$C/tasks.md"; printf '## real-herdr\nstatus: open\n' > "$C/gates.md"
+out="$(KEEP_SAID=1 sgc)"; assert_eq "$out" "" "stop: 擋過之後同一原因放行"
+assert_grep '^agent prompt opsx-coordinator \[eval-core\] 停住：等人答 gate' "$CL"
+rm -f "$C/gates.md"
+# 協調者不在：hook 照常放行，只在 coordinator.log 記一行；送失敗不記，下一次 Stop 會再試
+rm -rf "$OPSX_STATE_DIR/stop-said"; : > "$OPSX_STATE_DIR/coordinator.log"
+out="$(PATH="$FX/cbin:$PATH" OPSX_FAKE_LOG="$CL" sg)"; assert_eq "$out" "" "stop: 協調者不在照常放行"
+assert_grep 'opsx-coordinator' "$OPSX_STATE_DIR/coordinator.log"
+out="$(KEEP_SAID=1 sgc)"; assert_eq "$out" "" "stop: 協調者回來後放行"
+assert_grep '^agent prompt opsx-coordinator \[eval-core\] 停住：babysit 一輪做完' "$CL"
+# 記去重的檔寫不進去（symlink）：回報照送，hook 仍以 0 放行
+rm -rf "$OPSX_STATE_DIR/stop-said"; mkdir -p "$OPSX_STATE_DIR/stop-said"; ln -s "$FX/nowhere" "$OPSX_STATE_DIR/stop-said/Agentory-AI-eval-core"
+printf '{"cwd":"%s"}' "$R" | PATH="$FX/cbin:$PATH" OPSX_FAKE_LOG="$CL" OPSX_TEST_COORDINATOR_UP=1 bash "$H/openspec-stop-gate.sh" > /dev/null 2>&1
+assert_eq "$?" 0 "stop: 去重檔寫不進去不能讓 hook 以非 0 結束"
+rm -rf "$OPSX_STATE_DIR/stop-said"
 git -C "$R" commit -q --allow-empty -m "feat: later"   # report 之後又 commit
 out="$(sg)"; assert_eq "$(decision "$out")" block "stop: report 後有新 commit"
 # report 在、卡的階段是 babysit，但 hook 要的是 /review：擋滿後的 gate 要指 /review，不指 /babysit
 rm -f "$C/gates.md"; rm -rf "$STOP_STATE"
 out="$(KEEP=1 sg)"; out="$(KEEP=1 sg)"; out="$(KEEP=1 sg)"
 out="$(KEEP=1 sg)"; assert_eq "$out" "" "stop: report 後有新 commit 擋滿後放行"
+# 擋滿放行也回報（經 sgc，KEEP=1 保留擋的次數）
+rm -f "$C/gates.md"; rm -rf "$STOP_STATE"
+out="$(KEEP=1 sg)"; out="$(KEEP=1 sg)"; out="$(KEEP=1 sg)"
+out="$(KEEP=1 sgc)"; assert_eq "$out" "" "stop: 擋滿放行（回報版）"
+assert_grep '^agent prompt opsx-coordinator \[eval-core\] 停住：連續 3 次沒接 review' "$CL"
 assert_grep '^## 卡在接 /review' "$C/gates.md"; assert_not_grep '卡在接 /babysit' "$C/gates.md"
 rm -f "$C/gates.md"; rm -rf "$STOP_STATE"
 # reviewer 在背景跑（status.json 是 review 且步數未到最後一步）：主 agent 結束 turn 不是沒接下一站，不計次、不寫 gate
 printf '{"phase":"review","step":2,"total":7,"label":"三個 reviewer 已派出","tests":"green","at":"2026-11-10T14:28:10+08:00"}' > "$C/status.json"
 out="$(KEEP=1 sg)"; out="$(KEEP=1 sg)"; out="$(KEEP=1 sg)"; out="$(KEEP=1 sg)"; out="$(KEEP=1 sg)"
 assert_eq "$out" "" "stop: reviewer 在跑連停五次都放行"
+out="$(sgc)"; assert_eq "$out" "" "stop: reviewer 在跑放行（回報版）"
+assert_grep '^agent prompt opsx-coordinator \[eval-core\] 停住：等 reviewer' "$CL"
 assert_eq "$([ -e "$C/gates.md" ] && echo y || echo n)" n "stop: reviewer 在跑不寫「卡在接 /review」gate"
 assert_eq "$([ -e "$STOP_STATE/Agentory-AI-eval-core" ] && echo y || echo n)" n "stop: reviewer 在跑不留擋的次數"
 # review 走到最後一步仍沒有 report.md：不再是「在等 reviewer」，照擋
@@ -892,6 +932,8 @@ printf '## 1. x\n\n- [ ] 1.1 `attach-cli`：a\n- [x] 1.2 `attach-board`：b\n' >
 mk_sub attach-cli subagent-attach-cli "$FRESH"
 out="$(KEEP=1 sg)"; out="$(KEEP=1 sg)"; out="$(KEEP=1 sg)"; out="$(KEEP=1 sg)"; out="$(KEEP=1 sg)"
 assert_eq "$out" "" "stop: subagent 在做未疊的子 change，連停五次都放行"
+out="$(sgc)"; assert_eq "$out" "" "stop: subagent 在做放行（回報版）"
+assert_grep '^agent prompt opsx-coordinator \[eval-core\] 停住：等背景 subagent' "$CL"
 assert_eq "$([ -e "$C/gates.md" ] && echo y || echo n)" n "stop: subagent 在做不寫「卡在接 /apply」gate"
 assert_eq "$([ -e "$STOP_STATE/Agentory-AI-eval-core" ] && echo y || echo n)" n "stop: subagent 在做不留擋的次數"
 printf '## 1. x\n\n- [x] 1.1 `attach-cli`：a\n- [ ] 1.2 `attach-board`：b\n' > "$C/tasks.md"

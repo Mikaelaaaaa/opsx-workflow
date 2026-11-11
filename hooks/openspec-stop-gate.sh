@@ -134,6 +134,25 @@ write_auto_gate() { # <dir> <slug> <站>；站是 facts 時問的是事實欄位
   } | opsx_append "$f"
 }
 
+# 放行不等於這一站做完（真做完時 hook 會擋，導向下一站）：只報停在哪、為什麼
+wait_reason() { # <dir> <站>
+  if [ "$(st_open_gates_blocking "$1")" -gt 0 ]; then printf '等人答 gate（%s 站）' "$2"
+  elif st_subagent_running "$1"; then printf '等背景 subagent（%s 站）' "$2"
+  elif st_review_running "$1"; then printf '等 reviewer（%s 站）' "$2"
+  elif [ "$2" = babysit ]; then printf 'babysit 一輪做完，等 MR 合併'
+  else printf '%s 站放行，沒有要擋的條件' "$2"
+  fi
+}
+
+# 回報協調者：同一張卡連續兩次放行送同一行只送一次（中間被擋過就算卡又動了），送出成功才記
+say_once() { # <一行>
+  local f="$OPSX_STATE_DIR/stop-said/$(repo_name)-$slug"
+  [ "$(cat "$f" 2>/dev/null)" = "$1" ] && return 0
+  coordinator_say "$1" || return 0
+  mkdir -p "$(dirname "$f")"
+  printf '%s' "$1" | opsx_replace "$f" || return 0   # 記不下來只會多送一次，不能讓 hook 以非 0 結束
+}
+
 d="$(card_dir)"
 [ -n "$d" ] || exit 0
 slug="$(card_slug)"
@@ -147,6 +166,7 @@ state="$OPSX_STATE_DIR/stop-chain/$(repo_name)-$slug"
 out="$(stop_reason "$d" "$slug" "$stage")"
 if [ -z "$out" ]; then
   rm -f "$state"
+  say_once "[$slug] 停住：$(wait_reason "$d" "$stage")"
   exit 0
 fi
 want="${out%%|*}"     # hook 這次要求的站：不一定等於 stage_of 的站（report.md 在但要重跑 /review 時 stage 是 babysit）
@@ -165,6 +185,7 @@ if [ "$n" -ge "$MAX_BLOCKS" ]; then
   titled_gate_open "$d" "$want" || [ "$gated" = gated ] || write_auto_gate "$d" "$slug" "$want"
   if titled_gate_open "$d" "$want"; then
     printf '%s %s gated %s\n' "$want" "$n" "$fp" | opsx_replace "$state"
+    say_once "[$slug] 停住：連續 ${n} 次沒接 ${want}，已開「卡在接」gate"
     exit 0
   fi
   n=0; gated="-"   # gate 被回答了，重算
@@ -172,4 +193,5 @@ fi
 
 mkdir -p "$(dirname "$state")"
 printf '%s %s - %s\n' "$want" "$((n + 1))" "$fp" | opsx_replace "$state"
+rm -f "$OPSX_STATE_DIR/stop-said/$(repo_name)-$slug"
 stop_block "$reason"

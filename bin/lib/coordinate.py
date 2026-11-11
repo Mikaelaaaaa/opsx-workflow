@@ -33,6 +33,10 @@ USAGE_LIMIT_WARNING = "grace allowance"   # 「還有一小段寬限」是警告
 USAGE_LIMIT_RESET = re.compile(r"(?:limit resets|continuing automatically at)\s+(\d{1,2})(?::(\d{2}))?\s*([ap]m)", re.IGNORECASE)
 # 合併後交給卡自己的 /archive（它標 workplan merged、叫 opsx chain）；過了這麼久還沒歸檔就要人看
 ARCHIVE_GRACE_MINUTES = 30
+# 協調者 session 在 herdr 裡的 agent 名；hooks 與 common.sh 的 COORDINATOR_AGENT 是同一個名字
+COORDINATOR = "opsx-coordinator"
+# herdr 收不下這則 prompt 的兩種情形：沒有這個 agent、或它卡在對話框。兩種都改發桌面通知，人才收得到
+COORDINATOR_UNAVAILABLE = ("agent_not_found", "agent_blocked")
 AGENT_NAME = re.compile(r"^[a-z][a-z0-9_-]{0,31}$")
 VERIFY_WORDS = ("真機", "實測", "瀏覽器", "herdr 驗", "resume", "真的 claude", "真 herdr", "量測")
 GRANT_WORDS = ("授權", "開 PR", "開 / 改 MR", "gh pr create", "push", "推到 origin", "rebase")
@@ -388,13 +392,16 @@ class Round:
     def notify(self, c, kind, ident, event, body, scope=None):
         """這裡處理不了、要人去處理的事。每輪從狀態重算，送過的鍵記在 _notified，所以事件觸發那輪漏掉的由定時那輪補，也不會重送。
         scope 是去重鍵的前綴，預設是這張卡；feature session 的事屬於整個 session，傳 <repo>/@<feature>。
+        先送協調者 session（herdr agent prompt）；它不在或卡住（COORDINATOR_UNAVAILABLE）才發桌面通知。
         herdr 的通知沒有點擊動作，內文要寫去哪裡處理。"""
         self.send_notification("%s/%s/%s" % (scope or card_key(c), kind, ident), "[%s] %s" % (card_key(c), event), body)
 
     def send_notification(self, key, title, body):
         if key in self.memo["_notified"]:
             return
-        rc, out, err = self.act(["herdr", "notification", "show", title, "--body", body, "--sound", "request"])
+        rc, out, err = self.act(["herdr", "agent", "prompt", COORDINATOR, "%s：%s" % (title, body)])
+        if rc != 0 and any(code in out + err for code in COORDINATOR_UNAVAILABLE):
+            rc, out, err = self.act(["herdr", "notification", "show", title, "--body", body, "--sound", "request"])
         if rc != 0:
             self.log("?? 通知 %s 送不出去，下一輪再送：%s" % (key, (err or out).replace("\n", " ")[:200]))
             return
