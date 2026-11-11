@@ -288,14 +288,17 @@ function deepLinkTarget(cards,cardKey){
   if(!c)return {tab:'home',missing:true};
   return {tab:c.section==='收件匣'?'inbox':'home',open:cardKey};
 }
-/* 只在開頁後第一次成功的 collect 處理，之後的刷新不再切 tab 或重開抽屜 */
-function applyDeepLink(env,cards){
-  const k=env.ui.deepLink;if(!k)return;env.ui.deepLink=null;
-  const t=deepLinkTarget(cards,k);env.showTab(t.tab);
+/* 只處理一次，之後的刷新不再切 tab 或重開抽屜。server 會先回開頁前的快取（generated_at 只到秒），
+   剛建的卡還不在裡面，所以找不到且這份比開頁那一秒舊時先不處理，等較新的 collect */
+function applyDeepLink(env,cards,generatedAt){
+  const k=env.ui.deepLink;if(!k)return;
+  const t=deepLinkTarget(cards,k);
+  if(t.missing&&Date.parse(generatedAt)<Math.floor(env.loadedAt/1000)*1000)return;
+  env.ui.deepLink=null;env.showTab(t.tab);
   if(t.missing)env.toast('找不到這張卡',true);else env.openDrawer(t.open);
 }
 /* card deep link end */
-const deepLinkAtLoad=readLoadHash(window);
+const deepLinkAtLoad=readLoadHash(window);const pageLoadedAt=Date.now();
 function token(){try{return sessionStorage.getItem('opsx-token')||'';}catch(e){return '';}}
 const api={
   async collect(){const r=await fetch('/api/collect',{headers:{'X-Opsx-Token':token()}});if(r.status===401)throw new Error('token 不對：從 herdr 的 open-board 重開一次');if(!r.ok)throw new Error('collect '+r.status+'：'+(await r.text()).slice(0,200));return r.json();},
@@ -1090,7 +1093,7 @@ function showCollect(j,force){
   const {generated_at,...rest}=j;const raw=JSON.stringify(rest);
   if(force||raw!==lastRaw){lastRaw=raw;data=j;render();}
   else{data.generated_at=generated_at;$('#stamp').textContent='collect '+ago(generated_at);}
-  applyDeepLink({ui,showTab,openDrawer,toast},j.cards);
+  applyDeepLink({ui,showTab,openDrawer,toast,loadedAt:pageLoadedAt},j.cards,j.generated_at);
 }
 function showCollectError(e){
   if(!lastRaw)setView($('#view'),`<div class="empty" style="color:var(--danger)">${esc(e.message)}</div>`,false);

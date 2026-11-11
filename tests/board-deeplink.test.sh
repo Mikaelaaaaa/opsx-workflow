@@ -68,8 +68,10 @@ assert.deepStrictEqual(deepLinkTarget(cards, 'other/tui-keys'), {tab: 'inbox', o
 assert.deepStrictEqual(deepLinkTarget(cards, 'nope/x'), {tab: 'home', missing: true}, '找不到');
 assert.deepStrictEqual(deepLinkTarget([], 'nope/x'), {tab: 'home', missing: true}, '空 cards 也是找不到');
 
+const LOADED = Date.parse('2026-11-11T12:00:00.400+08:00');   // 開頁時間（ms），collect 的 generated_at 只到秒
+const FRESH = '2026-11-11T12:00:05+08:00', OLD = '2026-11-11T11:30:00+08:00', SAME_SECOND = '2026-11-11T12:00:00+08:00';
 const fakeUi = (deepLink) => {
-  const env = {toasts: [], ui: {tab: 'home', open: null, deepLink}};
+  const env = {toasts: [], loadedAt: LOADED, ui: {tab: 'home', open: null, deepLink}};
   env.showTab = (t) => { env.ui.tab = t; };
   env.openDrawer = (k) => { env.ui.open = k; };
   env.toast = (msg, bad) => { env.toasts.push([msg, bad]); };
@@ -78,39 +80,65 @@ const fakeUi = (deepLink) => {
 
 // Scenario 開進行中的卡
 let env = fakeUi('opsx-workflow/tui-keys');
-applyDeepLink(env, cards);
+applyDeepLink(env, cards, FRESH);
 assert.strictEqual(env.ui.tab, 'home', '進行中：tab home');
 assert.strictEqual(env.ui.open, 'opsx-workflow/tui-keys', '進行中：抽屜開那張卡');
 assert.deepStrictEqual(env.toasts, [], '找得到不提示');
 
 // Scenario 開收件匣的卡
 env = fakeUi('opsx-workflow/idea');
-applyDeepLink(env, cards);
+applyDeepLink(env, cards, FRESH);
 assert.strictEqual(env.ui.tab, 'inbox', '收件匣：tab inbox');
 assert.strictEqual(env.ui.open, 'opsx-workflow/idea', '收件匣：抽屜開那張卡');
 
 // Scenario 找不到卡
 env = fakeUi('nope/x');
 env.ui.tab = 'inbox';
-applyDeepLink(env, cards);
+applyDeepLink(env, cards, FRESH);
 assert.strictEqual(env.ui.tab, 'home', '找不到：停首頁');
 assert.strictEqual(env.ui.open, null, '找不到：抽屜不開');
 assert.strictEqual(env.toasts.length, 1, '找不到：提示一次');
 assert.strictEqual(env.toasts[0][0], '找不到這張卡', '提示文字');
-applyDeepLink(env, cards);
+applyDeepLink(env, cards, FRESH);
 assert.strictEqual(env.toasts.length, 1, '下一輪 collect 不再提示');
+
+// Scenario server 先回開頁前的舊快取：剛建的卡還不在裡面，等較新的 collect
+const newCard = {repo: 'opsx-workflow', slug: 'me-20261111-1200', section: '收件匣'};
+env = fakeUi('opsx-workflow/me-20261111-1200');
+applyDeepLink(env, cards, OLD);
+assert.deepStrictEqual([env.ui.tab, env.ui.open, env.toasts.length], ['home', null, 0], '舊快取找不到：不切 tab、不提示');
+assert.strictEqual(env.ui.deepLink, 'opsx-workflow/me-20261111-1200', '舊快取找不到：deep link 留著');
+applyDeepLink(env, cards, OLD);
+assert.strictEqual(env.toasts.length, 0, '同一份舊快取再來一次仍等');
+applyDeepLink(env, [...cards, newCard], FRESH);
+assert.strictEqual(env.ui.tab, 'inbox', '較新的 collect 有卡：切到 inbox');
+assert.strictEqual(env.ui.open, 'opsx-workflow/me-20261111-1200', '較新的 collect 有卡：開抽屜');
+assert.deepStrictEqual(env.toasts, [], '最後找到了就不提示');
+// 較新的仍沒有才提示
+env = fakeUi('nope/x');
+applyDeepLink(env, cards, OLD);
+applyDeepLink(env, cards, FRESH);
+assert.strictEqual(env.toasts.length, 1, '較新的 collect 仍找不到才提示');
+// 舊快取裡就有這張卡：直接開，不必等
+env = fakeUi('opsx-workflow/idea');
+applyDeepLink(env, cards, OLD);
+assert.strictEqual(env.ui.open, 'opsx-workflow/idea', '舊快取找得到就照開');
+// generated_at 只到秒：開頁那一秒開始的 collect 算新的，不多等一輪
+env = fakeUi('nope/x');
+applyDeepLink(env, cards, SAME_SECOND);
+assert.strictEqual(env.toasts.length, 1, '開頁同一秒的 collect 算新的');
 
 // Scenario 只處理一次
 env = fakeUi('opsx-workflow/idea');
-applyDeepLink(env, cards);
+applyDeepLink(env, cards, FRESH);
 env.ui.open = null; env.ui.tab = 'home';
-applyDeepLink(env, cards);
+applyDeepLink(env, cards, FRESH);
 assert.strictEqual(env.ui.open, null, '關掉後下一輪 collect 抽屜維持關閉');
 assert.strictEqual(env.ui.tab, 'home', '下一輪 collect 不再切 tab');
 
 // 沒有 card：什麼都不做
 env = fakeUi(null);
-applyDeepLink(env, cards);
+applyDeepLink(env, cards, FRESH);
 assert.deepStrictEqual([env.ui.tab, env.ui.open, env.toasts.length], ['home', null, 0], '沒有 deep link 不動');
 JS
 
@@ -124,5 +152,6 @@ const ui = html.slice(html.indexOf('const ui={'), html.indexOf('\n', html.indexO
 assert.ok(ui.includes('deepLink:'), 'ui 要帶 deepLink：' + ui);
 const sc = html.slice(html.indexOf('function showCollect('), html.indexOf('function showCollectError('));
 assert.ok(sc.includes('applyDeepLink('), 'showCollect 要呼叫 applyDeepLink：' + sc);
+assert.ok(/applyDeepLink\(\{[^}]*loadedAt:[^}]*\},j\.cards,j\.generated_at\)/.test(sc), 'showCollect 要帶開頁時間與這份 collect 的 generated_at：' + sc);
 JS
 echo ok
