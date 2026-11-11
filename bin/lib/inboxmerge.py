@@ -115,6 +115,21 @@ def parse(block: list) -> dict:
     return out
 
 
+def sections(text: str) -> list:
+    """每段 `## 併入：` 依檔案順序回 (標題行, parse 的結果或它丟的 ValueError)；看板列項目、報格式錯誤用。"""
+    lines = [x.rstrip("\n") for x in text.splitlines(keepends=True)]
+    heads = [i for i, x in enumerate(lines) if HEAD.match(x)] + [len(lines)]
+    out = []
+    for a, b in zip(heads, heads[1:]):
+        if not MERGED.match(lines[a]):
+            continue
+        try:
+            out.append((lines[a], parse(lines[a:b])))
+        except ValueError as e:
+            out.append((lines[a], e))
+    return out
+
+
 def card_body(fields: dict) -> str:
     lines = ["---", "type: 功能", "source: " + fields["source"], "found: " + fields["when"][:10], "related:", "kind_of_work: " + fields["kind_of_work"]]
     if "evidence" in fields:

@@ -343,6 +343,18 @@ function notesSection(c){
   return `<section><h3>派工指示 <span class="src">inbox.md</span></h3>${rows}${add?`<input type="text" id="note-add" aria-label="追加派工指示" placeholder="追加一條指示，Enter 送出">`:''}</section>`;
 }
 /* 派工指示 end */
+/* 併入項目（inbox.md ## 併入： 段，opsx split-out 拆得回來的）：tests/board-merged-web.test.sh 從 start 切到 end 執行 */
+/* 併入項目 start */
+function mergedSection(c){
+  const list=c.merged||[];
+  if(!list.length)return '';
+  const rows=list.map(m=>`<div class="note-row"><span class="mono faint">${esc(String(m.when).replace('T',' ').slice(0,16))} · ${esc(m.source)}</span> ${esc(m.text)} <button class="sm ghost" data-act="split-out" data-id="${esc(m.id)}">拆出來</button></div>`).join('');
+  return `<section><h3>併入項目 <span class="src">inbox.md</span></h3>${rows}</section>`;
+}
+function splitOut(c,id){
+  act(`opsx split-out ${c.slug} ${id}`,()=>api.post('split-out',{slug:c.slug,id,repo:repoTop(c)}));
+}
+/* 併入項目 end */
 function ago(iso){
   if(!iso)return '';const t=Date.parse(iso);if(isNaN(t))return iso;
   const s=Math.max(0,(Date.now()-t)/1000);
@@ -561,6 +573,7 @@ function mergeCtl(c,cards){
 function submitMerge(c){
   const into=ui.mergeInto;
   if(!mergeCandidates(data.cards,c).some(t=>t.slug===into))return;
+  if(ui.busy){toast('上一個動作還在跑，輸入先留著，等一下再送',true);return;}
   ui.merge=null;ui.mergeInto='';
   act(`opsx merge-card ${c.slug} --into ${into} --repo ${repoTop(c)}`,()=>api.post('merge-card',mergeBody(c,into)));
 }
@@ -773,7 +786,7 @@ function renderDrawer(){
   const foot=`<div class="foot">${d.pane?`<button class="ghost sm" data-act="pane">開啟 pane ${esc(d.pane)}</button><button class="ghost sm" data-act="stop">停止</button>`:''}${c.section!=='已完成'?`<button class="ghost sm" data-act="dispatch">${d.pane?'重新指派':'指派'}</button>`:''}<span class="path">${esc(c.path||'')}</span></div>`;
   const prioSec=c.priority?`<section><h3>等級 <span class="src">opsx priority</span></h3><div>${priorityBadge(c,true)}</div></section>`:'';
   const headBadge=(w?`<span class="badge ${WAIT_BADGE[w.type]}">${esc(w.type)}</span>`:c.agent_status==='working'?'<span class="badge ok"><span class="dot live"></span>執行中</span>':'')+pendBadge(c);
-  $('#drawer').innerHTML=`<header><div style="padding-top:2px">${bot(c,40)}</div><div class="ttl"><h2>${esc(c.title)}${headBadge}</h2><div class="flow">${flowLine(c)}</div></div><button class="x" data-act="close" aria-label="關閉">×</button></header><div class="body">${ask}${prioSec}${notesSection(c)}${facts}${prog}${out}${mr}${logSec}${foot}</div>`;
+  $('#drawer').innerHTML=`<header><div style="padding-top:2px">${bot(c,40)}</div><div class="ttl"><h2>${esc(c.title)}${headBadge}</h2><div class="flow">${flowLine(c)}</div></div><button class="x" data-act="close" aria-label="關閉">×</button></header><div class="body">${ask}${prioSec}${notesSection(c)}${mergedSection(c)}${facts}${prog}${out}${mr}${logSec}${foot}</div>`;
   $('#drawer').hidden=false;$('#scrim').hidden=false;
   const nr=$('#reply');if(nr&&keep){nr.value=keep.v;if(keep.focus){nr.focus();try{nr.setSelectionRange(keep.s,keep.s);}catch(e){}}}
   const nn=$('#note-add');if(nn&&keepNote){nn.value=keepNote.v;if(keepNote.focus){nn.focus();try{nn.setSelectionRange(keepNote.s,keepNote.s);}catch(e){}}}
@@ -876,6 +889,7 @@ function submitNew(){
 /* 先 explore：互動模式派出，第一句由 dispatch 從 stage 推，收件卡一定是 /explore（board-inbox D5） */
 function exploreFirst(c){act(`opsx dispatch ${c.slug} --mode interactive --kind ${c.kind}`,()=>api.post('dispatch',{slug:c.slug,mode:'interactive',kind:c.kind,repo:repoTop(c)}),{key:key(c),kind:'dispatch'});}
 function submitDrop(id,text){
+  if(ui.busy){toast('上一個動作還在跑，輸入先留著，等一下再送',true);return;}
   ui.drop=null;ui.dropText='';
   if(id.startsWith('unfiled:')){const slug=id.slice(8);act(`opsx drop ${slug} -- ${text}`,()=>api.post('drop',{slug,text}));return;}
   const c=byKey(id);if(!c){render();return;}
@@ -885,6 +899,7 @@ const closeMerge=()=>{ui.merge=null;ui.mergeInto='';render();};
 function submitPriority(c){
   const level=$('.prio-level').value,reason=ui.prioText.trim();
   if(!reason)return;
+  if(ui.busy){toast('上一個動作還在跑，輸入先留著，等一下再送',true);return;}
   ui.prio=null;ui.prioText='';ui.prioLevel=null;
   act(`opsx priority ${c.slug} --set ${level} --reason ${reason}`,()=>api.post('priority',{repo:repoTop(c),slug:c.slug,level,reason}));
 }
@@ -925,6 +940,7 @@ function openDispatch(c){
 function closeDispatch(){dlgFor=null;$('#dialog').hidden=true;$('#scrim').hidden=$('#drawer').hidden;}
 function doDispatch(){
   const c=byKey(dlgFor);if(!c)return;
+  if(ui.busy){toast('上一個動作還在跑，輸入先留著，等一下再送',true);return;}
   const agent=$('#dialog input[name=ag]:checked').value,mode=$('#dialog input[name=md]:checked').value;
   const kb=$('#dialog .kinds:not(.models) button[aria-pressed=true]');const mb=$('#dialog .models button[aria-pressed=true]');
   const kind=kb?kb.dataset.kind:c.kind;const model=agent==='codex'?'gpt-5':(mb?mb.dataset.model:MODEL_BY_KIND[kind]);
@@ -984,6 +1000,7 @@ document.addEventListener('click',e=>{
     if(a==='prio-go'){submitPriority(c);return;}
     if(a==='merge-open'){ui.merge=k;ui.mergeInto='';render();const i=$('.merge-into');if(i)i.focus();return;}
     if(a==='merge-go'){submitMerge(c);return;}
+    if(a==='split-out'){splitOut(c,btn.dataset.id);return;}
     return;
   }
   const kb=e.target.closest('#dialog .kinds button');
@@ -1061,7 +1078,7 @@ function refreshStep(st,ev){
 /* 動作接線 start */
 /* 只有 POST 本身失敗才還原與報失敗；POST 成功後重畫或刷新出錯不回滾，那時動作已經寫進檔了 */
 async function runAct(env,label,fn,p){
-  const {live,ui}=env;if(ui.busy)return;ui.busy=true;
+  const {live,ui}=env;if(ui.busy){env.toast('上一個動作還在跑，等一下再按',true);return;}ui.busy=true;
   const id=++live.seq;
   try{
     let r;

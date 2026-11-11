@@ -70,7 +70,7 @@ class ServerTest(unittest.TestCase):
             f'prev=; for a in "$@"; do if [ "$prev" = --attach ]; then cp "$a" "{cls.attached}/"; base64 < "$a" | tr -d "\\n" >> "{cls.contents}"; echo >> "{cls.contents}"; fi; prev="$a"; done\n'
             f'printf "OPSX_STATE_DIR=%s\\n" "${{OPSX_STATE_DIR:-}}" >> "{cls.env_log}"\n'
             f'if [ -f "{cls.fail_flag}" ]; then echo "opsx: 假的失敗" >&2; exit 2; fi\n'
-            f'if [ -f "{cls.rc_file}" ]; then echo "opsx: 假的退出碼" >&2; exit "$(cat "{cls.rc_file}")"; fi\n'
+            f'if [ -f "{cls.rc_file}" ]; then echo "opsx: 假的退出碼 $*" >&2; exit "$(cat "{cls.rc_file}")"; fi\n'
             'if [ "$1" = timeline ]; then echo \'{"generated_at": "g", "last_seen": null, "events": [], "errors": []}\'; exit 0; fi\n'
             'echo "ok: $1"\n'
         )
@@ -382,6 +382,37 @@ class ServerTest(unittest.TestCase):
             status, _, body = self.req("/api/merge-card", b, token=self.token)
             self.assertEqual(status, 400, "%r: %s" % (b, body))
         self.assertEqual(self.log.read_text(), "")
+
+    def test_split_out_forwards_to_opsx(self):
+        # specs/board-actions「拆出來呼叫 split-out」：--repo 在兩個位置參數之前，split-out 的參數迴圈遇到非選項就停
+        r = str(self.repo)
+        status, _, body = self.req("/api/split-out", {"slug": "x", "id": "agent-20261111-1040", "repo": r}, token=self.token)
+        self.assertEqual(status, 200, body)
+        self.assertTrue(json.loads(body)["ok"], body)
+        self.assertEqual(self.log.read_text().strip(), "split-out --repo %s x agent-20261111-1040" % r)
+
+    def test_split_out_rejects_bad_fields(self):
+        # specs/board-actions「id 格式不對回 400」
+        r = str(self.repo)
+        for b in ({"slug": "x", "id": "../etc", "repo": r}, {"slug": "x", "repo": r}, {"slug": "x", "id": "", "repo": r},
+                  {"slug": "x", "id": "-rf", "repo": r}, {"slug": "x", "id": 7, "repo": r},
+                  {"slug": "x", "id": "agent-1"}, {"id": "agent-1", "repo": r},
+                  {"slug": "x", "id": "agent-1", "repo": "/nonexistent-opsx-repo"}):
+            status, _, body = self.req("/api/split-out", b, token=self.token)
+            self.assertEqual(status, 400, "%r: %s" % (b, body))
+        self.assertEqual(self.log.read_text(), "")
+        status, _, _ = self.req("/api/split-out", token=self.token)
+        self.assertEqual(status, 405)
+
+    def test_split_out_failure_passes_through(self):
+        # specs/board-actions「split-out 失敗照實回」
+        self.rc_file.write_text("2")
+        status, _, body = self.req("/api/split-out", {"slug": "x", "id": "agent-20261111-1040", "repo": str(self.repo)}, token=self.token)
+        self.assertEqual(status, 200, body)
+        out = json.loads(body)
+        self.assertFalse(out["ok"], body)
+        self.assertEqual(out["rc"], 2, body)
+        self.assertIn("agent-20261111-1040", out["stderr"])
 
     def test_sync_with_and_without_source(self):
         status, _, body = self.req("/api/sync", {}, token=self.token)
