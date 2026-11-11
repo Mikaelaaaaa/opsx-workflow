@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# PreToolUse(Bash)：git commit 時，branch 要對到卡且 tasks.md 有勾才放行。
+# PreToolUse(Bash)：git commit 時，branch 要對到卡且 tasks.md 有勾才放行；子殼 branch（<主>--<子>）只要求 tasks.md 存在。
 # repo 沒有 workplan.yaml → 不擋（印一行「閘門未啟用」）。對不到 → deny；訊息帶 [no-change] 放行並記 bypass.log。
 # 只看 branch 不看 index（Agentory-AI 的 pathspec commit 照用）。要求檔 §8.5。
 source "$(dirname "${BASH_SOURCE[0]}")/_lib.sh"
@@ -53,7 +53,14 @@ d="$(card_dir)"
 if [ -z "$d" ]; then
   deny "opsx commit 閘門：branch '$(branch)' 對不到 openspec/changes/<slug>/。先 /opsx-workflow:propose 開卡（或 /opsx-workflow:explore），或在 commit 訊息加 [no-change] 說明為什麼這個 commit 不屬於任何 change。"
 fi
-if [ "$(tasks_done "$d")" -eq 0 ]; then
-  deny "opsx commit 閘門：${d#"$top"/} 的 tasks.md 還沒有任何勾（$( [ -f "$d/tasks.md" ] && echo '有 tasks.md 但全未勾' || echo '沒有 tasks.md' )）。先 /opsx-workflow:apply 做完一個 task 並勾起來再 commit；不屬於 task 的改動加 [no-change]。"
-fi
+case "$(card_slug)" in
+  *--*)
+    # 子殼的 subagent 在 isolation worktree 寫不到主 repo 的 subs/<子>/tasks.md，勾由 session 疊上 PR branch 時做
+    # shortcut: 子殼 commit 不檢查有沒有勾，空 commit 也放行, 等有心跳或子殼 status 回報後改成要求 status.json 的 step >= 1
+    [ -f "$d/tasks.md" ] || deny "opsx commit 閘門：${d#"$top"/} 沒有 tasks.md。先 /opsx-workflow:propose 寫出子殼的 tasks.md 再 commit；不屬於 task 的改動加 [no-change]。" ;;
+  *)
+    if [ "$(tasks_done "$d")" -eq 0 ]; then
+      deny "opsx commit 閘門：${d#"$top"/} 的 tasks.md 還沒有任何勾（$( [ -f "$d/tasks.md" ] && echo '有 tasks.md 但全未勾' || echo '沒有 tasks.md' )）。先 /opsx-workflow:apply 做完一個 task 並勾起來再 commit；不屬於 task 的改動加 [no-change]。"
+    fi ;;
+esac
 exit 0

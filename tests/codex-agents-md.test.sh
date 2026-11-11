@@ -28,7 +28,7 @@ gone() { case "$1" in *"$2"*) fail "${3:-內容}不該有 [$2]" ;; esac; }
 a="$(render_agents_md autopilot)"
 # 規則的每一段（以 ' · ' 切開）都在檔裡：同源
 while IFS= read -r seg; do has "$a" "$seg" "autopilot 規則段"; done < <(rule_autopilot | awk -F' · ' '{ for (i = 1; i <= NF; i++) print $i }')
-for s in 'gates.md' '一個 Bash 呼叫做一件事' 'waiting for merge' '直接做' '要授權' '永遠要人' 'merge' "$OPSX_ROOT/skills" '`/opsx-workflow:<stage> <slug>`'; do has "$a" "$s" autopilot; done
+for s in '主 checkout' 'bash tests/run.sh' 'gates.md' '一個 Bash 呼叫做一件事' 'waiting for merge' '直接做' '要授權' '永遠要人' 'merge' "$OPSX_ROOT/skills" '`/opsx-workflow:<stage> <slug>`'; do has "$a" "$s" autopilot; done
 i="$(render_agents_md interactive)"
 has "$i" "$(rule_interactive)" interactive
 gone "$i" '要問人的事寫 gates.md' interactive

@@ -22,6 +22,12 @@ has '## 併入' "$P"; has 'opsx split-out' "$P"
 S0="$FX/s0"; sec "$RV" "## Step 0: the gate" > "$S0"; [ -s "$S0" ] || fail "review 少 Step 0"
 has 'opsx check <slug>' "$S0"
 
+# --- me-20261111-1326：worktree 沒有 openspec/，openspec 指令走主 checkout；測試一律 bash tests/run.sh，不帶前綴環境變數 ---
+has '主 checkout' "$P"
+has 'bash tests/run.sh' "$P"
+has 'cd <worktree root>' "$P"
+! grep -qE '^[[:space:]]*(`)?OPSX_ROOT=' "$P" || fail "propose SKILL.md 不能有 OPSX_ROOT= 開頭的測試指令範例"
+
 # 驗收：openspec/changes/propose-gherkin/subs/propose-specs-rewrite/specs/propose-spec-guidance/spec.md 五個 Scenario
 hasnt() { ! grep -qE -- "$1" "$2" || fail "'$1' should not be in $(basename "$2"): $(grep -nE -- "$1" "$2")"; }
 RULES="$FX/rules"; sec "$P" "   Rules specific to opsx:" > "$RULES"; [ -s "$RULES" ] || fail "propose 少 Rules specific to opsx 段"
