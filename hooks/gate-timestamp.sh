@@ -47,11 +47,14 @@ new="$(awk -v now="$now" -v syn="$SYN" -v warn="$warn" -v warn_title="$warn_titl
     if (gid != "" && open && (!tl || norm(raw) == ""))
       print (tl ? "gate " gid " 的 type「" raw "」" : "gate " gid " 沒寫 type") > warn
     rest = ""
-    if (gid != "" && open && gid !~ /^[A-Za-z0-9-]+$/) {
+    if (gid != "" && open && gid !~ /^[A-Za-z0-9-]+$/ && gid !~ /^卡在接 /) {
       if (match(gid, /^[A-Za-z0-9-]+[ \t]+/)) {
         slug = trim(substr(gid, 1, RLENGTH)); rest = trim(substr(gid, RLENGTH + 1))
-        buf[1] = "## " slug
-        if (ql) { old = buf[ql]; sub(/^問題:[ \t]*/, "", old); buf[ql] = "問題: " rest "：" old; rest = "" }
+        if (seen[slug] > 1) { print "標題「" gid "」縮成 " slug " 會跟別的 gate 撞名" > warn_title; rest = "" }
+        else {
+          buf[1] = "## " slug
+          if (ql) { old = buf[ql]; sub(/^問題:[ \t]*/, "", old); buf[ql] = "問題: " rest (old != "" ? "：" old : ""); rest = "" }
+        }
       } else
         print "標題「" gid "」" > warn_title
     }
@@ -62,6 +65,15 @@ new="$(awk -v now="$now" -v syn="$SYN" -v warn="$warn" -v warn_title="$warn_titl
     }
     n = 0; st = 0; open = 0; has = 0; tl = 0; ql = 0
   }
+  # 第一遍：數每個 gate 縮完之後的 id，撞名的不縮
+  FNR == NR {
+    if ($0 ~ /^## /) {
+      k = trim(substr($0, 4))
+      if (match(k, /^[A-Za-z0-9-]+[ \t]+/)) k = trim(substr(k, 1, RLENGTH))
+      seen[k]++
+    }
+    next
+  }
   /^## / { flush(); gid = trim(substr($0, 4)) }
   {
     buf[++n] = $0
@@ -71,7 +83,7 @@ new="$(awk -v now="$now" -v syn="$SYN" -v warn="$warn" -v warn_title="$warn_titl
     if ($0 ~ /^問題:/ && !ql) ql = n
   }
   END { flush() }
-' "$file")" || { rm -f "$warn" "$warn_title"; exit 0; }
+' "$file" "$file")" || { rm -f "$warn" "$warn_title"; exit 0; }
 
 if [ "$new" != "$(cat "$file")" ]; then
   # shortcut: mktemp 與寫入之間有毫秒級空窗（要猜到隨機名並換成 symlink），這支不載入 python；要補就改走 safefile.py replace
@@ -88,7 +100,7 @@ $(cat "$warn")
 fi
 if [ -s "$warn_title" ]; then
   ctx="${ctx:+$ctx
-}gates.md 的 gate 標題只能是 slug（英數與 -，例如 q1-backlink-grant），問題文字寫進「問題:」欄；這些標題第一個詞不是 slug，請改成 slug：
+}gates.md 的 gate 標題只能是 slug（英數與 -，例如 q1-backlink-grant），問題文字寫進「問題:」欄；這些標題第一個詞不是 slug，或縮成 slug 會撞到別的 gate，請改成唯一的 slug：
 $(cat "$warn_title")"
 fi
 [ -z "$ctx" ] || jq -n --arg t "$ctx" '{hookSpecificOutput:{hookEventName:"PostToolUse",additionalContext:$t}}' 2>/dev/null

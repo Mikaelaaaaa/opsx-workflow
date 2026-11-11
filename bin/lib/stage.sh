@@ -47,7 +47,7 @@ st_open_gates_blocking() {
     /^## / { flush() }
     /^status:[ \t]*open[ \t]*$/ { open = 1 }
     /^type:[ \t]*approval[ \t]*$/ { appr = 1 }   # 核准只有人能答，不管問法
-    /^(## |問題:).*要不要(接|派|繼續)([ ]*\/|[ ]*下一|\?|？|$)/ { ask = 1 }
+    /^(## |問題:).*要不要(接|派|繼續)([ ]*\/|[ ]*下一|\?|？|：|$)/ { ask = 1 }
     END { flush(); print n + 0 }
   ' "$1/gates.md"
 }
