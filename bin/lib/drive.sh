@@ -21,7 +21,7 @@ opsx_drive() {
   [ -d "$d" ] || die "drive: 沒有這張卡：$d"
   drive_register "$repo/$slug" || exit 2
   trap "drive_unregister $(printf '%q' "$repo/$slug")" EXIT   # 展開在設 trap 時：EXIT 跑時 local 已經沒了
-  local max="${OPSX_DRIVE_MAX:-200}" poll="${OPSX_DRIVE_POLL:-300}" i=0 settled=0 watch="" watch_fp=""
+  local max="${OPSX_DRIVE_MAX:-200}" poll="${OPSX_DRIVE_POLL:-300}" i=0 settled=0 watch="" watch_fp="" last_stage="" last_at=0 backoff=0
 
   while [ "$i" -lt "$max" ]; do
     i=$((i+1))
@@ -74,13 +74,26 @@ opsx_drive() {
           *)     say "drive: $slug MR 卡在 $mr → /opsx-workflow:babysit"; herdr_step "$slug" agent prompt "$slug" "/opsx-workflow:babysit $slug" --wait || return 0; sleep "$poll" ;;
         esac ;;
       explore|grill|propose|apply|review|pr)
+        # 同階段相鄰兩次送出之間至少隔 poll 秒；階段前進的那一輪不受限
+        local gap
+        if [ "$stage" = "$last_stage" ]; then gap=$((poll - ($(date +%s) - last_at))); [ "$gap" -le 0 ] || sleep "$gap"; fi
         say "drive: $slug → /opsx-workflow:$stage"
-        local before; before="$(stage_fingerprint "$top" "$slug")"
+        local before sent_at; before="$(stage_fingerprint "$top" "$slug")"; sent_at="$(date +%s)"
         herdr_step "$slug" agent prompt "$slug" "/opsx-workflow:$stage $slug" --wait || return 0
-        [ "$HERDR_STEP_OK" = 1 ] || continue   # 沒送進去的不驗
-        if [ "$(stage_fingerprint "$top" "$slug")" = "$before" ]; then
-          write_stuck_gate "$d" "$stage" "$repo" "$slug"; say "drive: $slug 送了 /opsx-workflow:$stage 之後階段沒動，寫了 gate 等人"
-          coordinate_kick "$slug"   # shell 附加寫的 gate 不經過 gate-timestamp hook
+        [ "$HERDR_STEP_OK" = 1 ] || continue   # 沒送進去的不驗、不算一次送出（herdr_step 已經退避過）
+        last_stage="$stage"; last_at="$sent_at"
+        if [ "$(stage_fingerprint "$top" "$slug")" != "$before" ]; then backoff=0
+        else
+          case "$(pane_tail "$repo" "$slug")" in
+            *rate_limit*|*"Usage limit reached"*|*"HTTP 429"*|*"API Error"*)
+              # shortcut: 沒有 usage-limit-pause 的重置時間，從 poll 秒起每次翻倍、上限 3600 秒；有那張卡之後改等重置時間
+              if [ "$backoff" -eq 0 ]; then backoff="$poll"; else backoff=$((backoff * 2 > 3600 ? 3600 : backoff * 2)); fi
+              say "drive: $slug 送了 /opsx-workflow:$stage 之後 agent 立刻失敗（pane 尾巴有 API 錯誤），不重送、不寫 gate，退避 $backoff 秒"
+              sleep "$backoff" ;;
+            *)
+              write_stuck_gate "$d" "$stage" "$repo" "$slug"; say "drive: $slug 送了 /opsx-workflow:$stage 之後階段沒動，寫了 gate 等人"
+              coordinate_kick "$slug" ;;   # shell 附加寫的 gate 不經過 gate-timestamp hook
+          esac
         fi ;;
       *) die "drive: 不認得的階段 $stage" ;;
     esac
@@ -113,6 +126,9 @@ herdr_step() { # <slug> <herdr args…>
   esac
 }
 
+pane_tail() { # <repo> <slug>：pane 最後 20 行壓成一行；pane 讀不到印空
+  herdr pane read "$(dispatch_pane "$1" "$2")" 2>/dev/null | tail -20 | tr '\n' ' ' || true
+}
 drive_gate_open() { # <card dir>：第一個 open 的 drive-<stage>-<n> gate 的標題，沒有印空
   awk '/^## /{id = substr($0, 4)} /^status:[ \t]*open[ \t]*$/ && id ~ /^drive-[a-z]+-[0-9]+$/ {print id; exit}' "$1/gates.md"
 }
@@ -123,7 +139,7 @@ gate_field() { # <card dir> <gate id> <欄位>：該 gate 的欄位值，沒有�
 write_stuck_gate() { # <card dir> <stage> <repo> <slug>：gates.md 加一個 open 的 decision gate，id 不跟舊的 drive gate 撞
   local d="$1" stage="$2" repo="$3" slug="$4" n tail_text
   n=$(( $(grep -cE "^## drive-$stage-[0-9]+$" "$d/gates.md" 2>/dev/null || true) + 1 ))
-  tail_text="$(herdr pane read "$(dispatch_pane "$repo" "$slug")" 2>/dev/null | tail -20 | tr '\n' ' ' || true)"
+  tail_text="$(pane_tail "$repo" "$slug")"
   {
     printf '\n## drive-%s-%s\n' "$stage" "$n"
     printf 'type: decision\nstatus: open\n'
