@@ -39,18 +39,19 @@ assert.strictEqual(priorityBadge({repo: 'r', slug: 'c', priority: null}, true), 
 // 理由跳脫
 assert.ok(!priorityBadge({priority: {level: 'P2', reason: '<b>x</b>', overridden: false}}, true).includes('<b>x'), '理由要跳脫');
 
-// 單一 repo
-const ms = {r: {current: '1.0', goal: '能開單出貨', remaining: 2}};
+// 單一 repo：讀 collect 的 progress
+const ms = {r: {milestone: '1.0', goal: '能開單出貨', remaining: 2, mergeable: 0, testing: 0, developing: 2, waiting_on_you: 0, not_dispatched: 0, not_dispatched_planned: [], at: '2026-11-11T14:30:00+08:00'}};
 const one = milestoneLine(ms, ['r']);
 assert.ok(one.includes('1.0 · 能開單出貨 · 還差 2 張'), `頂列要有 milestone：${one}`);
 // 範圍是全部：每個有值的 repo 各一段，沒值的不出現
-const all = milestoneLine({...ms, s: {current: 'v2', goal: '能退貨', remaining: 0}}, ['r', 's', 't']);
+const all = milestoneLine({...ms, s: {milestone: 'v2', goal: '能退貨', remaining: 0}}, ['r', 's', 't']);
 assert.ok(all.includes('1.0 · 能開單出貨 · 還差 2 張') && all.includes('v2 · 能退貨 · 還差 0 張'), `每個 repo 各一段：${all}`);
 // 範圍外的 repo 不列
-assert.ok(!milestoneLine({...ms, s: {current: 'v2', goal: '能退貨', remaining: 0}}, ['r']).includes('v2'), '範圍外的 repo 不列');
+assert.ok(!milestoneLine({...ms, s: {milestone: 'v2', goal: '能退貨', remaining: 0}}, ['r']).includes('v2'), '範圍外的 repo 不列');
 
 // 沒有 milestone
 assert.strictEqual(milestoneLine({}, ['r']), '');
 assert.strictEqual(milestoneLine(ms, ['t']), '');
-assert.strictEqual(milestoneLine(undefined, ['r']), '', '舊 collect 沒有 milestones 欄位');
+assert.strictEqual(milestoneLine({r: {milestone: null, goal: null, remaining: 4}}, ['r']), '', 'milestone 為 null 的 repo 不列');
+assert.strictEqual(milestoneLine(undefined, ['r']), '', '舊 collect 沒有 progress 欄位');
 JS
