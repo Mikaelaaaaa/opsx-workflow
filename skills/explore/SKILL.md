@@ -84,7 +84,7 @@ Throughout the conversation, watch for:
 
 ## Breaking Down Work + Workplan
 
-When an idea is clear enough to act on, break it into a two-level hierarchy: **PRs** (for human review) and **commits/changes** (AI execution units). Then persist the plan to `openspec/workplan.yaml` so `/apply` can execute it without losing context.
+When an idea is clear enough to act on, break it into a two-level hierarchy: **PRs** (for human review) and **commits/changes** (AI execution units). Then persist the plan to `openspec/workplan.yaml` so `/opsx-workflow:apply` can execute it without losing context.
 
 > **Workplan is an advisory planning artifact, not authoritative state.** Git branches and GitHub PR status are the source of truth for progress. Workplan caches the last-known status and is reconciled by the health check on each skill invocation. If workplan says "pending" but GitHub says "merged", GitHub wins.
 
@@ -156,7 +156,7 @@ features:
             description: "Queue infrastructure and worker scaffold"
 ```
 
-Workplan supports multiple features. Each feature groups PRs; each PR groups changes. Features and changes take `depends-on` too (a feature lists PR names, a change lists sibling changes in the same PR); see "Splitting a big card". `/apply` can target a feature (`/apply --auto eval-service`), a PR (`/apply eval-infra`), or individual changes.
+Workplan supports multiple features. Each feature groups PRs; each PR groups changes. Features and changes take `depends-on` too (a feature lists PR names, a change lists sibling changes in the same PR); see "Splitting a big card". `/opsx-workflow:apply` can target a feature (`/opsx-workflow:apply --auto eval-service`), a PR (`/opsx-workflow:apply eval-infra`), or individual changes.
 
 This file is the **planning artifact** (not authoritative state) for:
 - Which changes belong to which PR, which PRs belong to which feature
@@ -164,7 +164,7 @@ This file is the **planning artifact** (not authoritative state) for:
 - PR dependency order
 - Last-known status (reconciled by health check against git/GitHub)
 
-`/apply` reads this to know what to do. `/explore` writes and updates it.
+`/opsx-workflow:apply` reads this to know what to do. `/opsx-workflow:explore` writes and updates it.
 
 ## Milestones
 
@@ -247,11 +247,11 @@ When the change has a shell (`openspec/changes/<slug>/`), end by writing `explor
 - **待決**: only questions the user must answer (product choice, preference, risk appetite). Each with 2–4 concrete options, the recommended one marked `(Recommended)`. A question `grep` or a ten-line script could answer does not belong here.
 - **不做**: directions ruled out, with the reason.
 
-Call `opsx status explore <n>/<total> "<label>"` as you go. Then continue per `../../references/continue.md`: invoke `/grill <slug>` when 待決 is non-empty, `/propose <slug>` when it is empty, in this turn.
+Call `opsx status explore <n>/<total> "<label>"` as you go. Then continue per `../../references/continue.md`: invoke `/opsx-workflow:grill <slug>` when 待決 is non-empty, `/opsx-workflow:propose <slug>` when it is empty, in this turn.
 
 No shell yet (the user is thinking out loud, not working a card)? Then the conversation might:
 
-- Flow into work breakdown: "Here's 2 PRs with 5 changes — workplan written, run `/propose` to create them"
+- Flow into work breakdown: "Here's 2 PRs with 5 changes — workplan written, run `/opsx-workflow:propose` to create them"
 - Result in glossary/ADR updates: artifacts captured inline
 - Just provide clarity: the thinking was the value
 - Continue later

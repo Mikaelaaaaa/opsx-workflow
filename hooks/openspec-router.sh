@@ -31,7 +31,7 @@ if [ -n "$card" ] && [ -f "$card/inbox.md" ]; then
 fi
 
 for kw in babysit pickup pause forensics correct reflect audit deepen dispatch; do
-  case " $lower " in *"/$kw "*|*" $kw "*|*"/$kw"*)
+  case " $lower " in *"/$kw "*|*" $kw "*|*"/$kw"*|*"/opsx-workflow:$kw"*)
     ctx "$ev" "opsx 平行流程：$kw · Read skills/$kw/SKILL.md；做完下一次 prompt 重讀主流程狀態$rule"; exit 0 ;;
   esac
 done

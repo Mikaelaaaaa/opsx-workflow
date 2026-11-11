@@ -18,7 +18,7 @@ Turn a reviewed change into a merge request the reviewer and the PM can both rea
 
 ## Where you are
 
-`openspec/changes/<slug>/report.md` exists (review ran) and has no MR URL yet. If report.md is missing, stop and say `/review <slug>` comes first; the Stop hook will say the same. If report.md still lists items under `待修（範圍內）`, stop and say `/apply <slug>` comes first; the Stop hook will say the same. If it already has an MR URL, this is an update: regenerate the description and `glab mr update` / `gh pr edit`.
+`openspec/changes/<slug>/report.md` exists (review ran) and has no MR URL yet. If report.md is missing, stop and say `/opsx-workflow:review <slug>` comes first; the Stop hook will say the same. If report.md still lists items under `待修（範圍內）`, stop and say `/opsx-workflow:apply <slug>` comes first; the Stop hook will say the same. If it already has an MR URL, this is an update: regenerate the description and `glab mr update` / `gh pr edit`.
 
 ## Steps
 
@@ -34,10 +34,10 @@ Turn a reviewed change into a merge request the reviewer and the PM can both rea
    ```
 
    and `opsx status pr 5/5 "MR 已開"`.
-6. **Reply.** The URL, the title, what the Test plan says, and the two closing lines (skipped / unchecked / risks). Then continue to `/babysit <slug>` per `../../references/continue.md`: invoke it now unless a gate is open. Babysit handles CI and review threads and stops when the card is waiting for the user to merge.
+6. **Reply.** The URL, the title, what the Test plan says, and the two closing lines (skipped / unchecked / risks). Then continue to `/opsx-workflow:babysit <slug>` per `../../references/continue.md`: invoke it now unless a gate is open. Babysit handles CI and review threads and stops when the card is waiting for the user to merge.
 
 ## Guardrails
 
 - Push and MR creation need a level-two grant in autopilot; without one, write a gate and stop here.
 - No AI attribution in the title, body, or commits.
-- Do not merge. Do not resolve threads. That is `/babysit` for comments and the user for the merge button.
+- Do not merge. Do not resolve threads. That is `/opsx-workflow:babysit` for comments and the user for the merge button.

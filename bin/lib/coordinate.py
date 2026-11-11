@@ -35,7 +35,7 @@ HUMAN_QUESTION = ("只有你能做", "誰來跑")
 MERGE_WORDS = ("合併", "merge")
 # explore 寫的拆法確認 gate 的 id：要人決定，永遠不代答
 SPLIT_GATE = "split"
-VERIFY_ANSWER = "這個要真機跑的驗證使用者之後自己做：把它標成「等使用者驗」寫進 report.md 的 Consider，不要再開 gate，繼續做完剩下的 task 到 /review、/pr。"
+VERIFY_ANSWER = "這個要真機跑的驗證使用者之後自己做：把它標成「等使用者驗」寫進 report.md 的 Consider，不要再開 gate，繼續做完剩下的 task 到 /opsx-workflow:review、/opsx-workflow:pr。"
 GRANT_ANSWER = "允許。長期授權在 grants.toml，直接做。"
 
 
@@ -127,24 +127,24 @@ class Round:
         return (lv, 1, 0, 0) if pos is None else (lv, 0) + pos
 
     def nobody_archiving(self, c):
-        """已合併但 agent 還在：歸檔、標 workplan、叫 chain 都是它自己 /archive 的事，這裡不搶。
-        過了寬限 agent 還 idle，代表沒人會送 /archive（例如人在網頁上合併、drive 早就結束），回傳 True 由這裡收尾。"""
+        """已合併但 agent 還在：歸檔、標 workplan、叫 chain 都是它自己 /opsx-workflow:archive 的事，這裡不搶。
+        過了寬限 agent 還 idle，代表沒人會送 /opsx-workflow:archive（例如人在網頁上合併、drive 早就結束），回傳 True 由這裡收尾。"""
         key = card_key(c)
         ago = self.now - datetime.datetime.fromisoformat(c["mr"]["merged_at"])
         minutes = ago.total_seconds() // 60
         if ago <= datetime.timedelta(minutes=ARCHIVE_GRACE_MINUTES):
-            self.log("⏳ %s 已合併，等它自己 /archive" % key)
+            self.log("⏳ %s 已合併，等它自己 /opsx-workflow:archive" % key)
             return False
         # idle 也可能是在等人回 gate，或互動模式的人暫時離開：那兩種不收，收了等於替人答 gate、關掉人的 session
         waiting_human = c["open_gates"] or self.dispatch_file[key].get("mode") == "interactive"
         if c["agent_status"] == "idle" and not waiting_human:
-            self.log("-- %s 合併 %d 分鐘了 agent 還 idle，沒人會 /archive，這裡收尾" % (key, minutes))
+            self.log("-- %s 合併 %d 分鐘了 agent 還 idle，沒人會 /opsx-workflow:archive，這裡收尾" % (key, minutes))
             return True
         self.log("?? %s 合併 %d 分鐘了還沒歸檔，agent 是 %s，要人看它卡在哪" % (key, minutes, c["agent_status"]))
         return False
 
     def clean_up(self, top, merged):
-        """agent 已經不在的已合併卡：代做 /archive 的事。回傳收尾成功的卡。"""
+        """agent 已經不在的已合併卡：代做 /opsx-workflow:archive 的事。回傳收尾成功的卡。"""
         self.update_main(top)
         done = [c for c in merged if self.archive_card(top, c)]
         self.act(["git", "-C", top, "worktree", "prune"])
@@ -617,12 +617,12 @@ def drive_dead(disp):
 
 
 def is_merged(c):
-    """forge 說合了才算；只看 workplan 的 merged 不算，那可能是卡自己 /archive 做到一半。"""
+    """forge 說合了才算；只看 workplan 的 merged 不算，那可能是卡自己 /opsx-workflow:archive 做到一半。"""
     return bool(c["mr"] and c["mr"]["merged_at"])
 
 
 def owner_gone(c):
-    """已合併的卡的 agent 不在了。drive pid 死掉不算：/archive 是 pane 裡的 agent 做的，不是 drive。"""
+    """已合併的卡的 agent 不在了。drive pid 死掉不算：/opsx-workflow:archive 是 pane 裡的 agent 做的，不是 drive。"""
     return not c["dispatch"] or c["agent_status"] == "unknown"
 
 

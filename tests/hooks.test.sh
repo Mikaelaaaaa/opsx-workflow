@@ -32,6 +32,9 @@ out="$(run_hook openspec-router.sh "$(j "$R" "" '{}' "做")")"
 reason "$out" | grep -q '^opsx：apply · eval-core · bug-fix · skills/apply/SKILL.md · skills/apply/references/playbooks/bug-fix.md · skills/tdd/SKILL.md' || fail "router: apply + playbook + tdd: $(reason "$out")"
 out="$(run_hook openspec-router.sh "$(j "$R" "" '{}' "先 tdd 把測試寫出來")")"; reason "$out" | grep -q '^opsx：tdd · eval-core' || fail "router: tdd 關鍵詞: $(reason "$out")"
 out="$(run_hook openspec-router.sh "$(j "$R" "" '{}' "/babysit 看一下 MR")")"; reason "$out" | grep -q '平行流程：babysit' || fail "router: 平行流程關鍵詞: $(reason "$out")"
+out="$(run_hook openspec-router.sh "$(j "$R" "" '{}' "/opsx-workflow:babysit 看一下 MR")")"; reason "$out" | grep -q '平行流程：babysit' || fail "router: 帶前綴的平行流程關鍵詞: $(reason "$out")"
+out="$(run_hook openspec-router.sh "$(j "$R" "" '{}' "/opsx-workflow:pickup")")"; reason "$out" | grep -q '平行流程：pickup' || fail "router: 帶前綴、後面沒有空白: $(reason "$out")"
+out="$(run_hook openspec-router.sh "$(j "$R" "" '{}' "為什麼 Foo::pause() 和 EventBus::dispatch 沒被呼叫")")"; reason "$out" | grep -q '平行流程' && fail "router: 程式碼裡的 ::kw 不該進平行流程: $(reason "$out")"
 printf '## 1. x\n\n- [x] 1.1 a\n- [x] 1.2 b\n' > "$C/tasks.md"
 out="$(run_hook openspec-router.sh "$(j "$R" "" '{}' "下一步")")"; reason "$out" | grep -q 'tests 不是 green' || fail "router: 全勾但沒 tests: $(reason "$out")"
 printf '{"phase":"apply","step":8,"total":8,"label":"x","tests":"green","at":"2026-11-05T15:00:00+08:00"}' > "$C/status.json"
@@ -99,7 +102,7 @@ printf 'schema: opsx\ncreated: 2026-11-05\n' > "$LC/eval-core/.openspec.yaml"
 printf '## 1. x\n\n- [ ] 1.1 a\n' > "$LC/eval-core/tasks.md"
 printf -- '---\ntype: 功能\n---\n\n## 一句話\n\nx\n' > "$LC/kb-export/inbox.md"
 r="$(lr)"
-assert_eq "$r" "opsx：explore · 沒有對到卡 · 進行中 2 張：/apply eval-core · /explore kb-export · 新工作先建殼 · skills/explore/SKILL.md" "router: 沒對到卡列清單"
+assert_eq "$r" "opsx：explore · 沒有對到卡 · 進行中 2 張：/opsx-workflow:apply eval-core · /opsx-workflow:explore kb-export · 新工作先建殼 · skills/explore/SKILL.md" "router: 沒對到卡列清單"
 assert_eq "$(lr SessionStart)" "$r" "router: SessionStart 與 UserPromptSubmit 同一段"
 rm -rf "$LC/kb-export"
 mkdir -p "$LC/archive/2026-11-01-old" "$LC/big" "$LC/legacy" "$LC/eval-core/subs/core"
@@ -109,7 +112,7 @@ printf -- '---\ntype: 功能\nsplit_into: a, b\n---\n\n## 一句話\n\nx\n' > "$
 printf 'schema: spec-driven\ncreated: 2026-10-01\n' > "$LC/legacy/.openspec.yaml"
 printf 'schema: opsx\ncreated: 2026-11-05\n' > "$LC/eval-core/subs/core/.openspec.yaml"
 r="$(lr)"
-case "$r" in *"進行中 1 張：/apply eval-core · 新工作先建殼"*) ;; *) fail "router: archive、已拆、舊卡、子殼不列: $r" ;; esac
+case "$r" in *"進行中 1 張：/opsx-workflow:apply eval-core · 新工作先建殼"*) ;; *) fail "router: archive、已拆、舊卡、子殼不列: $r" ;; esac
 case "$r" in *old*|*big*|*legacy*|*" core"*|*/core*) fail "router: 清單不該有 old、big、legacy、core: $r" ;; esac
 # 對到卡時維持一行
 mkdir -p "$LC/kb-export"; printf -- '---\ntype: 功能\n---\n\nx\n' > "$LC/kb-export/inbox.md"
@@ -730,7 +733,7 @@ printf '## real-herdr\nstatus: open\n' > "$C/gates.md"
 out="$(sg)"; assert_eq "$(decision "$out")" block "stop: open gate 不放行 tests red"; reason "$out" | grep -q green || fail "stop: open gate 下也要說要綠"
 rm -f "$C/gates.md"
 printf '{"phase":"apply","step":8,"total":8,"label":"x","tests":"green","at":"2026-11-05T15:00:00+08:00"}' > "$C/status.json"
-rm -f "$C/report.md"; out="$(sg)"; assert_eq "$(decision "$out")" block "stop: 沒 report"; reason "$out" | grep -q '/review' || fail "stop: 要叫跑 review"
+rm -f "$C/report.md"; out="$(sg)"; assert_eq "$(decision "$out")" block "stop: 沒 report"; reason "$out" | grep -q '/opsx-workflow:review' || fail "stop: 要叫跑 review"
 done_report; sleep 1
 out="$(sg)"; assert_eq "$out" "" "stop: 全齊放行"
 git -C "$R" commit -q --allow-empty -m "feat: later"   # report 之後又 commit
@@ -807,7 +810,8 @@ rm -rf "$C/subs"; rm -f "$C/gates.md"; rm -rf "$STOP_STATE"
 # hook 自己寫的「卡在接」gate：建議是選項之一，不是 hook 內部說明
 printf '## 1. x\n\n- [ ] 1.1 a\n' > "$C/tasks.md"
 out="$(KEEP=1 sg)"; out="$(KEEP=1 sg)"; out="$(KEEP=1 sg)"; out="$(KEEP=1 sg)"
-assert_grep '^建議: 重做 /apply 一次，做不完就把卡在哪寫進 gates.md$' "$C/gates.md"
+assert_grep '^建議: 重做 /opsx-workflow:apply 一次，做不完就把卡在哪寫進 gates.md$' "$C/gates.md"
+assert_grep '^選項: 重做 /opsx-workflow:apply 一次' "$C/gates.md"
 assert_not_grep '先看 pane' "$C/gates.md"
 printf '## 1. x\n\n- [x] 1.1 a\n- [x] 1.2 b\n' > "$C/tasks.md"
 rm -f "$C/gates.md"; rm -rf "$STOP_STATE"
@@ -815,7 +819,7 @@ rm -f "$C/gates.md"; rm -rf "$STOP_STATE"
 sgw() { [ -n "${KEEP:-}" ] || rm -rf "$STOP_STATE"; printf '{"cwd":"%s","stop_hook_active":false}' "$WT" | bash "$H/openspec-stop-gate.sh" 2>/dev/null; true; }
 done_report; sleep 1
 git -C "$WT" commit -q --allow-empty -m "feat: card later"
-out="$(sgw)"; assert_eq "$(decision "$out")" block "stop: worktree 卡 report 後自己有新 commit"; reason "$out" | grep -q '/review' || fail "stop: worktree 卡要叫重跑 review"
+out="$(sgw)"; assert_eq "$(decision "$out")" block "stop: worktree 卡 report 後自己有新 commit"; reason "$out" | grep -q '/opsx-workflow:review' || fail "stop: worktree 卡要叫重跑 review"
 done_report; sleep 1
 git -C "$R" commit -q --allow-empty -m "feat: other session"
 out="$(sgw)"; assert_eq "$out" "" "stop: worktree 卡不看主 checkout 的新 commit"
@@ -823,16 +827,16 @@ out="$(sgw)"; assert_eq "$out" "" "stop: worktree 卡不看主 checkout 的新 c
 # ---------- stop gate：下一站 ----------
 rm -f "$C/tasks.md" "$C/report.md" "$C/status.json" "$C/gates.md" "$C/grill.md"
 # explore.md 寫好、待決空、沒有 tasks.md → /propose
-out="$(sg)"; assert_eq "$(decision "$out")" block "stop: explore 完待決空 → 擋"; reason "$out" | grep -q '/propose' || fail "stop: 要叫 /propose"
+out="$(sg)"; assert_eq "$(decision "$out")" block "stop: explore 完待決空 → 擋"; reason "$out" | grep -q '/opsx-workflow:propose' || fail "stop: 要叫 /propose"
 # dev 卡待決非空 → /grill
 printf '## 已知\n- x\n\n## 待決\n- 選 A 還是 B\n\n## 不做\n' > "$C/explore.md"
 printf 'schema: opsx\ncreated: 2026-11-05\nkind: dev\n' > "$C/.openspec.yaml"
-out="$(sg)"; assert_eq "$(decision "$out")" block "stop: dev 待決非空 → 擋"; reason "$out" | grep -q '/grill' || fail "stop: 要叫 /grill"
+out="$(sg)"; assert_eq "$(decision "$out")" block "stop: dev 待決非空 → 擋"; reason "$out" | grep -q '/opsx-workflow:grill' || fail "stop: 要叫 /grill"
 # bug-fix 同一張 explore.md → 跳過 grill 直接 /propose
 printf 'schema: opsx\ncreated: 2026-11-05\nkind: bug-fix\n' > "$C/.openspec.yaml"
 out="$(sg)"; assert_eq "$(decision "$out")" block "stop: bug-fix 待決非空 → 擋"
-reason "$out" | grep -q '/propose' || fail "stop: bug-fix 要叫 /propose"
-reason "$out" | grep -q '/grill' && fail "stop: bug-fix 不提 /grill"
+reason "$out" | grep -q '/opsx-workflow:propose' || fail "stop: bug-fix 要叫 /propose"
+reason "$out" | grep -q '/opsx-workflow:grill' && fail "stop: bug-fix 不提 /grill"
 # 沒有 explore.md → 不擋
 mv "$C/explore.md" "$C/explore.md.bak"; out="$(sg)"; assert_eq "$out" "" "stop: 沒 explore.md 不擋"
 mv "$C/explore.md.bak" "$C/explore.md"
@@ -840,7 +844,7 @@ mv "$C/explore.md.bak" "$C/explore.md"
 printf '## 要選 A 還是 B\nstatus: open\n' > "$C/gates.md"
 out="$(sg)"; assert_eq "$out" "" "stop: chain 站有一般 open gate 放行"
 printf '## 要不要接 /propose\nstatus: open\n' > "$C/gates.md"
-out="$(sg)"; assert_eq "$(decision "$out")" block "stop: 「要不要接」的 gate 不算 open"; reason "$out" | grep -q '/propose' || fail "stop: 要不要接的 gate 下仍要叫 /propose"
+out="$(sg)"; assert_eq "$(decision "$out")" block "stop: 「要不要接」的 gate 不算 open"; reason "$out" | grep -q '/opsx-workflow:propose' || fail "stop: 要不要接的 gate 下仍要叫 /propose"
 printf '## propose-done\ntype: decision\nstatus: open\n問題: 要不要接 /apply？\n選項: 接 (Recommended) | 不接\n' > "$C/gates.md"
 out="$(sg)"; assert_eq "$(decision "$out")" block "stop: 真實 gate 格式（問題:）問要不要接也不算 open"
 printf '## g1\ntype: decision\nstatus: open\n問題: 要不要接受舊版 API 不相容？\n' > "$C/gates.md"
@@ -850,10 +854,10 @@ out="$(sg)"; assert_eq "$out" "" "stop: approval gate 只有人能答，問要�
 # apply 站（tasks.md 一個都沒勾）：「要不要接 /apply」的 gate 不放行，reason 叫 /apply
 printf '## 1. x\n\n- [ ] 1.1 a\n- [ ] 1.2 b\n' > "$C/tasks.md"
 printf '## 要不要接 /apply\nstatus: open\n' > "$C/gates.md"
-out="$(sg)"; assert_eq "$(decision "$out")" block "stop: apply 站「要不要接」gate 不放行"; reason "$out" | grep -q 'invoke /apply' || fail "stop: apply 站 reason 要叫 invoke /apply"
+out="$(sg)"; assert_eq "$(decision "$out")" block "stop: apply 站「要不要接」gate 不放行"; reason "$out" | grep -q 'invoke /opsx-workflow:apply' || fail "stop: apply 站 reason 要叫 invoke /apply"
 # approval 旗標只管自己那個 gate：前一個 approval 不能把後面沒有 type 的「要不要接」gate 變成會擋的
 printf '## 核准 push\ntype: approval\nstatus: answered\n\n## 要不要接 /apply\nstatus: open\n' > "$C/gates.md"
-out="$(sg)"; assert_eq "$(decision "$out")" block "stop: approval 旗標不帶到下一個 gate"; reason "$out" | grep -q 'invoke /apply' || fail "stop: approval 後接「要不要接」gate，reason 要叫 invoke /apply"
+out="$(sg)"; assert_eq "$(decision "$out")" block "stop: approval 旗標不帶到下一個 gate"; reason "$out" | grep -q 'invoke /opsx-workflow:apply' || fail "stop: approval 後接「要不要接」gate，reason 要叫 invoke /apply"
 rm -f "$C/gates.md" "$C/tasks.md"
 
 # 擋的次數：同一站 3 次，第 4 次 hook 寫 gate 放行；第 5 次不寫第二個
@@ -948,19 +952,19 @@ rm -f "$C/gates.md"
 # pr 站：report.md 在、沒有 ## MR
 printf '{"phase":"apply","step":8,"total":8,"label":"x","tests":"green","at":"2026-11-05T15:00:00+08:00"}' > "$C/status.json"
 printf '# report\n四桶…\n' > "$C/report.md"
-out="$(sg)"; assert_eq "$(decision "$out")" block "stop: report 沒 MR → 擋"; reason "$out" | grep -q '/pr' || fail "stop: 要叫 /pr"
+out="$(sg)"; assert_eq "$(decision "$out")" block "stop: report 沒 MR → 擋"; reason "$out" | grep -q '/opsx-workflow:pr' || fail "stop: 要叫 /pr"
 printf '# report\n### 待修（範圍內）\n- a.sh:1 task 沒做 · 回 `/apply eval-core` 做完\n### Consider\n' > "$C/report.md"
-out="$(sg)"; assert_eq "$(decision "$out")" block "stop: 待修（範圍內）有項目 → 擋"; reason "$out" | grep -q '/apply' || fail "stop: 待修要叫 /apply"; reason "$out" | grep -q '/pr' && fail "stop: 待修不叫 /pr"
+out="$(sg)"; assert_eq "$(decision "$out")" block "stop: 待修（範圍內）有項目 → 擋"; reason "$out" | grep -q '/opsx-workflow:apply' || fail "stop: 待修要叫 /apply"; reason "$out" | grep -q '/opsx-workflow:pr' && fail "stop: 待修不叫 /pr"
 printf '# report\n### 待修（範圍內）\n### Consider\n- a.sh:1 設計疑問\n' > "$C/report.md"
-out="$(sg)"; assert_eq "$(decision "$out")" block "stop: 待修空了 → 照一般 pr 站"; reason "$out" | grep -q '/pr' || fail "stop: 待修空了要叫 /pr"
+out="$(sg)"; assert_eq "$(decision "$out")" block "stop: 待修空了 → 照一般 pr 站"; reason "$out" | grep -q '/opsx-workflow:pr' || fail "stop: 待修空了要叫 /pr"
 # 確認: <sha>：HEAD 等於該 sha 時 report 之後的新 commit 不要求重審
 printf '# report\n### 待修（範圍內）\n' > "$C/report.md"; sleep 1
 git -C "$R" commit -q --allow-empty -m "fix: review items"
-out="$(sg)"; reason "$out" | grep -q '再跑一次 /review' || fail "stop: 沒有確認行，report 後新 commit 要求重審"
+out="$(sg)"; reason "$out" | grep -q '再跑一次 /opsx-workflow:review' || fail "stop: 沒有確認行，report 後新 commit 要求重審"
 printf '# report\n### 待修（範圍內）\n確認: %s\n' "$(git -C "$R" rev-parse HEAD)" > "$C/report.md"; touch -t 200001010000 "$C/report.md"
-out="$(sg)"; reason "$out" | grep -q '/review' && fail "stop: 確認 sha 等於 HEAD 不再要求重審"
+out="$(sg)"; reason "$out" | grep -q '/opsx-workflow:review' && fail "stop: 確認 sha 等於 HEAD 不再要求重審"
 git -C "$R" commit -q --allow-empty -m "fix: after confirm"
-out="$(sg)"; reason "$out" | grep -q '再跑一次 /review' || fail "stop: 確認後又有新 commit 要重審"
+out="$(sg)"; reason "$out" | grep -q '再跑一次 /opsx-workflow:review' || fail "stop: 確認後又有新 commit 要重審"
 printf '# report\n' > "$C/report.md"
 # babysit 站查 forge：MR 狀態來自假 glab
 use_fakes glab; export OPSX_FAKE_LOG="$FX/glab.log" OPSX_TEST_GLAB_JSON="$FX/mr.json" OPSX_MR_CACHE_TTL=0; : > "$OPSX_FAKE_LOG"
@@ -969,18 +973,18 @@ MERGED_MR='{"state":"merged","draft":false,"has_conflicts":false,"sha":"abc123",
 printf '%s' "$OPEN_MR" > "$OPSX_TEST_GLAB_JSON"
 # babysit 站：有 MR 沒有 babysit: 行
 printf '# report\n\n## MR\nhttps://gitlab.tsg-navigator.com/a/b/-/merge_requests/212 · opened 2026-11-10 · auto-merge: no\n' > "$C/report.md"
-out="$(sg)"; assert_eq "$(decision "$out")" block "stop: MR 已開沒 babysit → 擋"; reason "$out" | grep -q '/babysit' || fail "stop: 要叫 /babysit"
+out="$(sg)"; assert_eq "$(decision "$out")" block "stop: MR 已開沒 babysit → 擋"; reason "$out" | grep -q '/opsx-workflow:babysit' || fail "stop: 要叫 /babysit"
 done_report
 out="$(sg)"; assert_eq "$out" "" "stop: 有 babysit: 行放行"
 # MR 已合併、workplan 沒標 merged、沒有 babysit: 行 → 要 /archive，不要 babysit 記號
 printf '%s' "$MERGED_MR" > "$OPSX_TEST_GLAB_JSON"
 printf '# report\n\n## MR\nhttps://gitlab.tsg-navigator.com/a/b/-/merge_requests/212 · opened 2026-11-10 · auto-merge: no\n' > "$C/report.md"
 out="$(sg)"; assert_eq "$(decision "$out")" block "stop: MR 已合併 → 擋"
-reason "$out" | grep -q '/archive' || fail "stop: 已合併要叫 /archive: $(reason "$out")"
+reason "$out" | grep -q '/opsx-workflow:archive' || fail "stop: 已合併要叫 /archive: $(reason "$out")"
 reason "$out" | grep -q 'babysit' && fail "stop: 已合併不該提 babysit: $(reason "$out")"
 # 已合併也勝過舊的 babysit: 記號
 done_report
-out="$(sg)"; reason "$out" | grep -q '/archive' || fail "stop: 已合併且有 babysit: 行仍要 /archive: $(reason "$out")"
+out="$(sg)"; reason "$out" | grep -q '/opsx-workflow:archive' || fail "stop: 已合併且有 babysit: 行仍要 /archive: $(reason "$out")"
 # 擋滿 3 次：第 4 次寫「卡在接 /archive #1」並放行
 rm -f "$C/gates.md"; rm -rf "$STOP_STATE"
 KEEP=1 sg >/dev/null; KEEP=1 sg >/dev/null; KEEP=1 sg >/dev/null
@@ -991,19 +995,19 @@ rm -f "$C/gates.md"
 printf '# report\n\n## MR\nhttps://gitlab.tsg-navigator.com/a/b/-/merge_requests/212 · opened 2026-11-10 · auto-merge: no\n' > "$C/report.md"
 printf '' > "$OPSX_TEST_GLAB_JSON"
 out="$(sg)"; assert_eq "$(decision "$out")" block "stop: 查不到 MR → 維持擋"
-reason "$out" | grep -q '/babysit' || fail "stop: 查不到要叫 /babysit: $(reason "$out")"
+reason "$out" | grep -q '/opsx-workflow:babysit' || fail "stop: 查不到要叫 /babysit: $(reason "$out")"
 reason "$out" | grep -q 'glab mr view 212' || fail "stop: 要帶查詢的錯誤文字: $(reason "$out")"
 # 已關閉但沒合併（merged_at 是 null）：不是 /archive
 printf '{"state":"closed","draft":false,"has_conflicts":false,"sha":"abc123","merged_at":null}' > "$OPSX_TEST_GLAB_JSON"
 out="$(sg)"; assert_eq "$(decision "$out")" block "stop: MR 已關閉未合併 → 擋"
-reason "$out" | grep -q '/babysit' || fail "stop: 已關閉未合併要叫 /babysit: $(reason "$out")"
-reason "$out" | grep -q '/archive' && fail "stop: 已關閉未合併不能叫 /archive: $(reason "$out")"
+reason "$out" | grep -q '/opsx-workflow:babysit' || fail "stop: 已關閉未合併要叫 /babysit: $(reason "$out")"
+reason "$out" | grep -q '/opsx-workflow:archive' && fail "stop: 已關閉未合併不能叫 /archive: $(reason "$out")"
 # forge 查詢掛住：在 hook 的 10 秒之內放棄，仍 block 並帶錯誤文字
 printf '%s' "$MERGED_MR" > "$OPSX_TEST_GLAB_JSON"
 t0="$(date +%s)"; out="$(OPSX_TEST_GLAB_SLEEP=6 OPSX_MR_TIMEOUT=1 sg)"; elapsed=$(( $(date +%s) - t0 ))
 [ "$elapsed" -lt 4 ] || fail "stop: 查詢要在時限內放棄，花了 ${elapsed} 秒"
 assert_eq "$(decision "$out")" block "stop: 查詢逾時 → 擋"
-reason "$out" | grep -q '/babysit' || fail "stop: 逾時要叫 /babysit: $(reason "$out")"
+reason "$out" | grep -q '/opsx-workflow:babysit' || fail "stop: 逾時要叫 /babysit: $(reason "$out")"
 reason "$out" | grep -q 'glab mr view 212' || fail "stop: 逾時要帶錯誤文字: $(reason "$out")"
 # 不設 OPSX_MR_TIMEOUT：hook 自己的預設要在 10 秒內放棄
 t0="$(date +%s)"; out="$(unset OPSX_MR_TIMEOUT; OPSX_TEST_GLAB_SLEEP=9 sg)"; elapsed=$(( $(date +%s) - t0 ))

@@ -70,11 +70,11 @@ cd "$R/.claude/worktrees/fs"
 
 # --- Scenario：第一個主 change 開了 MR，接第二個（條目順序和 workplan 不同，照 workplan）---
 printf '{%s,%s,%s,%s}' "$(session fs)" "$(entry m3 fs)" "$(entry m1 fs)" "$(entry m2 fs)" > "$J"
-assert_eq "$(opsx next)" "/apply m2" "m1 等合併，接 m2"
+assert_eq "$(opsx next)" "/opsx-workflow:apply m2" "m1 等合併，接 m2"
 
 # --- 三個兄弟：m2 也開了 MR，接 m3 ---
 printf '# report\n\nhttps://github.com/o/r/pull/8\n' > "$R/openspec/changes/m2/report.md"
-assert_eq "$(opsx next)" "/apply m3" "m1、m2 等合併，接 m3"
+assert_eq "$(opsx next)" "/opsx-workflow:apply m3" "m1、m2 等合併，接 m3"
 
 # --- Scenario：沒有下一個（全部都開了 MR）---
 printf '# report\n\nhttps://github.com/o/r/pull/10\n' > "$R/openspec/changes/m3/report.md"
@@ -83,7 +83,7 @@ rm "$R/openspec/changes/m2/report.md" "$R/openspec/changes/m3/report.md"
 
 # --- 已歸檔（卡資料夾不在）的成員不算 ---
 mv "$R/openspec/changes/m2" "$FX/m2-archived"
-assert_eq "$(opsx next)" "/apply m3" "m2 歸檔了，接 m3"
+assert_eq "$(opsx next)" "/opsx-workflow:apply m3" "m2 歸檔了，接 m3"
 mv "$FX/m2-archived" "$R/openspec/changes/m2"
 
 # --- 別的 feature 的條目不算、停掉的不算 ---
@@ -95,7 +95,7 @@ assert_eq "$(opsx next)" "none" "停掉的不接"
 # --- Scenario：舊形 PR 在 session 裡接下一個（branch feat/p1 對不到卡 o1）---
 printf '{%s,%s,%s}' "$(session old)" "$(entry o1 old)" "$(entry o2 old)" > "$J"
 cd "$R/.claude/worktrees/old"
-assert_eq "$(opsx next)" "/apply o2" "舊形 PR：o1 等合併，接 o2"
+assert_eq "$(opsx next)" "/opsx-workflow:apply o2" "舊形 PR：o1 等合併，接 o2"
 
 # --- Scenario：沒有下一個（所在 worktree 沒有 session 條目）---
 cd "$R/.claude/worktrees/fs"
@@ -118,7 +118,7 @@ printf '{"nx/@lone":{"mode":"autopilot","pane":"w1:p1","agent":"claude","worktre
 cd "$R/.claude/worktrees/lone"
 assert_eq "$(opsx next)" "none" "worktree 名撞 feature 名，但 session 記的是別棵"
 cd "$R/.claude/worktrees/fs"
-assert_eq "$(opsx next)" "/apply m2" "照 session 條目記下的 worktree 認，不照目錄名"
+assert_eq "$(opsx next)" "/opsx-workflow:apply m2" "照 session 條目記下的 worktree 認，不照目錄名"
 
 assert_rc 2 opsx next extra
 echo ok

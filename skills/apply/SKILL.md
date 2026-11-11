@@ -17,7 +17,7 @@ compatibility: Requires openspec CLI and the opsx CLI (bin/opsx) for status.
 
 Implement tasks from an OpenSpec change. One change = one commit on its branch. Every task starts with its test.
 
-The flow around you: `/propose` wrote `tasks.md` where each task carries `驗收：` (the spec scenario it satisfies) and `測試：` (the test file to write first). After you, `/review` refuses to look at a change whose tasks lack tests or whose tests are not green, and the Stop hook refuses to let you stop with unchecked tasks. So the order below is not ceremony; it is what the next stage will check.
+The flow around you: `/opsx-workflow:propose` wrote `tasks.md` where each task carries `驗收：` (the spec scenario it satisfies) and `測試：` (the test file to write first). After you, `/opsx-workflow:review` refuses to look at a change whose tasks lack tests or whose tests are not green, and the Stop hook refuses to let you stop with unchecked tasks. So the order below is not ceremony; it is what the next stage will check.
 
 ## Setup (both modes)
 
@@ -109,11 +109,11 @@ A change with `openspec/changes/<main>/subs/` is a main change (`../../reference
 6. When a subagent ends with anything that is not `NEEDS-USER` (`DONE <子> <sha>`, an error, an empty report), first mark its sub-change finished so the Stop hook stops counting it as running: `opsx status apply <total>/<total> "<what it reported>" --sub <子> --worker session`, with `<total>` taken from that sub-shell's status. Then stack each `DONE <子> <sha>` onto the PR branch, in workplan 順序 (the order of the PR's `changes[]`), from the PR branch: `opsx stack <主> <子> <sha>`. It cherry-picks the one commit and checks that sub-change off in the main shell's tasks.md; do not check it off by hand or through skeleton step 10. A report that arrives before its turn waits; the command refuses a sub-change whose dependencies are not stacked yet.
 7. `opsx stack` 退出 3 means conflict: it already aborted and logged a line in decisions.tsv. session 自己重做 that sub-change on the PR branch, through the same sub-shell (`--sub <子>`, worker `session`), test first, one commit. 不在衝突標記上手解: the subagent's tests were green on the old base, nobody would re-verify a hand merge. Then hand the sub-changes that depended on it to new subagents from the new HEAD.
 8. A prompt `有新的派工指示，Read inbox.md 的 ## 派工指示` with no `[<子>]` prefix is a note written after the subagents started (`opsx note <主>` sends it to this pane, and a subagent's turns never reach the router). SendMessage every running sub-change subagent to read the `## 派工指示` section of `<top>/openspec/changes/<主>/inbox.md`, with the real path written in (the relative `inbox.md` does not exist in its worktree); each judges against its own tasks, and one that conflicts with a D in the main shell's `design.md` reports `NEEDS-USER <子>` (step 3). A sub-change whose subagent is not spawned yet needs nothing: its brief reads the file when it starts. For a sub-change that already reported `DONE`, read the note against its proposal and treat it as affected when unsure: if its sha is not stacked yet (`opsx stack`), drop the sha and hand the sub-change to a new subagent from the PR branch's current HEAD; if it is already stacked, do not rewrite the PR branch, write a `type: decision` gate in `subs/<子>/gates.md` and let the user choose.
-9. When every item in the main shell's tasks.md is checked, run the whole test suite once on the PR branch, then continue to `/review <主>` and `/pr <主>` once for the main change (`../../references/continue.md`). Sub-changes get no review or pr of their own.
+9. When every item in the main shell's tasks.md is checked, run the whole test suite once on the PR branch, then continue to `/opsx-workflow:review <主>` and `/opsx-workflow:pr <主>` once for the main change (`../../references/continue.md`). Sub-changes get no review or pr of their own.
 
 ## When review sent tasks back
 
-A `## R<N>. review 退回` group at the end of tasks.md holds in-scope findings from review round N. They are ordinary tasks: same skeleton, 測試先紅再修 (the regression test must be red on the current code before the fix), checked off only when green, one commit for the group (`fix(<scope>): address review findings`, one body line per finding). Do not edit report.md; review moves the `待修（範圍內）` lines when it re-reads your fix. When the group is done, continue to `/review <slug>` as usual.
+A `## R<N>. review 退回` group at the end of tasks.md holds in-scope findings from review round N. They are ordinary tasks: same skeleton, 測試先紅再修 (the regression test must be red on the current code before the fix), checked off only when green, one commit for the group (`fix(<scope>): address review findings`, one body line per finding). Do not edit report.md; review moves the `待修（範圍內）` lines when it re-reads your fix. When the group is done, continue to `/opsx-workflow:review <slug>` as usual.
 
 ## When this pane coordinates other cards
 
@@ -123,7 +123,7 @@ After `opsx chain` fans out (see `archive` step 6b), this pane hands each child 
 
 1. Update the workplan: changes → `done`; the PR → `in-progress` when all its changes are done.
 2. `opsx status apply <total>/<total> "全部 task 完成" --tests green` (only if the last run really was green).
-3. Reply with the table: change · tasks · tests · commit. Then continue to `/review <slug>` per `../../references/continue.md`: invoke it now, in this turn, unless a gate is open or the tests are not green.
+3. Reply with the table: change · tasks · tests · commit. Then continue to `/opsx-workflow:review <slug>` per `../../references/continue.md`: invoke it now, in this turn, unless a gate is open or the tests are not green.
 
 ## Guardrails
 
