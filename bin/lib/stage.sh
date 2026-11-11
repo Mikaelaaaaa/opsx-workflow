@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # 主流程狀態判斷，純函式，參數明示（top、slug）。hook 的 router 和 drive.sh 都用這一份，
 # 所以「下一步是什麼」只有一個答案。要求檔 §8.3 Router 表。
+source "$(dirname "${BASH_SOURCE[0]}")/check.sh"
 
 # slug 含 `--` 是子殼：<主>--<子> 對到 changes/<主>/subs/<子>。只印路徑，不檢查存在
 st_card_dir() { # <top> <slug>
@@ -9,7 +10,14 @@ st_card_dir() { # <top> <slug>
     *) printf '%s/openspec/changes/%s' "$1" "$2" ;;
   esac
 }
-st_card_kind() { local d="$1"; [ -f "$d/.openspec.yaml" ] && sed -n 's/^kind: *//p' "$d/.openspec.yaml" | head -1 || true; }
+# 第一個 kind: 行冒號後的空白剝掉、其餘照原樣（含 \r、尾端空白）；最後一行沒有換行時印出來也不帶換行，跟 sed 一樣
+st_card_kind() {
+  local line eol
+  [ -f "$1/.openspec.yaml" ] || return 0
+  while eol=$'\n'; IFS= read -r line || { eol=; [ -n "$line" ]; }; do
+    case "$line" in kind:*) line="${line#kind:}"; printf '%s%s' "${line#"${line%%[! ]*}"}" "$eol"; return 0 ;; esac
+  done < "$1/.openspec.yaml"
+}
 st_status_tests() { local d="$1"; [ -f "$d/status.json" ] && jq -r '.tests // "unknown"' "$d/status.json" 2>/dev/null || printf 'unknown'; }
 st_review_running() { local d="$1"; [ -f "$d/status.json" ] && jq -e '.phase == "review" and .step < .total' "$d/status.json" >/dev/null 2>&1; }
 # 主殼有子 change 的 subagent 在背景做：子殼名在主殼某個未勾 task 行的編號之後、status.json 的 worker 是 subagent-* 且 step < total、at 在過去 120 分鐘內。
@@ -36,7 +44,14 @@ st_pending_nonempty() {
   [ -f "$1/explore.md" ] || return 1
   awk '/^## 待決/{f=1;next} /^## /{f=0} f' "$1/explore.md" | grep -vE '^\s*$|^\s*<!--|^\s*-\s*$|^\s*（' | grep -q .
 }
-st_mr_url() { [ -f "$1/report.md" ] && grep -oE 'https?://[^ )]+/(merge_requests|pull)/[0-9]+' "$1/report.md" | head -1 || true; }
+# 第一個 MR 網址。整檔一次比對，字元類排除換行，跟 grep 逐行找第一個相同
+st_mr_url() {
+  local c re='https?://[^ )'$'\n'']+/(merge_requests|pull)/[0-9]+'
+  [ -f "$1/report.md" ] || return 0
+  IFS= read -r -d '' c < "$1/report.md" || true # -d '' 讀到檔尾一定回 1，呼叫端多半是 set -e
+  [[ $c =~ $re ]] && printf '%s\n' "${BASH_REMATCH[0]}"
+  return 0
+}
 st_mr_in_report() { [ -n "$(st_mr_url "$1")" ]; }
 st_open_gates() { [ -f "$1/gates.md" ] || { printf 0; return; }; grep -cE '^status:[[:space:]]*open[[:space:]]*$' "$1/gates.md" || true; }
 # 會擋 Stop 的 open gate 數：標題或「問題:」行問「要不要接 /apply」「要不要繼續？」這類接站問題的不算（接站不用問，continue.md）
@@ -47,7 +62,7 @@ st_open_gates_blocking() {
     /^## / { flush() }
     /^status:[ \t]*open[ \t]*$/ { open = 1 }
     /^type:[ \t]*approval[ \t]*$/ { appr = 1 }   # 核准只有人能答，不管問法
-    /^(## |問題:).*要不要(接|派|繼續)([ ]*\/|[ ]*下一|\?|？|$)/ { ask = 1 }
+    /^(## |問題:).*要不要(接|派|繼續)([ ]*\/|[ ]*下一|\?|？|：|$)/ { ask = 1 }
     END { flush(); print n + 0 }
   ' "$1/gates.md"
 }
@@ -74,14 +89,36 @@ wp_pr_field() { # <top> <slug> <field>
   ' "$1/openspec/workplan.yaml"
 }
 st_workplan_merged() { [ "$(wp_pr_field "$1" "$2" status)" = merged ]; } # <top> <slug>
-st_split_into() { [ -f "$1/inbox.md" ] && awk 'NR==1 && !/^---/{exit} NR>1 && /^---/{exit} /^split_into:/{sub(/^split_into: */,""); sub(/\r$/,""); sub(/ +#.*$/,""); if ($0 ~ /^(\[ *\]|""|\047\047|~|null)?$/) exit; print; exit}' "$1/inbox.md" || true; }
+# 只看 frontmatter（第一行是 --- 才算有）裡第一個 split_into:；空值、[]、""、''、~、null 算沒拆
+st_split_into() {
+  local line n=0 empty='^(\[ *\]|""|'"''"'|~|null)?$'
+  [ -f "$1/inbox.md" ] || return 0
+  while IFS= read -r line || [ -n "$line" ]; do
+    n=$((n+1))
+    case "$line" in
+      ---*) [ "$n" -eq 1 ] && continue; return 0 ;;
+      *) [ "$n" -eq 1 ] && return 0 ;;
+    esac
+    case "$line" in split_into:*) ;; *) continue ;; esac
+    line="${line#split_into:}"; line="${line#"${line%%[! ]*}"}"; line="${line%$'\r'}"
+    case "$line" in *" #"*) line="${line%% #*}"; line="${line%"${line##*[! ]}"}" ;; esac
+    [[ $line =~ $empty ]] || printf '%s\n' "$line"
+    return 0
+  done < "$1/inbox.md"
+}
 
 # 印「階段 · slug · kind · Read 清單」。沒卡印 explore。
 stage_of() { # <top> <slug>
   local top="$1" slug="$2" d="$1/openspec/changes/$2" kind
   if [ -z "$slug" ] || [ ! -d "$d" ]; then printf 'explore · （沒有對到卡，先建殼）· — · skills/explore/SKILL.md\n'; return; fi
   kind="$(st_card_kind "$d")"; kind="${kind:-dev}"
-  local reads="skills/apply/SKILL.md · skills/apply/references/playbooks/${kind}.md · skills/tdd/SKILL.md" split
+  local pb="skills/apply/references/playbooks" reads split
+  case "$kind" in
+    chore|ops) pb="" ;;
+    experiment) pb="$pb/hillclimb.md · $pb/eval.md · " ;;
+    *) pb="$pb/${kind}.md · " ;;
+  esac
+  reads="skills/apply/SKILL.md · ${pb}skills/tdd/SKILL.md"
   split="$(st_split_into "$d")"
   if [ -n "$split" ]; then printf 'split · %s · %s · 已拆成 %s，這張不再往下做\n' "$slug" "$kind" "$split"; return; fi
   if st_workplan_merged "$top" "$slug"; then printf 'archive · %s · %s · skills/archive/SKILL.md\n' "$slug" "$kind"; return; fi
@@ -96,12 +133,13 @@ stage_of() { # <top> <slug>
     printf 'review · %s · %s · skills/review/SKILL.md · skills/review/references/ponytail-review.md\n' "$slug" "$kind"; return
   fi
   if [ -f "$d/explore.md" ]; then
+    if [ -n "$(check_explore "$d")" ]; then printf 'explore · %s · %s · skills/explore/SKILL.md（explore.md 的 ## 步驟 不齊，opsx check %s）\n' "$slug" "$kind" "$slug"; return; fi
     if st_pending_nonempty "$d" && [ ! -f "$d/grill.md" ] && [ "$kind" != chore ] && [ "$kind" != bug-fix ]; then printf 'grill · %s · %s · skills/grill/SKILL.md\n' "$slug" "$kind"; return; fi
     printf 'propose · %s · %s · skills/propose/SKILL.md\n' "$slug" "$kind"; return
   fi
   printf 'explore · %s · %s · skills/explore/SKILL.md\n' "$slug" "$kind"
 }
-stage_name() { stage_of "$1" "$2" | cut -d' ' -f1; }
+stage_name() { local s; s="$(stage_of "$1" "$2")"; printf '%s\n' "${s%% *}"; }
 
 # 舊 spec-driven 的 change：.openspec.yaml 沒有 schema: opsx，inbox.md 不存在或只有空白。看板只計數、router 清單不列。
 # 只用 builtin：真 repo 裡有幾百張舊卡，每張 fork 一次 stage 判斷就是十幾秒。
@@ -120,7 +158,7 @@ collect_is_legacy() { # <change dir>
   return 0
 }
 
-# 進行中的主殼，每行印一項 `/<stage> <slug>`，slug 字母序。archive 目錄、舊卡、已拆的卡不列；子殼在 subs/ 底下，glob 碰不到。
+# 進行中的主殼，每行印一項 `/opsx-workflow:<stage> <slug>`，slug 字母序。archive 目錄、舊卡、已拆的卡不列；子殼在 subs/ 底下，glob 碰不到。
 active_changes() { # <top>
   local d slug stage
   for d in "$1"/openspec/changes/*/; do
@@ -128,6 +166,6 @@ active_changes() { # <top>
     [ -d "$d" ] && [ "$slug" != archive ] || continue
     if collect_is_legacy "$d"; then continue; fi
     stage="$(stage_name "$1" "$slug")"
-    if [ "$stage" != split ]; then printf '/%s %s\n' "$stage" "$slug"; fi
+    if [ "$stage" != split ]; then printf '/opsx-workflow:%s %s\n' "$stage" "$slug"; fi
   done
 }

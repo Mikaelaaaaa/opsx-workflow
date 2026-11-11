@@ -28,7 +28,7 @@ gone() { case "$1" in *"$2"*) fail "${3:-內容}不該有 [$2]" ;; esac; }
 a="$(render_agents_md autopilot)"
 # 規則的每一段（以 ' · ' 切開）都在檔裡：同源
 while IFS= read -r seg; do has "$a" "$seg" "autopilot 規則段"; done < <(rule_autopilot | awk -F' · ' '{ for (i = 1; i <= NF; i++) print $i }')
-for s in 'gates.md' '一個 Bash 呼叫做一件事' 'waiting for merge' '直接做' '要授權' '永遠要人' 'merge' "$OPSX_ROOT/skills"; do has "$a" "$s" autopilot; done
+for s in 'gates.md' '一個 Bash 呼叫做一件事' 'waiting for merge' '直接做' '要授權' '永遠要人' 'merge' "$OPSX_ROOT/skills" '`/opsx-workflow:<stage> <slug>`'; do has "$a" "$s" autopilot; done
 i="$(render_agents_md interactive)"
 has "$i" "$(rule_interactive)" interactive
 gone "$i" '要問人的事寫 gates.md' interactive
@@ -37,6 +37,8 @@ gone "$a" 'interactive：要授權就直接問' autopilot
 rc=0; render_agents_md yolo >/dev/null 2>&1 || rc=$?; assert_eq "$rc" 1 "不認得的模式要失敗"
 render_agents_md yolo 2>&1 | grep -q 'yolo' || fail "錯誤訊息要點名模式 yolo"
 for s in '直接做' '要授權' '永遠要人'; do has "$(cat "$OPSX_ROOT/references/grants.md")" "$s" grants.md; done
+# grant-outbound-speech：授權段寫明對外發話閘門不判，要自己先寫 gate
+for s in '對客戶或外部人發話' '閘門不判' '沒被擋不代表可以做' '發話前自己寫 `type: approval` 的 gate'; do has "$a" "$s" "autopilot 的授權段"; done
 
 # --- 3.1 / 3.2 / 4.1 dispatch codex ---
 FAKES="$OPSX_ROOT/tests/fakes"; mkdir -p "$FX/fakebin"

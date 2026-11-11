@@ -2,6 +2,7 @@
 # Stop：branch 對到的卡，agent 要停時依 stage_name 看下一站。要擋就 block 並說原因：
 #   apply 站 tasks.md 仍有 - [ ]（有會擋的 open gate 時這一項放行）、status.json tests 不是 green、有 commit 但 review 沒跑
 #   （report.md 有「確認: <sha>」且 HEAD 等於該 sha 時不算）、report.md 的「待修（範圍內）」還有項目；
+#   explore 站（explore.md 已存在、卡建立日期晚於 2026-11-10）## 步驟 不齊；
 #   grill / propose / pr / babysit 站該 invoke 下一站而沒有會擋的 open gate；
 #   babysit 站若 forge 說 MR 已合併（workplan 還沒標 merged），下一站改成 /archive。
 # 同一站最多擋 MAX_BLOCKS 次，再停就由這支 hook 寫「卡在接 /<站>」gate 放行；不看 stop_hook_active。
@@ -28,6 +29,16 @@ $missing
       return 0
     fi
   fi
+  if [ "$stage" = explore ]; then
+    [ -f "$d/explore.md" ] || return 0
+    missing="$(check_explore "$d")"
+    [ -n "$missing" ] || return 0
+    [ "$(st_open_gates_blocking "$d")" -gt 0 ] && return 0
+    printf '%s' "explore|opsx：${slug} 的 explore.md ## 步驟 不齊（opsx check ${slug}）：
+$missing
+補齊再停。"
+    return 0
+  fi
   if [ -f "$d/tasks.md" ]; then
     if [ -d "$d/subs" ] && [ "$(st_open_gates "$d")" -eq 0 ]; then
       missing="$(check_subs "$d")"
@@ -43,7 +54,7 @@ $missing
       [ "$(st_open_gates_blocking "$d")" -gt 0 ] && return 0
       # 子 change 的 subagent 在背景做：session 只能等通知，不算沒接站
       st_subagent_running "$d" && return 0
-      printf '%s' "apply|opsx：$slug 的 tasks.md 還有 $open 個 task 沒勾。要停下來就先把做到一半的 task 做完勾起來（測試綠才准勾），或用 Edit 或 Write 寫 gates.md 說明卡在哪；不要帶著半個 task 收工。要繼續就 invoke /apply ${slug}，不要問要不要接。"
+      printf '%s' "apply|opsx：$slug 的 tasks.md 還有 $open 個 task 沒勾。要停下來就先把做到一半的 task 做完勾起來（測試綠才准勾），或用 Edit 或 Write 寫 gates.md 說明卡在哪；不要帶著半個 task 收工。要繼續就 invoke /opsx-workflow:apply ${slug}，不要問要不要接。"
       return 0
     fi
     if [ "$(status_tests "$d")" != green ]; then
@@ -53,7 +64,7 @@ $missing
     # review 在背景開 reviewer 時主 agent 會結束 turn：status.json 還在 review 中間步就是在等，不算沒接站
     st_review_running "$d" && return 0
     if [ ! -f "$d/report.md" ]; then
-      printf '%s' "review|opsx：$slug tasks 全勾、測試綠，但還沒 review。跑 /review $slug 產 report.md 再停。"
+      printf '%s' "review|opsx：$slug tasks 全勾、測試綠，但還沒 review。跑 /opsx-workflow:review $slug 產 report.md 再停。"
       return 0
     fi
     last_commit="$(git -C "$(hook_cwd)" log -1 --format=%ct 2>/dev/null || echo 0)"
@@ -61,11 +72,11 @@ $missing
     confirmed="$(sed -n 's/^確認: *//p' "$d/report.md" | head -1)"
     head_sha="$(git -C "$(hook_cwd)" rev-parse HEAD 2>/dev/null)"
     if [ "$last_commit" -gt "$report_ts" ] && { [ -z "$confirmed" ] || [ "$(git -C "$(hook_cwd)" rev-parse "$confirmed" 2>/dev/null)" != "$head_sha" ]; }; then
-      printf '%s' "review|opsx：$slug 在 report.md 之後又有新 commit，review 沒涵蓋到。再跑一次 /review $slug 再停。"
+      printf '%s' "review|opsx：$slug 在 report.md 之後又有新 commit，review 沒涵蓋到。再跑一次 /opsx-workflow:review $slug 再停。"
       return 0
     fi
     if awk '/^### 待修（範圍內）/{on=1; next} /^#/{on=0} on && /^- /{f=1} END{exit !f}' "$d/report.md"; then
-      printf '%s' "apply|opsx：$slug 的 report.md 在「待修（範圍內）」還有項目。invoke /apply ${slug} 修掉（tasks.md 的 R 群組），不要問要不要接。"
+      printf '%s' "apply|opsx：$slug 的 report.md 在「待修（範圍內）」還有項目。invoke /opsx-workflow:apply ${slug} 修掉（tasks.md 的 R 群組），不要問要不要接。"
       return 0
     fi
   fi
@@ -85,7 +96,7 @@ $missing
     fi
   fi
   [ "$stage" = babysit ] && grep -q '^babysit:' "$d/report.md" && return 0
-  printf '%s' "${stage}|opsx：${slug} 的下一站是 /${stage}。現在用 Skill 工具 invoke opsx-workflow:${stage}，args ${slug}，不要問要不要接。真有只有使用者能答的問題，用 Edit 或 Write 寫進 gates.md（標題不要寫「要不要接」）。"
+  printf '%s' "${stage}|opsx：${slug} 的下一站是 /opsx-workflow:${stage}。現在用 Skill 工具 invoke opsx-workflow:${stage}，args ${slug}，不要問要不要接。真有只有使用者能答的問題，用 Edit 或 Write 寫進 gates.md（標題不要寫「要不要接」）。"
   [ "$stage" = babysit ] && printf '%s' " babysit 做完一次 pass 要在 report.md 的 ## MR 底下寫一行 babysit: <時間>。"
   [ -z "$mr_err" ] || printf '%s' " MR 合併狀態查不到，先照 babysit 處理：${mr_err}"
   return 0
@@ -100,8 +111,8 @@ titled_gate_open() { # <dir> <站>
 # 標題帶流水號：答完的舊 gate 跟新 gate 同名的話，opsx answer 只找得到第一個。
 # 取現有 #N 的最大值加一（gates.md 少了較早的 gate 時數量會小於最大號）；沒有數字的舊標題算 1。
 write_auto_gate() { # <dir> <slug> <站>；站是 facts 時問的是事實欄位，不是接站
-  local f="$1/gates.md" n=0 redo="重做 /$3 一次，做不完就把卡在哪寫進 gates.md" ask
-  ask="$(printf 'opsx：%s 連續 %s 次停在 /%s 之前沒有 invoke，卡在哪？' "$2" "$MAX_BLOCKS" "$3")"
+  local f="$1/gates.md" n=0 redo="重做 /opsx-workflow:$3 一次，做不完就把卡在哪寫進 gates.md" ask
+  ask="$(printf 'opsx：%s 連續 %s 次停在 /opsx-workflow:%s 之前沒有 invoke，卡在哪？' "$2" "$MAX_BLOCKS" "$3")"
   if [ "$3" = facts ]; then
     redo="補 inbox.md 的 kind_of_work、impact、evidence（opsx check $2 看缺什麼）"
     ask="$(printf 'opsx：%s 或它開出去的卡的事實欄位連續 %s 次沒補齊，卡在哪？' "$2" "$MAX_BLOCKS")"
@@ -128,7 +139,7 @@ d="$(card_dir)"
 slug="$(card_slug)"
 stage="$(stage_name "$(repo_top)" "$slug")"
 case "$stage" in
-  grill|propose|apply|review|pr|babysit) ;;
+  explore|grill|propose|apply|review|pr|babysit) ;;
   *) exit 0 ;;
 esac
 

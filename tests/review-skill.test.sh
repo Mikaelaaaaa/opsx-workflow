@@ -40,7 +40,7 @@ assert_fixed 'Review never implements a task' "$GUARD"
 # --- 2.2 step 4：範圍內寫成 task 回 apply，範圍外開卡，驗不了的降 Consider ---
 assert_fixed '## R<N>. review 退回' "$STEP4"
 assert_fixed '待修（範圍內）' "$STEP4"
-assert_fixed '/apply <slug>' "$STEP4"
+assert_fixed '/opsx-workflow:apply <slug>' "$STEP4"
 assert_fixed 'opsx new' "$STEP4"
 assert_fixed '優先度 P2' "$STEP4"
 assert_fixed 'review changes no code' "$STEP4"
@@ -61,3 +61,9 @@ grep -q '^| `area` |' "$OPSX_ROOT/references/priority.md" || fail "references/pr
 assert_fixed '../../references/harness-claude-code.md' "$STEP4"
 [ -f "$(dirname "$SK")/../../references/harness-claude-code.md" ] || fail "harness-claude-code.md does not resolve from skills/review/"
 assert_fixed 'do not reword the command' "$STEP4"
+
+# --- node-steps-gates：opsx check 的 Must-fix 候選由 review 讀並判斷 ---
+assert_fixed 'Must-fix 候選' "$STEP3"
+assert_fixed 'sends it back to explore' "$STEP3"
+assert_fixed 'A `Must-fix 候選` line is not an incomplete shell: leave it for Step 3.' "$SK"
+assert_fixed 'A line starting `explore.md 步驟` goes back to `/opsx-workflow:explore <slug>`, not to `/opsx-workflow:apply`.' "$SK"

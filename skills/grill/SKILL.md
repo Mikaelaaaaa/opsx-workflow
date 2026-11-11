@@ -14,6 +14,8 @@ argument-hint: "[change slug]"
 
 # /grill
 
+**Steps in TodoWrite.** First action after loading: put this skill's steps into TodoWrite verbatim; a step you will not do stays in the list as `skip: <reason>`, never deleted.
+
 The change has questions that explore could not close. Close them, cheaply, in the right order, and leave a record propose can build on without renumbering.
 
 ## Where you are
@@ -95,7 +97,7 @@ Rules that keep this file useful downstream:
 - **未決 is not a parking lot.** Only things that genuinely need a run to settle, each with its verification plan. If you can settle it now with bucket 1 or 2, do that instead.
 - **Write an ADR too** when a decision meets all three of: hard to reverse, surprising without context, the result of a real trade-off. Use `references/ADR-FORMAT.md`; most decisions will not qualify, and that is fine.
 
-Then tell the user in a few lines what got decided and what is still open. If 待決 is now fully answered, continue to `/propose <slug>` per `../../references/continue.md` in this turn; if anything went back into 待決, stop there. Call `opsx status grill <n>/<total> <label>` as you move through the items so the board shows progress.
+Then tell the user in a few lines what got decided and what is still open. If 待決 is now fully answered, continue to `/opsx-workflow:propose <slug>` per `../../references/continue.md` in this turn; if anything went back into 待決, stop there. Call `opsx status grill <n>/<total> <label>` as you move through the items so the board shows progress.
 
 ## What this skill does not do
 

@@ -18,9 +18,11 @@ argument-hint: "[topic | change-name | question]"
 
 # /explore
 
+**Steps in TodoWrite.** First action after loading: put this skill's steps into TodoWrite verbatim; a step you will not do stays in the list as `skip: <reason>`, never deleted.
+
 Think deeply. Challenge freely. Capture decisions as they crystallize.
 
-**This is a stance, not a workflow.** There are no fixed steps, no required outputs. You're a thinking partner who happens to know the project's domain language and decision history.
+**This is a stance, and when you work a card it also has steps.** The conversation has no script; you are a thinking partner who knows the project's domain language and decision history. The nine steps in "Steps" below are the part that always gets a record in explore.md.
 
 **Explore mode is for thinking, not implementing.** Read files and investigate the codebase, but never write application code. Creating documentation artifacts (CONTEXT.md, ADRs, OpenSpec proposals, workplan) is capturing thinking — that's fine.
 
@@ -84,7 +86,7 @@ Throughout the conversation, watch for:
 
 ## Breaking Down Work + Workplan
 
-When an idea is clear enough to act on, break it into a two-level hierarchy: **PRs** (for human review) and **commits/changes** (AI execution units). Then persist the plan to `openspec/workplan.yaml` so `/apply` can execute it without losing context.
+When an idea is clear enough to act on, break it into a two-level hierarchy: **PRs** (for human review) and **commits/changes** (AI execution units). Then persist the plan to `openspec/workplan.yaml` so `/opsx-workflow:apply` can execute it without losing context.
 
 > **Workplan is an advisory planning artifact, not authoritative state.** Git branches and GitHub PR status are the source of truth for progress. Workplan caches the last-known status and is reconciled by the health check on each skill invocation. If workplan says "pending" but GitHub says "merged", GitHub wins.
 
@@ -156,7 +158,7 @@ features:
             description: "Queue infrastructure and worker scaffold"
 ```
 
-Workplan supports multiple features. Each feature groups PRs; each PR groups changes. Features and changes take `depends-on` too (a feature lists PR names, a change lists sibling changes in the same PR); see "Splitting a big card". `/apply` can target a feature (`/apply --auto eval-service`), a PR (`/apply eval-infra`), or individual changes.
+Workplan supports multiple features. Each feature groups PRs; each PR groups changes. Features and changes take `depends-on` too (a feature lists PR names, a change lists sibling changes in the same PR); see "Splitting a big card". `/opsx-workflow:apply` can target a feature (`/opsx-workflow:apply --auto eval-service`), a PR (`/opsx-workflow:apply eval-infra`), or individual changes.
 
 This file is the **planning artifact** (not authoritative state) for:
 - Which changes belong to which PR, which PRs belong to which feature
@@ -164,7 +166,7 @@ This file is the **planning artifact** (not authoritative state) for:
 - PR dependency order
 - Last-known status (reconciled by health check against git/GitHub)
 
-`/apply` reads this to know what to do. `/explore` writes and updates it.
+`/opsx-workflow:apply` reads this to know what to do. `/opsx-workflow:explore` writes and updates it.
 
 ## Milestones
 
@@ -239,6 +241,22 @@ Read `references/ADR-FORMAT.md` for the format. Most ADRs are a single paragraph
 - **Something only running it would settle** (timing, layout, real output, how a library behaves on this input): build a throwaway per `references/prototype.md` and record what you saw. Do not leave it in 待決 for the user to guess.
 - **Something that needs digging through history or incidents**: `references/investigation.md`.
 
+## Steps
+
+When the change has a shell, go through these nine in order. Each condition is a judgment you make from the card, not a question for the user. A skill in the Read column is a `Read` of that path, not a Skill-tool call: the Skill tool refuses it (`../../references/harness-claude-code.md`). Put the step's output in the section named in the last column of the table, and record every step in explore.md's `## 步驟` (see "Ending: explore.md"). A step whose condition does not hold is not dropped; it is recorded as `skip：<which condition did not hold>`.
+
+| # | step | do it when | Read | output goes to |
+|---|---|---|---|---|
+| 1 | 讀卡 | always | `inbox.md`, `attachments/` | none |
+| 2 | how | the change spans 2 or more files, or you have not read that subsystem this session | `../how/SKILL.md` (simple path: one explainer; complex: 2 to 4 explorers plus one explainer, subagents are general-purpose) | 已知, a「怎麼運作」block |
+| 3 | 影響範圍 | a symbol the change touches has other users (export, DB column, API, config, env) | `../blast-radius/SKILL.md` | 已知, a「影響範圍」block: the safe fact with its evidence level, risks, what was ruled out |
+| 4 | why | the change alters structure or ownership, or deletes something that looks deliberate | `../why/SKILL.md` (git, code archaeology and incident postmortem investigators only) | 已知, a「為什麼現在這樣」block with Preserve / Change / Avoid / Risk |
+| 5 | prototype | a question only running it settles, and a throwaway fits in an hour | `references/prototype.md` | 已知, with what you ran and what it showed |
+| 6 | 查資料 | kind is dev or refactoring and the change adds an interface or a design | none; search for outside practice (similar tools, open-source projects, docs) | 已知, with source links |
+| 7 | 對照 code | inbox.md says "the system does X" | none | 已知, the list of statements that disagree with the code |
+| 8 | 待決 | always | none | 待決 |
+| 9 | unslop | always | `../unslop/SKILL.md` and `references/investigation.md` for the output format | explore.md as a whole |
+
 ## Ending: explore.md
 
 When the change has a shell (`openspec/changes/<slug>/`), end by writing `explore.md` in the schema's template:
@@ -246,12 +264,13 @@ When the change has a shell (`openspec/changes/<slug>/`), end by writing `explor
 - **已知**: facts from the code, each with a file path or the command you ran. Anything a prototype answered goes here with what was run and what it showed. Always include the **D5 check**, one line per criterion with your judgment: ① it spans more than one subsystem; ② it mixes different risk (data migration, permissions, external API next to ordinary logic); ③ one shell would hold more than 6 tasks. If any one holds, the card is split ("Splitting a big card"). Do not judge by estimated line count.
 - **待決**: only questions the user must answer (product choice, preference, risk appetite). Each with 2–4 concrete options, the recommended one marked `(Recommended)`. A question `grep` or a ten-line script could answer does not belong here.
 - **不做**: directions ruled out, with the reason.
+- **步驟**: one line for each of the nine steps, shaped `- <n> <step name>：<the 已知 block that holds its output>` when you did it, or `- <n> <step name>：skip：<which condition did not hold>` when you did not. A `skip：` with no reason counts as a missing line. `opsx check <slug>` reads this section, the Stop hook blocks the card in explore while a line is missing, and review compares a skipped 影響範圍 with the real diff.
 
-Call `opsx status explore <n>/<total> "<label>"` as you go. Then continue per `../../references/continue.md`: invoke `/grill <slug>` when 待決 is non-empty, `/propose <slug>` when it is empty, in this turn.
+Call `opsx status explore <n>/<total> "<label>"` as you go. Then continue per `../../references/continue.md`: invoke `/opsx-workflow:grill <slug>` when 待決 is non-empty, `/opsx-workflow:propose <slug>` when it is empty, in this turn.
 
 No shell yet (the user is thinking out loud, not working a card)? Then the conversation might:
 
-- Flow into work breakdown: "Here's 2 PRs with 5 changes — workplan written, run `/propose` to create them"
+- Flow into work breakdown: "Here's 2 PRs with 5 changes — workplan written, run `/opsx-workflow:propose` to create them"
 - Result in glossary/ADR updates: artifacts captured inline
 - Just provide clarity: the thinking was the value
 - Continue later

@@ -23,7 +23,14 @@ import priority  # noqa: E402
 import safefile  # noqa: E402
 
 MAX_DISPATCH = 6
+# 同時 working 的卡數上限預設值；<state>/max-working 可改
+DEFAULT_MAX_WORKING = 6
 REDISPATCH_MINUTES = 10
+# 真實訊息是 `Usage limit reached[ again] · …`，前面只有 Claude Code 畫的 ⎿ │ 與空白；引用、清單、diff 行都不算
+USAGE_LIMIT_LINE = re.compile(r"[\s⎿│]*Usage limit reached(?: again)?\s*·")
+USAGE_LIMIT_STALE_MINUTES = 30
+USAGE_LIMIT_WARNING = "grace allowance"   # 「還有一小段寬限」是警告，agent 還在跑，不算停下
+USAGE_LIMIT_RESET = re.compile(r"(?:limit resets|continuing automatically at)\s+(\d{1,2})(?::(\d{2}))?\s*([ap]m)", re.IGNORECASE)
 # 合併後交給卡自己的 /archive（它標 workplan merged、叫 opsx chain）；過了這麼久還沒歸檔就要人看
 ARCHIVE_GRACE_MINUTES = 30
 AGENT_NAME = re.compile(r"^[a-z][a-z0-9_-]{0,31}$")
@@ -35,7 +42,7 @@ HUMAN_QUESTION = ("只有你能做", "誰來跑")
 MERGE_WORDS = ("合併", "merge")
 # explore 寫的拆法確認 gate 的 id：要人決定，永遠不代答
 SPLIT_GATE = "split"
-VERIFY_ANSWER = "這個要真機跑的驗證使用者之後自己做：把它標成「等使用者驗」寫進 report.md 的 Consider，不要再開 gate，繼續做完剩下的 task 到 /review、/pr。"
+VERIFY_ANSWER = "這個要真機跑的驗證使用者之後自己做：把它標成「等使用者驗」寫進 report.md 的 Consider，不要再開 gate，繼續做完剩下的 task 到 /opsx-workflow:review、/opsx-workflow:pr。"
 GRANT_ANSWER = "允許。長期授權在 grants.toml，直接做。"
 
 
@@ -57,6 +64,8 @@ class Round:
         self.level_errors = {}
         self.orders = {}
         self.redispatched_now = set()
+        self.max_working = None
+        self.woken = 0
 
     def log(self, msg):
         line = "%s %s" % (self.now.strftime("%Y-%m-%d %H:%M:%S"), msg)
@@ -78,6 +87,7 @@ class Round:
         return rc, out, err
 
     def load(self):
+        self.max_working = read_max_working(os.path.join(self.state, "max-working"))
         rc, out, err = self.run(["opsx", "collect"])
         if rc != 0:
             raise CoordinateError("opsx collect 失敗（rc %d）：%s" % (rc, err[:300]))
@@ -127,24 +137,24 @@ class Round:
         return (lv, 1, 0, 0) if pos is None else (lv, 0) + pos
 
     def nobody_archiving(self, c):
-        """已合併但 agent 還在：歸檔、標 workplan、叫 chain 都是它自己 /archive 的事，這裡不搶。
-        過了寬限 agent 還 idle，代表沒人會送 /archive（例如人在網頁上合併、drive 早就結束），回傳 True 由這裡收尾。"""
+        """已合併但 agent 還在：歸檔、標 workplan、叫 chain 都是它自己 /opsx-workflow:archive 的事，這裡不搶。
+        過了寬限 agent 還 idle，代表沒人會送 /opsx-workflow:archive（例如人在網頁上合併、drive 早就結束），回傳 True 由這裡收尾。"""
         key = card_key(c)
         ago = self.now - datetime.datetime.fromisoformat(c["mr"]["merged_at"])
         minutes = ago.total_seconds() // 60
         if ago <= datetime.timedelta(minutes=ARCHIVE_GRACE_MINUTES):
-            self.log("⏳ %s 已合併，等它自己 /archive" % key)
+            self.log("⏳ %s 已合併，等它自己 /opsx-workflow:archive" % key)
             return False
         # idle 也可能是在等人回 gate，或互動模式的人暫時離開：那兩種不收，收了等於替人答 gate、關掉人的 session
         waiting_human = c["open_gates"] or self.dispatch_file[key].get("mode") == "interactive"
         if c["agent_status"] == "idle" and not waiting_human:
-            self.log("-- %s 合併 %d 分鐘了 agent 還 idle，沒人會 /archive，這裡收尾" % (key, minutes))
+            self.log("-- %s 合併 %d 分鐘了 agent 還 idle，沒人會 /opsx-workflow:archive，這裡收尾" % (key, minutes))
             return True
         self.log("?? %s 合併 %d 分鐘了還沒歸檔，agent 是 %s，要人看它卡在哪" % (key, minutes, c["agent_status"]))
         return False
 
     def clean_up(self, top, merged):
-        """agent 已經不在的已合併卡：代做 /archive 的事。回傳收尾成功的卡。"""
+        """agent 已經不在的已合併卡：代做 /opsx-workflow:archive 的事。回傳收尾成功的卡。"""
         self.update_main(top)
         done = [c for c in merged if self.archive_card(top, c)]
         self.act(["git", "-C", top, "worktree", "prune"])
@@ -247,6 +257,8 @@ class Round:
     def answer(self, c, top, gate, text, grant=False):
         args = ["opsx", "answer", c["slug"], "--gate", gate] + (["--grant", "this"] if grant else []) + ["--repo", top, "--", text]
         rc, out, err = self.act(args)
+        if rc == 0:
+            self.woken += 1   # 代答會喚醒 idle 的 agent，同時上限要算它
         if "agent_not_found" in out + err:
             self.redispatch(c, top, "answer 送不到")
         elif rc != 0:
@@ -256,11 +268,12 @@ class Round:
         """這裡處理不了、要人去處理的事。每輪從狀態重算，送過的鍵記在 _notified，所以事件觸發那輪漏掉的由定時那輪補，也不會重送。
         scope 是去重鍵的前綴，預設是這張卡；feature session 的事屬於整個 session，傳 <repo>/@<feature>。
         herdr 的通知沒有點擊動作，內文要寫去哪裡處理。"""
-        key = "%s/%s/%s" % (scope or card_key(c), kind, ident)
+        self.send_notification("%s/%s/%s" % (scope or card_key(c), kind, ident), "[%s] %s" % (card_key(c), event), body)
+
+    def send_notification(self, key, title, body):
         if key in self.memo["_notified"]:
             return
-        rc, out, err = self.act(["herdr", "notification", "show", "[%s] %s" % (card_key(c), event),
-                                 "--body", body, "--sound", "request"])
+        rc, out, err = self.act(["herdr", "notification", "show", title, "--body", body, "--sound", "request"])
         if rc != 0:
             self.log("?? 通知 %s 送不出去，下一輪再送：%s" % (key, (err or out).replace("\n", " ")[:200]))
             return
@@ -283,6 +296,59 @@ class Round:
 
     def notify_gate(self, c, w, why):
         self.notify(c, "gate", w["gate_id"], "gate %s %s" % (w["gate_id"], why), "看板：" + one_line(w.get("question") or ""))
+
+    def usage_limit_seen(self, live):
+        """派出去、沒在 working 也不是 unknown 的 agent，畫面最後 10 行有沒有用量上限訊息。
+        working 的不讀：它在跑，代表已經續上。回 (顯示訊息的 pane 清單, 最晚的重置時刻或 None)。"""
+        hits, times, panes = [], [], set()
+        for c in live:
+            if not c["dispatch"] or c["agent_status"] in ("working", "unknown"):
+                continue
+            pane = c["dispatch"].get("pane")
+            if not pane or pane in panes:
+                continue
+            panes.add(pane)
+            rc, out, err = self.run(["herdr", "agent", "read", pane, "--lines", "10", "--format", "text"])
+            if rc != 0:
+                self.log("?? %s 的畫面讀不到，用量上限看不了：%s" % (card_key(c), err[:200]))
+                continue
+            hit, resets_at = parse_usage_limit(out, self.now)
+            if hit:
+                hits.append(pane)
+                if resets_at:
+                    times.append(resets_at)
+        return hits, max(times) if times else None
+
+    def usage_limit_paused(self, live):
+        """用量上限到了就暫停：不派、不重派、不代答。暫停到記下的重置時刻過了、而且沒有 agent 畫面還顯示訊息。
+        重置時刻只在進入暫停時記一次：訊息還在時每輪重算會一直往後推（時刻過了還顯示，算出來是明天）。"""
+        panes, resets_at = self.usage_limit_seen(live)
+        held = self.memo.get("_usage_limit")
+        if panes and not held:
+            self.memo["_usage_limit"] = held = {"seen_at": self.now.isoformat(timespec="seconds"),
+                                                "resets_at": resets_at.isoformat(timespec="seconds") if resets_at else None}
+            if resets_at:
+                self.log("!! 用量上限到了，預計 %s 恢復，暫停派卡、重派與代答" % resets_at.strftime("%m-%d %H:%M"))
+                body = "預計 %s 恢復；Claude Code 到時間會自己續跑" % resets_at.strftime("%m-%d %H:%M")
+            else:
+                self.log("?? 看得到用量上限訊息但讀不出重置時刻，不猜：暫停到畫面不再出現")
+                body = "讀不出重置時刻，畫面不再顯示上限訊息才恢復派卡"
+            self.send_notification("usage-limit/paused/" + held["seen_at"], "[usage-limit] 用量上限，暫停派卡", body)
+        if panes:
+            # 過了重置時刻還有 pane 顯示訊息（停在等人的 gate、parked、按過 esc 的 pane）：沒人會替它續跑，要人看
+            stale_from = datetime.datetime.fromisoformat(held["resets_at"] or held["seen_at"])
+            if self.now > stale_from + datetime.timedelta(minutes=USAGE_LIMIT_STALE_MINUTES):
+                self.log("?? 重置時刻已過 %d 分鐘（讀不出時刻就從進入暫停起算），pane %s 還顯示上限訊息，繼續暫停" % (USAGE_LIMIT_STALE_MINUTES, "、".join(panes)))
+                self.send_notification("usage-limit/stale/" + held["seen_at"], "[usage-limit] 重置時刻過了仍暫停",
+                                       "pane %s 還顯示上限訊息；看過它再回板上" % "、".join(panes))
+            return True
+        if held and held["resets_at"] and self.now < datetime.datetime.fromisoformat(held["resets_at"]):
+            return True
+        if held:
+            self.log("ok   用量已重置，恢復派卡與代答")
+            self.send_notification("usage-limit/resumed/" + held["seen_at"], "[usage-limit] 用量已重置", "恢復派卡與代答")
+            del self.memo["_usage_limit"]
+        return False
 
     def handle_gate(self, c, top):
         """派出去的卡的第一個 open gate，照固定規則答、停、或留給人。"""
@@ -413,6 +479,7 @@ class Round:
 
     def dispatch_new(self, cards, repo_paths):
         n = 0
+        working = self.woken + sum(1 for c in cards if c["dispatch"] and c["agent_status"] == "working")
         ranked = sorted((self.rank(c, repo_paths[c["repo"]]), i, c) for i, c in enumerate(cards))
         for _, _, c in ranked:
             key, top = card_key(c), repo_paths[c["repo"]]
@@ -458,6 +525,9 @@ class Round:
             if not p0 and n >= MAX_DISPATCH:
                 self.log("-- 這輪派滿 %d 張，%s 下輪" % (MAX_DISPATCH, key))
                 continue
+            if not p0 and working + n >= self.max_working:
+                self.log("-- 同時在跑 %d 張，達上限 %d，%s 下輪" % (working + n, self.max_working, key))
+                continue
             if parked and not parked.get("answered"):
                 text = "停下之後合進 main 的 PR：%s。照最新的 main 繼續；你等的那張還沒合就再開 gate。" % "、".join(newly)
                 rc, _, err = self.act(["opsx", "answer", c["slug"], "--gate", parked["gate"], "--repo", top, "--", text])
@@ -486,6 +556,31 @@ class Round:
             if any(p.get("name") == pr.get("name") for p in f.get("prs") or []):
                 return f.get("name"), [d for d in f["depends-on"] if status.get(d) != "merged"]
         return None, []
+
+
+def read_max_working(path):
+    """同時 working 的卡數上限。launchd 與 --kick 都讀這個檔；沒有檔是預設值，內容不合法就拒跑。"""
+    if not os.path.exists(path):
+        return DEFAULT_MAX_WORKING
+    with open(path, encoding="utf-8") as f:
+        raw = f.read().strip()
+    if not re.fullmatch(r"[0-9]+", raw) or int(raw) < 1:
+        raise CoordinateError("%s 要是正整數，拿到 %r" % (path, raw))
+    return int(raw)
+
+
+def parse_usage_limit(text, now):
+    """畫面文字裡有沒有用量上限訊息，以及它說的重置時刻：(有沒有, 時刻或 None)。
+    訊息只寫時刻（7pm），沒有日期：取 now 之後的下一個該時刻。多個時刻取最晚的。"""
+    if not any(USAGE_LIMIT_LINE.match(line) and USAGE_LIMIT_WARNING not in line for line in text.splitlines()):
+        return False, None
+    times = []
+    for hour, minute, ampm in USAGE_LIMIT_RESET.findall(text):
+        if not 1 <= int(hour) <= 12 or int(minute or 0) > 59:
+            continue
+        at = now.replace(hour=int(hour) % 12 + (12 if ampm.lower() == "pm" else 0), minute=int(minute or 0), second=0, microsecond=0)
+        times.append(at if at > now else at + datetime.timedelta(days=1))
+    return True, max(times) if times else None
 
 
 def mark_stopped(d, key, at):
@@ -617,12 +712,12 @@ def drive_dead(disp):
 
 
 def is_merged(c):
-    """forge 說合了才算；只看 workplan 的 merged 不算，那可能是卡自己 /archive 做到一半。"""
+    """forge 說合了才算；只看 workplan 的 merged 不算，那可能是卡自己 /opsx-workflow:archive 做到一半。"""
     return bool(c["mr"] and c["mr"]["merged_at"])
 
 
 def owner_gone(c):
-    """已合併的卡的 agent 不在了。drive pid 死掉不算：/archive 是 pane 裡的 agent 做的，不是 drive。"""
+    """已合併的卡的 agent 不在了。drive pid 死掉不算：/opsx-workflow:archive 是 pane 裡的 agent 做的，不是 drive。"""
     return not c["dispatch"] or c["agent_status"] == "unknown"
 
 
@@ -672,24 +767,26 @@ def one_round(state, dry):
         done += r.clean_up(repo_paths[repo], [c for c in orphans if c["repo"] == repo])
     live = [c for c in cards if c not in merged]
     r.settle_parked(live)
+    paused = r.usage_limit_paused(live)
 
     for c in live:
         w = c["waiting"]
         if not w:
             r.forget_waiting(c, live)
-        if c["dispatch"] and w and w["type"] != "可以合併":
+        if c["dispatch"] and w and w["type"] != "可以合併" and not paused:
             r.handle_gate(c, repo_paths[c["repo"]])
         if c["mr"] and c["mr"]["state"] == "ready":
             # 推了新 commit 再全綠是新的一次可以合併，所以綁 head sha
             r.notify(c, "ready", c["mr"]["head_sha"], "可以合併", "看板按「合併」：" + c["mr"]["url"])
     for c in live:
-        if not c["dispatch"] or card_key(c) in r.memo["_parked"]:
+        if paused or not c["dispatch"] or card_key(c) in r.memo["_parked"]:
             continue
         if c["agent_status"] == "unknown":
             r.redispatch(c, repo_paths[c["repo"]], "agent 不在 herdr 裡（pane %s）" % c["dispatch"].get("pane"))
         elif drive_dead(c["dispatch"]):
             r.redispatch(c, repo_paths[c["repo"]], "drive pid %s 已經不在" % c["dispatch"]["drive_pid"])
-    r.dispatch_new(live, repo_paths)
+    if not paused:
+        r.dispatch_new(live, repo_paths)
     r.act(["opsx", "reap"])   # 失敗 act 已經記 log；孤兒的判斷與關閉條件都在 opsx reap
     r.save()
     r.log("== 結束：%d 張卡，收尾 %d 張" % (len(live), len(done)))

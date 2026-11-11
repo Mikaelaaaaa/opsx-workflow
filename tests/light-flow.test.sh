@@ -28,8 +28,8 @@ for f in "$CONT" "$GRILL" "$PROP" "$REV"; do assert_file "$f"; done
 section() { awk -v h="## $1" 'index($0,h)==1{on=1;print;next} /^## /{on=0} on' "$2"; }
 
 # --- 1.2 grill 與 propose 的文字；continue.md 的 explore 兩列 ---
-assert_fixed '| explore | `/grill <slug>` | 待決 non-empty and kind is not chore or bug-fix' "$CONT"
-assert_fixed '| explore | `/propose <slug>` | 待決 empty, or kind is chore or bug-fix' "$CONT"
+assert_fixed '| explore | `/opsx-workflow:grill <slug>` | 待決 non-empty and kind is not chore or bug-fix' "$CONT"
+assert_fixed '| explore | `/opsx-workflow:propose <slug>` | 待決 empty, or kind is chore or bug-fix' "$CONT"
 assert_fixed 'kind is chore or bug-fix' "$GRILL"
 assert_fixed 'kind is chore or bug-fix' "$PROP"
 assert_fixed '假設' "$PROP"
@@ -66,8 +66,8 @@ assert_fixed 'Consider never opens a gate' "$CONT"
 # --- review-fix-in-scope：範圍內退回 apply，第 2 輪後確認而不重審 ---
 assert_fixed 'confirm pass' "$FX/sec-step0"
 assert_fixed '待修（範圍內）' "$FX/sec-step0"
-assert_fixed '| review | `/apply <slug>` | `待修（範圍內）` has items |' "$CONT"
-assert_fixed '| review | `/pr <slug>` | no `待修（範圍內）` item left open (Consider does not count) |' "$CONT"
+assert_fixed '| review | `/opsx-workflow:apply <slug>` | `待修（範圍內）` has items |' "$CONT"
+assert_fixed '| review | `/opsx-workflow:pr <slug>` | no `待修（範圍內）` item left open (Consider does not count) |' "$CONT"
 assert_fixed '確認: <sha>' "$FX/sec-light"
 assert_not_fixed 'a gate lists the Bug and Must-fix items still open' "$CONT"
 # report.md 在、沒有 MR，但 review 退回的 R task 還沒勾 → apply，不是 pr

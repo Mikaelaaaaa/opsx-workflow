@@ -12,7 +12,7 @@ has 'one item per sub-change' "$SUB"
 for a in proposal.md specs/ design.md tasks.md; do has "$a" "$SUB"; done
 has 'D-id' "$SUB"
 has 'opsx check <name>' "$SUB"
-has 'do not continue to `/apply`' "$SUB"
+has 'do not continue to `/opsx-workflow:apply`' "$SUB"
 OUT="$FX/out"; sec "$P" "## Output" > "$OUT"; has 'opsx check' "$OUT"
 
 # --- new-auto-merge：寫 tasks.md 前，每段 ## 併入 要嘛變成 task，要嘛先 opsx split-out ---
