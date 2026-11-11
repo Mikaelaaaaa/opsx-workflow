@@ -286,11 +286,15 @@ def facts(slug: str, text: str) -> dict:
 def carry(target_dir: str, source_inbox: str, source_slug: str, write: bool = True) -> None:
     """來源卡的事實欄位併進目標卡 frontmatter：kind_of_work 取較高（incident 高於 planned），impact 取聯集，
     evidence 依 " ; " 分段去重後接在後面，來源的 priority 覆寫比目標高（或目標沒有）就連同理由帶過去。
-    來源沒有事實（planned、沒有 impact、沒有覆寫）就不動目標。等級由 opsx priority 從併完的欄位算。
+    來源沒有事實（planned、沒有 impact、沒有 evidence、沒有覆寫）就在解析目標之前返回，目標一個位元組都不動。
+    等級由 opsx priority 從併完的欄位算。priority 覆寫只在比目標的有效等級（目標的覆寫，沒有就用併完的 kind 與 impact 算的等級）高時才帶過去。
+    shortcut: 有效等級不看 workplan 的 milestone 位置，覆寫可能壓過目標因 milestone 得到的較高等級；併卡的來源與目標都在收件匣時沒差，到進了 workplan 的卡才要升級成用 priority.levels(top)
     write=False 只驗兩張卡的欄位合格、目標有 frontmatter（opsx merge-card 在捨棄來源之前呼叫），不寫檔。"""
     inbox = os.path.join(target_dir, "inbox.md")
     with open(source_inbox, encoding="utf-8") as f:
         s = facts(source_slug, f.read())
+    if s["kind"] == "planned" and not (s["impact"] or s["evidence"] or s["priority"]):
+        return
     with safefile.CardLock(target_dir):
         with open(inbox, encoding="utf-8") as f:
             text = f.read()
@@ -305,10 +309,9 @@ def carry(target_dir: str, source_inbox: str, source_slug: str, write: bool = Tr
             updates["impact"] = ", ".join(impact)
         if evidence != t["evidence"] or "impact" in updates:   # 目標原本用巢狀寫法時，evidence 要跟著 impact 一起改成同一行
             updates["evidence"] = evidence
-        if s["priority"] and (not t["priority"] or priority.LEVELS.index(s["priority"]) < priority.LEVELS.index(t["priority"])):
+        effective = t["priority"] or priority.rule_level("incident" if "kind_of_work" in updates else t["kind"], impact, None, None)[0]
+        if s["priority"] and priority.LEVELS.index(s["priority"]) < priority.LEVELS.index(effective):
             updates.update({"priority": s["priority"], "priority_reason": "併自 %s：%s" % (source_slug, s["reason"])})
-        if not updates and (s["kind"] == "planned" and not s["impact"]):
-            return
         new = rewrite_frontmatter(text, updates, inbox)
         if write and new != text:
             safefile.write_atomic(inbox, new)

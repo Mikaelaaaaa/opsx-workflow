@@ -220,6 +220,45 @@ err="$(opsx merge-card carry-s11 --into carry-d11 --repo "$A" 2>&1)" && fail "�
 case "$err" in *carry-d11*) ;; *) fail "stderr 要指名目標卡：$err" ;; esac
 assert_eq "$(snap)" "$before"
 
+# --- 低的 priority 覆寫不降低算出 P0 的目標 ---
+mk_card carry-s12 planned "" ""; mk_card carry-d12 incident data "資料遺失"
+printf -- '---\ntype: bug\nsource: agent:t\nfound: 2026-11-10\nrelated:\nkind_of_work: planned\npriority: P2\npriority_reason: 人判定不急\n---\n\n## 一句話\n\ncarry-s12\n\n## 證據\n\n- 原有\n' > "$CH/carry-s12/inbox.md"
+assert_eq "$(level_of carry-d12)" P0
+assert_rc 0 opsx merge-card carry-s12 --into carry-d12 --repo "$A"
+assert_eq "$(level_of carry-d12)" P0 "P2 覆寫不能把 P0 目標降下來"
+assert_eq "$(fm_value carry-d12 priority)" "" "目標不該多出比算出來還低的 priority"
+
+# --- 來源沒有任何事實：不解析目標（目標有舊的不合格欄位也併得進去），目標 frontmatter 位元組不變 ---
+mk_card carry-s13 "" "" ""; mk_card carry-d13 incident data ""
+mk_card carry-s14 "" "" ""; mk_card carry-d14 planned "" "a ; a"
+fm_of() { awk 'NR>1 && /^---/{exit} {print}' "$CH/$1/inbox.md" | shasum; }
+f13="$(fm_of carry-d13)"; f14="$(fm_of carry-d14)"
+assert_rc 0 opsx merge-card carry-s13 --into carry-d13 --repo "$A"
+assert_rc 0 opsx merge-card carry-s14 --into carry-d14 --repo "$A"
+assert_eq "$(fm_of carry-d13)" "$f13" "來源沒事實時目標不解析、不改"
+assert_eq "$(fm_of carry-d14)" "$f14" "evidence a ; a 不能被重新去重"
+
+# --- 目標內文有 --- 水平線但沒有 frontmatter：退出非零，不把欄位寫進內文 ---
+mk_card carry-s15 incident data "x15"
+mkdir -p "$CH/carry-d15"; printf 'schema: opsx\n' > "$CH/carry-d15/.openspec.yaml"
+printf '# 標題\n\n---\n\n## 證據\n\n- 原有\n' > "$CH/carry-d15/inbox.md"
+before="$(snap)"
+assert_rc 1 opsx merge-card carry-s15 --into carry-d15 --repo "$A"
+assert_eq "$(snap)" "$before" "沒有 frontmatter 的目標不能被寫進內文"
+
+# --- 巢狀目標只有 impact 變、evidence 相同：改成同一行後 evidence 還在 ---
+mk_card carry-s16 incident security "同一條"
+mkdir -p "$CH/carry-d16"; printf 'schema: opsx\n' > "$CH/carry-d16/.openspec.yaml"
+printf -- '---\ntype: bug\nsource: agent:t\nfound: 2026-11-10\nrelated:\nkind_of_work: incident\nimpact:\n  data: true\n  evidence: 同一條\n---\n\n## 一句話\n\nd16\n\n## 證據\n\n- 原有\n' > "$CH/carry-d16/inbox.md"
+assert_rc 0 opsx merge-card carry-s16 --into carry-d16 --repo "$A"
+assert_eq "$(fm_value carry-d16 impact)" "data, security"
+assert_eq "$(fm_value carry-d16 evidence)" "同一條" "巢狀的 evidence 不能因為只有 impact 變就掉了"
+
+# --- evidence 依 ' ; ' 分段去重：a ; b 加 b 還是 a ; b ---
+mk_card carry-s17 incident data "b"; mk_card carry-d17 incident data "a ; b"
+assert_rc 0 opsx merge-card carry-s17 --into carry-d17 --repo "$A"
+assert_eq "$(fm_value carry-d17 evidence)" "a ; b"
+
 # --- 來源的事實欄位不合格：退出非零，兩張卡都不動 ---
 mk_card carry-src6 incident data ""; mk_card carry-dst6 planned "" ""
 before="$(snap)"
