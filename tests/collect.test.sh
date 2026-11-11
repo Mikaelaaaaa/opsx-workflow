@@ -317,12 +317,17 @@ mklm() { # <changes 底下的路徑> [logic-map.md 內容]
 mklm x $'# 邏輯表：x\n┌─┐\n'
 mklm none
 mklm archive/2026-11-01-y $'# 邏輯表：y\n└─┘\n'
-J="$(opsx collect --root "$RL")"; assert_eq "$?" 0 "logic collect rc: $J"
+mklm bad $'# \xe9\x82'   # 寫到一半、斷在中文字中間
+J="$(opsx collect --root "$RL")"; assert_eq "$?" 0 "logic collect rc（壞檔不能拖垮整份）: $J"
 lm() { printf '%s' "$(card "$J" rl "$1")" | python3 -I -c 'import json,sys;c=json.load(sys.stdin);print(json.dumps(c["logic_map"],ensure_ascii=False) if "logic_map" in c else "MISSING")'; }
 assert_eq "$(lm x)" '"# 邏輯表：x\n┌─┐\n"' "有邏輯表：全文含換行與框線"
 assert_eq "$(lm none)" 'null' "沒有邏輯表：key 在、值 null"
 assert_eq "$(lm y)" '"# 邏輯表：y\n└─┘\n"' "已歸檔的卡讀歸檔目錄的檔"
-case "$(q "$J" errors)" in *rl/openspec/changes/none*|*logic-map*) fail "沒有邏輯表不該進 errors：$(q "$J" errors)" ;; esac
+case "$(q "$J" errors)" in *changes/none*|*changes/x/*|*2026-11-01-y*) fail "沒有或讀得到的邏輯表不該進 errors：$(q "$J" errors)" ;; esac
+assert_eq "$(lm bad)" 'null' "讀不了的邏輯表：值 null"
+LE="$(printf '%s' "$J" | python3 -I -c 'import json,sys;print(json.dumps([e for e in json.load(sys.stdin)["errors"] if e["source"].endswith("/bad/logic-map.md")],ensure_ascii=False))')"
+assert_eq "$(printf '%s' "$LE" | python3 -I -c 'import json,sys;print(len(json.load(sys.stdin)))')" 1 "讀不了的邏輯表一筆 error：$(q "$J" errors)"
+printf '%s' "$LE" | grep -q 'rl/bad' || fail "error 要指名 repo/slug：$LE"
 
 # ---------- generated_at 在讀任何來源之前取：卡片迴圈裡的 glab 慢 4 秒也不會往後（banner-same-second） ----------
 # 慢的是迴圈裡的 mr_json：它比 herdr 早讀，取時點放在迴圈之後的實作會被抓到

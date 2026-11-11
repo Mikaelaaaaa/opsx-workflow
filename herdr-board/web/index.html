@@ -361,7 +361,16 @@ function splitOut(c,id){
 /* 邏輯表 start */
 function logicMapSection(c){
   if(!c.logic_map)return '';
-  return `<section><h3>邏輯表 <span class="src">logic-map.md</span></h3><pre class="term logic-map">${esc(c.logic_map)}</pre></section>`;
+  return `<section><h3>邏輯表 <span class="src">logic-map.md</span></h3><pre class="term logic-map" data-key="${esc(c.repo+'/'+c.slug)}">${esc(c.logic_map)}</pre></section>`;
+}
+/* 抽屜每次重畫都換掉整段 DOM；同一張卡要留在原本捲到的欄位，條件表的 file:line 在右邊 */
+function logicMapScroll(drawer){
+  const p=drawer.querySelector('pre.logic-map');
+  return p?{key:p.dataset.key,left:p.scrollLeft}:null;
+}
+function restoreLogicMapScroll(drawer,pos){
+  const p=drawer.querySelector('pre.logic-map');
+  if(p&&pos&&p.dataset.key===pos.key)p.scrollLeft=pos.left;
 }
 /* 邏輯表 end */
 function ago(iso){
@@ -794,9 +803,11 @@ function renderDrawer(){
   const logSec=`<section><h3>紀錄 <span class="src">decisions.tsv</span></h3>${tlErr?`<div class="faint" style="color:var(--danger)">${esc(tlErr)}</div>`:!tl?'<div class="faint">載入中…</div>':mine.length?`<div class="panel" style="margin-top:0">${mine.map(evRow).join('')}</div>`:'<div class="faint">這張卡還沒有紀錄</div>'}</section>`;
   const foot=`<div class="foot">${d.pane?`<button class="ghost sm" data-act="pane">開啟 pane ${esc(d.pane)}</button><button class="ghost sm" data-act="stop">停止</button>`:''}${c.section!=='已完成'?`<button class="ghost sm" data-act="dispatch">${d.pane?'重新指派':'指派'}</button>`:''}<span class="path">${esc(c.path||'')}</span></div>`;
   const prioSec=c.priority?`<section><h3>等級 <span class="src">opsx priority</span></h3><div>${priorityBadge(c,true)}</div></section>`:'';
+  const lmPos=logicMapScroll($('#drawer'));
   const headBadge=(w?`<span class="badge ${WAIT_BADGE[w.type]}">${esc(w.type)}</span>`:c.agent_status==='working'?'<span class="badge ok"><span class="dot live"></span>執行中</span>':'')+pendBadge(c);
   $('#drawer').innerHTML=`<header><div style="padding-top:2px">${bot(c,40)}</div><div class="ttl"><h2>${esc(c.title)}${headBadge}</h2><div class="flow">${flowLine(c)}</div></div><button class="x" data-act="close" aria-label="關閉">×</button></header><div class="body">${ask}${prioSec}${notesSection(c)}${mergedSection(c)}${facts}${prog}${out}${mr}${logicMapSection(c)}${logSec}${foot}</div>`;
   $('#drawer').hidden=false;$('#scrim').hidden=false;
+  restoreLogicMapScroll($('#drawer'),lmPos);
   const nr=$('#reply');if(nr&&keep){nr.value=keep.v;if(keep.focus){nr.focus();try{nr.setSelectionRange(keep.s,keep.s);}catch(e){}}}
   const nn=$('#note-add');if(nn&&keepNote){nn.value=keepNote.v;if(keepNote.focus){nn.focus();try{nn.setSelectionRange(keepNote.s,keepNote.s);}catch(e){}}}
 }
