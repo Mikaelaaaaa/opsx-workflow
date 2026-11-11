@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # babysit 遇到衝突與 stale base 自己把 main 合進 PR 分支解，只有語意矛盾才開 gate。
-# 對應 babysit-merge-main 的 specs/babysit-conflict-resolve（「上游紀錄」由 upstream-note 子 change 測）。
+# 對應 babysit-merge-main 的 specs/babysit-conflict-resolve。
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 SKILL="$OPSX_ROOT/skills/babysit/SKILL.md"
@@ -53,3 +53,7 @@ assert_not_grep "needing a rebase" "$SKILL"
 assert_grep "conflict" "$FX/step10"
 assert_grep "run babysit to resolve the conflict" "$FX/step10"
 assert_grep "press merge again" "$FX/step10"
+
+# 上游紀錄：UPSTREAM.md 的 babysit 那一列記下合 main
+grep '^| `skills/babysit/SKILL.md`' "$OPSX_ROOT/UPSTREAM.md" > "$FX/upstream_row"
+assert_grep "合 main" "$FX/upstream_row"
