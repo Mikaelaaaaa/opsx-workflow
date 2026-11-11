@@ -469,6 +469,22 @@ out="$(tw "$R/src/newdir/contest.py")"; assert_eq "$out" "" "test-path: contest.
 ln -s "$R" "$FX/rlink"
 out="$(tw "$FX/rlink/src/newdir/foo.test.ts")"; assert_eq "$(decision "$out")" deny "test-path: 經 symlink 寫進 worktree 也要判"
 out="$(tw "$FX/rlink/tests/b.test.sh")"; assert_eq "$out" "" "test-path: 經 symlink 寫進有測試的目錄不出聲"
+# 相對路徑：hook 不能卡住到逾時（逾時等於放行），要 deny 並點名原值。alarm 讓卡住的 hook 在 10 秒被砍，輸出空字串就算放行
+twt() { printf '%s' "$(j "$R" Write "{\"file_path\":\"$1\",\"content\":\"x\"}")" | perl -e 'alarm 10; exec @ARGV' bash "$H/opsx-grant-gate.sh" 2>/dev/null; true; }
+for f in x.test.ts src/nope/x.test.ts; do
+  out="$(twt "$f")"; assert_eq "$(decision "$out")" deny "test-path: 相對路徑 ${f} 要 deny，不能逾時放行"
+  reason "$out" | grep -qF "$f" || fail "test-path: 相對路徑的 deny 要點名 ${f}：$(reason "$out")"
+done
+# 這一層的被追蹤測試檔排在大量子目錄檔案前面（清單超過 pipe buffer）時仍要放行
+mkdir -p "$R/big/sub"; printf 'x\n' > "$R/big/a.test.sh"
+( cd "$R/big/sub" && seq -f 'padding-padding-padding-%06g.ts' 1 3000 | xargs touch )
+git -C "$R" add big; git -C "$R" commit -q -m "fixture: big dir"
+out="$(tw "$R/big/b.test.sh")"; assert_eq "$out" "" "test-path: 有測試的目錄、清單很大也不出聲"
+out="$(tw "$R/big/sub/c.test.ts")"; assert_eq "$(decision "$out")" deny "test-path: 大目錄底下只有上層有測試，這一層仍算沒有"
+# 進不去的目錄（cd 失敗）不能讓 hook 以非 0 結束而放行
+mkdir -p "$R/locked"; chmod 000 "$R/locked"
+out="$(tw "$R/locked/x.test.ts")"; chmod 755 "$R/locked"
+assert_eq "$(decision "$out")" deny "test-path: 進不去的目錄要 deny"
 # 有授權：repo 永遠、這張卡
 printf '[repos."Agentory-AI"]\ntest-path = true\n' > "$OPSX_STATE_DIR/grants.toml"
 out="$(tw "$R/src/newdir/foo.test.ts")"; assert_eq "$(printf '%s' "$out" | jq -r '.hookSpecificOutput.permissionDecision')" allow "test-path: grants.toml 有授權要明說 allow"

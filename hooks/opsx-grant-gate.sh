@@ -136,14 +136,17 @@ if [ "$tool" = "Edit" ] || [ "$tool" = "Write" ]; then
   [ "$UNMAPPED" = 1 ] && exit 0
   wtop="$(git -C "$(hook_cwd)" rev-parse --show-toplevel 2>/dev/null || true)"
   [ -n "$wtop" ] || exit 0
+  case "$file" in /*) ;; *) deny "opsx 授權閘門：file_path 不是絕對路徑（${file}），分不出它在哪個 worktree，先擋下。用絕對路徑" ;; esac
   # 目錄還不存在時往上找最近存在的那層，用它判斷屬於哪個 worktree；pwd -P 讓 /tmp 與 /private/tmp 這類 symlink 對得上
   base="${file%/*}"; missing=0
   while [ -n "$base" ] && [ ! -d "$base" ]; do base="${base%/*}"; missing=1; done
-  base="$(cd "${base:-/}" && pwd -P)"
+  real="$(cd "${base:-/}" && pwd -P)" || deny "opsx 授權閘門：進不了 ${base:-/}，分不出 ${file} 屬於哪個 worktree，先擋下"
+  base="$real"
   [ "$(git -C "$base" rev-parse --show-toplevel 2>/dev/null || true)" = "$wtop" ] || exit 0
   if [ "$missing" = 0 ]; then
-    tracked="$(git -C "$base" -c core.quotepath=off ls-files)" || deny "opsx 授權閘門：git ls-files 失敗（${base}），分不出這一層有沒有既有測試，先擋下"
-    printf '%s\n' "$tracked" | grep -qE '^([^/]*\.(test|spec)\.[^/]*|test_[^/]*\.py|[^/]*_test\.[^/]*)$' && exit 0
+    # :(glob) 的 * 不跨 /，所以只列這一層；樣式跟上面的檔名 case 同一組
+    tracked="$(git -C "$base" ls-files -- ':(glob)*.test.*' ':(glob)*.spec.*' ':(glob)test_*.py' ':(glob)*_test.*')" || deny "opsx 授權閘門：git ls-files 失敗（${base}），分不出這一層有沒有既有測試，先擋下"
+    [ -n "$tracked" ] && exit 0
   fi
   level2 test-path "測試檔寫進沒有既有測試的目錄（${file}）"
   allow
