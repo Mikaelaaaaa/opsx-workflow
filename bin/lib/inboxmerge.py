@@ -98,7 +98,8 @@ def append(card_dir: str, base: str, when: str, source: str, kind: str, evidence
     with safefile.CardLock(card_dir):
         with open(inbox, encoding="utf-8") as f:
             cur = f.read()
-        # opsx new 在鎖外判斷階段，這裡鎖內再查一次，免得併進剛開工或剛拆的卡
+        # opsx new 在鎖外判斷階段，這裡鎖內再查一次，免得併進剛開工或剛拆的卡。
+        # shortcut: propose 寫 tasks.md 不取卡鎖，這只把視窗縮到查完到寫入之間；要關死得讓 tasks.md 的寫入也取卡鎖
         if os.path.exists(os.path.join(card_dir, "tasks.md")):
             raise TargetStarted("%s 已有 tasks.md，不併" % card_dir)
         if split_into(cur):

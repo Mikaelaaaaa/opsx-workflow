@@ -205,6 +205,35 @@ reset; card x 'bin/x.sh' "split_into: [x-a, x-b]"; keep x
 append; assert_eq "$?" 4 "目標已拆要退出 4：$(cat "$ERR")"; kept x; assert_grep 'split_into' "$ERR"
 reset; card x 'bin/x.sh'
 append > /dev/null; assert_eq "$?" 0 "還沒開工的照寫：$(cat "$ERR")"; assert_grep '^bin/x.sh 晚到$' "$C/x/inbox.md"
+# opsx new 整條路（review R2.1）：先握住 x 的卡鎖，opsx new 判斷完、卡在寫入前；這時 x 開工或被拆，放鎖後 opsx new 要建新殼、x 不動
+hold_x() { # hold_x：背景持 x 的卡鎖，等 $FX/go 出現才放
+  rm -f "$FX/held" "$FX/go"
+  python3 -I -c '
+import os, sys, time
+sys.path.insert(0, sys.argv[1]); import safefile
+with safefile.CardLock(sys.argv[2]):
+    open(sys.argv[3], "w").close()
+    while not os.path.exists(sys.argv[4]):
+        time.sleep(0.02)
+' "$OPSX_ROOT/bin/lib" "$C/x" "$FX/held" "$FX/go" &
+  HOLDER=$!
+  for _ in $(seq 100); do [ -e "$FX/held" ] && break; sleep 0.05; done
+  [ -e "$FX/held" ] || fail "拿不到 x 的卡鎖"
+}
+late_new() { # late_new <在鎖內對 x 做的事>：opsx new 等鎖時做那件事，再放鎖
+  hold_x
+  agent_new --kind-of-work planned --repo "$E" -- "bin/x.sh 晚到" &
+  NEW=$!
+  sleep 1
+  eval "$1"; keep x
+  : > "$FX/go"; wait "$HOLDER"; wait "$NEW"; assert_eq "$?" 0 "目標開工後 opsx new 要照常建殼：$(cat "$ERR")"
+  new_shell_out agent; kept x; assert_grep 'inboxmerge' "$ERR"
+}
+reset; card x 'bin/x.sh'
+late_new "printf -- '- [ ] 1.1 a\n' > '$C/x/tasks.md'"
+reset; card x 'bin/x.sh'
+late_new "sed -i '' 's/^kind_of_work: planned\$/kind_of_work: planned\nsplit_into: [x-a]/' '$C/x/inbox.md'"
+assert_grep '^split_into: \[x-a\]$' "$C/x/inbox.md"
 
 # --- 兩邊都有紀錄 ---
 reset; card x 'bin/x.sh'; card foo '沒路徑'
