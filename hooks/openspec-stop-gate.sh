@@ -117,12 +117,6 @@ case "$stage" in
   *) exit 0 ;;
 esac
 
-# 用量上限停下不是沒接站：agent 動不了，擋它只會累積次數、寫出沒人答得了的 gate
-tp="$(jqr '.transcript_path')"
-if [ -n "$tp" ] && [ -r "$tp" ] && tail -n 5 "$tp" | jq -e 'select(.type == "system" and ((.content // "") | tostring | startswith("Usage limit reached")))' >/dev/null 2>&1; then
-  exit 0
-fi
-
 state="$OPSX_STATE_DIR/stop-chain/$(repo_name)-$slug"
 out="$(stop_reason "$d" "$slug" "$stage")"
 if [ -z "$out" ]; then

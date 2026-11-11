@@ -23,10 +23,12 @@ import priority  # noqa: E402
 import safefile  # noqa: E402
 
 MAX_DISPATCH = 6
-# 同時 working 的卡數上限，環境變數 OPSX_MAX_WORKING 可改
+# 同時 working 的卡數上限預設值；<state>/max-working 可改
 DEFAULT_MAX_WORKING = 6
 REDISPATCH_MINUTES = 10
-USAGE_LIMIT = "Usage limit reached"
+# 訊息獨占一行、前面最多是符號與空白（⎿ 之類）；程式碼或對話裡引用這句話不算
+USAGE_LIMIT_LINE = re.compile(r"\W*Usage limit reached")
+USAGE_LIMIT_STALE_MINUTES = 30
 USAGE_LIMIT_WARNING = "grace allowance"   # 「還有一小段寬限」是警告，agent 還在跑，不算停下
 USAGE_LIMIT_RESET = re.compile(r"(?:limit resets|continuing automatically at)\s+(\d{1,2})(?::(\d{2}))?\s*([ap]m)", re.IGNORECASE)
 # 合併後交給卡自己的 /archive（它標 workplan merged、叫 opsx chain）；過了這麼久還沒歸檔就要人看
@@ -63,6 +65,7 @@ class Round:
         self.orders = {}
         self.redispatched_now = set()
         self.max_working = None
+        self.woken = 0
 
     def log(self, msg):
         line = "%s %s" % (self.now.strftime("%Y-%m-%d %H:%M:%S"), msg)
@@ -84,13 +87,7 @@ class Round:
         return rc, out, err
 
     def load(self):
-        raw = os.environ.get("OPSX_MAX_WORKING")
-        if raw is None:
-            self.max_working = DEFAULT_MAX_WORKING
-        elif raw.isdigit() and int(raw) >= 1:
-            self.max_working = int(raw)
-        else:
-            raise CoordinateError("OPSX_MAX_WORKING 要是正整數，拿到 %r" % raw)
+        self.max_working = read_max_working(os.path.join(self.state, "max-working"))
         rc, out, err = self.run(["opsx", "collect"])
         if rc != 0:
             raise CoordinateError("opsx collect 失敗（rc %d）：%s" % (rc, err[:300]))
@@ -260,6 +257,8 @@ class Round:
     def answer(self, c, top, gate, text, grant=False):
         args = ["opsx", "answer", c["slug"], "--gate", gate] + (["--grant", "this"] if grant else []) + ["--repo", top, "--", text]
         rc, out, err = self.act(args)
+        if rc == 0:
+            self.woken += 1   # 代答會喚醒 idle 的 agent，同時上限要算它
         if "agent_not_found" in out + err:
             self.redispatch(c, top, "answer 送不到")
         elif rc != 0:
@@ -300,8 +299,8 @@ class Round:
 
     def usage_limit_seen(self, live):
         """派出去、沒在 working 也不是 unknown 的 agent，畫面最後 10 行有沒有用量上限訊息。
-        working 的不讀：它在跑，代表已經續上。回 (有沒有, 最晚的重置時刻或 None)。"""
-        seen, times, panes = False, [], set()
+        working 的不讀：它在跑，代表已經續上。回 (顯示訊息的 pane 清單, 最晚的重置時刻或 None)。"""
+        hits, times, panes = [], [], set()
         for c in live:
             if not c["dispatch"] or c["agent_status"] in ("working", "unknown"):
                 continue
@@ -315,17 +314,17 @@ class Round:
                 continue
             hit, resets_at = parse_usage_limit(out, self.now)
             if hit:
-                seen = True
+                hits.append(pane)
                 if resets_at:
                     times.append(resets_at)
-        return seen, max(times) if times else None
+        return hits, max(times) if times else None
 
     def usage_limit_paused(self, live):
         """用量上限到了就暫停：不派、不重派、不代答。暫停到記下的重置時刻過了、而且沒有 agent 畫面還顯示訊息。
         重置時刻只在進入暫停時記一次：訊息還在時每輪重算會一直往後推（時刻過了還顯示，算出來是明天）。"""
-        seen, resets_at = self.usage_limit_seen(live)
+        panes, resets_at = self.usage_limit_seen(live)
         held = self.memo.get("_usage_limit")
-        if seen and not held:
+        if panes and not held:
             self.memo["_usage_limit"] = held = {"seen_at": self.now.isoformat(timespec="seconds"),
                                                 "resets_at": resets_at.isoformat(timespec="seconds") if resets_at else None}
             if resets_at:
@@ -335,7 +334,12 @@ class Round:
                 self.log("?? 看得到用量上限訊息但讀不出重置時刻，不猜：暫停到畫面不再出現")
                 body = "讀不出重置時刻，畫面不再顯示上限訊息才恢復派卡"
             self.send_notification("usage-limit/paused/" + held["seen_at"], "[usage-limit] 用量上限，暫停派卡", body)
-        if seen:
+        if panes:
+            # 過了重置時刻還有 pane 顯示訊息（停在等人的 gate、parked、按過 esc 的 pane）：沒人會替它續跑，要人看
+            if held["resets_at"] and self.now > datetime.datetime.fromisoformat(held["resets_at"]) + datetime.timedelta(minutes=USAGE_LIMIT_STALE_MINUTES):
+                self.log("?? 重置時刻已過 %d 分鐘，pane %s 還顯示上限訊息，繼續暫停" % (USAGE_LIMIT_STALE_MINUTES, "、".join(panes)))
+                self.send_notification("usage-limit/stale/" + held["seen_at"], "[usage-limit] 重置時刻過了仍暫停",
+                                       "pane %s 還顯示上限訊息；看過它再回板上" % "、".join(panes))
             return True
         if held and held["resets_at"] and self.now < datetime.datetime.fromisoformat(held["resets_at"]):
             return True
@@ -470,7 +474,7 @@ class Round:
 
     def dispatch_new(self, cards, repo_paths):
         n = 0
-        working = sum(1 for c in cards if c["dispatch"] and c["agent_status"] == "working")
+        working = self.woken + sum(1 for c in cards if c["dispatch"] and c["agent_status"] == "working")
         ranked = sorted((self.rank(c, repo_paths[c["repo"]]), i, c) for i, c in enumerate(cards))
         for _, _, c in ranked:
             key, top = card_key(c), repo_paths[c["repo"]]
@@ -549,14 +553,25 @@ class Round:
         return None, []
 
 
+def read_max_working(path):
+    """同時 working 的卡數上限。launchd 與 --kick 都讀這個檔；沒有檔是預設值，內容不合法就拒跑。"""
+    if not os.path.exists(path):
+        return DEFAULT_MAX_WORKING
+    with open(path, encoding="utf-8") as f:
+        raw = f.read().strip()
+    if not re.fullmatch(r"[0-9]+", raw) or int(raw) < 1:
+        raise CoordinateError("%s 要是正整數，拿到 %r" % (path, raw))
+    return int(raw)
+
+
 def parse_usage_limit(text, now):
     """畫面文字裡有沒有用量上限訊息，以及它說的重置時刻：(有沒有, 時刻或 None)。
     訊息只寫時刻（7pm），沒有日期：取 now 之後的下一個該時刻。多個時刻取最晚的。"""
-    if not any(USAGE_LIMIT in line and USAGE_LIMIT_WARNING not in line for line in text.splitlines()):
+    if not any(USAGE_LIMIT_LINE.match(line) and USAGE_LIMIT_WARNING not in line for line in text.splitlines()):
         return False, None
     times = []
     for hour, minute, ampm in USAGE_LIMIT_RESET.findall(text):
-        if not 1 <= int(hour) <= 12:
+        if not 1 <= int(hour) <= 12 or int(minute or 0) > 59:
             continue
         at = now.replace(hour=int(hour) % 12 + (12 if ampm.lower() == "pm" else 0), minute=int(minute or 0), second=0, microsecond=0)
         times.append(at if at > now else at + datetime.timedelta(days=1))

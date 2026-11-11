@@ -678,23 +678,73 @@ assert_eq "$(count '^agent read')" 0 "working 不讀"
 assert_eq "$(count '^opsx dispatch q1 ')" 1 "只有 working 的 agent：不暫停"
 printf 'ok\n' > "$AR"
 
-# --- 同時在跑上限（OPSX_MAX_WORKING）---
+# parse_usage_limit：固定 now 下直接比對輸出（時刻照時鐘算、外來文字不算、分鐘不合法不當掉）
+python3 -I - "$OPSX_ROOT/bin/lib" <<'PY' || fail "parse_usage_limit 的案例有錯"
+import datetime, sys
+sys.path.insert(0, sys.argv[1])
+import coordinate
+tz = datetime.timezone(datetime.timedelta(hours=8))
+def at(day, h, m=0):
+    return datetime.datetime(2026, 11, day, h, m, tzinfo=tz)
+CONT = "Usage limit reached · continuing automatically at %s · esc to cancel"
+cases = [
+    (CONT % "7pm", at(10, 20), (True, at(11, 19))),
+    (CONT % "7pm", at(10, 18), (True, at(10, 19))),
+    (CONT % "12am", at(10, 20), (True, at(11, 0))),
+    (CONT % "12pm", at(10, 8), (True, at(10, 12))),
+    ("Usage limit reached · limit resets 7:30pm", at(10, 18), (True, at(10, 19, 30))),
+    ("  ⎿  Usage limit reached · limit resets 7pm", at(10, 18), (True, at(10, 19))),
+    (CONT % "7:99pm", at(10, 18), (True, None)),
+    ("Usage limit reached · something new", at(10, 18), (True, None)),
+    ("LIMIT_MSG='Usage limit reached · continuing automatically at 7pm'", at(10, 18), (False, None)),
+    ("+USAGE_LIMIT = \"Usage limit reached\"", at(10, 18), (False, None)),
+    ("Usage limit reached; a short grace allowance remains, then this turn is cut off", at(10, 18), (False, None)),
+]
+for text, now, want in cases:
+    got = coordinate.parse_usage_limit(text, now)
+    assert got == want, "%r at %s: want %s got %s" % (text, now, want, got)
+PY
+
+# 暫停過了重置時刻 30 分鐘、pane 還顯示訊息：通知一次，不派
 rm -f "$MEMO"
+printf '%s\n' "$LIMIT_MSG" > "$AR"
+printf '{"_usage_limit":{"seen_at":"%s","resets_at":"%s"}}' "$(ago 100)" "$(ago 40)" > "$MEMO"
+cards "[$(idle r1),{\"slug\":\"q1\"}]"
+round || fail "rc: $(cat "$FX/out")"
+assert_eq "$(count '^opsx dispatch')" 0 "過了重置時刻仍顯示訊息：照暫停"
+assert_grep '^notification show \[usage-limit\] 重置時刻過了' "$OPSX_FAKE_LOG"
+assert_grep 'w1:p1' "$OPSX_FAKE_LOG"
+round || fail "rc: $(cat "$FX/out")"
+assert_eq "$(count '^notification show')" 0 "仍暫停的通知只送一次"
+rm -f "$MEMO"; printf 'ok\n' > "$AR"
+
+# --- 同時在跑上限（<state>/max-working，沒有這個檔是 6）---
+MW="$OPSX_STATE_DIR/max-working"; rm -f "$MW"
 cards "[$(busy r1),$(busy r2),$(busy r3),$(busy r4),$(busy r5),$(busy r6),{\"slug\":\"q1\"}]"
 round || fail "rc: $(cat "$FX/out")"
 assert_eq "$(count '^opsx dispatch')" 0 "六張在跑，不派非 P0：$(cat "$OPSX_FAKE_LOG")"
 grep '同時' "$LOG" | grep -q 6 || fail "要記 -- 含上限 6：$(cat "$LOG")"
 cards "[$(busy r1),$(busy r2),{\"slug\":\"q1\"}]"
-OPSX_MAX_WORKING=2 round || fail "rc: $(cat "$FX/out")"
+printf '2\n' > "$MW"
+round || fail "rc: $(cat "$FX/out")"
 assert_eq "$(count '^opsx dispatch')" 0 "上限 2、兩張在跑不派"
-OPSX_MAX_WORKING=3 round || fail "rc: $(cat "$FX/out")"
+printf '3\n' > "$MW"
+round || fail "rc: $(cat "$FX/out")"
 assert_eq "$(count '^opsx dispatch q1 ')" 1 "上限 3 派"
 cards "[$(busy r1),$(busy r2),{\"slug\":\"q1\"},{\"slug\":\"q2\"},{\"slug\":\"q3\"}]"
-OPSX_MAX_WORKING=3 round || fail "rc: $(cat "$FX/out")"
+round || fail "rc: $(cat "$FX/out")"
 assert_eq "$(count '^opsx dispatch')" 1 "本輪已派的也算進同時數：$(cat "$OPSX_FAKE_LOG")"
-OPSX_MAX_WORKING=abc round && fail "上限設錯要拒跑"
-grep 'OPSX_MAX_WORKING' "$LOG" | grep -q abc || fail "log 要含 OPSX_MAX_WORKING 與 abc：$(cat "$LOG")"
+# 本輪代答喚醒的卡也算：四張 working，兩張 idle 等可代答的 gate，上限 6
+printf '6\n' > "$MW"
+cards "[$(busy r1),$(busy r2),$(busy r3),$(busy r4),{\"slug\":\"r5\",\"section\":\"待處理\",\"dispatch\":$D,\"agent_status\":\"idle\",\"waiting\":$GATE},{\"slug\":\"r6\",\"section\":\"待處理\",\"dispatch\":$D,\"agent_status\":\"idle\",\"waiting\":$GATE},{\"slug\":\"q1\"}]"
+round || fail "rc: $(cat "$FX/out")"
+assert_eq "$(count '^opsx answer')" 2 "兩個 gate 都代答：$(cat "$OPSX_FAKE_LOG")"
+assert_eq "$(count '^opsx dispatch')" 0 "代答喚醒的兩張算進同時數，q1 不派：$(cat "$OPSX_FAKE_LOG")"
+printf 'abc\n' > "$MW"
+round && fail "上限設錯要拒跑"
+grep 'max-working' "$LOG" | grep -q abc || fail "log 要含檔名 max-working 與 abc：$(cat "$LOG")"
 assert_eq "$(count '^opsx dispatch')" 0 "設錯不動任何卡"
+rm -f "$MW"
 unset OPSX_TEST_AGENT_READ
 
 LOCK="$OPSX_STATE_DIR/coordinator.lock"; RERUN="$OPSX_STATE_DIR/coordinator.rerun"
