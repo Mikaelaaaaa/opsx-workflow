@@ -195,10 +195,11 @@ PY
       *agent_pane_busy*)
         if [ "$try" -lt 6 ]; then try=$((try + 1)); sleep "${OPSX_DISPATCH_RETRY_SLEEP:-1}"; continue; fi
         # pane 已壞時 pane read 會失敗，當成沒輸出，不讓診斷擋住錯誤回報
-        screen="$(herdr pane read "$pane" 2>/dev/null | tail -20)"
+        screen="$(herdr pane read "$pane" 2>/dev/null | tail -20)" || screen=""
         [ -n "${screen//[[:space:]]/}" ] || screen="pane 沒有任何輸出"
+        # 間隔可以是小數（sleep 吃 0.5），shell 算術只吃整數
         out="${out}
-新 pane 的 shell 超過 $(( (try - 1) * ${OPSX_DISPATCH_RETRY_SLEEP:-1} )) 秒沒有出現提示字元，可能是 shell 啟動卡住。常見原因：pyenv 鎖檔 ~/.pyenv/shims/.pyenv-shim 殘留（opsx init --check 會檢查）
+新 pane 的 shell 超過 $(awk -v n="$((try - 1))" -v s="${OPSX_DISPATCH_RETRY_SLEEP:-1}" 'BEGIN { print n * s }') 秒沒有出現提示字元，可能是 shell 啟動卡住。常見原因：pyenv 鎖檔 ~/.pyenv/shims/.pyenv-shim 殘留（opsx init --check 會檢查）
 pane 畫面：
 ${screen}" ;;
       *agent_name_taken*)

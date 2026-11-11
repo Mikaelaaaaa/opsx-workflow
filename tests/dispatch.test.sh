@@ -100,6 +100,16 @@ for w in shell 提示字元 .pyenv-shim '10 秒' agent_pane_busy 'cannot rehash'
 echo 99 > "$OPSX_TEST_BUSY_LEFT"
 out="$(opsx dispatch stuck-card --agent claude --mode interactive --kind dev 2>&1)"; [ $? -ne 0 ] || fail "persistent busy must fail"
 echo "$out" | grep -qF 'pane 沒有任何輸出' || fail "pane 空的要註明: $out"
+# pane 已死、pane read 失敗：當成沒輸出，照樣關 tab、印原文
+: > "$OPSX_FAKE_LOG"; echo 99 > "$OPSX_TEST_BUSY_LEFT"
+out="$(OPSX_TEST_PANE_READ_FAIL=1 opsx dispatch stuck-card --agent claude --mode interactive --kind dev 2>&1)"; [ $? -ne 0 ] || fail "persistent busy must fail"
+echo "$out" | grep -qF 'agent_pane_busy' && echo "$out" | grep -qF 'pane 沒有任何輸出' || fail "pane read 失敗要當成沒輸出並印原文: $out"
+assert_grep '^tab close w1:tB$' "$OPSX_FAKE_LOG"
+# 小數間隔：已等待秒數照算（5 × 0.5），不中止
+: > "$OPSX_FAKE_LOG"; echo 99 > "$OPSX_TEST_BUSY_LEFT"
+out="$(PATH="$FX/nosleep:$PATH" OPSX_DISPATCH_RETRY_SLEEP=0.5 opsx dispatch stuck-card --agent claude --mode interactive --kind dev 2>&1)"; [ $? -ne 0 ] || fail "persistent busy must fail"
+echo "$out" | grep -qF '2.5 秒' || fail "小數間隔的秒數: $out"
+assert_grep '^tab close w1:tB$' "$OPSX_FAKE_LOG"
 # 別的錯：不重試，一樣關 tab
 : > "$OPSX_FAKE_LOG"; echo 0 > "$OPSX_TEST_BUSY_LEFT"
 out="$(OPSX_TEST_START_FAIL=agent_kind_unsupported opsx dispatch stuck-card --agent claude --mode interactive --kind dev 2>&1)"; [ $? -ne 0 ] || fail "other error must fail"
