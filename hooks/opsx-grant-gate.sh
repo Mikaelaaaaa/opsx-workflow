@@ -105,13 +105,17 @@ if [ "$tool" = "Bash" ]; then
     [ "$UNMAPPED" = 1 ] && level3 "merge"
     merge_gate && GRANTED=1
   fi
-  printf '%s' "$l3" | grep -qE 'git\s+push.*(--force|-f\b|\+[a-zA-Z])' && level3 "force-push"
+  # push 的旗標與 refspec 照 shell 解析完的樣子比：拿掉引號與反斜線（"main"、\main、'+feat/x' 才跟 main、+feat/x 一樣被認出來）
+  l3n="$(printf '%s' "$l3" | tr -d "\"'\\\\")"
+  push_args='git[[:space:]]+push([[:space:]].*)?[[:space:]]'
+  printf '%s' "$l3n" | grep -qE "${push_args}(--force[^[:space:]]*|--mirror|-[a-zA-Z]*f[a-zA-Z]*|\\+[^[:space:]]+)([[:space:]]|\$)" && level3 "force-push"
+  printf '%s' "$l3n" | grep -qE "${push_args}--(receive-pack|exec)(=|[[:space:]]|\$)" && level3 "push 帶會執行程式的參數"
   # 同一段 push 內，refspec 目標是 main / master 才算；分支名只含 main 片段、push 以外的 main 字樣不算（hooks/security-guard.sh 同一條）
   push_main='git\s+push\b[^;&|]*[[:space:]:+"'"'"'](refs/heads/)?(main|master)([^A-Za-z0-9._/:-]|$)'
-  printf '%s' "$l3" | grep -qE "$push_main" && level3 "push main"
+  printf '%s' "$l3n" | grep -qE "$push_main" && level3 "push main"
   printf '%s' "$l3" | grep -qiE '(^|\s|/)deploy(\.sh)?(\s|$)' && level3 "deploy"
   printf '%s' "$l3" | grep -qiE 'drop\s+(table|database|schema)|truncate\s+table|db:reset' && level3 "刪資料"
-  printf '%s' "$l3" | grep -qE 'sops\s+(-e|--encrypt|edit)|\.gitlab-ci\.yml|\.github/workflows' && level3 "改 CI / secrets"
+  printf '%s' "$l3" | grep -qiE 'sops\s+(-e|--encrypt|edit)|\.gitlab-ci\.yml|\.github/workflows' && level3 "改 CI / secrets"
   [ "$UNMAPPED" = 1 ] && exit 0
   # 第二級
   printf '%s' "$sk" | grep -qE '(^|\s|&&|;)git\s+push(\s|$)' && level2 push "git push"
@@ -133,6 +137,7 @@ fi
 
 if [ "$tool" = "Edit" ] || [ "$tool" = "Write" ]; then
   [ -n "$file" ] || exit 0
+  shopt -s nocasematch   # APFS 預設不分大小寫：.Env 與 .env 是同一個檔
   case "$file" in
     *.gitlab-ci.yml|*/.github/workflows/*|*secrets*|*.sops.*|*/sops/*) level3 "改 CI / secrets（${file}）" ;;
     *.env.example) exit 0 ;;
@@ -155,7 +160,7 @@ if [ "$tool" = "Edit" ] || [ "$tool" = "Write" ]; then
   [ "$(git -C "$base" rev-parse --show-toplevel 2>/dev/null || true)" = "$wtop" ] || exit 0
   if [ "$missing" = 0 ]; then
     # :(glob) 的 * 不跨 /，所以只列這一層；樣式跟上面的檔名 case 同一組
-    tracked="$(git -C "$base" ls-files -- ':(glob)*.test.*' ':(glob)*.spec.*' ':(glob)test_*.py' ':(glob)*_test.*')" || deny "opsx 授權閘門：git ls-files 失敗（${base}），分不出這一層有沒有既有測試，先擋下"
+    tracked="$(git -C "$base" ls-files -- ':(glob,icase)*.test.*' ':(glob,icase)*.spec.*' ':(glob,icase)test_*.py' ':(glob,icase)*_test.*')" || deny "opsx 授權閘門：git ls-files 失敗（${base}），分不出這一層有沒有既有測試，先擋下"
     [ -n "$tracked" ] && exit 0
   fi
   level2 test-path "測試檔寫進沒有既有測試的目錄（${file}）"

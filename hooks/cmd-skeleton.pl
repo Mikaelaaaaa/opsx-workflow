@@ -52,10 +52,37 @@ sub heredoc {
     return $out;
 }
 
+# heredoc 的分隔字照 bash：整個字去掉引號與反斜線之後的樣子（'E'F、E\OF 都是 EF 與 EOF，EOF-X 就是 EOF-X）
+sub unquote_word {
+    my ($w) = @_;
+    my ($out, $i) = ('', 0);
+    while ($i < length $w) {
+        my $c = substr $w, $i, 1;
+        if ($c eq '\\') { $out .= substr($w, $i + 1, 1); $i += 2; next }
+        if ($c eq $SQ || $c eq '"') {
+            my $end = index $w, $c, $i + 1;
+            $end = length $w if $end < 0;
+            $out .= substr $w, $i + 1, $end - $i - 1;
+            $i = $end + 1;
+            next;
+        }
+        $out .= $c;
+        $i++;
+    }
+    return $out;
+}
+
+my $HEREDOC_WORD = qr/(?>(?:[^\s;&|<>()\\'"]|\\.|'[^']*'|"[^"]*")+)/;
+
+sub heredoc_of {
+    my ($lead, $prefix, $opener, $word, $body, $depth) = @_;
+    return heredoc($lead, $prefix, $opener, $word =~ /[\x27"\\]/ ? $SQ : '', $body, $depth);
+}
+
 sub skeleton {
     my ($s, $depth) = @_;
     return $s if $depth > MAX_DEPTH;
-    $s =~ s/(^|\n)([^\n]*?)(?<!<)(<<-?\s*([\x27"]?)(\w+)\4[^\n]*)\n(.*?)\n[ \t]*\5[ \t]*(?:\n|\z)/heredoc($1, $2, $3, $4, $6, $depth)/sge;
+    $s =~ s/(^|\n)([^\n]*?)(?<!<)(<<-?[ \t]*($HEREDOC_WORD)[^\n]*)\n(.*?)\n[ \t]*(??{ quotemeta unquote_word($4) })[ \t]*(?:\n|\z)/heredoc_of($1, $2, $3, $4, $5, $depth)/sge;
     my ($out, $i, $n) = ('', 0, length $s);
     while ($i < $n) {
         my $c = substr $s, $i, 1;

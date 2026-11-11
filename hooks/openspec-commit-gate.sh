@@ -6,7 +6,11 @@ source "$(dirname "${BASH_SOURCE[0]}")/_lib.sh"
 
 cmd="$(hook_cmd)"
 sk="$(cmd_skeleton "$cmd")" || deny "opsx commit 閘門：perl 執行失敗，讀不到指令骨架，先擋下。確認 perl 可用"
-printf '%s' "$sk" | grep -qE '(^|\s|&&|\|\||;)git\s+(-C\s+\S+\s+)?commit(\s|$)' || exit 0
+# git 的寫法：反引號、$(…)、\git、絕對路徑都算；全域選項（-C、-c、--no-pager…）夾在 git 與 commit 之間也算。
+# -c alias.<名>=… 可以把任何字變成 commit，只要出現就當成 commit 處理（寧可誤擋）。
+git_word='(^|[^[:alnum:]_./-])(\\|/[^[:space:];&|()`$]*/)?git'
+git_opts='(([[:space:]]+-C[[:space:]]+[^[:space:]]+)|([[:space:]]+-c[[:space:]]+[^[:space:]]+)|([[:space:]]+--[a-z][a-z-]*(=[^[:space:]]+)?))*'
+printf '%s' "$sk" | grep -qE "${git_word}${git_opts}[[:space:]]+commit([[:space:]]|\$)|${git_word}([[:space:]]+[^;&|]*)?[[:space:]]-c[[:space:]]+alias\\." || exit 0
 
 # commit 實際作用的目錄決定對卡，不是 session cwd；hook_cwd 認 OPSX_CWD
 join_dir() { case "$2" in /*) printf '%s' "$2" ;; *) printf '%s/%s' "$1" "$2" ;; esac; }

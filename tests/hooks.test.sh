@@ -137,6 +137,16 @@ out="$(cg 'git commit -m "feat: x" -- a.ts')"; assert_eq "$(decision "$out")" de
 printf '## 1. x\n\n- [x] 1.1 a\n- [ ] 1.2 b\n' > "$C/tasks.md"
 out="$(cg 'git commit -m "feat: x" -- a.ts')"; assert_eq "$(decision "$out")" allow "commit: 有勾放行"
 out="$(cg 'git -C /x commit -m "feat: x"')"; assert_eq "$(decision "$out")" allow "commit: git -C 也認得"
+# gate-bypass-closure：所有會執行 git commit 的寫法都要走同一道閘門（tasks 全未勾時擋）
+printf '## 1. x\n\n- [ ] 1.1 a\n' > "$C/tasks.md"
+for c in 'git commit -m x' 'echo `git commit -m x`' 'echo $(git commit -m x)' '\git commit -m x' '/usr/bin/git commit -m x' 'git -c alias.ci=commit ci -m x' 'git -c user.name=a commit -m x' 'git --no-pager commit -m x' 'git push gitlab feat/a/b && echo `git commit -m x`'; do
+  out="$(cg "$c")"; assert_eq "$(decision "$out")" deny "commit: $c 沒勾 task 要擋"
+  reason "$out" | grep -q 'tasks.md' || fail "commit: $c 的 deny 要說 tasks.md：$(reason "$out")"
+done
+for c in 'git log --oneline' 'echo "git commit"' 'git commit-tree HEAD' 'echo git-commit' 'ls /usr/bin/git-commit'; do
+  out="$(cg "$c")"; assert_eq "$out" "" "commit: $c 不是 commit，不出聲"
+done
+printf '## 1. x\n\n- [x] 1.1 a\n- [ ] 1.2 b\n' > "$C/tasks.md"
 git -C "$R" checkout -q main
 out="$(cg 'git commit -m "chore: bump"')"; assert_eq "$(decision "$out")" deny "commit: branch 對不到卡要擋"
 out="$(cg 'git commit -m "chore: bump [no-change] 只是改 README"')"; assert_eq "$(decision "$out")" allow "commit: [no-change] 放行"
@@ -300,6 +310,34 @@ EOF')")"; assert_eq "$(decision "$out")" deny "grant: 已授權的 push 後面�
 out="$(gg Bash "$(cmdj 'echo "$(gh pr merge 12)"')")"; assert_eq "$(decision "$out")" deny "grant: 雙引號內 \$(…) 的 merge 仍擋"
 out="$(gg Bash "$(cmdj 'eval "git push --force gitlab main"')")"; assert_eq "$(decision "$out")" deny "grant: eval 內的 force-push 仍擋"
 out="$(gg Bash "$(cmdj 'echo ok && sh -c '"'"'pnpm add left-pad'"'"'')")"; assert_eq "$(decision "$out")" deny "grant: sh -c 單引號內的裝套件仍擋"
+
+# gate-bypass-closure：push 的 force / main 寫法照 shell 實際解析的結果判斷；會執行程式的參數不放行
+for c in 'git push -fu gitlab feat/x' 'git push -uf gitlab feat/x' 'git push gitlab +feat/x' 'git push gitlab "+feat/x"' 'git push gitlab \main' 'git push --mirror gitlab' 'git push --receive-pack=/tmp/x gitlab feat/x' 'git push --exec=/tmp/x gitlab feat/x'; do
+  out="$(gg Bash "$(cmdj "$c")")"; assert_eq "$(decision "$out")" deny "grant: $c 不能放行"
+done
+for c in 'git push -u gitlab feat/x' 'git push gitlab feat/x' 'git push --follow-tags gitlab feat/x'; do
+  out="$(gg Bash "$(cmdj "$c")")"; assert_eq "$(decision "$out")" allow "grant: $c 照常放行"
+done
+# 檔名樣式不分大小寫（APFS 預設不分）
+for f in /x/.Env /x/.ENV.local /x/Secrets.yaml /x/.GitLab-CI.yml; do
+  out="$(gg Write "{\"file_path\":\"$f\",\"content\":\"A=1\"}")"; assert_eq "$(decision "$out")" deny "grant: Write $f 要照 .env / CI / secrets 擋"
+done
+out="$(gg Write '{"file_path":"/x/.ENV.EXAMPLE","content":"A="}')"; assert_eq "$(decision "$out")" allow "grant: .ENV.EXAMPLE 照 .env.example 放行"
+out="$(gg Write "{\"file_path\":\"$R/src/newdir/a.TEST.ts\",\"content\":\"x\"}")"; assert_eq "$(decision "$out")" deny "grant: a.TEST.ts 照測試檔判"
+out="$(gg Bash "$(cmdj 'echo x > .Github/Workflows/ci.yml')")"; assert_eq "$(decision "$out")" deny "grant: Bash 寫 .Github/Workflows 照 CI 擋"
+# heredoc 分隔字照 bash：夾在中間的指令要留在骨架裡
+HD_BODY='hello'
+for opener in "cat <<'E'F" 'cat <<E\OF' 'cat <<EOF-X'; do
+  case "$opener" in *"'E'F") end=EF; stray=E ;; *'E\OF') end=EOF; stray=E ;; *) end=EOF-X; stray=EOF ;; esac
+  cmd="$(printf '%s\n%s\n%s\nglab mr create -F d.md\n%s\n' "$opener" "$HD_BODY" "$end" "$stray")"
+  sk="$(printf '%s' "$cmd" | perl "$H/cmd-skeleton.pl")"
+  case "$sk" in *'glab mr create'*) ;; *) fail "skeleton: $opener 之後的指令不能從骨架消失：$sk" ;; esac
+  case "$sk" in *hello*) fail "skeleton: $opener 的 heredoc 本體不該在骨架：$sk" ;; esac
+  out="$(gg Bash "$(cmdj "$cmd")")"; assert_eq "$(decision "$out")" deny "grant: $opener 後面的 mr 指令沒授權要擋"
+done
+cmd="$(printf "cat <<'EOF'\nglab mr create -F d.md\nEOF\n")"
+sk="$(printf '%s' "$cmd" | perl "$H/cmd-skeleton.pl")"
+case "$sk" in *'glab mr create'*) fail "skeleton: 一般 heredoc 本體不進骨架：$sk" ;; esac
 
 # 第三級白名單容器（grill D1）：三種容器的資料部分不算，其他寫法一律照原文比對
 out="$(gg Bash "$(cmdj 'git commit -m "$(cat <<'"'EOF'"'
