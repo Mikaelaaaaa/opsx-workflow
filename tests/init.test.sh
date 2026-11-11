@@ -248,6 +248,36 @@ outc="$(CLAUDE_CONFIG_DIR="$FX/cc6" opsx init --check 2>&1)"; assert_eq "$?" 0 "
 case "$outc" in *還沒信任*) ;; *) fail "cc6 沒有信任紀錄，--check 要警告：$outc" ;; esac
 cd "$FX"
 
+# --- 與插件同名的 skill：--check 與 --global 警告，不改 rc、不動使用者的檔案 ---
+CCS="$FX/cc-skills"
+CLAUDE_CONFIG_DIR="$CCS" opsx init --global >/dev/null 2>&1 || fail "global for cc-skills"
+mkdir -p "$CCS/skills/tdd" "$CCS/skills/pr" "$CCS/skills/mine"
+printf -- '---\nname: tdd\n---\nmine\n' > "$CCS/skills/tdd/SKILL.md"
+printf -- '---\nname: mine\n---\n' > "$CCS/skills/mine/SKILL.md"
+ln -s "$OPSX_ROOT/skills/explore" "$CCS/skills/explore"      # 指回插件本身：不算
+tdd_before="$(cat "$CCS/skills/tdd/SKILL.md")"
+outk="$(CLAUDE_CONFIG_DIR="$CCS" opsx init --check 2>&1)"; assert_eq "$?" 0 "同名 skill 不改 --check 的 rc：$outk"
+case "$outk" in *"$CCS/skills/tdd 跟 opsx 插件的 skills/tdd 同名"*) ;; *) fail "--check 要指名同名的 tdd 與路徑：$outk" ;; esac
+case "$outk" in *搬走*|*改名*) ;; *) fail "警告要說怎麼處理：$outk" ;; esac
+case "$outk" in *"$CCS/skills/pr"*) fail "沒有 SKILL.md 的 pr 資料夾不算同名：$outk" ;; esac
+case "$outk" in *"$CCS/skills/mine"*) fail "不同名的 mine 不該警告：$outk" ;; esac
+case "$outk" in *"$CCS/skills/explore"*) fail "指回插件的 symlink 不該警告：$outk" ;; esac
+outk="$(CLAUDE_CONFIG_DIR="$CCS" opsx init --global 2>&1)"; assert_eq "$?" 0 "同名 skill 不讓 --global 失敗：$outk"
+case "$outk" in *"$CCS/skills/tdd 跟 opsx 插件的 skills/tdd 同名"*) ;; *) fail "--global 也要指名同名的 tdd：$outk" ;; esac
+assert_eq "$(cat "$CCS/skills/tdd/SKILL.md")" "$tdd_before" "警告不能動使用者的 skill"
+rm -r "$CCS/skills/tdd"
+outk="$(CLAUDE_CONFIG_DIR="$CCS" opsx init --check 2>&1)"; assert_eq "$?" 0 "沒有同名時 --check 的 rc：$outk"
+case "$outk" in *"$CCS/skills/tdd"*) fail "沒有同名時不該警告：$outk" ;; esac
+# 專案層：只在 repo 裡掃
+cd "$R"
+CLAUDE_CONFIG_DIR="$CCS" opsx init >/dev/null 2>&1 || fail "init R in cc-skills"
+mkdir -p "$R/.claude/skills/review"; printf -- '---\nname: review\n---\n' > "$R/.claude/skills/review/SKILL.md"
+outk="$(CLAUDE_CONFIG_DIR="$CCS" opsx init --check 2>&1)"; assert_eq "$?" 0 "專案層同名不改 rc：$outk"
+case "$outk" in *"$R/.claude/skills/review"*) ;; *) fail "repo 裡 --check 要警告專案層的 review：$outk" ;; esac
+cd "$FX"
+outk="$(CLAUDE_CONFIG_DIR="$CCS" opsx init --check 2>&1)"
+case "$outk" in *"$R/.claude/skills/review"*) fail "repo 外不掃專案層：$outk" ;; esac
+
 # --- 每日同步 launchd：第一次安裝 ---
 PL="$OPSX_LAUNCH_AGENTS_DIR/com.opsx.sync.plist"
 assert_file "$PL"

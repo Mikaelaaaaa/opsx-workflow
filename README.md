@@ -21,6 +21,8 @@ herdr socket 不在使用者層標準設定裡：能連它的 session 可以用 
 
 新電腦 onboarding：裝好 plugin → `opsx init --global` → 每個 repo 根目錄 `opsx init` → `opsx init --check` 確認和標準設定一致（只讀；缺什麼逐項印出，exit 1）。要改全部機器的設定，改 `templates/settings.opsx.json`、再各跑一次 `opsx init --global`，不要手改各台的 settings。
 
+`opsx init --global` 與 `opsx init --check` 也會掃使用者層（`$CLAUDE_CONFIG_DIR/skills/`，沒設用 `~/.claude/skills/`）與 repo 內 `.claude/skills/`，跟插件 `skills/` 同名的逐項警告；只警告，不影響 exit code，不動你的檔案。
+
 資料夾要在 Claude Code 的信任對話框按過信任，專案層 settings 的 allow 與 additionalDirectories 才生效；`opsx init`、`opsx init --check`、`opsx dispatch` 發現 repo 沒信任會警告。opsx 自己的設定在使用者層，不受信任狀態影響；opsx 不會替你改信任紀錄。
 
 合併核准、「這張卡」與「這次」的授權存在 `~/.local/state/opsx-protected/authz.json`（`init --global` 建，0700）。它刻意放在 `~/.local/state/opsx/` 之外，不要把它或它的父目錄加進任何 `additionalDirectories`：沙盒內的 session 寫得到 `dispatch.json`，所以閘門只信這裡。`opsx merge`、`opsx answer --grant card|this` 要在沙盒外跑（終端機或看板），在 agent 的沙盒裡會報「受保護位置寫不進去」。`opsx init` 的上層目錄檢查也涵蓋它：repo 根目錄是 state 目錄的上層時直接拒絕，`opsx-protected` 與 state 目錄同層，所以一併不會被開成可寫。

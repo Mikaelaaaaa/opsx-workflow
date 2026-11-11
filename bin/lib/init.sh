@@ -95,6 +95,7 @@ $term_line
     say "init --global: 沒有 herdr，看板 plugin 略過（裝了 herdr 再跑一次）"
   fi
   merge_claude_settings "$py" --template "$OPSX_ROOT/templates/settings.opsx.json"
+  warn_skill_clashes
   write_coordinator_settings "$py" "$state"
   install_launch_jobs "$state" "$bindir"
   say "init --global: 設定在 $state"
@@ -103,6 +104,27 @@ $term_line
 # 使用者層 Claude Code settings：CLAUDE_CONFIG_DIR 優先，沒設才用 ~/.claude。
 # 沙盒不讓沒登記的目錄可寫，裝完 opsx 的 session 才不用人手動開權限（herdr socket 只給主控 session，見 write_coordinator_settings）。
 claude_settings_file() { printf '%s/settings.json' "${CLAUDE_CONFIG_DIR:-$HOME/.claude}"; }
+
+# 使用者層、專案層（在 repo 裡時）的 skills 目錄名跟插件 skills/ 同名就警告。只警告：可能是刻意留的個人版本，opsx 不動使用者的檔案。
+warn_skill_clashes() {
+  local top plugin_skills dirs=() dir skill name real seen=$'\n'
+  top="$(git_toplevel)"
+  plugin_skills="$(cd "$OPSX_ROOT/skills" && pwd -P)"
+  dirs+=("$(dirname "$(claude_settings_file)")/skills")
+  [ -z "$top" ] || dirs+=("$top/.claude/skills")
+  for dir in "${dirs[@]}"; do
+    for skill in "$dir"/*/; do
+      [ -f "$skill/SKILL.md" ] || continue
+      name="$(basename "$skill")"
+      [ -d "$OPSX_ROOT/skills/$name" ] || continue
+      real="$(cd "$skill" && pwd -P)"
+      case "$real/" in "$plugin_skills"/*) continue ;; esac
+      case "$seen" in *$'\n'"$real"$'\n'*) continue ;; esac
+      seen="$seen$real"$'\n'
+      warn "skill 同名：${skill%/} 跟 opsx 插件的 skills/${name} 同名，手打 /${name} 會跑到這份，模型也可能選錯。要用插件的就把它搬走或改名；這份是刻意留的就忽略這行（opsx 自己送的指令都帶 /opsx-workflow: 前綴，不受影響）"
+    done
+  done
+}
 
 merge_claude_settings() { # <python> <claude-settings.py 的參數…>
   local py="$1" file out; shift
@@ -157,6 +179,7 @@ init_check() {
     3) printf '%s\n' "$out"; say "init --check: ${file} 和標準設定不一致，上面是缺的項目。全域的跑 opsx init --global，repo 的在那個 repo 根目錄跑 opsx init" ;;
     *) die "init --check: 比對失敗（上面是原因）" ;;
   esac
+  warn_skill_clashes
   [ -z "$top" ] || warn_untrusted "$top"
   [ "$rc" = 0 ]
 }
