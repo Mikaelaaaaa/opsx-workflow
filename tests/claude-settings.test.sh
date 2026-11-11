@@ -10,7 +10,7 @@ mkdir -p "$FX/cfg"
 cat > "$T" <<'JSON'
 {
   "permissions": {"allow": ["Bash(opsx status *)"], "additionalDirectories": ["${OPSX_STATE_DIR}"]},
-  "sandbox": {"network": {"allowUnixSockets": ["${HOME}/herdr.sock"]}, "excludedCommands": ["gh pr *"]}
+  "sandbox": {"network": {"allowUnixSockets": ["${HOME}/herdr.sock"]}, "excludedCommands": ["gh pr *", "gh issue comment *"]}
 }
 JSON
 # 範本裡的 ${HOME}、${OPSX_STATE_DIR} 由環境變數展開
@@ -33,7 +33,7 @@ assert_file "$S"
 assert_eq "$(jget "$S" permissions.additionalDirectories)" '["/x/state", "/y/repo"]'
 assert_eq "$(jget "$S" permissions.allow)" '["Bash(opsx status *)"]'
 assert_eq "$(jget "$S" sandbox.network.allowUnixSockets)" '["/h/herdr.sock"]'
-assert_eq "$(jget "$S" sandbox.excludedCommands)" '["gh pr *"]'
+assert_eq "$(jget "$S" sandbox.excludedCommands)" '["gh pr *", "gh issue comment *"]'
 assert_eq "$(jget "$S" sandbox.enabled)" MISSING "不替使用者開關沙盒"
 assert_eq "$(jget "$S" sandbox.allowUnsandboxedCommands)" MISSING
 assert_no_file "$S.opsx-bak"
