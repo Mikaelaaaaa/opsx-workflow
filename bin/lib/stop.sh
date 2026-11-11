@@ -28,7 +28,13 @@ opsx_stop() {
     if herdr agent prompt "$name" "[$slug] stop" >/dev/null 2>&1; then say "stop: 已請 $name 的 pane 停掉 $slug 的 subagent，pane 不關"
     else say "stop: 送不到 ${name}，$slug 照樣標 stopped；它的 subagent 可能還在跑，到 pane $pane 看"; fi
   else
-    if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then kill "$pid" 2>/dev/null || true; say "stop: drive pid $pid 已 kill"; fi
+    if [ -n "$pid" ]; then
+      local state=0; drive_pid_state "$pid" "$slug" || state=$?
+      case "$state" in
+        0) kill "$pid" 2>/dev/null || true; say "stop: drive pid $pid 已 kill" ;;
+        2) say "stop: pid $pid 還活著但不是 $slug 的 drive（${DRIVE_PID_CMD}），不 kill" ;;
+      esac
+    fi
     if [ -n "$pane" ]; then
       if herdr pane close "$pane" >/dev/null 2>&1; then closed=1; say "stop: pane $pane 關了"; else say "stop: pane $pane 關不掉（可能已經不在）"; fi
     fi

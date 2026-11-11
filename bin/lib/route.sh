@@ -16,6 +16,15 @@ print("%s\t%s" % (e.get("herdr_name") or os.environ["OPSX_SLUG"], e.get("via") o
 PY
 }
 
+# dispatch.json 的 drive_pid 在 drive 被 SIGKILL 或重開機後會留著，pid 之後可能被別的行程重用，所以 kill 前要確認它是這張卡的 drive。
+# 回 0：是這張卡的 drive；1：pid 不在；2：活著但不是（命令列放在 DRIVE_PID_CMD）。slug 後面接空格，retry 才不會中 retry-backoff
+drive_pid_state() { # <pid> <slug>
+  kill -0 "$1" 2>/dev/null || return 1
+  DRIVE_PID_CMD="$(ps -p "$1" -o command= 2>/dev/null)" || DRIVE_PID_CMD="（ps 讀不到）"
+  case "$DRIVE_PID_CMD" in *"/bin/opsx drive $2 --repo "*) return 0 ;; esac
+  return 2
+}
+
 # 續接後父卡那筆留著當紀錄（handed_to），它的 pane 已經歸子卡；再對它下指令會打到子卡的 agent，所以拒絕
 refuse_if_handed() { # <repo> <slug> <command name>
   OPSX_KEY="$1/$2" OPSX_CMD="$3" "$OPSX_PY" -I - "$OPSX_STATE_DIR/dispatch.json" <<'PY' || exit 2
