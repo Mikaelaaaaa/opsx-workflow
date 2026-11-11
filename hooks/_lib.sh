@@ -106,3 +106,15 @@ card_mode() { # <repo> <slug>：印 interactive、autopilot、drive、stopped，
   [ -f "$f" ] || return 0
   jq -r --arg k "$1/$2" '.[$k].mode // empty' "$f" 2>/dev/null
 }
+# 這個 claude 有沒有帶 dispatch 給這張卡的 --settings（沒帶就寫不了主 repo 的 openspec/）。
+# 回 0：有帶，或不判定（mode 不是 autopilot / drive、沒 python、settings 檔不存在表示沒派過）；回 1：遺失；
+# 回 2：認不得（ps 失敗、不是 claude 的 cmdline），原因印在 stdout
+args_lost_status() { # <repo> <slug> <mode>
+  local settings="$OPSX_STATE_DIR/settings/$1-$2-$3.json" line out rc=0
+  case "$3" in autopilot|drive) ;; *) return 0 ;; esac
+  [ -n "${OPSX_PY:-}" ] && [ -f "$settings" ] || return 0
+  line="$(ps -o args= -p "$PPID" 2>&1)" || { printf 'ps 失敗：%s' "$line"; return 2; }
+  out="$(printf '%s\n' "$line" | "$OPSX_PY" -I "$OPSX_ROOT/bin/lib/argslost.py" "$settings" 2>&1)" || rc=$?
+  [ "$rc" -le 1 ] || printf '%s' "$out"
+  return "$rc"
+}

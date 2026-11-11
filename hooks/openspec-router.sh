@@ -17,8 +17,17 @@ lower="$(printf '%s' "$prompt" | tr '[:upper:]' '[:lower:]')"
 rule=""
 slug="$(card_slug)"
 if [ -n "$slug" ] && [ -n "${OPSX_PY:-}" ]; then
-  case "$(card_mode "$(basename "$top")" "$slug" 2>/dev/null || true)" in
-    autopilot|drive) rule=" · $(rule_autopilot)" ;;
+  mode="$(card_mode "$(basename "$top")" "$slug" 2>/dev/null || true)"
+  case "$mode" in
+    autopilot|drive)
+      rule=" · $(rule_autopilot)"
+      if [ "$ev" = SessionStart ]; then
+        lost_rc=0; lost_why="$(args_lost_status "$(basename "$top")" "$slug" "$mode")" || lost_rc=$?
+        case "$lost_rc" in
+          1) rule=" · 參數遺失，跑 opsx relaunch $slug$rule" ;;
+          2) rule=" · 無法判斷啟動參數：$lost_why$rule" ;;
+        esac
+      fi ;;
     interactive) rule=" · $(rule_interactive)" ;;
   esac
 fi
