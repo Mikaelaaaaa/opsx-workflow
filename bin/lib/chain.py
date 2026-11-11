@@ -58,8 +58,10 @@ def _block(lines: list, i: int, ind: int):
         k, _, v = lines[i][1].partition(":")
         i += 1
         if v.strip():
+            while i < len(lines) and lines[i][0] > ind:   # 折行的純量：縮排更深的後續行接在值後面
+                v += " " + lines[i][1]; i += 1
             m[k.strip()] = _scalar(v)
-        elif i < len(lines) and lines[i][0] > ind:
+        elif i < len(lines) and (lines[i][0] > ind or (lines[i][0] == ind and lines[i][1].startswith("- "))):
             m[k.strip()], i = _block(lines, i, lines[i][0])
         else:
             m[k.strip()] = None
