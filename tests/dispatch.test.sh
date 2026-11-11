@@ -66,6 +66,8 @@ last_row() { tail -1 "$R/openspec/changes/retry-backoff/decisions.tsv" | cut -f2
 assert_eq "$(last_row)" "你$(printf '\t')已指派"
 assert_eq "$(tail -1 "$R/openspec/changes/retry-backoff/decisions.tsv" | awk -F'\t' '{print NF}')" 5
 
+assert_not_grep 'gitlab\.tsg-navigator\.com' "$OPSX_FAKE_LOG"
+
 # --- 同一張卡還在跑就再派：拒絕，說它在哪（herdr 本來就會回 agent_name_taken；板上「指派」按到舊畫面就是這條） ---
 : > "$OPSX_FAKE_LOG"
 out="$(opsx dispatch retry-backoff --agent claude --mode autopilot 2>&1)"; [ $? -eq 2 ] || fail "active card must be refused: $out"
@@ -484,4 +486,5 @@ python3 -I -c 'import json,sys;p=sys.argv[1];d=json.load(open(p));del d["Agentor
 out="$(opsx dispatch held --agent claude --mode autopilot 2>&1)"; [ $? -ne 0 ] || fail "分支被佔、沒條目也要失敗: $out"
 echo "$out" | grep -qF '.claude/worktrees/c' || fail "要說佔著的 worktree: $out"
 [ ! -d "$R/.claude/worktrees/held" ] || fail "被佔時不能開 worktree"
+assert_not_grep 'gitlab\.tsg-navigator\.com' "$OPSX_FAKE_LOG"
 echo ok

@@ -7,7 +7,7 @@
 # repo 的判準跟 collect 一樣：<root>/<name>/openspec/changes 存在，而且 <name>/.git 是目錄。
 
 opsx_timeline() {
-  local root="$HOME/code" state="$OPSX_STATE_DIR" since=""
+  local root="${OPSX_CODE_ROOT:-$HOME/code}" state="$OPSX_STATE_DIR" since=""
   while [ $# -gt 0 ]; do
     case "$1" in
       --root) root="$2"; shift 2 ;;

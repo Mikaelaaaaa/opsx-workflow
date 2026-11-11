@@ -6,6 +6,8 @@ TMP_BASE="${TMPDIR:-/tmp}"
 FX="$(mktemp -d "${TMP_BASE%/}/opsx-test.XXXXXX")"
 export OPSX_STATE_DIR="$FX/state"
 export OPSX_BIN_DIR="$FX/bin"
+# collect 與 timeline 預設掃 $HOME/code/*；測試背景起的 coordinate 不能讀到真的卡與真的 MR 網址
+export OPSX_CODE_ROOT="$FX/code"; mkdir -p "$OPSX_CODE_ROOT"
 export HERDR_ENV=""          # status.sh 的 pane metadata 鏡像認它；collect 不看它
 # 測試裡永遠不碰真 herdr：PATH 最前放一支一定失敗的；要成功的測試自己 use_fakes herdr（放得更前）
 mkdir -p "$FX/failbin"; printf '#!/usr/bin/env bash\necho "herdr: test isolation, no real herdr" >&2\nexit 1\n' > "$FX/failbin/herdr"; chmod +x "$FX/failbin/herdr"
