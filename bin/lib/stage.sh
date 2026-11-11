@@ -72,7 +72,7 @@ wp_pr_field() { # <top> <slug> <field>
   [ -f "$1/openspec/workplan.yaml" ] || return 0
   awk -v s="$2" -v k="$3" '
     function ind() { match($0, /^ */); return RLENGTH }
-    function val(  v) { v = $0; sub(/^ *(- )?[A-Za-z_-]+: */, "", v); sub(/ +#.*$/, "", v); gsub(/^["\047]|["\047]$/, "", v); return v }
+    function val(  v) { v = $0; sub(/^ *(- )?[A-Za-z_-]+: */, "", v); sub(/ +#.*$/, "", v); if (v == "null" || v == "~") return ""; gsub(/^["\047]|["\047]$/, "", v); return v }
     # 項目縮排取該層第一個 `- name:` 的縮排：YAML 序列可以和 `prs:` / `changes:` 同縮排，也可以更深
     BEGIN { pi = -1; pii = -1; ci = -1; cii = -1 }
     /^ *prs:/ { pi = ind(); pii = -1; ci = -1; cii = -1; pr = ""; next }
@@ -93,6 +93,7 @@ wp_pr_field() { # <top> <slug> <field>
       pi = -1; pii = -1; pr = ""; next
     }
     ci >= 0 && $0 !~ /^ *(#|$)/ && ind() <= ci && $0 !~ /^ *- / { ci = -1; cii = -1 }
+    pi >= 0 && $0 !~ /^ *(#|$)/ && ind() <= pi && $0 !~ /^ *- / { pi = -1; pii = -1; pr = "" }
     pr != "" && ci < 0 && ind() == ki && index($0, k ":") == ki + 1 { f[pr] = val() }
     END { if (hit != "") print f[hit] }
   ' "$1/openspec/workplan.yaml"

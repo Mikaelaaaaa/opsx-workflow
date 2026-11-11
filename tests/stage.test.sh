@@ -271,4 +271,71 @@ assert_bytes 'merged\n' wp_pr_field "$DEEPF" c2 status
 assert_bytes 'b2\n' wp_pr_field "$DEEPF" p2 branch
 assert_bytes 'done\n' wp_pr_field "$DEEPF" p3 status
 assert_bytes 'b4\n' wp_pr_field "$DEEPF" p4 branch
+# YAML 的 null 與 ~ 是空值，引號包住的 "null" 與 nullable 是字串；PR 底下的 `- name:` 清單（reviewers）不離開 PR 層；
+# feature 層在 `prs:` 之後的清單（follow-ups）不是 PR（兩種縮排）
+SIB="$FX/sib"; mkdir -p "$SIB/openspec"
+cat > "$SIB/openspec/workplan.yaml" <<'EOF'
+features:
+  - name: f
+    prs:
+      - name: p1
+        branch: null
+        status: ~
+      - name: p2
+        branch: nullable
+        status: pending
+      - name: p3
+        reviewers:
+          - name: alice
+        branch: b3
+        status: merged
+      - name: p5
+        branch: "null"
+    follow-ups:
+      - name: fu1
+        status: merged
+        branch: bfu
+  - name: g
+    prs:
+      - name: p4
+        branch: b4
+EOF
+SIBF="$FX/sibflat"; mkdir -p "$SIBF/openspec"
+cat > "$SIBF/openspec/workplan.yaml" <<'EOF'
+features:
+- name: f
+  prs:
+  - name: p1
+    branch: null
+    status: ~
+  - name: p2
+    branch: nullable
+    status: pending
+  - name: p3
+    reviewers:
+    - name: alice
+    branch: b3
+    status: merged
+  - name: p5
+    branch: "null"
+  follow-ups:
+  - name: fu1
+    status: merged
+    branch: bfu
+- name: g
+  prs:
+  - name: p4
+    branch: b4
+EOF
+for W in "$SIB" "$SIBF"; do
+  assert_bytes '\n' wp_pr_field "$W" p1 branch
+  assert_bytes '\n' wp_pr_field "$W" p1 status
+  assert_bytes 'nullable\n' wp_pr_field "$W" p2 branch
+  assert_bytes 'b3\n' wp_pr_field "$W" p3 branch
+  assert_bytes 'merged\n' wp_pr_field "$W" p3 status
+  assert_bytes 'null\n' wp_pr_field "$W" p5 branch
+  assert_bytes '' wp_pr_field "$W" fu1 status
+  assert_bytes '' wp_pr_field "$W" fu1 branch
+  assert_bytes 'b4\n' wp_pr_field "$W" p4 branch
+done
 echo "ok stage"
