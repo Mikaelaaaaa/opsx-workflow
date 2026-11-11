@@ -534,6 +534,15 @@ class Round:
             del self.memo["_usage_limit"]
         return False
 
+    def merged_into_main(self, top, slug):
+        """waits-on 的卡合進 main 了：workplan 裡它所屬的 PR 是 merged，或 openspec/changes/archive/ 有 <日期>-<slug>。
+        workplan 與 archive 都沒有它（卡名寫錯、還沒進 workplan）算沒合，維持停 pane。"""
+        pr = pr_of(self.workplan(top), slug)
+        if pr is not None:
+            return pr.get("status") == "merged"
+        archive = os.path.join(top, "openspec", "changes", "archive")
+        return os.path.isdir(archive) and any(re.fullmatch(r"\d{4}-\d{2}-\d{2}-" + re.escape(slug), n) for n in os.listdir(archive))
+
     def handle_gate(self, c, top):
         """派出去的卡的第一個 open gate，照 gaterule.decide 的處置答、停、或留給人。"""
         w, key = c["waiting"], card_key(c)
@@ -542,6 +551,10 @@ class Round:
             self.answer(c, top, w["gate_id"], verdict[1], grant=verdict[2])
             return
         q = w.get("question") or ""
+        if verdict[0] == "park" and self.merged_into_main(top, verdict[1]):
+            self.log("✓ %s gate %s 等的 %s 已合進 main，答掉，不停 pane" % (key, w["gate_id"], verdict[1]))
+            self.answer(c, top, w["gate_id"], "%s 已合進 main" % verdict[1])
+            return
         if verdict[0] == "park":
             self.log("⏳ %s gate %s 等 %s，先停 pane，有卡合進 main 那輪再派：%s" % (key, w["gate_id"], verdict[1], q[:100]))
             rc, _, _ = self.act(["opsx", "stop", c["slug"], "--repo", top])

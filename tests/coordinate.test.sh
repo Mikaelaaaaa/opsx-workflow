@@ -523,6 +523,33 @@ assert_grep "^opsx stop p1 --repo $R\$" "$OPSX_FAKE_LOG"
 assert_eq "$(count '^notification show')" 0 "waits-on 的 gate 不通知：$(cat "$OPSX_FAKE_LOG")"
 rm -f "$MEMO"; : > "$OPSX_FAKE_LOG"; : > "$LOG"
 
+# --- waits-on 的卡已合進 main（workplan merged 或已歸檔）：答掉 gate、不停 pane、不記 parked（waits-on-auto-release）---
+cp "$R/openspec/workplan.yaml" "$FX/workplan.waits"
+W1='[{"slug":"p1","section":"待處理","dispatch":'"$D"',"agent_status":"idle","waiting":{"type":"等待決定","needs":null,"waits_on":"a","gate_id":"g9","question":"等 a 合進 main 之後再做","recommended":null,"options":["等"]}}]'
+printf 'created: 2026-11-07\n\nfeatures:\n  - name: fa\n    prs:\n      - name: a\n        branch: feat/a/m\n        status: merged\n        depends-on: []\n        changes:\n          - name: a\n            status: done\n' > "$R/openspec/workplan.yaml"
+cards "$W1"
+round || fail "waits-on 已合 rc: $(cat "$FX/out")"
+assert_eq "$(count '^opsx stop')" 0 "依賴卡已合不停 pane：$(cat "$OPSX_FAKE_LOG")"
+assert_eq "$(count '^opsx answer p1 --gate g9 --repo ')" 1 "要答掉 g9：$(cat "$OPSX_FAKE_LOG")"
+grep '^opsx answer p1 ' "$OPSX_FAKE_LOG" | grep -qF 'a 已合進 main' || fail "答案要點名那張卡：$(cat "$OPSX_FAKE_LOG")"
+assert_eq "$(memo_get _parked demo/p1)" "" "已合不記 parked"
+rm -f "$MEMO"
+# 已歸檔（workplan 裡沒有）也算
+printf 'created: 2026-11-07\n\nfeatures:\n  - name: fb\n    prs:\n      - name: other\n        branch: feat/o/m\n        status: pending\n        depends-on: []\n' > "$R/openspec/workplan.yaml"
+mkdir -p "$R/openspec/changes/archive/2026-11-11-a"
+cards "$W1"
+round || fail "waits-on 已歸檔 rc: $(cat "$FX/out")"
+assert_eq "$(count '^opsx stop')" 0 "依賴卡已歸檔不停 pane：$(cat "$OPSX_FAKE_LOG")"
+assert_eq "$(count '^opsx answer p1 --gate g9 --repo ')" 1 "已歸檔要答掉 g9：$(cat "$OPSX_FAKE_LOG")"
+rm -rf "$R/openspec/changes/archive/2026-11-11-a"; rm -f "$MEMO"
+# 還沒合（PR 是 in-progress）：照舊停 pane、記 parked、不答
+printf 'created: 2026-11-07\n\nfeatures:\n  - name: fa\n    prs:\n      - name: a\n        branch: feat/a/m\n        status: in-progress\n        depends-on: []\n' > "$R/openspec/workplan.yaml"
+cards "$W1"
+round || fail "waits-on 未合 rc: $(cat "$FX/out")"
+assert_grep "^opsx stop p1 --repo $R\$" "$OPSX_FAKE_LOG"; assert_eq "$(count '^opsx answer')" 0 "未合不答"
+[ -n "$(memo_get _parked demo/p1)" ] || fail "未合要記 parked：$(cat "$MEMO")"
+cp "$FX/workplan.waits" "$R/openspec/workplan.yaml"; rm -f "$MEMO"; : > "$OPSX_FAKE_LOG"; : > "$LOG"
+
 # --- 等別張卡：停下並記 parked ---
 cards '[{"slug":"p1","section":"待處理","dispatch":'"$D"',"agent_status":"idle","waiting":{"type":"等待決定","needs":null,"waits_on":"a","gate_id":"g7","question":"等 a 合進 main 之後再做","recommended":null,"options":["等"]}}]'
 round || fail "rc: $(cat "$FX/out")"
