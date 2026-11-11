@@ -8,10 +8,39 @@ cmd="$(hook_cmd)"
 sk="$(cmd_skeleton "$cmd")" || deny "opsx commit 閘門：perl 執行失敗，讀不到指令骨架，先擋下。確認 perl 可用"
 printf '%s' "$sk" | grep -qE '(^|\s|&&|\|\||;)git\s+(-C\s+\S+\s+)?commit(\s|$)' || exit 0
 
+# commit 實際作用的目錄決定對卡，不是 session cwd；hook_cwd 認 OPSX_CWD
+join_dir() { case "$2" in /*) printf '%s' "$2" ;; *) printf '%s/%s' "$1" "$2" ;; esac; }
+unreadable_dir() { case "$1" in *[\"\'\$\`~\\]*|*[*?\[\{]*) return 0 ;; esac; return 1; }
+unset OPSX_CWD
+bad_dirs=''
+if [[ "$sk" =~ (^|[[:space:];\&\|\(])git[[:space:]]+(-C[[:space:]]+([^[:space:]]+)[[:space:]]+)?commit([[:space:]]|$) ]]; then
+  c_dir="${BASH_REMATCH[3]}"
+  before=" ${sk%%"${BASH_REMATCH[0]}"*}"
+  after_cd="${before##*[[:space:];&|(]cd[[:space:]]}"
+  cd_dir=''
+  [ "$after_cd" != "$before" ] && cd_dir="${after_cd%%[[:space:];&|)]*}"
+  for d in "$cd_dir" "$c_dir"; do
+    case "$d" in
+      '""'|"''") bad_dirs="$bad_dirs 引號包住的路徑" ;;
+      *) unreadable_dir "$d" && bad_dirs="$bad_dirs '$d'" ;;
+    esac
+  done
+  if [ -z "$bad_dirs" ]; then
+    target="$(hook_cwd)"
+    [ -n "$cd_dir" ] && target="$(join_dir "$target" "$cd_dir")"
+    [ -n "$c_dir" ] && target="$(join_dir "$target" "$c_dir")"
+    [ -d "$target" ] && export OPSX_CWD="$target"
+  fi
+fi
+
 top="$(repo_top)"
 [ -n "$top" ] || exit 0
 if [ ! -f "$top/openspec/workplan.yaml" ]; then
   ctx PreToolUse "opsx commit 閘門未啟用：這個 repo 還沒有 openspec/workplan.yaml（第一次 /propose 後自動生效）"; exit 0
+fi
+
+if [ -n "$bad_dirs" ]; then
+  deny "opsx commit 閘門：指令裡的目錄（${bad_dirs# }）含空白、引號、變數、~ 或萬用字元，閘門讀不到 commit 實際作用的 repo。改用不含空白的字面路徑（git -C /abs/path commit 或 cd /abs/path && git commit）。"
 fi
 
 if printf '%s' "$cmd" | grep -q '\[no-change\]'; then

@@ -122,6 +122,8 @@ case "$r" in *進行中*|*kb-export*) fail "router: 對到卡時不附清單: $r
 cg() { run_hook openspec-commit-gate.sh "$(j "$R" Bash "{\"command\":$(printf '%s' "$1" | jq -Rs .)}")"; }
 out="$(cg 'git commit -m "feat: x" -- a.ts')"; reason "$out" | grep -q '閘門未啟用' || fail "commit: no workplan → 不擋: $out"
 assert_eq "$(decision "$out")" allow
+out="$(cg 'git -C "/a b" commit -m x')"; assert_eq "$(decision "$out")" allow "commit: 沒有 workplan 時目錄含空白也不擋"
+reason "$out" | grep -q '閘門未啟用' || fail "commit: 沒有 workplan 時目錄含空白要印未啟用: $(reason "$out")"
 printf 'prs:\n  - name: eval-core\n    status: in-progress\n' > "$R/openspec/workplan.yaml"
 printf '## 1. x\n\n- [ ] 1.1 a\n' > "$C/tasks.md"
 out="$(cg 'git commit -m "feat: x" -- a.ts')"; assert_eq "$(decision "$out")" deny "commit: tasks 全未勾要擋"
@@ -137,6 +139,40 @@ rm -f "$OPSX_STATE_DIR/bypass.log"; printf 'keep me\n' > "$FX/victim"; ln -s "$F
 cg 'git commit -m "chore: bump [no-change] 再一次"' >/dev/null 2>&1 || true
 assert_eq "$(cat "$FX/victim")" "keep me" "commit: bypass.log 不能附加到 symlink 的目標"
 rm -f "$OPSX_STATE_DIR/bypass.log"
+# commit-gate-cwd：session cwd 在 main，commit 實際作用的目錄（git -C / cd）在卡的 branch 上 → 看那個目錄
+git -C "$R" worktree add -q "$FX/wt" feat/eval-core/mikaela
+out="$(cg "git -C $FX/wt commit -m x")"; assert_eq "$(decision "$out")" allow "commit: git -C 指到 worktree 要看 worktree 的 branch"
+out="$(cg 'git commit -m x')"; assert_eq "$(decision "$out")" deny "commit: 沒有目錄參數仍看 session cwd"
+reason "$out" | grep -q "branch 'main'" || fail "commit: 沒有目錄參數的 deny 要帶 branch 'main': $(reason "$out")"
+out="$(cg "cd $FX/wt && git commit -m x")"; assert_eq "$(decision "$out")" allow "commit: cd 進 worktree 再 commit 要看 worktree 的 branch"
+out="$(cg "cd $R && git commit -m x")"; assert_eq "$(decision "$out")" deny "commit: cd 進沒有卡的 main 仍擋"
+out="$(cg "cd $R && git -C $FX/wt commit -m x")"; assert_eq "$(decision "$out")" allow "commit: -C 優先於 cd"
+out="$(cg "cd $FX && git -C wt commit -m x")"; assert_eq "$(decision "$out")" allow "commit: -C 相對路徑以 cd 的目錄為基準"
+out="$(cg "cd $FX/wt && git add f && git commit -m x")"; assert_eq "$(decision "$out")" allow "commit: cd 之後還有別的指令仍看 cd 的目錄"
+out="$(cg "cd $FX/wt; git commit -m x")"; assert_eq "$(decision "$out")" allow "commit: cd 用 ; 接 commit 也看 cd 的目錄"
+out="$(cg "cd $R && git add f && git commit -m x")"; assert_eq "$(decision "$out")" deny "commit: cd 到沒有卡的 main、中間隔著別的指令仍擋"
+out="$(cg "git -C $FX/wt commit-tree x && git commit -m y")"; assert_eq "$(decision "$out")" deny "commit: commit-tree 不是 commit，不能拿它的 -C 目錄"
+out="$(cg "echo legit commit now; git -C $FX/wt commit -m x")"; assert_eq "$(decision "$out")" allow "commit: legit commit 裡的 git commit 不是 commit，目錄取自真正的 -C"
+for c in 'git -C ~/wt commit -m x' 'cd ~/wt && git commit -m x' 'git -C /tmp/a\b commit -m x' 'git -C /tmp/wt-* commit -m x' 'git -C /tmp/wt? commit -m x' 'git -C /tmp/{a,b} commit -m x'; do
+  out="$(cg "$c")"; assert_eq "$(decision "$out")" deny "commit: 目錄含 ~、反斜線或萬用字元要 deny（${c}）"
+  reason "$out" | grep -qF "$(printf '%s' "$c" | sed -E 's/^.*(-C|cd) ([^ ]+).*$/\2/')" || fail "commit: deny 要點名讀不出來的值（${c}）: $(reason "$out")"
+done
+out="$(cg 'cd "$A" && git -C "$B" commit -m x')"; assert_eq "$(decision "$out")" deny "commit: cd 與 -C 都讀不出來要 deny"
+assert_eq "$(reason "$out" | grep -o '引號包住的路徑' | wc -l | tr -d ' ')" 2 "commit: deny 要兩個值都點名: $(reason "$out")"
+for c in 'git -C "/path with space" commit -m x' 'cd "/path with space" && git commit -m x' 'cd $WT && git commit -m x' 'git -C "$WT" commit -m x'; do
+  out="$(cg "$c")"; assert_eq "$(decision "$out")" deny "commit: 目錄讀不出來要 deny（${c}）"
+  reason "$out" | grep -q '空白' && reason "$out" | grep -q '不含空白的字面路徑' || fail "commit: 目錄讀不出來的 deny 要說明原因與改法（${c}）: $(reason "$out")"
+done
+git -C "$R" worktree add -q -b feat/no-such-card/mikaela "$FX/wt2"
+out="$(cg "git -C $FX/wt2 commit -m x")"; assert_eq "$(decision "$out")" deny "commit: 目標目錄的 branch 對不到卡要擋"
+reason "$out" | grep -q 'feat/no-such-card/mikaela' || fail "commit: deny 要帶目標目錄的 branch: $(reason "$out")"
+reason "$out" | grep -q "'main'" && fail "commit: deny 不能帶 session cwd 的 branch: $(reason "$out")"
+rm -f "$OPSX_STATE_DIR/bypass.log"
+cg "git -C $FX/wt2 commit -m 'x [no-change] y'" >/dev/null
+assert_grep 'feat/no-such-card/mikaela' "$OPSX_STATE_DIR/bypass.log"
+rm -f "$OPSX_STATE_DIR/bypass.log"
+git -C "$R" worktree remove --force "$FX/wt2"; git -C "$R" branch -q -D feat/no-such-card/mikaela
+git -C "$R" worktree remove --force "$FX/wt"
 out="$(cg 'ls -la')"; assert_eq "$out" "" "commit: 非 commit 指令不出聲"
 out="$(cg 'echo "之後再 git commit -m x"')"; assert_eq "$out" "" "commit: 引號內的 git commit 不出聲"
 out="$(cg 'bash -c "git commit -m x"')"; assert_eq "$(decision "$out")" deny "commit: bash -c 內的 commit 仍擋"
