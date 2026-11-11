@@ -32,10 +32,10 @@ GRANT_WORDS = ("授權", "開 PR", "開 / 改 MR", "gh pr create", "push", "推�
 # 建議或選項裡有這些字，代表要人動手；不替人承諾
 HUMAN_WORDS = ("你", "使用者", "沙盒外", "自己跑", "本人", "人工", "跑指令", "跑腳本", "錄", "貼路徑")
 HUMAN_QUESTION = ("只有你能做", "誰來跑")
-# 卡在等別張卡合併：不答，答了它查完又會開一個 gate
 MERGE_WORDS = ("合併", "merge")
-WAIT_WORDS = ("合進 main", "merge 之後", "merged 之後", "merge 之前", "之後再派", "合併後", "等它 merge", "等 .* 合")
-VERIFY_ANSWER = "這個要真機跑的驗證使用者之後自己做：把它標成「等使用者驗」寫進 report.md 的 Consider，不要再開 gate，繼續做完剩下的 task 到 /review、/pr。"
+# explore 寫的拆法確認 gate 的 id：要人決定，永遠不代答
+SPLIT_GATE = "split"
+VERIFY_ANSWER = "這個要真機跑的驗證使用者之後自己做：把它標成「等使用者驗」寫進 report.md 的 Consider，不要再開 gate，繼續做完剩下的 task 到 /opsx-workflow:review、/opsx-workflow:pr。"
 GRANT_ANSWER = "允許。長期授權在 grants.toml，直接做。"
 
 
@@ -127,24 +127,24 @@ class Round:
         return (lv, 1, 0, 0) if pos is None else (lv, 0) + pos
 
     def nobody_archiving(self, c):
-        """已合併但 agent 還在：歸檔、標 workplan、叫 chain 都是它自己 /archive 的事，這裡不搶。
-        過了寬限 agent 還 idle，代表沒人會送 /archive（例如人在網頁上合併、drive 早就結束），回傳 True 由這裡收尾。"""
+        """已合併但 agent 還在：歸檔、標 workplan、叫 chain 都是它自己 /opsx-workflow:archive 的事，這裡不搶。
+        過了寬限 agent 還 idle，代表沒人會送 /opsx-workflow:archive（例如人在網頁上合併、drive 早就結束），回傳 True 由這裡收尾。"""
         key = card_key(c)
         ago = self.now - datetime.datetime.fromisoformat(c["mr"]["merged_at"])
         minutes = ago.total_seconds() // 60
         if ago <= datetime.timedelta(minutes=ARCHIVE_GRACE_MINUTES):
-            self.log("⏳ %s 已合併，等它自己 /archive" % key)
+            self.log("⏳ %s 已合併，等它自己 /opsx-workflow:archive" % key)
             return False
         # idle 也可能是在等人回 gate，或互動模式的人暫時離開：那兩種不收，收了等於替人答 gate、關掉人的 session
         waiting_human = c["open_gates"] or self.dispatch_file[key].get("mode") == "interactive"
         if c["agent_status"] == "idle" and not waiting_human:
-            self.log("-- %s 合併 %d 分鐘了 agent 還 idle，沒人會 /archive，這裡收尾" % (key, minutes))
+            self.log("-- %s 合併 %d 分鐘了 agent 還 idle，沒人會 /opsx-workflow:archive，這裡收尾" % (key, minutes))
             return True
         self.log("?? %s 合併 %d 分鐘了還沒歸檔，agent 是 %s，要人看它卡在哪" % (key, minutes, c["agent_status"]))
         return False
 
     def clean_up(self, top, merged):
-        """agent 已經不在的已合併卡：代做 /archive 的事。回傳收尾成功的卡。"""
+        """agent 已經不在的已合併卡：代做 /opsx-workflow:archive 的事。回傳收尾成功的卡。"""
         self.update_main(top)
         done = [c for c in merged if self.archive_card(top, c)]
         self.act(["git", "-C", top, "worktree", "prune"])
@@ -309,12 +309,16 @@ class Round:
             self.log("?? %s gate %s 的 type 沒寫或不在 approval | decision，不代答，要人看：%s" % (key, w["gate_id"], (w.get("question") or "")[:100]))
             self.notify_gate(c, w, "的 type 不明")
             return
+        if w["gate_id"] == SPLIT_GATE:
+            self.log("?? %s gate %s 是拆法確認，只有使用者能答，不代答、不停 pane：%s" % (key, w["gate_id"], (w.get("question") or "")[:100]))
+            self.notify_gate(c, w, "要你確認拆法")
+            return
         q = w.get("question") or ""
         pick = w.get("recommended") or (w.get("options") or [None])[0]
         text = q + " " + (pick or "")
-        # 等別張卡的字本身含「合併後」「等 X 合」，要先認出來，不然會被下面的合併類規則吃掉
-        if any(re.search(k, text) for k in WAIT_WORDS):
-            self.log("⏳ %s gate %s 在等別張卡，先停 pane，有卡合進 main 那輪再派：%s" % (key, w["gate_id"], q[:100]))
+        # gate 明寫 waits-on 才算等別張卡：不答，答了它查完又會開一個 gate。要先認，不然會被下面的合併類規則吃掉
+        if w.get("waits_on"):
+            self.log("⏳ %s gate %s 等 %s，先停 pane，有卡合進 main 那輪再派：%s" % (key, w["gate_id"], w["waits_on"], q[:100]))
             rc, _, _ = self.act(["opsx", "stop", c["slug"], "--repo", top])
             if rc == 0:
                 self.memo["_parked"][key] = {"at": self.now.isoformat(timespec="seconds"), "gate": w["gate_id"],
@@ -613,12 +617,12 @@ def drive_dead(disp):
 
 
 def is_merged(c):
-    """forge 說合了才算；只看 workplan 的 merged 不算，那可能是卡自己 /archive 做到一半。"""
+    """forge 說合了才算；只看 workplan 的 merged 不算，那可能是卡自己 /opsx-workflow:archive 做到一半。"""
     return bool(c["mr"] and c["mr"]["merged_at"])
 
 
 def owner_gone(c):
-    """已合併的卡的 agent 不在了。drive pid 死掉不算：/archive 是 pane 裡的 agent 做的，不是 drive。"""
+    """已合併的卡的 agent 不在了。drive pid 死掉不算：/opsx-workflow:archive 是 pane 裡的 agent 做的，不是 drive。"""
     return not c["dispatch"] or c["agent_status"] == "unknown"
 
 

@@ -42,14 +42,11 @@ init_global() {
     if [ -n "$old" ]; then say "init --global: python 從 $old 換成 $py"; else say "init --global: python 記為 $py"; fi
   fi
 
-  write_if_missing "$state/sources.toml" '# opsx 同步來源。opsx init 在每個 repo 跑時會自動補 gitlab / github；obsidian、customer 在這裡填。
+  write_if_missing "$state/sources.toml" '# opsx 同步來源。opsx init 在每個 repo 跑時會自動補 gitlab / github；obsidian 在這裡填。
+# customer 來源尚未支援（on-hold），填了 opsx sync 也不會同步。
 # [obsidian]
 # vault = "/path/to/vault"
 # folder = "01-Projects/inbox"
-# [customer]
-# base_url = ""
-# token_env = "CUSTOMER_API_TOKEN"
-# list_endpoint = "/api/reports?status=open"
 '
   write_if_missing "$state/grants.toml" '# 「這個 repo 永遠」那級的授權。每 repo 一個表：push / mr / migrate 三個布林。merge 永遠不可寫。
 # [repos."Agentory-AI"]
@@ -84,7 +81,7 @@ $term_line
   if interactive; then
     ask_global_sources "$state/sources.toml"
   else
-    say "init --global: 非互動，obsidian / customer 來源略過（之後改 $state/sources.toml）"
+    say "init --global: 非互動，obsidian 來源略過（之後改 $state/sources.toml）"
   fi
   # herdr 看板：把這個 plugin 根目錄掛進 herdr（herdr-plugin.toml 在根目錄）。沒裝 herdr 就跳過。
   if command -v herdr >/dev/null 2>&1; then
@@ -160,6 +157,12 @@ init_check() {
     3) printf '%s\n' "$out"; say "init --check: ${file} 和標準設定不一致，上面是缺的項目。全域的跑 opsx init --global，repo 的在那個 repo 根目錄跑 opsx init" ;;
     *) die "init --check: 比對失敗（上面是原因）" ;;
   esac
+  # rehash 正常只持續數秒；5 分鐘內的可能還在跑，不報
+  local lock="$HOME/.pyenv/shims/.pyenv-shim"
+  if [ -n "$(find "$lock" -mmin +5 2>/dev/null)" ]; then
+    say "init --check: ${lock} 是 pyenv rehash 的鎖檔，已存在超過 5 分鐘，多半是 rehash 被中斷後殘留；它會讓每個新 shell 卡在等鎖（dispatch 的新 pane 起不來）。確認沒有 rehash 在跑再刪掉它"
+    rc=1
+  fi
   [ -z "$top" ] || warn_untrusted "$top"
   [ "$rc" = 0 ]
 }
@@ -238,17 +241,6 @@ ask_global_sources() {
             [ -d "$ans/$folder" ] || warn "init --global: $ans/$folder 現在不是資料夾，同步時會記錯；路徑裡的 \\ 不會被當成跳脫，要改就編 $f" ;;
         esac
       fi
-    fi
-  fi
-  if ! grep -q '^\[customer\]' "$f"; then
-    printf 'customer 平台 base URL（直接 Enter 跳過）：'
-    read -r ans
-    if [ -n "$ans" ]; then
-      local tok ep
-      printf 'token 的環境變數名：'; read -r tok
-      printf '列表端點（例 /api/reports?status=open）：'; read -r ep
-      printf '\n[customer]\nbase_url = "%s"\ntoken_env = "%s"\nlist_endpoint = "%s"\n' "$ans" "$tok" "$ep" >> "$f"
-      say "init --global: customer 已登記"
     fi
   fi
 }

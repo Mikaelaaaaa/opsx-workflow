@@ -18,7 +18,7 @@ Creates a change with artifacts:
 - design.md (how)
 - tasks.md (implementation steps)
 
-When the artifacts are done it continues straight into `/apply` (`../../references/continue.md`).
+When the artifacts are done it continues straight into `/opsx-workflow:apply` (`../../references/continue.md`).
 
 **Input**: The user's request should include a change name (kebab-case) OR a description of what they want to build.
 
@@ -29,8 +29,8 @@ When the artifacts are done it continues straight into `/apply` (`../../referenc
 If `openspec/workplan.yaml` exists, silently verify it matches reality before proceeding:
 
 1. For each PR where status ≠ `merged`:
-   - `gh pr list --head <branch> --json state --jq '.[0].state' 2>/dev/null` — is it merged on GitHub?
-   - If merged on GitHub but workplan says `pending`/`in-progress` → auto-update to `merged`
+   - Find the forge from `git remote get-url gitlab` (else `origin`). A GitLab host: `glab mr list --source-branch <branch> --merged -F json`. `github.com`: `gh pr list --head <branch> --state merged --json number`. Any other host: skip this check and say so.
+   - If the list is not empty (merged on the forge) but workplan says `pending`/`in-progress` → auto-update to `merged`
 2. For each change where status ≠ `done`:
    - Check if `openspec/changes/<name>/` still exists
    - If missing (archived or deleted) → auto-update to `done`
@@ -50,7 +50,7 @@ Do NOT proceed without understanding what the user wants to build.
 openspec new change "<name>" --schema opsx
 ```
 
-Usually the shell already exists (收件 made it, explore and grill wrote into it). Then skip this and read what is there: `inbox.md`, `explore.md` (已知 / 待決 / 不做), `grill.md` (D1…Dn). If `explore.md` has a non-empty 待決 and no `grill.md`, stop: `/grill <name>` first; the router says the same. The exception is a card whose kind is chore or bug-fix (`../../references/continue.md`, "Light flow"): do not stop; write each open 待決 item as one 假設 sentence at the end of proposal.md's What Changes, and carry on. Confirm the kind in 2b first: if 2b changes it to anything else while 待決 is non-empty and there is no `grill.md`, stop and route to `/grill <name>`.
+Usually the shell already exists (收件 made it, explore and grill wrote into it). Then skip this and read what is there: `inbox.md`, `explore.md` (已知 / 待決 / 不做), `grill.md` (D1…Dn). If `explore.md` has a non-empty 待決 and no `grill.md`, stop: `/opsx-workflow:grill <name>` first; the router says the same. The exception is a card whose kind is chore or bug-fix (`../../references/continue.md`, "Light flow"): do not stop; write each open 待決 item as one 假設 sentence at the end of proposal.md's What Changes, and carry on. Confirm the kind in 2b first: if 2b changes it to anything else while 待決 is non-empty and there is no `grill.md`, stop and route to `/opsx-workflow:grill <name>`.
 
 ### 2b. Confirm the kind
 
@@ -119,7 +119,9 @@ When `openspec/changes/<name>/subs/` exists, `<name>` is a main change (`../../r
 - The main shell's tasks.md has one item per sub-change, in workplan `depends-on` order. Each item's `驗收：` points at that sub-change's spec and its `測試：` at the test files the sub-change's tasks name. Checking it off means that sub-change is committed on the PR branch.
 - Each `subs/<sub>/` gets proposal.md, specs/<capability>/spec.md, design.md and tasks.md from the same templates and rules as above. Its design.md cites the main shell's D-ids rather than inventing new ones; its tasks are cut against the D5 limit (more than 6 means the split was wrong, say so).
 - The main shell's specs/ holds the union of the sub-change specs, because archive merges only the main shell's specs. A sub spec that changes is copied to the main shell.
-- Last, run `opsx check <name>`. Any line it prints is a missing piece: fix it and run again. While it fails, do not continue to `/apply`.
+- Last, run `opsx check <name>`. Any line it prints is a missing piece: fix it and run again. While it fails, do not continue to `/opsx-workflow:apply`.
+
+Run `opsx check <name>` for every change, not only a main change with `subs/`: it also checks the card's fact fields (`kind_of_work`, and `impact` plus `evidence` for an incident) when an agent opened the card, and for every card this one opened.
 
 ### 5. Update workplan
 
@@ -147,7 +149,7 @@ After completing all artifacts, summarize:
 - List of artifacts created with brief descriptions
 - What's ready: "All artifacts created! Ready for implementation."
 
-Then continue to `/apply <name>` per `../../references/continue.md`: invoke it now unless a gate is open or, for a main change with `subs/`, `opsx check <name>` still fails. Apply switches to the PR's branch itself.
+Then continue to `/opsx-workflow:apply <name>` per `../../references/continue.md`: invoke it now unless a gate is open or `opsx check <name>` still prints lines. Apply switches to the PR's branch itself.
 
 ## Artifact Creation Guidelines
 
