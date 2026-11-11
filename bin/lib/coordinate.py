@@ -535,13 +535,12 @@ class Round:
         return False
 
     def merged_into_main(self, top, slug):
-        """waits-on 的卡合進 main 了：workplan 裡它所屬的 PR 是 merged，或 openspec/changes/archive/ 有 <日期>-<slug>。
+        """waits-on 的卡合進 main 了：workplan 裡它所屬的 PR 是 merged，或它已歸檔（is_archived）而且不是被捨棄的。
         workplan 與 archive 都沒有它（卡名寫錯、還沒進 workplan）算沒合，維持停 pane。"""
         pr = pr_of(self.workplan(top), slug)
-        if pr is not None:
-            return pr.get("status") == "merged"
-        archive = os.path.join(top, "openspec", "changes", "archive")
-        return os.path.isdir(archive) and any(re.fullmatch(r"\d{4}-\d{2}-\d{2}-" + re.escape(slug), n) for n in os.listdir(archive))
+        if pr is not None and pr.get("status") == "merged":
+            return True
+        return is_archived(top, slug) and not archived_declined(top, slug)
 
     def handle_gate(self, c, top):
         """派出去的卡的第一個 open gate，照 gaterule.decide 的處置答、停、或留給人。"""
@@ -1074,6 +1073,15 @@ def is_archived(top, name):
     """change 目錄不在了，而且 openspec archive 留下了 <日期>-<name>。"""
     changes = os.path.join(top, "openspec", "changes")
     return not os.path.isdir(os.path.join(changes, name)) and bool(glob.glob(os.path.join(changes, "archive", "????-??-??-" + glob.escape(name))))
+
+
+def archived_declined(top, name):
+    """歸檔的卡是被捨棄的（opsx drop、opsx merge-card 會在 .openspec.yaml 寫 outcome: declined），不是合進 main。"""
+    for d in glob.glob(os.path.join(top, "openspec", "changes", "archive", "????-??-??-" + glob.escape(name))):
+        yaml_path = os.path.join(d, ".openspec.yaml")
+        if re.search(r"^outcome:\s*declined\s*$", priority.read_text(yaml_path), re.M):
+            return True
+    return False
 
 
 def waiting_on(prs, slug):

@@ -536,12 +536,31 @@ assert_eq "$(memo_get _parked demo/p1)" "" "已合不記 parked"
 rm -f "$MEMO"
 # 已歸檔（workplan 裡沒有）也算
 printf 'created: 2026-11-07\n\nfeatures:\n  - name: fb\n    prs:\n      - name: other\n        branch: feat/o/m\n        status: pending\n        depends-on: []\n' > "$R/openspec/workplan.yaml"
+[ ! -d "$R/openspec/changes/a" ] || mv "$R/openspec/changes/a" "$FX/changes-a.save"   # 已歸檔 = change 目錄不在了
 mkdir -p "$R/openspec/changes/archive/2026-11-11-a"
 cards "$W1"
 round || fail "waits-on 已歸檔 rc: $(cat "$FX/out")"
 assert_eq "$(count '^opsx stop')" 0 "依賴卡已歸檔不停 pane：$(cat "$OPSX_FAKE_LOG")"
 assert_eq "$(count '^opsx answer p1 --gate g9 --repo ')" 1 "已歸檔要答掉 g9：$(cat "$OPSX_FAKE_LOG")"
 rm -rf "$R/openspec/changes/archive/2026-11-11-a"; rm -f "$MEMO"
+# 被捨棄（outcome: declined，opsx drop / merge-card 的歸檔）不算合進 main：照舊停 pane
+mkdir -p "$R/openspec/changes/archive/2026-11-11-a"; printf 'schema: opsx\noutcome: declined\n' > "$R/openspec/changes/archive/2026-11-11-a/.openspec.yaml"
+cards "$W1"
+round || fail "waits-on 被捨棄 rc: $(cat "$FX/out")"
+assert_grep "^opsx stop p1 --repo $R\$" "$OPSX_FAKE_LOG"; assert_eq "$(count '^opsx answer')" 0 "被捨棄的歸檔不答：$(cat "$OPSX_FAKE_LOG")"
+rm -f "$MEMO"
+# changes/a 還在（同名的舊歸檔不算）：照舊停 pane
+printf 'schema: opsx\n' > "$R/openspec/changes/archive/2026-11-11-a/.openspec.yaml"; mkdir -p "$R/openspec/changes/a"
+cards "$W1"
+round || fail "waits-on 同名卡還在 rc: $(cat "$FX/out")"
+assert_grep "^opsx stop p1 --repo $R\$" "$OPSX_FAKE_LOG"; assert_eq "$(count '^opsx answer')" 0 "同名卡還在不答：$(cat "$OPSX_FAKE_LOG")"
+rm -rf "$R/openspec/changes/archive/2026-11-11-a" "$R/openspec/changes/a"; rm -f "$MEMO"
+[ ! -d "$FX/changes-a.save" ] || mv "$FX/changes-a.save" "$R/openspec/changes/a"
+# gate 已答、pane 剛重派（沒有 waiting）：下一輪不停 pane、不再答
+cards '[{"slug":"p1","section":"進行中","dispatch":'"$D"',"agent_status":"working"}]'
+round || fail "剛重派 rc: $(cat "$FX/out")"
+assert_eq "$(count '^opsx stop')" 0 "剛重派的 pane 不能被停：$(cat "$OPSX_FAKE_LOG")"; assert_eq "$(count '^opsx answer')" 0
+rm -f "$MEMO"
 # 還沒合（PR 是 in-progress）：照舊停 pane、記 parked、不答
 printf 'created: 2026-11-07\n\nfeatures:\n  - name: fa\n    prs:\n      - name: a\n        branch: feat/a/m\n        status: in-progress\n        depends-on: []\n' > "$R/openspec/workplan.yaml"
 cards "$W1"

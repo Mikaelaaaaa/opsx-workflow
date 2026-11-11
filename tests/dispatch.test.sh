@@ -3,6 +3,9 @@
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 FAKES="$OPSX_ROOT/tests/fakes"; mkdir -p "$FX/fakebin"
 for f in herdr glab; do printf '#!/usr/bin/env bash\nexec bash "%s/%s" "$@"\n' "$FAKES" "$f" > "$FX/fakebin/$f"; chmod +x "$FX/fakebin/$f"; done
+# glab 的每次呼叫另外記在不會被清空的檔（OPSX_FAKE_LOG 中途會被清掉），結尾檢查沒有人查真的 GitLab project
+: > "$FX/glab-all.log"
+printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >> "%s/glab-all.log"\nexec bash "%s/glab" "$@"\n' "$FX" "$FAKES" > "$FX/fakebin/glab"
 export PATH="$FX/fakebin:$PATH"
 export OPSX_FAKE_LOG="$FX/herdr.log"; : > "$OPSX_FAKE_LOG"
 export OPSX_USER=mikaela
@@ -487,4 +490,5 @@ out="$(opsx dispatch held --agent claude --mode autopilot 2>&1)"; [ $? -ne 0 ] |
 echo "$out" | grep -qF '.claude/worktrees/c' || fail "要說佔著的 worktree: $out"
 [ ! -d "$R/.claude/worktrees/held" ] || fail "被佔時不能開 worktree"
 assert_not_grep 'gitlab\.tsg-navigator\.com' "$OPSX_FAKE_LOG"
+assert_not_grep 'gitlab\.tsg-navigator\.com' "$FX/glab-all.log"
 echo ok
