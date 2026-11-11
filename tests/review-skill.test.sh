@@ -37,6 +37,12 @@ assert_not_fixed 'always Consider, never Act on' "$STEP3"
 assert_fixed 'BUG = task checked and the diff has no code for it' "$STEP2"
 assert_fixed 'Review never implements a task' "$GUARD"
 
+# --- review-examples-rows：Agent A 逐列對照 Examples 表，缺列是 MUST_FIX ---
+assert_fixed 'Scenario with an Examples table' "$STEP2"
+assert_fixed 'every row needs a matching case in the `測試：` file' "$STEP2"
+assert_fixed 'a missing row is MUST_FIX' "$STEP2"
+assert_fixed 'the finding names the missing row' "$STEP2"
+
 # --- 2.2 step 4：範圍內寫成 task 回 apply，範圍外開卡，驗不了的降 Consider ---
 assert_fixed '## R<N>. review 退回' "$STEP4"
 assert_fixed '待修（範圍內）' "$STEP4"
