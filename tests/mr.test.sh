@@ -148,6 +148,22 @@ assert_eq "$(field "$(OPSX_MR_CACHE_TTL=60 OPSX_MR_STALE_OK=1 mr_json "$C")" hea
 assert_file "$CACHE"
 # 除錯用的子命令：opsx mr <card dir> 印 mr_json
 assert_eq "$(field "$(OPSX_MR_CACHE_TTL=60 opsx mr "$C")" head_sha)" new222
+# 手動 --refresh 沒拿鎖：正常結束，也不刪別支拿著的鎖
+rm -f "$CACHE"; rm -rf "$CACHE.lock"
+OPSX_MR_CACHE_TTL=60 opsx mr "$C" --refresh || fail "沒有鎖時手動 --refresh 要退出 0"
+assert_file "$CACHE"
+mkdir "$CACHE.lock"
+OPSX_MR_CACHE_TTL=60 opsx mr "$C" --refresh || fail "別支拿著鎖時手動 --refresh 要退出 0"
+[ -d "$CACHE.lock" ] || fail "手動 --refresh 不該刪別支拿著的鎖"
+rmdir "$CACHE.lock"
+# 背景重抓的 forge 呼叫要有時間上限，而且比 120 秒的死鎖上限短，接手死鎖時舊的那支已經被殺了
+ENVBIN="$FX/env-glab"; mkdir -p "$ENVBIN"
+printf '#!/usr/bin/env bash\n[ "$1 $2" = "mr view" ] && echo "timeout=${OPSX_MR_TIMEOUT:-}" >> "%s/refresh-env"\nexec bash "%s/tests/fakes/glab" "$@"\n' "$FX" "$OPSX_ROOT" > "$ENVBIN/glab"; chmod +x "$ENVBIN/glab"
+stale_cache; rm -f "$FX/refresh-env"
+PATH="$ENVBIN:$PATH" OPSX_MR_CACHE_TTL=60 OPSX_MR_STALE_OK=1 mr_json "$C" >/dev/null
+wait_unlock "$CACHE.lock"
+t="$(sed -n 's/^timeout=//p' "$FX/refresh-env")"
+[ -n "$t" ] && [ "$t" -gt 0 ] && [ "$t" -lt 120 ] || fail "背景重抓的 OPSX_MR_TIMEOUT 要介於 0 和 120 秒之間，實際是「$t」"
 printf '%s' "$GREEN" > "$OPSX_TEST_GLAB_JSON"
 
 # --- forge 查詢的時間上限：OPSX_MR_TIMEOUT 沒設就不限時，設了逾時要殺掉、錯誤文字說逾時 ---

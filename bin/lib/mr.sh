@@ -45,18 +45,19 @@ mr_refresh_bg() { # <card dir> <cache>
     [ "$(mr_age "$lock")" -ge 120 ] || return 0
     rmdir "$lock" 2>/dev/null; mkdir "$lock" 2>/dev/null || return 0
   fi
-  perl -MPOSIX -e 'POSIX::setsid(); exec @ARGV' bash "$OPSX_ROOT/bin/opsx" mr "$1" --refresh </dev/null >/dev/null 2>&1 &
+  # forge 的時間上限要比 120 s 死鎖上限短：鎖被當死鎖接手時，舊的那支已經被殺了，不會兩支一起掛著
+  OPSX_MR_TIMEOUT=60 perl -MPOSIX -e 'POSIX::setsid(); exec @ARGV' bash "$OPSX_ROOT/bin/opsx" mr "$1" --refresh "$lock" </dev/null >/dev/null 2>&1 &
 }
 
-# opsx mr <card dir> [--refresh]：印 mr_json；--refresh 跳過快取重抓、寫快取、放掉 mr_refresh_bg 的鎖
+# opsx mr <card dir> [--refresh [<lock>]]：印 mr_json；--refresh 跳過快取重抓、寫快取；帶 <lock> 時最後放掉那個鎖（mr_refresh_bg 拿的）
 opsx_mr() {
-  local d="${1:?用法：opsx mr <card dir> [--refresh]}" lock rc=0
+  local d="${1:?用法：opsx mr <card dir> [--refresh [<lock>]]}" rc=0
   case "${2:-}" in
     "") mr_json "$d" ;;
     --refresh)
-      lock="$(mr_cache "$(st_mr_url "$d")").lock"
       OPSX_MR_REFRESH=1 mr_json "$d" >/dev/null || rc=$?
-      rmdir "$lock"; return "$rc" ;;
+      [ -z "${3:-}" ] || rmdir "$3"
+      return "$rc" ;;
     *) die "opsx mr：不認得的參數 $2" ;;
   esac
 }

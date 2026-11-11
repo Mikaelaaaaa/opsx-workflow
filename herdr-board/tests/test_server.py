@@ -679,6 +679,7 @@ class CacheInvalidationTest(unittest.TestCase):
         cls.begun_log = cls.tmp / "collect.begun"
         cls.rc_file = cls.tmp / "collect.rc"
         cls.out_file = cls.tmp / "collect.out"
+        cls.bad_bytes = cls.tmp / "collect.bad"
         cls.fail_flag = cls.tmp / "opsx.fail"
         cls.action_sleep = cls.tmp / "action.sleep"
         cls.action_started = cls.tmp / "action.started"
@@ -692,6 +693,7 @@ class CacheInvalidationTest(unittest.TestCase):
             f'  : > "{cls.started}"\n'
             f'  if [ -f "{cls.sleep_file}" ]; then sleep "$(cat "{cls.sleep_file}")"; fi\n'
             f'  echo collect >> "{cls.collect_log}"\n'
+            f'  if [ -f "{cls.bad_bytes}" ]; then printf \'collect: \\377 壞掉的位元組\\n\' >&2; exit 1; fi\n'
             f'  if [ -f "{cls.rc_file}" ]; then echo "collect: 假的失敗" >&2; exit "$(cat "{cls.rc_file}")"; fi\n'
             f'  if [ -f "{cls.out_file}" ]; then cat "{cls.out_file}"; exit 0; fi\n'
             '  echo \'{"generated_at": "g", "scopes": [], "cards": [], "unmatched_agents": [], "errors": []}\'\n'
@@ -712,7 +714,7 @@ class CacheInvalidationTest(unittest.TestCase):
         self.collect_log.write_text("")
         self.begun_log.write_text("")
         for f in (self.sleep_file, self.fail_flag, self.started, self.action_sleep, self.action_started,
-                  self.rc_file, self.out_file):
+                  self.rc_file, self.out_file, self.bad_bytes):
             if f.exists():
                 f.unlink()
         self.proc, _, port = start_server(self.env, None)
@@ -821,6 +823,16 @@ class CacheInvalidationTest(unittest.TestCase):
         self.assertEqual(status, 502, "背景刷新失敗後不能再回之前那份成功的結果")
         self.assertIn("error", body)
         self.assertIn("collect: 假的失敗", body["stderr"])
+
+    def test_collect_output_that_is_not_utf8_is_502_and_does_not_wedge(self):
+        self.bad_bytes.write_text("")
+        status, body, _ = self.get_json()
+        self.assertEqual(status, 502, "collect 的輸出解不開也要回錯誤，不能讓 GET 卡住")
+        self.assertIn("壞掉的位元組", body["stderr"])
+        self.bad_bytes.unlink()
+        self.out_file.write_text('{"n": 1}')
+        self.assertEqual(self.req("/api/stop", {"slug": "x"}), 200)
+        self.assertEqual(self.get_json()[:2], (200, {"n": 1}), "之後的 collect 照常跑，動作後的 GET 不卡")
 
     def test_no_requests_no_collect(self):
         self.assertEqual(self.get_json()[0], 200)

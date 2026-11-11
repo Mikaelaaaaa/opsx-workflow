@@ -105,25 +105,28 @@ class Config:
 
 def collect_once(cfg: Config, env: dict, started: float) -> None:
     """背景 thread 跑一輪 collect，寫進 cfg.cached 並叫醒等結果的 GET。"""
-    # 在 thread 裡丟出去的例外沒人接，running 會一直是 True，等結果的 GET 就永遠卡住，所以 exec 失敗也寫成 502
+    # thread 裡丟出去的例外沒人接；不管怎麼結束都要放掉 running 並存一份結果，不然等結果的 GET 永遠卡住
+    status, payload = 502, {"error": "opsx collect 沒跑完", "stderr": ""}
     try:
-        r = run(["bash", str(OPSX), "collect"], COLLECT_TIMEOUT, env)
-    except OSError as e:
-        r = {"ok": False, "stderr": "opsx collect 跑不起來：%s" % e}
-    if not r["ok"]:
-        status, payload = 502, {"error": "opsx collect 失敗", "stderr": r["stderr"]}
-    else:
         try:
-            status, payload = 200, json.loads(r["stdout"])
-        except json.JSONDecodeError as e:
-            status, payload = 502, {"error": "opsx collect 回的不是 JSON：%s" % e}
-    with cfg.cond:
-        cfg.cached = (time.monotonic(), started, status, payload)
-        cfg.running = False
-        # 跑到一半有動作作廢了快取：這輪不一定看得到動作寫的檔，馬上再跑一輪給動作之後的 GET
-        if started <= cfg.invalidated_at:
-            kick(cfg, env)
-        cfg.cond.notify_all()
+            r = run(["bash", str(OPSX), "collect"], COLLECT_TIMEOUT, env)
+        except OSError as e:
+            r = {"ok": False, "stderr": "opsx collect 跑不起來：%s" % e}
+        if not r["ok"]:
+            status, payload = 502, {"error": "opsx collect 失敗", "stderr": r["stderr"]}
+        else:
+            try:
+                status, payload = 200, json.loads(r["stdout"])
+            except json.JSONDecodeError as e:
+                status, payload = 502, {"error": "opsx collect 回的不是 JSON：%s" % e}
+    finally:
+        with cfg.cond:
+            cfg.cached = (time.monotonic(), started, status, payload)
+            cfg.running = False
+            # 跑到一半有動作作廢了快取：這輪不一定看得到動作寫的檔，馬上再跑一輪給動作之後的 GET
+            if started <= cfg.invalidated_at:
+                kick(cfg, env)
+            cfg.cond.notify_all()
 
 
 def kick(cfg: Config, env: dict) -> None:
@@ -274,7 +277,7 @@ def priority_args(body: dict) -> list[str]:
 def run(argv: list[str], timeout: int, env: dict) -> dict:
     """跑一個子行程；逾時殺整個 process group（collect 底下掛著幾百支 stage_of / python，只殺 bash 會留孤兒）。"""
     try:
-        p = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env, start_new_session=True)
+        p = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, errors="replace", env=env, start_new_session=True)
     except FileNotFoundError:
         return {"ok": False, "stdout": "", "stderr": "%s 不存在" % argv[0], "rc": 127}
     try:
