@@ -174,4 +174,34 @@ assert_bytes 'feat/archive-pr/mikaela\n' wp_pr_field "$R" archive-child branch
 assert_bytes 'merged\n' wp_pr_field "$R" archive-pr status
 assert_bytes 'in-progress\n' wp_pr_field "$R" x status
 assert_bytes '' wp_pr_field "$R" nope branch
+# 序列不縮排（PyYAML 預設輸出；`prs:` 與 `- name:` 同縮排，`changes:` 亦同）
+FLAT="$FX/flat"; mkdir -p "$FLAT/openspec"
+cat > "$FLAT/openspec/workplan.yaml" <<'EOF'
+features:
+- name: f
+  prs:
+  - name: p1
+    branch: feat/p1/u
+    status: merged
+    depends-on: []
+    changes:
+    - name: c1
+      status: done
+      depends-on: []
+  - name: p2
+    branch: feat/p2/u
+    status: pending
+    depends-on:
+    - p1
+    changes:
+    - name: c2
+      status: pending
+      depends-on: []
+EOF
+assert_bytes 'feat/p1/u\n' wp_pr_field "$FLAT" p1 branch
+assert_bytes 'merged\n' wp_pr_field "$FLAT" c1 status
+assert_bytes 'feat/p2/u\n' wp_pr_field "$FLAT" p2 branch
+assert_bytes 'pending\n' wp_pr_field "$FLAT" c2 status
+assert_bytes 'feat/p1/u\n' wp_pr_field "$FLAT" c1 branch
+assert_bytes '' wp_pr_field "$FLAT" nope branch
 echo "ok stage"
