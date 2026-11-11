@@ -16,6 +16,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import jsonfile  # noqa: E402
 import priority  # noqa: E402
 
+AGENT_NAME = re.compile(r"^[a-z][a-z0-9_-]{0,31}$")
+
 
 def _scalar(v: str):
     v = v.strip()
@@ -99,9 +101,17 @@ def card_of(top: str, pr: dict, todo: list) -> str:
     return todo[0]   # 一個 PR 一條 branch；同 PR 的其他 change 由接手的 agent 依序做
 
 
+def session_managed(feature: dict) -> bool:
+    """feature 由 session 代管：有 depends-on，或 prs 有 2 個以上且名稱能當 herdr agent 名。已合的 PR 也算，代管方式才不會做到一半切換。
+    名稱不合法的多 PR feature 開不了 session，照單卡派。"""
+    if feature.get("depends-on"):
+        return True
+    return len(feature.get("prs") or []) >= 2 and bool(AGENT_NAME.match(feature.get("name") or ""))
+
+
 def children(top: str, repo: str, parent: str, dispatch_path: str) -> list:
     """父卡的條目有 feature（一個 session 代管整個 feature）時，同 feature 的主 change 印 session 行，
-    別的 feature、以及有自己 depends-on 的 feature，由 coordinate 依 feature 的 depends-on 派，這裡不接。"""
+    別的 feature、以及由 session 代管的 feature（session_managed），由 coordinate 開 session 派，這裡不接。"""
     dispatch = jsonfile.load(dispatch_path)
     me = dispatch.get("%s/%s" % (repo, parent))
     if not me:
@@ -124,7 +134,7 @@ def children(top: str, repo: str, parent: str, dispatch_path: str) -> list:
             return split_next(top, repo, prs, split, dispatch, feature_waits(features, prs))
         return [("skip", "workplan 裡沒有 %s" % parent)]
     session = me.get("feature")
-    gated = {f.get("name") for f in features if f.get("depends-on")}   # 有自己依賴的 feature，由 coordinate 照 feature 依賴派
+    gated = {f.get("name") for f in features if session_managed(f)}
     status = {pr.get("name"): pr.get("status") for pr in prs}
     out = []
     for pr in prs:
