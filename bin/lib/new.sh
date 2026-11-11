@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
-# opsx new [--repo <path>] [--source <me|agent:<slug>>] [--kind-of-work <incident|planned>] [--impact <值,…>] [--evidence <一行>] [--attach <file>]… -- <一句話>：＋新增一張收件卡，印出 slug。
+# opsx new [--repo <path>] [--source <me|agent:<slug>>] [--kind-of-work <incident|planned>] [--impact <值,…>] [--evidence <一行>] [--area <名>] [--attach <file>]… -- <一句話>：＋新增一張收件卡，印出 slug。
 # 給了 repo 就在那裡建殼；沒給就寫 <state>/unfiled/<slug>.md，等 opsx file 選 repo（board-inbox D6）。
 # slug 是 me-<YYYYMMDD-HHMM>，同名依序加 -2（D2）。specs/board-actions「新增到收件匣」「新增時附檔」「agent 開的卡標明來源」。
 # --attach 的檔複製進卡的 attachments/（待分類是 unfiled/<slug>/attachments/），有附件時 source: paste。
 # 在 dispatch 的 worktree（<top>/.claude/worktrees/<slug>）裡呼叫是 agent 開的：source: agent:<slug>、slug 前綴 agent-；--source me 蓋過偵測。
 # agent 開的卡必帶 --kind-of-work；incident 還要 --impact 與 --evidence（references/priority.md 的事實欄位）。使用者開的卡不強制，沒帶是 planned。
+# --area 寫進 frontmatter 的 area:，值要在 repo 的 openspec/areas.txt 裡；有清單時 agent 開的卡必帶。沒有清單的 repo 不收 --area，其餘照舊（new-auto-merge D2、D3）。
 
 OPSX_ATTACH_MAX=10485760
 
@@ -26,8 +27,36 @@ check_fact_flags() { # <source> <kind> <impact> <evidence>
   fi
 }
 
+# 讀 area 清單，一行印一個。忽略空行、# 開頭的行與行尾空白；不合格式的行 die 並報行號，免得打錯字的 area 永遠對不到。
+opsx_areas() { # <areas.txt>
+  local f="$1" line n=0
+  while IFS= read -r line || [ -n "$line" ]; do
+    n=$((n+1))
+    line="${line%"${line##*[![:space:]]}"}"
+    case "$line" in ""|"#"*) continue ;; esac
+    [[ "$line" =~ ^[a-z0-9][a-z0-9/_-]*$ ]] || die "new: $f 第 $n 行不是合格的 area 名（要符合 [a-z0-9][a-z0-9/_-]*）：$line"
+    printf '%s\n' "$line"
+  done < "$f"
+}
+
+check_area() { # <top> <source> <area>
+  local top="$1" src="$2" area="$3" f="$1/openspec/areas.txt" list
+  if [ -z "$top" ]; then
+    [ -z "$area" ] || die "new: --area 要配 --repo（待分類的卡沒有 repo，對不到 areas.txt）"
+    return 0
+  fi
+  if [ ! -f "$f" ]; then
+    [ -z "$area" ] || die "new: $f 不存在，這個 repo 不收 --area（拿到：${area}）"
+    return 0
+  fi
+  case "$src" in agent:*) ;; *) [ -n "$area" ] || return 0 ;; esac
+  list="$(opsx_areas "$f")" || exit 2
+  [ -n "$area" ] || die "new: 這個 repo 有 openspec/areas.txt，agent 開的卡要帶 --area <名>，可選：${list//$'\n'/ }"
+  grep -qxF -- "$area" <<< "$list" || die "new: --area「${area}」不在 openspec/areas.txt 裡，可選：${list//$'\n'/ }"
+}
+
 opsx_new() {
-  local top="" text="" source="" kind="" impact="" evidence="" prefix=me files=() names=() f b stem ext cand n taken=$'\n' i wt mt
+  local top="" text="" source="" kind="" impact="" evidence="" area="" prefix=me files=() names=() f b stem ext cand n taken=$'\n' i wt mt
   while [ $# -gt 0 ]; do
     case "$1" in
       --repo) top="$2"; shift 2 ;;
@@ -36,8 +65,9 @@ opsx_new() {
       --impact) [ $# -ge 2 ] || die "new: --impact 後面要給值"; impact="$2"; shift 2 ;;
       --evidence) [ $# -ge 2 ] || die "new: --evidence 後面要給一行證據"; evidence="$2"; shift 2 ;;
       --attach) [ $# -ge 2 ] || die "new: --attach 後面要給檔案"; files+=("$2"); shift 2 ;;
+      --area) [ $# -ge 2 ] || die "new: --area 後面要給 openspec/areas.txt 裡的一個名字"; area="$2"; shift 2 ;;
       --) shift; text="$*"; break ;;
-      *) die "new: 用法 opsx new [--repo <path>] [--source <me|agent:<slug>>] [--kind-of-work <incident|planned>] [--impact <值,…>] [--evidence <一行>] [--attach <file>]… -- <一句話>" ;;
+      *) die "new: 用法 opsx new [--repo <path>] [--source <me|agent:<slug>>] [--kind-of-work <incident|planned>] [--impact <值,…>] [--evidence <一行>] [--area <名>] [--attach <file>]… -- <一句話>" ;;
     esac
   done
   single_line "$text"
@@ -55,6 +85,7 @@ opsx_new() {
   [ -z "$source" ] || [[ "$source" =~ ^(me|agent:[A-Za-z0-9][A-Za-z0-9._-]*)$ ]] || die "new: --source 要是 me 或 agent:<slug>，拿到：$source"
   check_fact_flags "$source" "$kind" "$impact" "$evidence"
   [ -z "$top" ] || top="$(opsx_repo_top "$top")"
+  check_area "$top" "$source" "$area"
   for f in ${files[@]+"${files[@]}"}; do
     [ -f "$f" ] || die "new: --attach 不存在或不是一般檔案：$f"
     [ "$(( $(wc -c < "$f") ))" -le "$OPSX_ATTACH_MAX" ] || die "new: --attach $f 超過 10 MB"
@@ -78,6 +109,7 @@ opsx_new() {
   printf -- '---\ntype: 功能\nsource: %s\nfound: %s\nrelated:\nkind_of_work: %s\n' "$source" "$(date '+%Y-%m-%d')" "${kind:-planned}" > "$body"
   [ -z "$impact" ] || printf 'impact: %s\n' "$impact" >> "$body"
   [ -z "$evidence" ] || printf 'evidence: %s\n' "$evidence" >> "$body"
+  [ -z "$area" ] || printf 'area: %s\n' "$area" >> "$body"
   printf -- '---\n\n## 一句話\n\n%s\n\n' "$text" >> "$body"
   if [ ${#names[@]} -gt 0 ]; then
     printf '## 附件\n\n' >> "$body"
