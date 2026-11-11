@@ -116,12 +116,6 @@ if [ "$tool" = "Bash" ]; then
   # 第二級
   printf '%s' "$sk" | grep -qE '(^|\s|&&|;)git\s+push(\s|$)' && level2 push "git push"
   printf '%s' "$sk" | grep -qE '(glab mr (create|update)|gh pr (create|edit)|glab issue (note|comment)|gh issue comment)' && level2 mr "開 / 改 MR"
-  # MR 留言（/pr 步 5c 的邏輯表）：只認這兩種形狀，且整條指令只能是它。GRANTED 之後 allow() 放行整串，
-  # 骨架比對會讓 `gh pr comment …; <別的指令>` 把別的指令一起放行，所以錨定原文。路徑不准含 ..。
-  # GitLab 的路徑在引號裡骨架看不到；形狀之外的 glab api（例如打 /merge）不分類，settings 也沒有 glab api 規則，dontAsk 會拒。
-  gh_comment='^gh pr comment [0-9]+( --edit-last)? --body-file [A-Za-z0-9_./-]+ *$'
-  glab_note='^glab api --method (POST|PUT) "projects/:id/merge_requests/[0-9]+/notes(/[0-9]+)?" --field body=@[A-Za-z0-9_./-]+ *$'
-  [[ $cmd != *..* && ( $cmd =~ $gh_comment || $cmd =~ $glab_note ) ]] && level2 mr "留言到 MR"
   printf '%s' "$sk" | grep -qE 'db:migrate|drizzle-kit (migrate|push)|alembic upgrade' && level2 migrate "本機 migrate"
   printf '%s' "$sk" | grep -qE '(^|\s|&&|;)rm\s+-(r|f|rf|fr)\b' && level2 delete "刪檔（rm -r/-f）"
   printf '%s' "$sk" | grep -qE '(pnpm (add|install|i)\b|npm (install|i|ci)\b|uv (add|sync)|pip install|yarn add|brew install)' && level2 install "裝套件"
