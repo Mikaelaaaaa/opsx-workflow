@@ -1,7 +1,7 @@
 """目標卡 inbox.md 的 `## 併入：<時間> <來源>` 段：opsx new 追加、opsx split-out 拆回獨立的卡。
 
 用法：
-    $OPSX_PY -I inboxmerge.py append <卡目錄> <基本 id> <ISO 時間> <來源> <kind_of_work> <evidence> <area> <一句話>
+    $OPSX_PY -I inboxmerge.py append <卡目錄> <基本 id> <ISO 時間> <來源> <kind_of_work> <evidence> <type> <一句話>
         追加一段，印這段拿到的 id。id 是新卡原本會拿到的 slug；目標裡已經有同一個 id 時依序加 -2、-3。
     $OPSX_PY -I inboxmerge.py card <卡目錄> <id>
         印那一段拆回獨立卡時的 inbox.md（跟 opsx new 寫的同形）。找不到退出 2。
@@ -10,7 +10,7 @@
     $OPSX_PY -I inboxmerge.py ids <卡目錄>
         一行印一個這張卡現有的併入 id（opsx drop 用來拒絕還有併入項目的卡）。
 兩個 agent 可能同時併進同一張卡：鎖在卡目錄上（inbox.md 會被原子替換換掉 inode，鎖它本身擋不住），鎖內重讀再改。
-一段併入從標題到下一個 `## ` 或檔尾為止。specs/card-auto-merge「同 area 併入」「拆出來」。
+一段併入從標題到下一個 `## ` 或檔尾為止。specs/card-auto-merge「同檔案併入」「拆出來」。
 """
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ HEAD = re.compile(r"^## ")
 MERGED = re.compile(r"^## 併入：")
 MERGED_HEAD = re.compile(r"^## 併入：(\S+) (\S+)\s*$")
 ID_LINE = re.compile(r"^- id: (\S+)\s*$")
-FIELD = re.compile(r"^- (id|kind_of_work|evidence|area): (.*)$")
+FIELD = re.compile(r"^- (id|kind_of_work|evidence|type|area): (.*)$")
 DATE = re.compile(r"^\d{4}-\d{2}-\d{2}")
 
 
@@ -54,15 +54,15 @@ def free_id(base: str, taken: set) -> str:
     return "%s-%d" % (base, n)
 
 
-def section(mid: str, when: str, source: str, kind: str, evidence: str, area: str, text: str) -> str:
+def section(mid: str, when: str, source: str, kind: str, evidence: str, kind_type: str, text: str) -> str:
     lines = ["## 併入：%s %s" % (when, source), "", "- id: " + mid, "- kind_of_work: " + kind]
     if evidence:
         lines.append("- evidence: " + evidence)
-    lines += ["- area: " + area, "", text, ""]
+    lines += ["- type: " + kind_type, "", text, ""]
     return "\n".join(lines)
 
 
-def append(card_dir: str, base: str, when: str, source: str, kind: str, evidence: str, area: str, text: str) -> str:
+def append(card_dir: str, base: str, when: str, source: str, kind: str, evidence: str, kind_type: str, text: str) -> str:
     inbox = os.path.join(card_dir, "inbox.md")
     with safefile.CardLock(card_dir):
         with open(inbox, encoding="utf-8") as f:
@@ -72,7 +72,7 @@ def append(card_dir: str, base: str, when: str, source: str, kind: str, evidence
             cur += "\n"
         if cur and not cur.endswith("\n\n"):
             cur += "\n"
-        safefile.write_atomic(inbox, cur + section(mid, when, source, kind, evidence, area, text))
+        safefile.write_atomic(inbox, cur + section(mid, when, source, kind, evidence, kind_type, text))
     return mid
 
 
@@ -105,9 +105,12 @@ def parse(block: list) -> dict:
             raise ValueError("併入段的欄位行看不懂：%s" % block[i])
         out[f.group(1)] = f.group(2)
         i += 1
-    for key in ("id", "kind_of_work", "area"):
+    for key in ("id", "kind_of_work"):
         if key not in out:
             raise ValueError("併入段少了 - %s:（標題 %s）" % (key, block[0]))
+    # 新段寫 - type:，舊段（自動併入看 area 的時期）寫 - area:
+    if "type" not in out and "area" not in out:
+        raise ValueError("併入段要有 - type: 或 - area:（標題 %s）" % block[0])
     rest = block[i + 1:]
     if not rest or rest[0] == "" or any(x != "" for x in rest[1:]):
         raise ValueError("併入段欄位後要是空行加一行一句話（id %s）" % out["id"])
@@ -131,10 +134,11 @@ def sections(text: str) -> list:
 
 
 def card_body(fields: dict) -> str:
-    lines = ["---", "type: 功能", "source: " + fields["source"], "found: " + fields["when"][:10], "related:", "kind_of_work: " + fields["kind_of_work"]]
+    kind_type = fields["type"] if "type" in fields else "待定"   # 舊段沒有 type
+    lines = ["---", "type: " + kind_type, "source: " + fields["source"], "found: " + fields["when"][:10], "related:", "kind_of_work: " + fields["kind_of_work"]]
     if "evidence" in fields:
         lines.append("evidence: " + fields["evidence"])
-    lines += ["area: " + fields["area"], "---", "", "## 一句話", "", fields["text"], "", "## 證據", "", ""]
+    lines += ["---", "", "## 一句話", "", fields["text"], "", "## 證據", "", ""]
     return "\n".join(lines)
 
 
@@ -161,7 +165,7 @@ def main() -> None:
     cmd = args[0] if args else ""
     want = {"append": 9, "card": 3, "remove": 3, "ids": 2}
     if cmd not in want or len(args) != want[cmd]:
-        sys.exit("用法：inboxmerge.py append <卡目錄> <基本 id> <ISO 時間> <來源> <kind_of_work> <evidence> <area> <一句話> | card <卡目錄> <id> | remove <卡目錄> <id> | ids <卡目錄>")
+        sys.exit("用法：inboxmerge.py append <卡目錄> <基本 id> <ISO 時間> <來源> <kind_of_work> <evidence> <type> <一句話> | card <卡目錄> <id> | remove <卡目錄> <id> | ids <卡目錄>")
     try:
         if cmd == "append":
             print(append(*args[1:]))
