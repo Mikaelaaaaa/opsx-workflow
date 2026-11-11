@@ -259,6 +259,11 @@ for tgt in main '"main"' "'master'" HEAD:main HEAD:refs/heads/main refs/heads/ma
 done
 out="$(gg Bash "$(cmdj 'git push -u gitlab main && echo done')")"; assert_eq "$(decision "$out")" deny "grant: push main 後面串指令仍擋"
 reason "$out" | grep -q 'push main' || fail "grant: deny 要說 push main：$(reason "$out")"
+# main 後面緊接運算子、--delete、push option 都還是 push main；目標是別的遠端分支則不是
+for cmd in 'git push gitlab main&&echo ok' 'git push gitlab main||true' 'git push gitlab main|cat' 'git push gitlab main&' 'git push gitlab main>/dev/null' 'git push --delete gitlab main' 'git push -o ci.skip gitlab main'; do
+  out="$(gg Bash "$(cmdj "$cmd")")"; assert_eq "$(decision "$out")" deny "grant: $cmd 是 push main"
+done
+out="$(gg Bash "$(cmdj 'git push gitlab main:feat/x')")"; assert_eq "$(decision "$out")" allow "grant: 目標是別的遠端分支不算 push main"
 out="$(gg Bash "$(cmdj 'bash -c "glab mr merge 212"')")"; assert_eq "$(decision "$out")" deny "grant: bash -c 內的 merge 仍擋"
 out="$(gg Bash "$(cmdj 'git push gitlab feat/eval-core/mikaela && bash <<EOF
 git push --force gitlab main
@@ -807,6 +812,12 @@ out="$(sd 'git push -u gitlab feat/babysit-merge-main/mikaela-lin')"; assert_eq 
 out="$(sd 'git push gitlab main')"; assert_eq "$(decision "$out")" deny "guard: refspec 目標 main 擋"
 out="$(sd 'git push -u gitlab main')"; assert_eq "$(decision "$out")" deny "guard: -u 不讓 main 目標放行"
 out="$(sd 'git push gitlab HEAD:refs/heads/master')"; assert_eq "$(decision "$out")" deny "guard: HEAD:refs/heads/master 擋"
+out="$(sd 'git push gitlab main&&echo ok')"; assert_eq "$(decision "$out")" deny "guard: main 後面緊接 && 擋"
+out="$(sd 'git push gitlab main|cat')"; assert_eq "$(decision "$out")" deny "guard: main 後面緊接 | 擋"
+out="$(sd 'git push --delete gitlab main')"; assert_eq "$(decision "$out")" deny "guard: --delete main 擋"
+out="$(sd 'git push gitlab \
+  HEAD:main')"; assert_eq "$(decision "$out")" deny "guard: 續行後的 HEAD:main 擋"
+out="$(sd 'git push gitlab main:feat/x')"; assert_eq "$(decision "$out")" allow "guard: 目標是別的遠端分支不擋"
 # 三種容器（grill D2）：提到 push main、claude 不擋；真的署名寫在 heredoc 餵給 commit 的訊息裡仍擋
 out="$(sd 'git commit -m "docs: git push origin main 與 git add .env 的說明"')"; assert_eq "$(decision "$out")" allow "guard: commit 訊息提到 push main / add .env"
 out="$(sd 'opsx answer s g1 -- "git push origin main，Co-Authored-By: Claude 都只是文字"')"; assert_eq "$(decision "$out")" allow "guard: answer 答案文字提到 push main 與署名字樣"

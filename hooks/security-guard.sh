@@ -28,8 +28,8 @@ if echo "$SKELETON" | grep -qE '(^|\s|&&|\|\||;)git\s+push(\s|$)'; then
     deny "Do not push directly to main/master. Create a feature branch and open a PR."
   fi
   # 同一段 push 內，refspec 目標是 main / master 才算；分支名只含 main 片段、push 以外的 main 字樣不算（hooks/opsx-grant-gate.sh 同一條）
-  push_main='git\s+push\b[^;&|]*[[:space:]:+"'"'"'](refs/heads/)?(main|master)([[:space:]"'"'"';)]|$)'
-  if echo "$COMMAND" | grep -qE "$push_main"; then
+  push_main='git\s+push\b[^;&|]*[[:space:]:+"'"'"'](refs/heads/)?(main|master)([^A-Za-z0-9._/:-]|$)'
+  if echo "$COMMAND" | tr '\n' ' ' | grep -qE "$push_main"; then
     deny "Do not push directly to main/master. Create a feature branch and open a PR."
   fi
   # Block force push
