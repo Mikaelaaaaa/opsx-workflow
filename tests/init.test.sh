@@ -227,7 +227,8 @@ assert_no_file "$FX/cc4/settings.json.opsx-bak"
 
 # --- init --check：比對機器 / repo 的設定與標準設定，只讀 ---
 cd "$FX"
-outc="$(opsx init --check 2>&1)"; assert_eq "$?" 0 "裝完的機器 --check 要過：$outc"
+PYH="$FX/pyhome"; mkdir -p "$PYH"   # --check 會看 $HOME/.pyenv；不讓真機器的鎖檔影響結果
+outc="$(HOME="$PYH" opsx init --check 2>&1)"; assert_eq "$?" 0 "裝完的機器 --check 要過：$outc"
 case "$outc" in *一致*) ;; *) fail "一致時要說一致：$outc" ;; esac
 mkdir -p "$FX/cc5"; printf '{"theme":"dark"}' > "$FX/cc5/settings.json"
 before="$(cat "$FX/cc5/settings.json")"
@@ -244,9 +245,19 @@ outc="$(CLAUDE_CONFIG_DIR="$FX/cc6" opsx init --check 2>&1)"; rc=$?
 assert_eq "$rc" 1 "repo 沒登記時 --check 要失敗：$outc"
 case "$outc" in *"$R"*) ;; *) fail "要印缺的 repo 路徑：$outc" ;; esac
 CLAUDE_CONFIG_DIR="$FX/cc6" opsx init >/dev/null 2>&1 || fail "init in cc6"
-outc="$(CLAUDE_CONFIG_DIR="$FX/cc6" opsx init --check 2>&1)"; assert_eq "$?" 0 "登記後 --check 要過：$outc"
+outc="$(HOME="$PYH" CLAUDE_CONFIG_DIR="$FX/cc6" opsx init --check 2>&1)"; assert_eq "$?" 0 "登記後 --check 要過：$outc"
 case "$outc" in *還沒信任*) ;; *) fail "cc6 沒有信任紀錄，--check 要警告：$outc" ;; esac
 cd "$FX"
+# pyenv rehash 鎖檔殘留：超過 5 分鐘才報（rc 1、印路徑與 rehash）；剛建立的與不存在的都不提
+case "$outc" in *pyenv*) fail "沒有鎖檔時不該提 pyenv：$outc" ;; esac
+LOCK="$PYH/.pyenv/shims/.pyenv-shim"; mkdir -p "${LOCK%/*}"; : > "$LOCK"
+python3 -I -c 'import os,sys,time;t=time.time()-60;os.utime(sys.argv[1],(t,t))' "$LOCK"
+outc="$(HOME="$PYH" opsx init --check 2>&1)"; assert_eq "$?" 0 "1 分鐘內的鎖檔不算問題：$outc"
+case "$outc" in *pyenv*) fail "剛建立的鎖檔不該提：$outc" ;; esac
+python3 -I -c 'import os,sys,time;t=time.time()-600;os.utime(sys.argv[1],(t,t))' "$LOCK"
+outc="$(HOME="$PYH" opsx init --check 2>&1)"; assert_eq "$?" 1 "10 分鐘前的鎖檔要失敗：$outc"
+case "$outc" in *"$LOCK"*rehash*|*rehash*"$LOCK"*) ;; *) fail "要印鎖檔路徑與 rehash：$outc" ;; esac
+rm "$LOCK"
 
 # --- 與插件同名的 skill：--check 與 --global 警告，不改 rc、不動使用者的檔案 ---
 CCS="$FX/cc-skills"

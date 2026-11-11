@@ -120,7 +120,7 @@ collect_is_legacy() { # <change dir>
   return 0
 }
 
-# 進行中的主殼，每行印一項 `/<stage> <slug>`，slug 字母序。archive 目錄、舊卡、已拆的卡不列；子殼在 subs/ 底下，glob 碰不到。
+# 進行中的主殼，每行印一項 `/opsx-workflow:<stage> <slug>`，slug 字母序。archive 目錄、舊卡、已拆的卡不列；子殼在 subs/ 底下，glob 碰不到。
 active_changes() { # <top>
   local d slug stage
   for d in "$1"/openspec/changes/*/; do
@@ -128,6 +128,6 @@ active_changes() { # <top>
     [ -d "$d" ] && [ "$slug" != archive ] || continue
     if collect_is_legacy "$d"; then continue; fi
     stage="$(stage_name "$1" "$slug")"
-    if [ "$stage" != split ]; then printf '/%s %s\n' "$stage" "$slug"; fi
+    if [ "$stage" != split ]; then printf '/opsx-workflow:%s %s\n' "$stage" "$slug"; fi
   done
 }

@@ -40,7 +40,7 @@ assert_fixed 'Review never implements a task' "$GUARD"
 # --- 2.2 step 4：範圍內寫成 task 回 apply，範圍外開卡，驗不了的降 Consider ---
 assert_fixed '## R<N>. review 退回' "$STEP4"
 assert_fixed '待修（範圍內）' "$STEP4"
-assert_fixed '/apply <slug>' "$STEP4"
+assert_fixed '/opsx-workflow:apply <slug>' "$STEP4"
 assert_fixed 'opsx new' "$STEP4"
 assert_fixed '優先度 P2' "$STEP4"
 assert_fixed 'review changes no code' "$STEP4"

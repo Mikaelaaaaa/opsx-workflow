@@ -55,16 +55,16 @@ opsx_drive() {
         case "$mr" in
           ready) say "drive: $slug MR 五條件全綠，可以合併，停在這裡等人"; opsx_status_quiet "$top" "$slug" pr 5/5 "可以合併"; coordinate_kick "$slug"; return 0 ;;
           none)  say "drive: $slug report.md 有 MR 但 glab 讀不到，等 $poll 秒再看"; sleep "$poll" ;;
-          *)     say "drive: $slug MR 卡在 $mr → /babysit"; herdr_step "$slug" agent prompt "$slug" "/babysit $slug" --wait || return 0; sleep "$poll" ;;
+          *)     say "drive: $slug MR 卡在 $mr → /opsx-workflow:babysit"; herdr_step "$slug" agent prompt "$slug" "/opsx-workflow:babysit $slug" --wait || return 0; sleep "$poll" ;;
         esac ;;
       explore|grill|propose|apply|review|pr)
         if [ "$stage" = "$last" ] && [ "$sent" -ge 2 ]; then
-          write_stuck_gate "$d" "$stage" "$repo" "$slug"; say "drive: $slug 送了兩次 /$stage 階段都沒動，寫了 gate 等人"
+          write_stuck_gate "$d" "$stage" "$repo" "$slug"; say "drive: $slug 送了兩次 /opsx-workflow:$stage 階段都沒動，寫了 gate 等人"
           coordinate_kick "$slug"   # shell 附加寫的 gate 不經過 gate-timestamp hook
           continue
         fi
-        say "drive: $slug → /$stage"
-        herdr_step "$slug" agent prompt "$slug" "/$stage $slug" --wait || return 0
+        say "drive: $slug → /opsx-workflow:$stage"
+        herdr_step "$slug" agent prompt "$slug" "/opsx-workflow:$stage $slug" --wait || return 0
         [ "$HERDR_STEP_OK" = 1 ] || continue   # 沒送進去的不算一次
         if [ "$stage" = "$last" ]; then sent=$((sent+1)); else last="$stage"; sent=1; fi ;;
       *) die "drive: 不認得的階段 $stage" ;;
@@ -105,12 +105,12 @@ write_stuck_gate() { # <card dir> <stage> <repo> <slug>：gates.md 加一個 ope
   {
     printf '\n## drive-%s-%s\n' "$stage" "$n"
     printf 'type: decision\nstatus: open\n'
-    printf '問題: drive 卡在 /%s：連送兩次，卡的階段都沒動。agent 沒做完這一步，或做完了但沒寫出下一階段要的檔\n' "$stage"
+    printf '問題: drive 卡在 /opsx-workflow:%s：連送兩次，卡的階段都沒動。agent 沒做完這一步，或做完了但沒寫出下一階段要的檔\n' "$stage"
     # 選項會變成看板的回覆按鈕，按下去的字直接送給 agent，所以寫成 agent 照著做得到的話
-    printf '選項: 重做 /%s 一次，做不完就把卡在哪寫進 gates.md (Recommended) | 跳過這一步，在 decisions.tsv 寫下原因再往下走 | 停在這裡，把卡在哪寫進 gates.md 等人\n' "$stage"
+    printf '選項: 重做 /opsx-workflow:%s 一次，做不完就把卡在哪寫進 gates.md (Recommended) | 跳過這一步，在 decisions.tsv 寫下原因再往下走 | 停在這裡，把卡在哪寫進 gates.md 等人\n' "$stage"
     printf '建議: 先看 pane（板上開 pane）再回；要整張卡停掉用板上的「停止」\n'
     printf '證據: pane 最後 20 行：%s\n' "$tail_text"
-    printf '預設: drive 停在這裡等，不再送 /%s\n' "$stage"
+    printf '預設: drive 停在這裡等，不再送 /opsx-workflow:%s\n' "$stage"
   } >> "$d/gates.md"
 }
 
