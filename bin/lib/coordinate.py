@@ -288,6 +288,9 @@ class Round:
             pr = pr_of(prs, k.split("/", 1)[1])
             if pr is None or pr.get("status") != "merged":
                 continue
+            # 上一次關同名 session 時刪過的成員分支，條目還留著
+            if self.run(["git", "-C", top, "rev-parse", "--verify", "--quiet", "refs/heads/" + v["branch"]])[0] != 0:
+                continue
             rc, _, err = self.act(["git", "-C", top, "branch", "-D", v["branch"]])
             if rc != 0:
                 self.log("?? %s 分支 %s 刪不掉，session 條目留給人：%s" % (session_key, v["branch"], err[:200]))
@@ -601,14 +604,36 @@ class Round:
                 if not AGENT_NAME.match(name):
                     self.log("-- %s 的 feature %s 不是合法的 agent 名，跳過" % (repo, name))
                     continue
-                if n >= MAX_DISPATCH:
+                try:
+                    plan = chain.feature_plan(top, name)
+                except SystemExit as e:
+                    self.log("-- %s 的 feature %s 不開 session：%s" % (repo, name, e))
+                    continue
+                # 單卡派著的卡（上線前派的、人手動派的）佔著它的分支，dispatch --feature 會在 worktree add 撞上
+                single = [p[0] for p in plan if self.live_single(repo, p[0], name)]
+                if single:
+                    self.log("-- %s 的 feature %s 不開 session：%s 已經單卡派著" % (repo, name, "、".join(single)))
+                    continue
+                levels = [(p[0], self.level(top, p[0])) for p in plan]
+                held = ["%s %s" % (s, got["error"] if "error" in got else got["reason"]) for s, got in levels if "error" in got or got["level"] == "P2"]
+                if len(held) == len(levels):
+                    self.log("-- %s 的 feature %s 能開工的卡都是 P2 或等級算不出來，不自動開 session：%s" % (repo, name, "；".join(held)))
+                    continue
+                p0 = any("level" in got and got["level"] == "P0" for _, got in levels)
+                if not p0 and n >= MAX_DISPATCH:
                     self.log("-- 這輪派滿 %d 個，feature %s 下輪" % (MAX_DISPATCH, name))
                     continue
                 rc, _, err = self.act(["opsx", "dispatch", "--feature", name, "--agent", "claude", "--mode", "autopilot", "--repo", top])
                 if rc != 0:
                     self.log("?? %s 的 feature %s 開不了 session：%s" % (repo, name, err[:200]))
                     continue
-                n += 1
+                if not p0:
+                    n += 1
+
+    def live_single(self, repo, slug, feature):
+        """<slug> 有沒停的條目，而且不是這個 feature 的 session 成員。"""
+        entry = self.dispatch_file.get("%s/%s" % (repo, slug))
+        return bool(entry) and entry.get("mode") != "stopped" and entry.get("via") != "@" + feature
 
 
 def mark_stopped(d, key, at):

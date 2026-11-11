@@ -692,6 +692,59 @@ round || fail "rc: $(cat "$FX/out")"
 assert_eq "$(count '^opsx dispatch --feature g ')" 1 "不活的 session 要重開：$(cat "$OPSX_FAKE_LOG")"
 rm -f "$MEMO"; printf '{}' > "$DISP"
 
+# m3 已經單卡派著（條目活著、沒有 via @g）、沒有 demo/@g：不開 session，log 記原因
+printf '{"demo/m3":{"mode":"autopilot","agent":"claude","pane":"w1:p3","drive_pid":null,"branch":"feat/m3/u"}}' > "$DISP"
+round || fail "rc: $(cat "$FX/out")"
+assert_not_grep "^opsx dispatch --feature g" "$OPSX_FAKE_LOG"
+grep '已經單卡派' "$LOG" | grep 'feature g' | grep -q 'm3' || fail "要記 m3 已經單卡派：$(cat "$LOG")"
+rm -f "$MEMO"; printf '{}' > "$DISP"
+
+# feature g 能開工的卡全是 P2：不開 session，log 記 P2
+printf -- '---\npriority: P2\npriority_reason: 先不做\n---\n' > "$R/openspec/changes/m3/inbox.md"
+round || fail "rc: $(cat "$FX/out")"
+assert_not_grep "^opsx dispatch --feature g" "$OPSX_FAKE_LOG"
+grep 'feature g' "$LOG" | grep -q 'P2' || fail "要記 feature g 的卡是 P2：$(cat "$LOG")"
+rm -f "$MEMO"
+
+# 開 session 佔每輪額度、排在單卡派之後：六張單卡派滿，feature g（P1）下輪
+mkcard n1 n2 n3 n4 n5 n6 m6
+for s in n1 n2 n3 n4 n5 n6; do incident "$s" workaround_exists "手動重跑可過"; done
+SIX='{"slug":"n1"},{"slug":"n2"},{"slug":"n3"},{"slug":"n4"},{"slug":"n5"},{"slug":"n6"}'
+rm -f "$R/openspec/changes/m3/inbox.md"
+cards "[$SIX,{\"slug\":\"m3\"}]"
+round || fail "rc: $(cat "$FX/out")"
+assert_eq "$(count '^opsx dispatch n')" 6 "六張單卡先派：$(cat "$OPSX_FAKE_LOG")"
+assert_not_grep "^opsx dispatch --feature g" "$OPSX_FAKE_LOG"
+grep '派滿' "$LOG" | grep -q 'feature g' || fail "feature g 要記派滿：$(cat "$LOG")"
+rm -f "$MEMO"
+
+# feature g 的卡是 P0：單卡派滿也照開 session
+incident m3 security "tests/auth.test.sh 第 3 案：未登入可讀 /admin"
+round || fail "rc: $(cat "$FX/out")"
+assert_eq "$(count '^opsx dispatch --feature g ')" 1 "P0 不佔每輪上限：$(cat "$OPSX_FAKE_LOG")"
+rm -f "$MEMO" "$R/openspec/changes/m3/inbox.md"
+
+# 開失敗不佔額度：五張單卡、兩個 feature 都 ready、每個派工都失敗，第二個 feature 照樣去開
+auto_wp merged
+cat >> "$R/openspec/workplan.yaml" <<'EOF'
+  - name: g2
+    depends-on: [m1]
+    prs:
+      - name: m6
+        branch: feat/m6/u
+        status: pending
+        depends-on: []
+        changes:
+          - name: t6
+            status: pending
+EOF
+cards '[{"slug":"n1"},{"slug":"n2"},{"slug":"n3"},{"slug":"n4"},{"slug":"n5"},{"slug":"m3"},{"slug":"m6"}]'
+OPSX_TEST_FAIL_dispatch="dispatch: boom" round || fail "rc: $(cat "$FX/out")"
+assert_eq "$(count '^opsx dispatch --feature')" 2 "第一個 session 開失敗不佔額度：$(cat "$OPSX_FAKE_LOG")"
+auto_wp merged
+rm -rf "$R/openspec/changes/n1" "$R/openspec/changes/n2" "$R/openspec/changes/n3" "$R/openspec/changes/n4" "$R/openspec/changes/n5" "$R/openspec/changes/n6" "$R/openspec/changes/m6"
+rm -f "$MEMO"; printf '{}' > "$DISP"
+
 # 根 feature r（沒有 depends-on）：r1、r2 照單卡派，不開 session
 cat > "$R/openspec/workplan.yaml" <<'EOF'
 features:
@@ -1127,6 +1180,36 @@ bash "$OPSX_ROOT/bin/opsx" dispatch --feature g --agent claude --mode autopilot 
 assert_not_grep '已經派出去' "$FX/dispatch-out"
 assert_not_grep 'agent_name_taken' "$FX/dispatch-out"
 assert_grep '^agent start g ' "$OPSX_FAKE_LOG"
+
+# 同名 feature 第二次關 session：上一輪的成員 m3 條目還在、分支已刪（假 git 對 refs/heads/feat/m3/u 回錯），不對它 branch -D，照樣關完
+cat > "$R/openspec/workplan.yaml" <<'EOF'
+features:
+  - name: g
+    depends-on: []
+    prs:
+      - name: m3
+        branch: feat/m3/u
+        status: merged
+        depends-on: []
+        changes:
+          - name: t3
+            status: done
+      - name: m5
+        branch: feat/m5/u
+        status: pending
+        depends-on: [m3]
+        changes:
+          - name: t5
+            status: pending
+EOF
+printf '{"demo/@g":{"workspace":"demo","workspace_id":"w1","tab":"w1:t9","pane":"w1:p9","agent":"claude","model":"claude-opus-5-5","mode":"autopilot","worktree":"%s","started_at":"2026-11-08T10:00:00+08:00","drive_pid":null},"demo/m3":{"mode":"stopped","agent":"claude","pane":"w1:p9","herdr_name":"g","via":"@g","feature":"g","drive_pid":null,"branch":"feat/m3/u"},"demo/m5":{"mode":"autopilot","agent":"claude","pane":"w1:p9","herdr_name":"g","via":"@g","feature":"g","drive_pid":null,"branch":"feat/m5/u"}}' "$R/.claude/worktrees/g" > "$DISP"
+mkdir -p "$R/.claude/worktrees/g"
+cards "[$(merged m5 2026-11-08T12:30:00Z "$GM" '"idle"')]"
+OPSX_TEST_GIT_FAIL=refs/heads/feat/m3/u round || fail "rc: $(cat "$FX/out")"
+assert_not_grep 'branch -D feat/m3/u' "$OPSX_FAKE_LOG"
+assert_grep "^git -C $R branch -D feat/m5/u\$" "$OPSX_FAKE_LOG"
+assert_eq "$(jq -r '."demo/@g"' "$DISP")" null "第二次關 session 也拿掉條目：$(cat "$LOG")"
+cards "[$(merged m4 2026-11-07T12:30:00Z "$GM" '"idle"')]"
 
 # worktree 移不掉時留給人
 wake_wp merged; close_disp
