@@ -21,9 +21,9 @@ The change has questions that explore could not close. Close them, cheaply, in t
 ## Steps
 
 1. Read explore.md's `## 待決`. Empty: reply「<slug> 沒有待決，直接 /propose」and stop.
-2. Ask one question at a time with AskUserQuestion, 2 to 4 options, the recommended one first, in the words `CONTEXT.md` uses (`references/CONTEXT-FORMAT.md`).
-3. An item the code or one run can answer goes back to explore; do not ask it and do not settle it yourself.
-4. When every item is answered, write D1 to Dn into `grill.md` (decision, reason, rejected alternative).
+2. Ask one question at a time with AskUserQuestion, 2 to 4 options, the recommended one first, in the words `CONTEXT.md` uses (`references/CONTEXT-FORMAT.md`). In autopilot do not call AskUserQuestion; follow `## In autopilot`.
+3. An item the code or one run can answer is yours: look it up or run it, write the answer into explore.md's `## 已知` and remove it from 待決. Only an item nobody but the user can answer is asked.
+4. When every item is answered, write D1 to Dn into `grill.md` (decision, reason, rejected alternative). In autopilot with a gate still open, write the Ds you have.
 5. Before the summary goes out, `Read ../technical-writing/SKILL.md` and apply it, then `Read ../unslop/SKILL.md` and apply that.
 
 ## Where you are

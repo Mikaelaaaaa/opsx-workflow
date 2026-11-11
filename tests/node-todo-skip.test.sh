@@ -18,4 +18,8 @@ awk '/^```/{f=!f} !f && /^## /{on=($0=="## Steps");next} on' "$GRILL" > "$FX/gri
 assert_eq "$(grep -cE '^[0-9]+\. ' "$FX/grill-steps")" 5 "grill ## Steps 要照 §8.3 有五個編號步驟"
 for k in '../technical-writing/SKILL.md' '../unslop/SKILL.md'; do assert_grep "$k" "$FX/grill-steps"; done
 grep -F 'TodoWrite' "$GRILL" | grep -qF '## Steps' || fail "grill 的 TodoWrite 那句沒有指向 ## Steps"
+# ## Steps 要和同檔正文一致：bucket 1、2 自己查自己跑、不退回 explore；autopilot 不呼叫 AskUserQuestion
+assert_grep 'remove it from 待決' "$FX/grill-steps"
+assert_grep 'autopilot' "$FX/grill-steps"
+assert_not_grep 'goes back to explore' "$FX/grill-steps"
 echo ok

@@ -43,6 +43,11 @@ done <<< "$NODES"
 awk '/^### /{on=($0 ~ /^### 3b\./);next} /^## /{on=0} on' "$OPSX_ROOT/skills/archive/SKILL.md" > "$FX/archive-3b"
 [ -s "$FX/archive-3b" ] || fail "archive 沒有 3b 一節"
 assert_grep 'not wait for that approval' "$FX/archive-3b"
+# 開卡指令只能用 opsx new 認得的形狀（bin/lib/new.sh 只收 --repo、--attach、--），而且 reflect 步驟 5 的等批准在這裡不適用
+assert_grep 'opsx new -- ' "$FX/archive-3b"
+assert_not_grep '--kind-of-work' "$FX/archive-3b"
+assert_grep 'step 5' "$FX/archive-3b"
+assert_not_grep 'no one at the terminal' "$FX/archive-3b"
 
 # playbooks 與 architect / teach 點名的 skill 要寫成相對於該檔的路徑，且路徑解析得到檔案
 # 驗收：「playbook 的 skill 都有路徑」
