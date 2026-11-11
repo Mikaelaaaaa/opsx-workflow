@@ -236,6 +236,37 @@ out="$(PATH="$FX/sleepbin:$PATH" OPSX_DRIVE_POLL=7 OPSX_DRIVE_MAX=2 opsx drive r
 assert_grep '^sleep 14$' "$OPSX_FAKE_LOG"
 if [ -f "$C/gates.md" ]; then assert_not_grep '^## drive-' "$C/gates.md"; fi
 unset OPSX_TEST_PANE_TEXT
+# --- 送出後階段沒動，但 pane 顯示背景工作或 subagent 在跑 → 不寫 gate、不重送、睡 poll 秒；輸入框與一般輸出照樣寫 gate ---
+for t in "1 shell / 1 monitor still running" "general-purpose 8m"; do
+  reset_apply; printf '{"Agentory-CS/retry-backoff":{"mode":"drive","pane":"p42","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"
+  export OPSX_TEST_ON_PROMPT="$FX/noop.sh" OPSX_TEST_PANE_TEXT="$t"
+  out="$(PATH="$FX/sleepbin:$PATH" OPSX_DRIVE_POLL=7 OPSX_DRIVE_MAX=1 opsx drive retry-backoff 2>&1)"; assert_eq "$?" 0 "drive 背景工作「${t}」: $out"
+  assert_eq "$(grep -c '^agent prompt' "$OPSX_FAKE_LOG")" 1 "「${t}」只送一次: $(cat "$OPSX_FAKE_LOG")"
+  assert_grep '^sleep 7$' "$OPSX_FAKE_LOG"
+  if [ -f "$C/gates.md" ]; then assert_not_grep '^## drive-' "$C/gates.md"; fi
+done
+for t in "❯ " "● Bash(ls) Running…" "Plan 3 steps"; do
+  reset_apply; printf '{"Agentory-CS/retry-backoff":{"mode":"drive","pane":"p42","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"
+  export OPSX_TEST_ON_PROMPT="$FX/noop.sh" OPSX_TEST_PANE_TEXT="$t"
+  out="$(PATH="$FX/sleepbin:$PATH" OPSX_DRIVE_POLL=7 OPSX_DRIVE_MAX=1 opsx drive retry-backoff 2>&1)"; assert_eq "$?" 0 "drive 沒有背景工作「${t}」: $out"
+  assert_grep '^## drive-apply-1$' "$C/gates.md"
+done
+# 背景工作等過一輪之後仍在跑：不重送階段指令（間隔下限被 --wait 加 sleep 吃掉，只靠它擋不住）
+reset_apply; printf '{"Agentory-CS/retry-backoff":{"mode":"drive","pane":"p42","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"
+export OPSX_TEST_ON_PROMPT="$FX/noop.sh" OPSX_TEST_PANE_TEXT="1 shell / 1 monitor still running"
+out="$(PATH="$FX/sleepbin:$PATH" OPSX_DRIVE_POLL=7 OPSX_DRIVE_MAX=2 opsx drive retry-backoff 2>&1)"; assert_eq "$?" 0 "drive 背景工作兩輪: $out"
+assert_eq "$(grep -c '^agent prompt' "$OPSX_FAKE_LOG")" 1 "背景工作還在跑時第二輪不重送: $(cat "$OPSX_FAKE_LOG")"
+assert_eq "$(grep -c '^sleep 7$' "$OPSX_FAKE_LOG")" 2 "兩輪各等一次: $(cat "$OPSX_FAKE_LOG")"
+if [ -f "$C/gates.md" ]; then assert_not_grep '^## drive-' "$C/gates.md"; fi
+# 背景工作結束（第二次讀 pane 只剩輸入框）而指紋仍沒動：寫 gate，不重送
+reset_apply; printf '{"Agentory-CS/retry-backoff":{"mode":"drive","pane":"p42","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"
+printf '1 shell / 1 monitor still running\n' > "$FX/pane_once"
+export OPSX_TEST_PANE_TEXT="❯ " OPSX_TEST_PANE_ONCE="$FX/pane_once"
+out="$(PATH="$FX/sleepbin:$PATH" OPSX_DRIVE_POLL=7 OPSX_DRIVE_MAX=2 opsx drive retry-backoff 2>&1)"; assert_eq "$?" 0 "drive 背景工作結束: $out"
+assert_eq "$(grep -c '^agent prompt' "$OPSX_FAKE_LOG")" 1 "背景工作結束也不重送: $(cat "$OPSX_FAKE_LOG")"
+assert_grep '^## drive-apply-1$' "$C/gates.md"
+unset OPSX_TEST_PANE_ONCE
+unset OPSX_TEST_PANE_TEXT
 # --- 同階段相鄰兩次送出之間至少隔 poll 秒（扣掉已經過的時間） ---
 reset_apply; printf '## 1\n\n- [ ] 1.1 a\n- [ ] 1.2 b\n- [ ] 1.3 c\n' > "$C/tasks.md"
 cat > "$FX/tick.sh" <<EOF

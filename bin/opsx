@@ -26,6 +26,7 @@ opsx <command> [args]
   next                                 feature session 的主 change 等合併時，印同 feature 下一個主 change 的 /<stage> <主>，沒有印 none
   stack <主> <子> <sha>               在 PR 分支上 cherry-pick 子 change 的 commit、勾主殼 tasks.md；衝突 abort 退出 3
   drive <slug> [--repo]                「開到可合併」迴圈（dispatch --mode autopilot 會自己跑；手動跑也會登記 pid）
+  lead [<repo 路徑>]                   在 herdr pane 裡開協調者 session（新 tab、herdr 名 opsx-coordinator、第一句 /opsx-workflow:lead）；已在跑就說它在哪
   coordinate [--dry|--kick]            中控跑一輪：收尾已合併的卡、答 gate、重派死掉的卡、派待指派的卡（不合併；launchd 每 5 分鐘）；--kick 放背景跑一輪、立刻回傳
   late <slug> [--repo] [--open-gate]   已合併的卡，remote 分支比合併當下的 head 多幾個 commit：none | acked | late <N> …（退出 1）| 查不出來（退出 2）；--open-gate 開 late-<sha> gate
   stop <slug>|@<feature> [--repo]      停：kill drive、關 pane、dispatch.json 標 stopped（@<feature> 停 session，成員條目不動）

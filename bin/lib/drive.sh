@@ -21,7 +21,7 @@ opsx_drive() {
   [ -d "$d" ] || die "drive: 沒有這張卡：$d"
   drive_register "$repo/$slug" || exit 2
   trap "drive_unregister $(printf '%q' "$repo/$slug")" EXIT   # 展開在設 trap 時：EXIT 跑時 local 已經沒了
-  local max="${OPSX_DRIVE_MAX:-200}" poll="${OPSX_DRIVE_POLL:-300}" i=0 settled=0 watch="" watch_fp="" last_stage="" last_at=0 backoff=0
+  local max="${OPSX_DRIVE_MAX:-200}" poll="${OPSX_DRIVE_POLL:-300}" i=0 settled=0 watch="" watch_fp="" last_stage="" last_at=0 backoff=0 bg_fp=""
 
   while [ "$i" -lt "$max" ]; do
     i=$((i+1))
@@ -78,6 +78,16 @@ opsx_drive() {
           *)     say "drive: $slug MR 卡在 $mr → /opsx-workflow:babysit"; herdr_step "$slug" agent prompt "$slug" "/opsx-workflow:babysit $slug" --wait || return 0; sleep "$poll" ;;
         esac ;;
       explore|grill|propose|apply|review|pr)
+        # 上一輪送出後 pane 有背景工作：不重送。指紋動了就照常往下；還在跑就再等；不跑了指紋仍沒動才算卡住
+        if [ -n "$bg_fp" ]; then
+          if [ "$(stage_fingerprint "$top" "$slug")" != "$bg_fp" ]; then bg_fp=""
+          elif [ "$(pane_state "$repo" "$slug")" = busy ]; then
+            say "drive: $slug 的 pane 還有背景工作或 subagent 在跑，不重送 /opsx-workflow:${stage}，等 $poll 秒"; sleep "$poll"; continue
+          else
+            bg_fp=""; write_stuck_gate "$d" "$stage" "$repo" "$slug"; say "drive: $slug 背景工作結束後階段還是沒動，寫了 gate 等人"
+            coordinate_kick "$slug"; continue
+          fi
+        fi
         # 同階段相鄰兩次送出之間至少隔 poll 秒；階段前進的那一輪不受限
         local gap
         if [ "$stage" = "$last_stage" ]; then gap=$((poll - ($(date +%s) - last_at))); [ "$gap" -le 0 ] || sleep "$gap"; fi
@@ -89,12 +99,16 @@ opsx_drive() {
         [ "$HERDR_STEP_OK" = 1 ] || continue   # 沒送進去的不驗、不算一次送出（herdr_step 已經退避過）
         if [ "$(stage_fingerprint "$top" "$slug")" != "$before" ]; then backoff=0
         else
-          case "$(pane_tail "$repo" "$slug")" in
-            *rate_limit*|*"Usage limit reached"*|*"HTTP 429"*|*"API Error"*)
+          case "$(pane_state "$repo" "$slug")" in
+            error)
               # shortcut: 沒有 usage-limit-pause 的重置時間，從 poll 秒起每次翻倍、上限 3600 秒；有那張卡之後改等重置時間
               if [ "$backoff" -eq 0 ]; then backoff="$poll"; else backoff=$((backoff * 2 > 3600 ? 3600 : backoff * 2)); fi
               say "drive: $slug 送了 /opsx-workflow:$stage 之後 agent 立刻失敗（pane 尾巴有 API 錯誤），不重送、不寫 gate，退避 $backoff 秒"
               sleep "$backoff" ;;
+            busy)
+              bg_fp="$before"
+              say "drive: $slug 送了 /opsx-workflow:$stage 之後階段沒動，但 pane 有背景工作或 subagent 在跑，不寫 gate、不重送，等 $poll 秒"
+              sleep "$poll" ;;
             *)
               write_stuck_gate "$d" "$stage" "$repo" "$slug"; say "drive: $slug 送了 /opsx-workflow:$stage 之後階段沒動，寫了 gate 等人"
               coordinate_kick "$slug" ;;   # shell 附加寫的 gate 不經過 gate-timestamp hook
@@ -133,6 +147,14 @@ herdr_step() { # <slug> <herdr args…>
 
 pane_tail() { # <repo> <slug>：pane 最後 20 行壓成一行；pane 讀不到印空
   herdr pane read "$(dispatch_pane "$1" "$2")" 2>/dev/null | tail -20 | tr '\n' ' ' || true
+}
+pane_state() { # <repo> <slug>：pane 尾巴是 API 錯誤（error）、有背景工作或 subagent 在跑（busy），或都不是（idle）
+  # shortcut: busy 只認 inbox 證據裡見過的兩種畫面，沒在真 pane 上校正過，漏掉的樣式會退回開 gate，有需要再補
+  case "$(pane_tail "$1" "$2")" in
+    *rate_limit*|*"Usage limit reached"*|*"HTTP 429"*|*"API Error"*) echo error ;;
+    *"still running"*|*"general-purpose "[0-9]*) echo busy ;;
+    *) echo idle ;;
+  esac
 }
 drive_gate_open() { # <card dir>：第一個 open 的 drive-<stage>-<n> 或 Stop hook 的「卡在接 /<stage>[ #<n>]」gate 的標題，沒有印空
   awk '/^## /{id = substr($0, 4)} /^status:[ \t]*open[ \t]*$/ && id ~ /^(drive-[a-z]+-[0-9]+|卡在接 \/[a-z]+( #[0-9]+)?)$/ {print id; exit}' "$1/gates.md"

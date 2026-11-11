@@ -22,7 +22,7 @@ Open a todolist with one entry per phase before starting.
 
 ## Phase A: Ground the problem
 
-Build a real mental model of every system the new code touches. Run the **how** skill over the relevant subsystems. Naming a file isn't grounding. Produce the architectural explanation `how` prescribes. If the design redefines ownership or layering, also run the **why** skill on the existing shape so the rationale becomes a constraint, not a guess.
+Build a real mental model of every system the new code touches. `Read ../how/SKILL.md` and follow it over the relevant subsystems. Naming a file isn't grounding. Produce the architectural explanation `how` prescribes. If the design redefines ownership or layering, also `Read ../why/SKILL.md` and follow it on the existing shape so the rationale becomes a constraint, not a guess.
 
 Skip Phase A only when the work is genuinely greenfield with no surrounding system to integrate.
 
@@ -44,7 +44,7 @@ Default: proceed directly to implementation with the chosen design. No human che
 
 Opt in to a checkpoint when the invoker explicitly asks: "/architect with checkpoint," "stop and show me before implementing," or similar. Then surface the design and pause for sign-off.
 
-The sketch can ship as its own commit either way, as the "scaffold first" mode of the **foundational-thinking** principle skill. Planned and scoped breakage during fill-in is fine, per the **outcome-oriented-execution** principle skill. For adversarial pressure on the design before implementing, run the **interrogate** skill on the sketch.
+The sketch can ship as its own commit either way, as the "scaffold first" mode of the **foundational-thinking** principle skill. Planned and scoped breakage during fill-in is fine, per the **outcome-oriented-execution** principle skill. For adversarial pressure on the design before implementing, `Read ../interrogate/SKILL.md` and follow it on the sketch.
 
 If the human pushes back on the shape (in a checkpoint or after the fact), treat that as Phase A evidence. Re-ground and re-run Phase B before writing more code.
 

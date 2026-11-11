@@ -49,7 +49,7 @@ assert_not_grep '^workspace create' "$OPSX_FAKE_LOG"
 S="$OPSX_STATE_DIR/settings/Agentory-CS-retry-backoff-autopilot.json"; assert_file "$S"
 python3 -I -c 'import json,sys;d=json.load(open(sys.argv[1]))["permissions"];assert "Bash(git push:*)" in d["allow"],d;assert "Bash(glab mr merge:*)" in d["allow"] and "Bash(gh pr merge:*)" in d["allow"],d;assert not any("merge" in x for x in d["deny"]),d;assert not any("glab mr create" in a for a in d["allow"]),d;assert "Bash(glab issue note:*)" not in d["allow"] and "Bash(gh issue comment:*)" not in d["allow"],d' "$S"
 # dontAsk 下不在 allow 的指令直接被拒：常用唯讀與測試指令要在 allow 裡，不然 agent 連跑測試都不行
-python3 -I -c 'import json,sys;a=json.load(open(sys.argv[1]))["permissions"]["allow"];miss=[x for x in ["Bash(jq:*)","Bash(head:*)","Bash(tail:*)","Bash(wc:*)","Bash(sed -n:*)","Bash(bash tests/:*)","Bash(herdr agent:*)","Bash(glab mr view:*)","Bash(glab ci:*)","Bash(gh pr view:*)","Bash(git merge-base:*)","Bash(git remote:*)"] if x not in a];assert not miss,miss' "$S" || fail "allow 少了常用指令"
+python3 -I -c 'import json,sys;a=json.load(open(sys.argv[1]))["permissions"]["allow"];miss=[x for x in ["Bash(jq:*)","Bash(head:*)","Bash(tail:*)","Bash(wc:*)","Bash(sed -n:*)","Bash(bash tests/:*)","Bash(herdr agent:*)","Bash(glab mr view:*)","Bash(glab ci:*)","Bash(gh pr view:*)","Bash(git merge-base:*)","Bash(git merge:*)","Bash(git remote:*)"] if x not in a];assert not miss,miss' "$S" || fail "allow 少了常用指令"
 # 重啟 / resume 後旗標不在，可寫目錄還要由 settings 供應
 python3 -I -c 'import json,sys;d=json.load(open(sys.argv[1]))["permissions"];assert d["additionalDirectories"]==[sys.argv[2],sys.argv[3]],d' "$S" "$R/openspec" "$OPSX_STATE_DIR" || fail "autopilot settings 缺 additionalDirectories"
 # dispatch.json
@@ -463,4 +463,24 @@ opsx stop note-card >/dev/null 2>&1 || fail "stop note-card"
 opsx dispatch note-card --agent claude --mode interactive >/dev/null 2>&1 || fail "不帶 --note 重派"
 cmp -s "$N/inbox.md" "$FX/note-before.md" || fail "不帶 --note 不該動 inbox.md"
 opsx --help 2>&1 | grep -q '^  dispatch .*--note' || fail "opsx --help 的 dispatch 行要列 --note"
+
+# --- 分支被別的 worktree 佔著（held-branch-guard/worktree-held-check）：不 worktree add、不開 tab、不寫條目，說出佔著的 worktree 與 pane ---
+cd "$R"
+mkdir -p "$R/openspec/changes/held"; printf 'schema: opsx\nkind: dev\n' > "$R/openspec/changes/held/.openspec.yaml"
+git -C "$R" worktree add -q "$R/.claude/worktrees/c" -b feat/held/mikaela
+# 條目記的路徑不是 realpath（$FX 底下的 symlink），比對前要兩邊都 resolve
+ln -s "$R" "$FX/R-link"
+python3 -I -c 'import json,sys;p=sys.argv[1];d=json.load(open(p));d["Agentory-CS/c"]={"mode":"autopilot","pane":"p1","worktree":sys.argv[2]};json.dump(d,open(p,"w"))' "$OPSX_STATE_DIR/dispatch.json" "$FX/R-link/.claude/worktrees/c"
+: > "$OPSX_FAKE_LOG"
+out="$(opsx dispatch held --agent claude --mode autopilot 2>&1)"; [ $? -ne 0 ] || fail "分支被佔要失敗: $out"
+echo "$out" | grep -qF '.claude/worktrees/c' || fail "要說佔著的 worktree: $out"
+echo "$out" | grep -qF 'Agentory-CS/c' && echo "$out" | grep -qF 'p1' || fail "要說對到的條目與 pane: $out"
+[ ! -d "$R/.claude/worktrees/held" ] || fail "被佔時不能開 worktree"
+assert_eq "$(cat "$OPSX_FAKE_LOG")" "" "被佔時不碰 herdr"
+assert_eq "$(jq -r 'has("Agentory-CS/held") | tostring' "$OPSX_STATE_DIR/dispatch.json")" false "被佔時不寫條目"
+# 對不到條目：照樣擋，只寫 worktree 路徑
+python3 -I -c 'import json,sys;p=sys.argv[1];d=json.load(open(p));del d["Agentory-CS/c"];json.dump(d,open(p,"w"))' "$OPSX_STATE_DIR/dispatch.json"
+out="$(opsx dispatch held --agent claude --mode autopilot 2>&1)"; [ $? -ne 0 ] || fail "分支被佔、沒條目也要失敗: $out"
+echo "$out" | grep -qF '.claude/worktrees/c' || fail "要說佔著的 worktree: $out"
+[ ! -d "$R/.claude/worktrees/held" ] || fail "被佔時不能開 worktree"
 echo ok

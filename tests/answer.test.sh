@@ -97,10 +97,10 @@ assert_eq "$(jq -r '."Agentory-AI/x" | has("once")' "$OPSX_STATE_DIR/dispatch.js
 gates; rm -rf "$PD"; mkdir -p "$PD"; chmod 500 "$PD"; : > "$OPSX_FAKE_LOG"
 cp "$C/gates.md" "$FX/before.md"; cp "$C/decisions.tsv" "$FX/before.tsv"; cp "$OPSX_STATE_DIR/dispatch.json" "$FX/dispatch.before"
 for g in card this; do
-  out="$(opsx answer x --gate g1 --grant "$g" "允許" 2>&1)"; [ $? -ne 0 ] || fail "$g：受保護位置唯讀要非零退出"
-  echo "$out" | grep -qF "$PD" || fail "$g：訊息要含受保護路徑: $out"
-  cmp -s "$C/gates.md" "$FX/before.md" || fail "$g：gates.md 不該變"; cmp -s "$C/decisions.tsv" "$FX/before.tsv" || fail "$g：decisions 不該變"
-  cmp -s "$OPSX_STATE_DIR/dispatch.json" "$FX/dispatch.before" || fail "$g：dispatch.json 不該變"
+  out="$(opsx answer x --gate g1 --grant "$g" "允許" 2>&1)"; [ $? -ne 0 ] || fail "${g}：受保護位置唯讀要非零退出"
+  echo "$out" | grep -qF "$PD" || fail "${g}：訊息要含受保護路徑: $out"
+  cmp -s "$C/gates.md" "$FX/before.md" || fail "${g}：gates.md 不該變"; cmp -s "$C/decisions.tsv" "$FX/before.tsv" || fail "${g}：decisions 不該變"
+  cmp -s "$OPSX_STATE_DIR/dispatch.json" "$FX/dispatch.before" || fail "${g}：dispatch.json 不該變"
 done
 assert_eq "$(cat "$OPSX_FAKE_LOG")" "" "寫不進去不該送 prompt"
 chmod 700 "$PD"

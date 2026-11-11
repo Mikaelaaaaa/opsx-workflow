@@ -15,7 +15,7 @@
 
 ## 步驟
 
-<!-- 九步各一行：做了寫 已知 哪一塊有產出，沒做寫 skip：<哪個條件不成立>。步驟名與順序見 skills/explore/SKILL.md 的 Steps。 -->
+<!-- 九步各一行：做了寫產出在哪（步驟 2 到 7 寫 已知 哪一塊，8 寫 待決），步驟 1 與 9 永遠做、寫 done；沒做寫 skip：<哪個條件不成立>。例：- 1 讀卡：done、- 8 待決：待決、- 9 unslop：done。步驟名與順序見 skills/explore/SKILL.md 的 Steps。 -->
 - 1 讀卡：
 - 2 how：
 - 3 影響範圍：

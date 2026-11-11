@@ -201,7 +201,20 @@ A gate's `type` is `approval` (a permission) or `decision` (a choice) and nothin
 1. Each main change: `openspec new change <pr> --schema opsx`, with an inbox.md that says what the whole main change does and lists its sub-changes.
 2. Each sub-change: `openspec/changes/<main>/subs/<sub>/` with `inbox.md` (frontmatter `parent: <main>`, `depends-on: [<sibling>]`) and `.openspec.yaml` (`schema: opsx`, `kind:`, `parent: <main>`). The openspec CLI does not know about these; `opsx check <main>` does.
 3. `openspec/workplan.yaml`: the features, PRs and changes with all three levels of `depends-on`. No dependency means no waiting.
-4. The original card's inbox frontmatter gets `split_into: <main1>, <main2>`. Its stage becomes `split` and the flow stops there; continue with the first main change that has no unmet dependency. Before writing `split_into`, turn each `## 併入：` section of the original card's inbox.md into its own card with `opsx split-out <original> <id>`: nobody works a split card again, so a merged item left on it is lost.
+4. The original card's inbox frontmatter gets `split_into: <main1>, <main2>`. Its stage becomes `split` and the flow stops there. Before writing `split_into`, turn each `## 併入：` section of the original card's inbox.md into its own card with `opsx split-out <original> <id>`: nobody works a split card again, so a merged item left on it is lost. Log the split (below), then run `opsx chain <original>`: it takes the first main change in `split_into` order that has no unmet dependency, switches this worktree to its branch, and records it in dispatch.json under this pane. Do not switch branches yourself. Whether it continued or printed `chain: …` with a reason it did not (skip, 沒有續接), then run `opsx chain --unclaimed <original>`. It prints one line per main change nobody will pick up on their own, `<main><TAB><unmerged dependencies, comma-separated>`: the coordinator only dispatches a card that has tasks.md, and a freshly split main change has only inbox.md. A main change that is merged, already has a live pane, or has tasks.md is not printed. For each printed line, write this gate in that main change's `openspec/changes/<main>/gates.md`; leave out the `waits-on:` line when the dependency column is empty, and when it is not, recommend waiting for those to merge instead of dispatching now. Write no gate when nothing is printed. Then report what chain did and stop. If it continued, the main change's first command arrives as the next prompt.
+
+```
+## dispatch-<main>
+type: decision
+status: open
+waits-on: <the first unmerged dependency>
+問題: 派 <main>？
+已確認: <original> 已拆卡，<main> 只有 inbox.md，沒有 pane 在做
+選項: 從看板派 <main> (Recommended) | 先不派
+建議: 從看板派 <main>，它從 explore 接著做（有依賴沒合時：等 <dependencies> merged 再派）
+風險: 不派的話這張主 change 沒人做
+預設: 不派，等回覆
+```
 
 Every inbox.md you write here, and any card you open while exploring, gets the facts in its frontmatter (`kind_of_work`, plus `impact` and `evidence` for an incident); then run `opsx priority <slug>`, and if it prints P0 without a user override write the `p0-review` gate per `references/priority.md`.
 
@@ -264,7 +277,7 @@ When the change has a shell (`openspec/changes/<slug>/`), end by writing `explor
 - **已知**: facts from the code, each with a file path or the command you ran. Anything a prototype answered goes here with what was run and what it showed. Always include the **D5 check**, one line per criterion with your judgment: ① it spans more than one subsystem; ② it mixes different risk (data migration, permissions, external API next to ordinary logic); ③ one shell would hold more than 6 tasks. If any one holds, the card is split ("Splitting a big card"). Do not judge by estimated line count.
 - **待決**: only questions the user must answer (product choice, preference, risk appetite). Each with 2–4 concrete options, the recommended one marked `(Recommended)`. A question `grep` or a ten-line script could answer does not belong here.
 - **不做**: directions ruled out, with the reason.
-- **步驟**: one line for each of the nine steps, shaped `- <n> <step name>：<the 已知 block that holds its output>` when you did it, or `- <n> <step name>：skip：<which condition did not hold>` when you did not. A `skip：` with no reason counts as a missing line. `opsx check <slug>` reads this section, the Stop hook blocks the card in explore while a line is missing, and review compares a skipped 影響範圍 with the real diff.
+- **步驟**: one line for each of the nine steps, shaped `- <n> <step name>：<where its output went>` when you did it, or `- <n> <step name>：skip：<which condition did not hold>` when you did not. Steps 2 to 7 name the 已知 block that holds their output, step 8 writes `待決`, and steps 1 and 9 have no block of their own and always run, so they write `done`. For example `- 1 讀卡：done`, `- 8 待決：待決`, `- 9 unslop：done`. A `skip：` with no reason counts as a missing line. `opsx check <slug>` reads this section, the Stop hook blocks the card in explore while a line is missing, and review compares a skipped 影響範圍 with the real diff.
 
 Call `opsx status explore <n>/<total> "<label>"` as you go. Then continue per `../../references/continue.md`: invoke `/opsx-workflow:grill <slug>` when 待決 is non-empty, `/opsx-workflow:propose <slug>` when it is empty, in this turn.
 
