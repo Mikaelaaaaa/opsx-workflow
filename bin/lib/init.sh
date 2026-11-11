@@ -99,6 +99,7 @@ $term_line
   write_coordinator_settings "$py" "$state"
   install_launch_jobs "$state" "$bindir"
   say "init --global: 設定在 $state"
+  say "init --global: 開協調者：在 herdr pane 跑 opsx lead"
 }
 
 # 使用者層 Claude Code settings：CLAUDE_CONFIG_DIR 優先，沒設才用 ~/.claude。

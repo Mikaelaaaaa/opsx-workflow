@@ -28,7 +28,14 @@ case "$1 $2" in
       rm -f "$OPSX_TEST_NOT_READY_ONCE"
       echo '{"error":{"code":"agent_not_ready","message":"agent '"$3"' is blocked during startup and is not ready for prompts"},"id":"cli:agent:start"}' >&2; exit 1
     fi
+    [ "$3" = opsx-coordinator ] && : > "$OPSX_FAKE_LOG.coordinator-up"
     echo '{"result":{"ok":true}}' ;;
+  # 格式沒在真 herdr 上存過樣本：只放 opsx lead 用到的三個欄位
+  "agent get")
+    if [ "$3" = opsx-coordinator ] && { [ -n "${OPSX_TEST_COORDINATOR_UP:-}" ] || [ -f "$OPSX_FAKE_LOG.coordinator-up" ]; }; then
+      echo '{"id":"cli:agent:get","result":{"agent":{"pane_id":"w3:p7","tab_id":"w3:t2","workspace_id":"w3","agent_status":"idle"}}}'; exit 0
+    fi
+    herdr_err agent_not_found get ;;
   "tab close") echo '{"id":"cli:tab:close","result":{"type":"ok"}}' ;;
   # pane 畫面用 OPSX_TEST_PANE_TEXT 當內容：wait-output 找得到 --match 的字就成功，否則 rc 1
   "pane wait-output") case "${OPSX_TEST_PANE_TEXT:-}" in *"$4"*) echo '{"result":{"matched":true}}' ;; *) echo '{"error":{"code":"timeout"}}' >&2; exit 1 ;; esac ;;
@@ -45,10 +52,10 @@ case "$1 $2" in
   # OPSX_TEST_AGENT_READ 指到一個檔：當畫面內容（coordinate 偵測用量上限用）
   "agent read") cat "${OPSX_TEST_AGENT_READ:-$(dirname "${BASH_SOURCE[0]}")/herdr-samples/agent-read.txt}" ;;
   # OPSX_TEST_PROMPT_ERR / OPSX_TEST_WAIT_ERR 指到一個檔，每行一個 herdr 錯誤碼：每次呼叫取走第一行，是 ok 或檔空了就照常成功
-  # opsx-coordinator 預設不存在（agent_not_found）；OPSX_TEST_COORDINATOR_UP 設了才在，OPSX_TEST_COORD_ERR 指到一個檔時每次取走一行錯誤碼
+  # opsx-coordinator 預設不存在（agent_not_found）；OPSX_TEST_COORDINATOR_UP 設了、或 agent start 起過它才在，OPSX_TEST_COORD_ERR 指到一個檔時每次取走一行錯誤碼
   "agent prompt")
     if [ "$3" = opsx-coordinator ]; then
-      [ -n "${OPSX_TEST_COORDINATOR_UP:-}" ] || herdr_err agent_not_found prompt
+      [ -n "${OPSX_TEST_COORDINATOR_UP:-}" ] || [ -f "$OPSX_FAKE_LOG.coordinator-up" ] || herdr_err agent_not_found prompt
       code="$(pop_err "${OPSX_TEST_COORD_ERR:-}")"; [ -n "$code" ] && herdr_err "$code" prompt
       echo '{"result":{"submitted":true}}'; exit 0
     fi
