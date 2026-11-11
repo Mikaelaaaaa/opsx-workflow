@@ -47,7 +47,7 @@ assert_grep '^agent prompt retry-backoff /opsx-workflow:propose retry-backoff$' 
 assert_not_grep '^workspace create' "$OPSX_FAKE_LOG"
 # settings：repo 永遠 push 進 allow；merge 在 allow 不在 deny（deny 會蓋過 grant-gate 的放行，merge 由 gate 單獨把關）
 S="$OPSX_STATE_DIR/settings/Agentory-CS-retry-backoff-autopilot.json"; assert_file "$S"
-python3 -I -c 'import json,sys;d=json.load(open(sys.argv[1]))["permissions"];assert "Bash(git push:*)" in d["allow"],d;assert "Bash(glab mr merge:*)" in d["allow"] and "Bash(gh pr merge:*)" in d["allow"],d;assert not any("merge" in x for x in d["deny"]),d;assert not any("glab mr create" in a for a in d["allow"]),d;assert "Bash(glab issue note:*)" not in d["allow"] and "Bash(gh issue comment:*)" not in d["allow"],d' "$S"
+python3 -I -c 'import json,sys;d=json.load(open(sys.argv[1]))["permissions"];assert "Bash(git push:*)" in d["allow"],d;assert "Bash(glab mr merge:*)" in d["allow"] and "Bash(gh pr merge:*)" in d["allow"],d;assert not any("merge" in x for x in d["deny"]),d;assert not any("glab mr create" in a for a in d["allow"]),d;assert "Bash(glab issue note:*)" not in d["allow"] and "Bash(gh issue comment:*)" not in d["allow"],d;assert not any("gh pr comment" in x or "glab api" in x for x in d["allow"]),d' "$S"
 # dontAsk 下不在 allow 的指令直接被拒：常用唯讀與測試指令要在 allow 裡，不然 agent 連跑測試都不行
 python3 -I -c 'import json,sys;a=json.load(open(sys.argv[1]))["permissions"]["allow"];miss=[x for x in ["Bash(jq:*)","Bash(head:*)","Bash(tail:*)","Bash(wc:*)","Bash(sed -n:*)","Bash(bash tests/:*)","Bash(herdr agent:*)","Bash(glab mr view:*)","Bash(glab ci:*)","Bash(gh pr view:*)","Bash(git merge-base:*)","Bash(git merge:*)","Bash(git remote:*)"] if x not in a];assert not miss,miss' "$S" || fail "allow 少了常用指令"
 # 重啟 / resume 後旗標不在，可寫目錄還要由 settings 供應
@@ -190,6 +190,7 @@ rm "$OPSX_STATE_DIR/workspaces.toml"; cp "$FX/ws.real" "$OPSX_STATE_DIR/workspac
 printf '[repos."scam-guard"]\nmr = true\n' >> "$OPSX_STATE_DIR/grants.toml"
 opsx dispatch rdap-timeout --agent claude --mode autopilot --kind dev >/dev/null 2>&1 || fail "dispatch unmapped repo"
 python3 -I -c 'import json,sys;a=json.load(open(sys.argv[1]))["permissions"]["allow"];miss=[x for x in ["Bash(glab mr create:*)","Bash(gh pr create:*)","Bash(glab issue note:*)","Bash(glab issue comment:*)","Bash(gh issue comment:*)"] if x not in a];assert not miss,miss' "$OPSX_STATE_DIR/settings/scam-guard-rdap-timeout-autopilot.json" || fail "mr 授權的 allow 要含 issue 留言"
+python3 -I -c 'import json,sys;a=json.load(open(sys.argv[1]))["permissions"]["allow"];miss=[x for x in ["Bash(gh pr comment:*)","Bash(glab api --method POST \"projects/:id/merge_requests/*/notes\" *)","Bash(glab api --method PUT \"projects/:id/merge_requests/*/notes/*\" *)"] if x not in a];assert not miss,miss;assert "Bash(glab api:*)" not in a and "Bash(git -C:*)" not in a,a' "$OPSX_STATE_DIR/settings/scam-guard-rdap-timeout-autopilot.json" || fail "mr 授權的 allow 要含 MR 留言規則，且不放整個 glab api 與 git -C"
 assert_grep '^workspace create --label scam-guard' "$OPSX_FAKE_LOG"
 assert_grep '^"scam-guard" = "scam-guard"$' "$OPSX_STATE_DIR/workspaces.toml"   # 記 label，id 在 dispatch.json
 assert_grep '^tab create --workspace w9 ' "$OPSX_FAKE_LOG"
