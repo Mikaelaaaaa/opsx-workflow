@@ -26,8 +26,13 @@ for s in \
 done
 
 # 可合併只看 agent 的回報（review 完、全套綠、跟 main 無衝突）；多張一起合時只用 git merge-tree 查依序疊起來無衝突，不重跑全套
-grep -qF 'git merge-tree' "$F" || fail "skill 要寫多張一起合時用 git merge-tree 查依序疊起來無衝突"
-! grep -qiE 'run the full suite yourself|自己.*跑全套' "$F" || fail "協調者列可合併前不自己重跑全套（使用者 2026-11-11 更正）"
+# 只看職責 4 那一段（從「4. 」到「5. 」），表格註解裡的字不算
+D4="$(sed -n '/^4\. /,/^5\. /p' "$F")"
+[ -n "$D4" ] || fail "找不到職責 4"
+for s in 'reports review done' 'Do not rerun the suite yourself' 'git merge-tree --write-tree' 'git commit-tree'; do
+  case "$D4" in *"$s"*) ;; *) fail "職責 4 缺：$s" ;; esac
+done
+case "$D4" in *"run the full suite"*|*"rerun the suite against"*) fail "職責 4 不能叫協調者自己重跑全套：$D4" ;; esac
 
 # frontmatter 的 name 是 lead（/opsx-workflow:lead）
 assert_eq "$(sed -n 2p "$F")" "name: lead" "frontmatter name"
