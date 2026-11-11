@@ -768,7 +768,7 @@ rm -f "$LOG" "$MEMO"
 # --- --dry 只印，不送不記 ---
 rm -f "$MEMO"
 round --dry || fail "dry rc: $(cat "$FX/out")"
-assert_grep 'DRY herdr notification show \[demo/a1\]' "$FX/out"
+assert_grep 'DRY herdr agent prompt opsx-coordinator \[demo/a1\]' "$FX/out"
 assert_eq "$(notes)" 0 "dry 不送"; assert_no_file "$MEMO"
 
 # --- 代答的 gate 不通知 ---
@@ -787,6 +787,28 @@ grep '??' "$LOG" | grep 'demo/a1/gate/g1' | grep -q boom || fail "失敗要記 ?
 assert_eq "$(memo_get _notified demo/a1/gate/g1)" "" "失敗不記進 _notified"
 OPSX_TEST_NOTIFY_ERR="$FX/nerr" round || fail "rc: $(cat "$FX/out")"
 assert_eq "$(notes)" 1 "下一輪再送一次"
+[ -n "$(memo_get _notified demo/a1/gate/g1)" ] || fail "成功後要記：$(cat "$MEMO")"
+rm -f "$MEMO"
+
+# --- 協調者在：事件走 agent prompt，不發桌面通知 ---
+cards "$HUMAN"
+OPSX_TEST_COORDINATOR_UP=1 round || fail "rc: $(cat "$FX/out")"
+c1="$(count '^agent prompt opsx-coordinator \[demo/a1\] gate g1 ')"; assert_eq "$(notes)" 0 "協調者在不發桌面通知"
+OPSX_TEST_COORDINATOR_UP=1 round || fail "rc: $(cat "$FX/out")"
+assert_eq "$((c1 + $(count '^agent prompt opsx-coordinator ')))" 1 "協調者在：兩輪只送一次：$(cat "$OPSX_FAKE_LOG")"
+assert_eq "$(notes)" 0 "協調者在第二輪也不發桌面通知"
+[ -n "$(memo_get _notified demo/a1/gate/g1)" ] || fail "協調者收到要記 _notified：$(cat "$MEMO")"
+rm -f "$MEMO"
+
+# --- 協調者那邊出別的錯：不退回桌面通知、不記，下一輪補送 ---
+printf 'boom\nok\n' > "$FX/cerr"
+cards "$HUMAN"
+OPSX_TEST_COORDINATOR_UP=1 OPSX_TEST_COORD_ERR="$FX/cerr" round || fail "rc: $(cat "$FX/out")"
+assert_eq "$(notes)" 0 "別的錯不退回桌面通知"
+grep '??' "$LOG" | grep 'demo/a1/gate/g1' | grep -q boom || fail "失敗要記 ?? 含去重鍵與 herdr 的錯：$(cat "$LOG")"
+assert_eq "$(memo_get _notified demo/a1/gate/g1)" "" "失敗不記進 _notified"
+OPSX_TEST_COORDINATOR_UP=1 OPSX_TEST_COORD_ERR="$FX/cerr" round || fail "rc: $(cat "$FX/out")"
+assert_eq "$(count '^agent prompt opsx-coordinator ')" 1 "下一輪補送"
 [ -n "$(memo_get _notified demo/a1/gate/g1)" ] || fail "成功後要記：$(cat "$MEMO")"
 rm -f "$MEMO"
 

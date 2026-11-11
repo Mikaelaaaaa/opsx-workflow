@@ -44,7 +44,14 @@ case "$1 $2" in
   # 真格式（2026-11-06 在 pane w5:pH 實跑）：TARGET 吃 dispatch.json 的 pane id，--format text 是純文字
   "agent read") cat "$(dirname "${BASH_SOURCE[0]}")/herdr-samples/agent-read.txt" ;;
   # OPSX_TEST_PROMPT_ERR / OPSX_TEST_WAIT_ERR 指到一個檔，每行一個 herdr 錯誤碼：每次呼叫取走第一行，是 ok 或檔空了就照常成功
-  "agent prompt") code="$(pop_err "${OPSX_TEST_PROMPT_ERR:-}")"; [ -n "$code" ] && herdr_err "$code" prompt
+  # opsx-coordinator 預設不存在（agent_not_found）；OPSX_TEST_COORDINATOR_UP 設了才在，OPSX_TEST_COORD_ERR 指到一個檔時每次取走一行錯誤碼
+  "agent prompt")
+    if [ "$3" = opsx-coordinator ]; then
+      [ -n "${OPSX_TEST_COORDINATOR_UP:-}" ] || herdr_err agent_not_found prompt
+      code="$(pop_err "${OPSX_TEST_COORD_ERR:-}")"; [ -n "$code" ] && herdr_err "$code" prompt
+      echo '{"result":{"submitted":true}}'; exit 0
+    fi
+    code="$(pop_err "${OPSX_TEST_PROMPT_ERR:-}")"; [ -n "$code" ] && herdr_err "$code" prompt
     [ -n "${OPSX_TEST_ON_PROMPT:-}" ] && bash "$OPSX_TEST_ON_PROMPT" "$4"; echo '{"result":{"submitted":true}}' ;;
   "agent wait") code="$(pop_err "${OPSX_TEST_WAIT_ERR:-}")"; [ -n "$code" ] && herdr_err "$code" wait
     [ -n "${OPSX_TEST_ON_WAIT:-}" ] && bash "$OPSX_TEST_ON_WAIT" "$@"; echo '{"result":{"status":"idle"}}' ;;

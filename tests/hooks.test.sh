@@ -784,11 +784,18 @@ STOP_STATE="$OPSX_STATE_DIR/stop-chain"
 # 每次呼叫先清擋的次數；要測次數的 case 用 KEEP=1 sg 保留
 sg() { [ -n "${KEEP:-}" ] || rm -rf "$STOP_STATE"; printf '{"cwd":"%s","stop_hook_active":%s}' "$R" "${1:-false}" | bash "$H/openspec-stop-gate.sh" 2>/dev/null; true; }
 done_report() { printf '# report\n\n## MR\nhttps://gitlab.tsg-navigator.com/a/b/-/merge_requests/212 · opened 2026-11-10 · auto-merge: no\nbabysit: 2026-11-10T14:00:00+08:00\n' > "$C/report.md"; }
+# 放行時回報協調者：fake herdr 只在這個 PATH 前綴下才有，opsx-coordinator 在（OPSX_TEST_COORDINATOR_UP）
+CL="$FX/coord.log"; mkdir -p "$FX/cbin"
+printf '#!/usr/bin/env bash\nexec bash "%s/tests/fakes/herdr" "$@"\n' "$OPSX_ROOT" > "$FX/cbin/herdr"; chmod +x "$FX/cbin/herdr"
+sgc() { : > "$CL"; PATH="$FX/cbin:$PATH" OPSX_FAKE_LOG="$CL" OPSX_TEST_COORDINATOR_UP=1 sg; }
 printf '## 1. x\n\n- [x] 1.1 a\n- [ ] 1.2 b\n' > "$C/tasks.md"
 out="$(sg)"; assert_eq "$(decision "$out")" block "stop: 有未勾"; reason "$out" | grep -q '1 個 task 沒勾' || fail "stop: 沒 gates.md 要說幾個 task 沒勾"
+out="$(sgc)"; assert_eq "$(decision "$out")" block "stop: 擋住時不回報協調者"; assert_eq "$(cat "$CL")" "" "stop: 擋住時不回報協調者"
 out="$(sg true)"; assert_eq "$(decision "$out")" block "stop: stop_hook_active 不再是放行條件"
 printf '## real-herdr\nstatus: open\n' > "$C/gates.md"
 out="$(sg)"; assert_eq "$out" "" "stop: 有未勾但有 open gate 放行"
+out="$(sgc)"; assert_eq "$out" "" "stop: open gate 放行（回報版）"
+assert_grep '^agent prompt opsx-coordinator \[eval-core\] 停住' "$CL"
 printf '## real-herdr\nstatus: answered\n' > "$C/gates.md"
 out="$(sg)"; assert_eq "$(decision "$out")" block "stop: gate 都 answered 仍擋未勾"; reason "$out" | grep -q '1 個 task 沒勾' || fail "stop: answered gate 要說幾個 task 沒勾"
 printf '## real-herdr\nstatus: open (等 push 授權)\n' > "$C/gates.md"
@@ -805,6 +812,12 @@ printf '{"phase":"apply","step":8,"total":8,"label":"x","tests":"green","at":"20
 rm -f "$C/report.md"; out="$(sg)"; assert_eq "$(decision "$out")" block "stop: 沒 report"; reason "$out" | grep -q '/opsx-workflow:review' || fail "stop: 要叫跑 review"
 done_report; sleep 1
 out="$(sg)"; assert_eq "$out" "" "stop: 全齊放行"
+out="$(sgc)"; assert_eq "$out" "" "stop: 全齊放行（回報版）"
+assert_grep '^agent prompt opsx-coordinator \[eval-core\] babysit 完成 → 下一站 archive' "$CL"
+# 協調者不在：hook 照常放行，只在 coordinator.log 記一行
+: > "$OPSX_STATE_DIR/coordinator.log"
+out="$(PATH="$FX/cbin:$PATH" OPSX_FAKE_LOG="$CL" sg)"; assert_eq "$out" "" "stop: 協調者不在照常放行"
+assert_grep 'opsx-coordinator' "$OPSX_STATE_DIR/coordinator.log"
 git -C "$R" commit -q --allow-empty -m "feat: later"   # report 之後又 commit
 out="$(sg)"; assert_eq "$(decision "$out")" block "stop: report 後有新 commit"
 # report 在、卡的階段是 babysit，但 hook 要的是 /review：擋滿後的 gate 要指 /review，不指 /babysit

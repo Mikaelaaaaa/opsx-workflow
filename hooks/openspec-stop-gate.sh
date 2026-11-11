@@ -123,6 +123,10 @@ write_auto_gate() { # <dir> <slug> <站>；站是 facts 時問的是事實欄位
   } | opsx_append "$f"
 }
 
+next_stage() { # <站>
+  case "$1" in grill) echo propose ;; propose) echo apply ;; apply) echo review ;; review) echo pr ;; pr) echo babysit ;; *) echo archive ;; esac
+}
+
 d="$(card_dir)"
 [ -n "$d" ] || exit 0
 slug="$(card_slug)"
@@ -136,6 +140,11 @@ state="$OPSX_STATE_DIR/stop-chain/$(repo_name)-$slug"
 out="$(stop_reason "$d" "$slug" "$stage")"
 if [ -z "$out" ]; then
   rm -f "$state"
+  if [ "$(st_open_gates_blocking "$d")" -gt 0 ]; then
+    coordinator_say "[$slug] 停住：等人答 gate（$stage 站）"
+  else
+    coordinator_say "[$slug] $stage 完成 → 下一站 $(next_stage "$stage")"
+  fi
   exit 0
 fi
 want="${out%%|*}"     # hook 這次要求的站：不一定等於 stage_of 的站（report.md 在但要重跑 /review 時 stage 是 babysit）
@@ -154,6 +163,7 @@ if [ "$n" -ge "$MAX_BLOCKS" ]; then
   titled_gate_open "$d" "$want" || [ "$gated" = gated ] || write_auto_gate "$d" "$slug" "$want"
   if titled_gate_open "$d" "$want"; then
     printf '%s %s gated %s\n' "$want" "$n" "$fp" | opsx_replace "$state"
+    coordinator_say "[$slug] 停住：連續 $n 次沒接 /opsx-workflow:$want，已開「卡在接」gate"
     exit 0
   fi
   n=0; gated="-"   # gate 被回答了，重算
