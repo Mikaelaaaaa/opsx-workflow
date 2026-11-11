@@ -127,9 +127,13 @@ PY
   trap "relaunch_mark $(printf '%q' "$key") clear" EXIT
 
   # drive 在 claude 退出的空窗收到 agent_not_found 會叫 coordinate，coordinate 就把 pane 收掉重派：/exit 前先停它
-  if [ -n "$drive_pid" ] && kill -0 "$drive_pid" 2>/dev/null; then
-    kill "$drive_pid" || die "relaunch: drive pid $drive_pid kill 不掉，沒送任何鍵"
-    say "relaunch: drive pid $drive_pid 已 kill"
+  if [ -n "$drive_pid" ]; then
+    local state=0; drive_pid_state "$drive_pid" "$slug" || state=$?
+    case "$state" in
+      0) kill "$drive_pid" || die "relaunch: drive pid $drive_pid kill 不掉，沒送任何鍵"
+         say "relaunch: drive pid $drive_pid 已 kill" ;;
+      2) say "relaunch: pid $drive_pid 還活著但不是 $slug 的 drive（${DRIVE_PID_CMD}），不 kill" ;;
+    esac
   fi
   [ -z "$drive_pid" ] || relaunch_mark "$key" "unset-drive:$drive_pid"
 

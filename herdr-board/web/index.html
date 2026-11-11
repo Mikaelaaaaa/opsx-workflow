@@ -71,8 +71,9 @@ input::placeholder{color:var(--fg-3)}
 .topbar .right{margin-left:auto;display:flex;align-items:center;gap:10px}
 .counter{font-family:var(--font-mono);font-size:12px;color:var(--fg-2);margin-left:auto}
 .counter b{color:var(--data);font-weight:700}
-.counter .link{border:0;background:none;padding:0;min-height:0;margin:0;color:var(--accent);font:inherit;cursor:pointer}
+.counter .link,.milestones .link{border:0;background:none;padding:0;min-height:0;margin:0;color:var(--accent);font:inherit;cursor:pointer}
 .stamp{font-family:var(--font-mono);font-size:11px;color:var(--fg-3)}
+.milestones .link.badge.warn{color:var(--warn);background:var(--warn-bg);padding:0 4px}
 .milestones{display:flex;gap:14px;flex-wrap:wrap;font-family:var(--font-mono);font-size:12px;color:var(--fg-2)}
 .prio-why{font-size:13px;color:var(--fg-2);margin-left:8px}
 .row .act .prio-reason{min-width:160px}
@@ -152,6 +153,8 @@ main{flex:1;min-width:0;padding-left:max(16px,env(safe-area-inset-left,0px));pad
 .ask .answers{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
 .ask .answers input{flex:1;min-width:160px}
 .term{background:var(--pet-screen);color:var(--fg-2);font-family:var(--font-mono);font-size:12px;line-height:1.55;border:1px solid var(--border-soft);border-radius:var(--r);padding:10px 12px;margin:0;white-space:pre-wrap;overflow-x:auto}
+/* 框線圖一折行就斷，所以不沿用 .term 的 pre-wrap */
+.term.logic-map{white-space:pre}
 .checks{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:1fr 1fr;gap:6px 16px;font-size:13px}
 .checks li{display:flex;gap:8px;align-items:center;color:var(--fg-2)}
 .checks .yes{color:var(--success);font-family:var(--font-mono)}.checks .no{color:var(--danger);font-family:var(--font-mono)}
@@ -307,7 +310,7 @@ const api={
   async post(action,body){const r=await fetch('/api/'+action,{method:'POST',headers:{'X-Opsx-Token':token(),'Content-Type':'application/json'},body:JSON.stringify(body)});const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(action+' '+r.status+'：'+(j.error||j.stderr||''));if(!j.ok)throw new Error((j.stderr||j.stdout||'opsx '+action+' 失敗').trim());return j;}
 };
 let data={generated_at:null,scopes:[],cards:[],sessions:[],unmatched_agents:[],errors:[],legacy:{},worktrees_skipped:[]};let lastRaw='';
-const ui={tab:'home',deepLink:deepLinkAtLoad,scope:'all',ws:null,repo:null,sel:null,open:null,doneOpen:false,busy:false,logFilter:'all',drop:null,dropText:'',merge:null,mergeInto:'',fileRepo:{},prio:null,prioText:'',prioLevel:null};
+const ui={tab:'home',deepLink:deepLinkAtLoad,scope:'all',ws:null,repo:null,sel:null,open:null,doneOpen:false,busy:false,logFilter:'all',drop:null,dropText:'',merge:null,mergeInto:'',fileRepo:{},prio:null,prioText:'',prioLevel:null,progressClass:null};
 let tl=null;let tlErr='';let bannerClosed=false;let seenAt=null;  /* 這頁最後一次送給 /api/seen 的時間 */
 const outputs={};  /* 卡 key → {ok, text} 或 {ok:false, error}；抽屜打開時才抓 */
 const REFRESH_MS=5000;
@@ -355,6 +358,22 @@ function splitOut(c,id){
   act(`opsx split-out ${c.slug} ${id}`,()=>api.post('split-out',{slug:c.slug,id,repo:repoTop(c)}));
 }
 /* 併入項目 end */
+/* 邏輯表（卡目錄的 logic-map.md）：tests/logic-map-web.test.sh 從 start 切到 end 執行 */
+/* 邏輯表 start */
+function logicMapSection(c){
+  if(!c.logic_map)return '';
+  return `<section><h3>邏輯表 <span class="src">logic-map.md</span></h3><pre class="term logic-map" data-key="${esc(c.repo+'/'+c.slug)}">${esc(c.logic_map)}</pre></section>`;
+}
+/* 抽屜每次重畫都換掉整段 DOM；同一張卡要留在原本捲到的欄位，條件表的 file:line 在右邊 */
+function logicMapScroll(drawer){
+  const p=drawer.querySelector('pre.logic-map');
+  return p?{key:p.dataset.key,left:p.scrollLeft}:null;
+}
+function restoreLogicMapScroll(drawer,pos){
+  const p=drawer.querySelector('pre.logic-map');
+  if(p&&pos&&p.dataset.key===pos.key)p.scrollLeft=pos.left;
+}
+/* 邏輯表 end */
 function ago(iso){
   if(!iso)return '';const t=Date.parse(iso);if(isNaN(t))return iso;
   const s=Math.max(0,(Date.now()-t)/1000);
@@ -402,11 +421,26 @@ function priorityBadge(card,withReason){
   const b=`<span class="badge ${PRIO_BADGE[p.level]}" title="${esc(p.reason)}">${esc(p.level)}</span>`+(p.overridden?'<span class="badge accent" title="使用者改過等級">改</span>':'');
   return withReason?`${b}<span class="prio-why">${esc(p.reason)}</span>`:b;
 }
-/* progress 可能缺：--collect 固定檔是舊格式；沒設 current milestone 的 repo 不列 */
-function milestoneLine(progress,repos){
+/* 進度列：一行的文字去掉 HTML 後要跟 TUI 的 progress_text 逐字相同，改格式兩邊一起改。
+   progress 可能缺：--collect 固定檔是舊格式。分類一律讀 collect 的 progress_class，這裡不自己判斷 */
+const PROGRESS_LABEL={mergeable:'可合併',testing:'測試中',developing:'開發中',waiting_on_you:'等你',not_dispatched:'還沒派'};
+function progressLine(progress,repos){
   const m=progress||{};
-  return repos.filter(r=>m[r]&&m[r].milestone).map(r=>`<span class="ms"><span class="faint">${esc(r)}</span> ${esc(m[r].milestone)} · ${esc(m[r].goal)} · 還差 ${esc(m[r].remaining)} 張</span>`).join('');
+  const rs=repos.filter(r=>m[r]);
+  return rs.map(r=>{
+    const p=m[r];
+    const head=p.milestone==null?`進行中 ${esc(p.remaining)} 張`:`<span title="${esc(p.goal)}">${esc(p.milestone)}</span>：剩 ${esc(p.remaining)} 張`;
+    const nums=Object.entries(PROGRESS_LABEL).map(([k,l])=>`<button class="link${k==='waiting_on_you'&&p[k]>0?' badge warn':''}" data-act="progress-filter" data-class="${k}">${l} ${esc(p[k])}</button>`).join(' · ');
+    return `<span class="ms">${rs.length>1?`<span class="faint">${esc(r)}</span> `:''}進度 ${esc(hhmm(p.at))} · ${head} · ${nums}</span>`;
+  }).join('');
 }
+const toggleProgressClass=(cur,cls)=>cur===cls?null:cls;
+const byProgressClass=(cards,cls)=>cls?cards.filter(c=>c.progress_class===cls):cards;
+const progressFilterMark=cls=>cls?`<button class="link" data-act="progress-filter" data-class="${cls}">篩選：${PROGRESS_LABEL[cls]} ×</button>`:'';
+const counterTail=cls=>cls?' · '+progressFilterMark(cls):'';
+/* 篩選中一區的卡：collect 也給收進 session 的主 change 卡分類，所以這裡不像 homeSect 那樣排除它們 */
+const progressSect=(cards,cls,name)=>byProgressClass(cards,cls).filter(c=>c.section===name);
+const notDispatchedNames=(progress,repos)=>repos.flatMap(r=>(progress||{})[r]?progress[r].not_dispatched_planned:[]);
 
 /* ---------- 範圍 ---------- */
 function wsOf(repo){const s=data.scopes.find(s=>s.repos.includes(repo));return s?s.workspace:null;}
@@ -415,6 +449,7 @@ function inScope(c){
   if(ui.repo)return c.repo===ui.repo;
   return wsOf(c.repo)===ui.ws;
 }
+const scopeRepos=()=>Object.keys(data.repo_paths||{}).filter(r=>inScope({repo:r}));
 function scopeLabel(){if(ui.repo)return ui.repo;if(ui.scope!=='ws')return 'workspace';return ui.ws||'沒掛的';}
 const sect=name=>data.cards.filter(c=>c.section===name&&inScope(c));
 /* 範圍視圖下其他 repo 也有卡在等時，多列全部範圍的總數；那些卡在首頁別處都看不到。
@@ -530,16 +565,23 @@ function rowSession(s){
 const panel=(title,n,sub,body)=>`<section class="panel"><div class="panel-h"><span class="h2">${title}</span><span class="n">${n}</span>${sub?`<span class="sub">${sub}</span>`:''}</div>${body}</section>`;
 
 function renderHome(){
-  const H=name=>homeSect(data.cards.filter(inScope).map(c=>pendApply(c,key(c),live.pending)),data.sessions.filter(inScope),name);
+  /* 篩進度類別時只留 progress_class 符合的卡，收進 session 的卡單獨畫、收件匣裡符合的卡另成一區；
+     session 列、沒對到卡的 agent、孤兒 pane 都沒有 progress_class，篩選中不畫 */
+  const pc=ui.progressClass;
+  const cards=data.cards.filter(inScope).map(c=>pendApply(c,key(c),live.pending));
+  const H=name=>pc?{sessions:[],cards:progressSect(cards,pc,name)}:homeSect(cards,data.sessions.filter(inScope),name);
+  const inb=pc?progressSect(cards,pc,'收件匣'):[];
   const A=H('待處理'),R=H('進行中'),Y=H('待指派'),D=H('已完成');
   const n=x=>x.sessions.length+x.cards.length;
   const list=(x,row)=>x.sessions.map(rowSession).join('')+x.cards.map(row).join('');
-  const un=ui.scope==='all'?data.unmatched_agents.filter(a=>!a.orphan):[];
-  const orph=data.orphans||[];   // 孤兒不屬於任何範圍，範圍篩選不影響
+  const un=ui.scope==='all'&&!pc?data.unmatched_agents.filter(a=>!a.orphan):[];
+  const orph=pc?[]:data.orphans||[];   // 孤兒不屬於任何範圍，範圍篩選不影響
   const leg=Object.entries(data.legacy||{}).filter(([r])=>ui.scope!=='ws'||(ui.repo?r===ui.repo:wsOf(r)===ui.ws));
-  let h=renderBanner()+panel('待處理',n(A),'只有你能做的：授權、決定、合併、終端機卡住',n(A)?list(A,rowAttn):'<div class="empty">沒有等你的事</div>');
+  const nd=pc==='not_dispatched'?notDispatchedNames(data.progress,scopeRepos()):[];
+  let h=renderBanner()+(pc==='not_dispatched'?panel('還沒建殼',nd.length,'workplan 排了、還沒建殼的項目',nd.length?nd.map(x=>`<div class="row"><div class="main"><div class="l1"><span class="title">${esc(x)}</span></div></div></div>`).join(''):'<div class="empty">沒有</div>'):'')+panel('待處理',n(A),'只有你能做的：授權、決定、合併、終端機卡住',n(A)?list(A,rowAttn):'<div class="empty">沒有等你的事</div>');
   h+=panel('進行中',n(R)+un.length+orph.length,'進度 status.json · 狀態 herdr',(list(R,rowRunning)+un.map(rowUnmatched).join('')+(orph.length?rowOrphanSummary(orph.length)+orph.map(rowOrphan).join(''):''))||'<div class="empty">沒有執行中的工作</div>');
   h+=panel(ui.scope==='ws'?`待指派 · ${esc(scopeLabel())}`:'待指派',n(Y),'explore 過、還沒派出去的（剛收進來的在收件匣）',(n(Y)?list(Y,rowReady):'<div class="empty">沒有待指派的工作</div>')+(leg.length?`<div class="empty">舊 schema 的 change 不列（沒有 inbox.md、不是 schema: opsx）：${leg.map(([r,n])=>`${esc(r)} ${n}`).join(' · ')}</div>`:''));
+  if(inb.length)h+=panel('收件匣',inb.length,'還沒 explore 的卡',inb.map(rowInbox).join(''));
   h+=`<section class="panel"><div class="panel-h"><button class="tg h2" data-act="done-toggle" aria-expanded="${ui.doneOpen}"><span class="chev"></span>已完成</button><span class="n">${n(D)}</span></div>${ui.doneOpen?(n(D)?list(D,rowDone):'<div class="empty">還沒有</div>'):''}</section>`;
   return h;
 }
@@ -713,12 +755,12 @@ function refocus(i){i.focus();if(i.tagName!=='SELECT')i.setSelectionRange(i.valu
 /* 重畫保焦點 end */
 function render(){
   const A=homeSect(data.cards.filter(inScope),data.sessions.filter(inScope),'待處理');
-  $('#counter').innerHTML=counterHtml(data.cards,data.sessions,inScope);
+  $('#counter').innerHTML=counterHtml(data.cards,data.sessions,inScope)+counterTail(ui.progressClass);
   $('#home-n').textContent=A.sessions.length+A.cards.length||'';
   $('#inbox-n').textContent=sect('收件匣').length+(data.unfiled||[]).length||'';
   for(const t of ['home','inbox','log'])$('#tab-'+t).setAttribute('aria-selected',ui.tab===t);
   $('#stamp').textContent=data.generated_at?'collect '+ago(data.generated_at):'';
-  $('#milestones').innerHTML=milestoneLine(data.progress,Object.keys(data.repo_paths||{}).filter(r=>inScope({repo:r})));
+  $('#milestones').innerHTML=progressLine(data.progress,scopeRepos());
   const y=window.scrollY;const typing=typingClass(document.activeElement);
   setView($('#view'),ui.tab==='inbox'?renderInbox():ui.tab==='log'?renderLog():renderHome(),ui.tab==='log');
   window.scrollTo(0,y);
@@ -785,9 +827,11 @@ function renderDrawer(){
   const logSec=`<section><h3>紀錄 <span class="src">decisions.tsv</span></h3>${tlErr?`<div class="faint" style="color:var(--danger)">${esc(tlErr)}</div>`:!tl?'<div class="faint">載入中…</div>':mine.length?`<div class="panel" style="margin-top:0">${mine.map(evRow).join('')}</div>`:'<div class="faint">這張卡還沒有紀錄</div>'}</section>`;
   const foot=`<div class="foot">${d.pane?`<button class="ghost sm" data-act="pane">開啟 pane ${esc(d.pane)}</button><button class="ghost sm" data-act="stop">停止</button>`:''}${c.section!=='已完成'?`<button class="ghost sm" data-act="dispatch">${d.pane?'重新指派':'指派'}</button>`:''}<span class="path">${esc(c.path||'')}</span></div>`;
   const prioSec=c.priority?`<section><h3>等級 <span class="src">opsx priority</span></h3><div>${priorityBadge(c,true)}</div></section>`:'';
+  const lmPos=logicMapScroll($('#drawer'));
   const headBadge=(w?`<span class="badge ${WAIT_BADGE[w.type]}">${esc(w.type)}</span>`:c.agent_status==='working'?'<span class="badge ok"><span class="dot live"></span>執行中</span>':'')+pendBadge(c);
-  $('#drawer').innerHTML=`<header><div style="padding-top:2px">${bot(c,40)}</div><div class="ttl"><h2>${esc(c.title)}${headBadge}</h2><div class="flow">${flowLine(c)}</div></div><button class="x" data-act="close" aria-label="關閉">×</button></header><div class="body">${ask}${prioSec}${notesSection(c)}${mergedSection(c)}${facts}${prog}${out}${mr}${logSec}${foot}</div>`;
+  $('#drawer').innerHTML=`<header><div style="padding-top:2px">${bot(c,40)}</div><div class="ttl"><h2>${esc(c.title)}${headBadge}</h2><div class="flow">${flowLine(c)}</div></div><button class="x" data-act="close" aria-label="關閉">×</button></header><div class="body">${ask}${prioSec}${notesSection(c)}${mergedSection(c)}${facts}${prog}${out}${mr}${logicMapSection(c)}${logSec}${foot}</div>`;
   $('#drawer').hidden=false;$('#scrim').hidden=false;
+  restoreLogicMapScroll($('#drawer'),lmPos);
   const nr=$('#reply');if(nr&&keep){nr.value=keep.v;if(keep.focus){nr.focus();try{nr.setSelectionRange(keep.s,keep.s);}catch(e){}}}
   const nn=$('#note-add');if(nn&&keepNote){nn.value=keepNote.v;if(keepNote.focus){nn.focus();try{nn.setSelectionRange(keepNote.s,keepNote.s);}catch(e){}}}
 }
@@ -983,6 +1027,7 @@ document.addEventListener('click',e=>{
     if(a==='new-attach'){$('#new-file').click();return;}
     if(a==='new-unattach'){newFiles.splice(Number(btn.dataset.i),1);renderNewFiles();return;}
     if(a==='scope-all'){$('#scope-all').click();return;}
+    if(a==='progress-filter'){ui.progressClass=toggleProgressClass(ui.progressClass,btn.dataset.class);render();return;}
     if(a==='logf'){setLogFilter(btn.dataset.f);render();return;}
     if(a==='log-more'){logMore();render();return;}
     if(a==='ev-open'){if(!byKey(btn.dataset.key)){toast(btn.dataset.key+' 不在首頁（archive 只列最新的幾張）',true);return;}showTab('home');openDrawer(btn.dataset.key);return;}

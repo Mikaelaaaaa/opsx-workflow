@@ -224,7 +224,13 @@ class Round:
         if session_key in self.dispatch_file:
             return self.archive_member(top, c, entry, session_key)
         shared = self.session_siblings(key, top)
-        if entry and entry.get("mode") != "stopped" and not shared:
+        # 單卡派的卡屬於 session 代管的 feature、session 還活著：依賴它的下一個主 change 要叫醒。
+        # chain.children 從磁碟讀這張的條目，opsx stop 標 stopped 之前叫醒，不然它會當成人停的而不接
+        owner = self.session_feature_of(top, c["slug"])
+        session = self.dispatch_file.get("%s/@%s" % (c["repo"], owner)) if owner and not shared else None
+        wake_session = bool(session) and chain.session_alive(session)
+        stop = entry and entry.get("mode") != "stopped" and not shared
+        if stop and not wake_session:
             self.act(["opsx", "stop", c["slug"], "--repo", top])
         if not self.mark_merged(top, c["slug"]):
             return False
@@ -232,6 +238,10 @@ class Round:
         if rc != 0:
             self.log("?? %s openspec archive 失敗：%s" % (key, err[:200]))
             return False
+        if wake_session:
+            self.wake(top, c, owner, session)
+            if stop:
+                self.act(["opsx", "stop", c["slug"], "--repo", top])
         if shared:
             # pane 與 worktree 是同 feature 的 session 共用的，它還在做 shared 這幾張：不送 opsx stop（會打到 session），
             # 只把這張的條目標 stopped，之後算「session 還有誰活著」、開新 session 撞名檢查才不會把它算進去
@@ -298,7 +308,7 @@ class Round:
         coordinate 在沙盒外，不寫 herdr 佇列。"""
         path = os.path.join(self.state, "dispatch.json")
         try:
-            rows = chain.children(top, c["repo"], c["slug"], path)
+            rows = chain.children(top, c["repo"], c["slug"], path, feature)
         except SystemExit as e:
             self.log("?? %s 算不出同 feature 的下一個主 change，不叫醒：%s" % (card_key(c), e))
             return
@@ -565,9 +575,18 @@ class Round:
         if "agent" not in c["dispatch"]:
             self.log("?? %s %s，但 dispatch.json 沒記 agent，不知道派給誰" % (key, why))
             return
+        try:
+            plan = chain.feature_plan(top, feature)
+        except SystemExit as e:
+            self.log("?? %s 算不出能交給 session 的卡，不重派：%s" % (key, e))
+            return
+        only = self.feature_members(c["repo"], feature, plan)[1]
+        if not only:
+            self.log("-- %s 現在沒有能交給 session 的卡（單卡派過或人停的不算），不重派" % key)
+            return
         self.log("!! %s %s，停 session 後整個 feature 重派" % (key, why))
         self.act(["opsx", "stop", "@" + feature, "--repo", top])
-        rc, _, err = self.act(["opsx", "dispatch", "--feature", feature, "--agent", c["dispatch"]["agent"], "--mode", "autopilot", "--repo", top])
+        rc, _, err = self.act(["opsx", "dispatch", "--feature", feature, "--only", ",".join(only), "--agent", c["dispatch"]["agent"], "--mode", "autopilot", "--repo", top])
         if rc != 0:
             self.log("?? %s 重派開不了 session：%s" % (key, err[:200]))
             return
@@ -645,7 +664,7 @@ class Round:
             if owner:
                 self.log("-- %s 屬於 feature %s，由那個 session 做，不單獨派" % (key, owner))
                 continue
-            missing = deps_unmerged(c["slug"], self.workplan(top))
+            missing = deps_unmerged(c["slug"], self.workplan(top), read_features(os.path.join(top, "openspec", "workplan.yaml")))
             if missing:
                 self.log("⏳ %s 等 %s merged 才派" % (key, "、".join(missing)))
                 continue
@@ -736,7 +755,7 @@ class Round:
             status = {p.get("name"): p.get("status") for p in prs}
             features = read_features(os.path.join(top, "openspec", "workplan.yaml"))
             for f in features:
-                if not chain.session_managed(f) and len(f.get("prs") or []) >= 2:
+                if not chain.session_managed(f) and (len(f.get("prs") or []) >= 2 or f.get("depends-on")):
                     self.log("?? %s 的 feature %s 不是合法的 agent 名，開不了 session，它的卡照單卡派" % (repo, f.get("name")))
             for f in session_features(features):
                 name = f.get("name")
@@ -765,7 +784,7 @@ class Round:
                     self.log("-- %s 的 feature %s 不開 session：%s" % (repo, name, e))
                     continue
                 # 單卡派過的卡（上線前派的、人手動派的）只要 worktree 還在就佔著它的分支，dispatch --feature 會在 worktree add 撞上
-                single = [p[0] for p in plan if self.holds_branch(repo, p[0], name)]
+                single, slugs = self.feature_members(repo, name, plan)
                 live = [s for s in single if self.dispatch_file["%s/%s" % (repo, s)].get("mode") != "stopped"]
                 if live:
                     self.log("-- %s 的 feature %s 不開 session：%s 已經單卡派著" % (repo, name, "、".join(live)))
@@ -773,8 +792,6 @@ class Round:
                 # 停了的單卡不會自己合併，擋整個 feature 就永遠不開；只把它從 --only 拿掉，它的分支留給它自己
                 if single:
                     self.log("-- %s 的 feature %s 不交 %s：單卡派過、停了但 worktree 還在" % (repo, name, "、".join(single)))
-                # 人停的成員 dispatch --feature 會跳過，等級也不算它
-                slugs = [p[0] for p in plan if p[0] not in single and not chain.human_stopped(self.dispatch_file.get("%s/%s" % (repo, p[0])), name)]
                 levels = [(s, self.level(top, s)) for s in slugs]
                 held = ["%s %s" % (s, got["error"] if "error" in got else got["reason"]) for s, got in levels if "error" in got or got["level"] == "P2"]
                 ready = [(priority.LEVELS.index(got["level"]), i, s) for i, (s, got) in enumerate(levels) if "error" not in got and got["level"] != "P2"]
@@ -797,6 +814,12 @@ class Round:
                     continue
                 if not p0:
                     n += 1
+
+    def feature_members(self, repo, name, plan):
+        """feature_plan 的卡分成 (單卡派過的卡, 交給 session 的卡)。人停的成員 dispatch --feature 會跳過，也不在後者。"""
+        single = [p[0] for p in plan if self.holds_branch(repo, p[0], name)]
+        slugs = [p[0] for p in plan if p[0] not in single and not chain.human_stopped(self.dispatch_file.get("%s/%s" % (repo, p[0])), name)]
+        return single, slugs
 
     def holds_branch(self, repo, slug, feature):
         """<slug> 有條目、不是這個 feature 的 session 成員，而且沒停、或停了但 worktree 還在（opsx stop 不收 worktree）。"""
@@ -926,12 +949,15 @@ def session_features(features):
     return [f for f in features if chain.session_managed(f)]
 
 
-def deps_unmerged(slug, prs):
+def deps_unmerged(slug, prs, features):
+    """卡所屬 PR 的 depends-on，加上所屬 feature 的 depends-on（chain.feature_waits），還沒 merged 的。"""
     pr = pr_of(prs, slug)
     if pr is None:
         return []
     status = {p.get("name"): p.get("status") for p in prs}
-    return [d for d in pr.get("depends-on") or [] if status.get(d) != "merged"]
+    deps = list(pr.get("depends-on") or [])
+    deps += [d for d in chain.feature_waits(features, prs).get(pr["name"], []) if d not in deps]
+    return [d for d in deps if status.get(d) != "merged"]
 
 
 def is_archived(top, name):

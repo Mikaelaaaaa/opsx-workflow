@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# 假 ps：只支援 `ps -p <pid> -o command=`。pid 不在就 exit 1（跟真的一樣），在就印 $OPSX_TEST_PS_CMD。測試用。
+kill -0 "$2" 2>/dev/null || exit 1
+printf '%s\n' "${OPSX_TEST_PS_CMD:?}"

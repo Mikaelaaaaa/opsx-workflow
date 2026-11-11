@@ -634,3 +634,66 @@ printf '{"root/m1":{"mode":"autopilot","pane":"w5:pQ","agent":"claude","grants":
 got="$(python3 -I -B "$OPSX_ROOT/bin/lib/chain.py" children "$R7" root m1 "$FX/disp7.json")"
 assert_eq "$got" "$(printf 'child\ts1\tfeat/s1/u\tdev')" "多 PR 根 feature 的 r2 留給 coordinate 開 session，單 PR 根 feature 的 s1 照接"
 echo ok
+
+# 單卡 r1 收尾由 coordinate 叫醒 session：帶 feature 參數時，同 feature 的 r2 回 session row；不帶時照舊留給 coordinate
+cat > "$R7/openspec/workplan.yaml" <<'EOF'
+features:
+  - name: r
+    prs:
+      - name: r1
+        branch: feat/r1/u
+        status: merged
+        depends-on: []
+        changes:
+          - name: r1
+            status: done
+      - name: r2
+        branch: feat/r2/u
+        status: pending
+        depends-on: [r1]
+        changes:
+          - name: r2
+            status: pending
+EOF
+printf '{"root/r1":{"mode":"autopilot","pane":"w5:pQ","agent":"claude","grants":[]}}' > "$FX/disp7.json"
+got="$(python3 -I -B "$OPSX_ROOT/bin/lib/chain.py" children "$R7" root r1 "$FX/disp7.json")"
+assert_eq "$got" "skip	沒有可以接的子卡" "沒帶 feature：r2 屬於 session 代管的 feature，單卡路徑不接"
+got="$(python3 -I -B -c 'import sys; sys.path.insert(0, sys.argv[1]); import chain; print(chain.children(*sys.argv[2:6], feature="r"))' "$OPSX_ROOT/bin/lib" "$R7" root r1 "$FX/disp7.json")"
+assert_eq "$got" "[('session', 'r2', 'feat/r2/u', 'dev')]" "帶 feature：同 feature 的 r2 回 session row"
+
+# 名稱不合法而有 depends-on 的 feature：它的 PR 等 feature 的依賴 d 合併才接
+cat > "$R7/openspec/workplan.yaml" <<'EOF'
+features:
+  - name: solo
+    prs:
+      - name: m1
+        branch: feat/m1/u
+        status: merged
+        changes:
+          - name: m1
+            status: done
+      - name: d
+        branch: feat/d/u
+        status: pending
+        changes:
+          - name: d
+            status: pending
+  - name: Bad_X
+    depends-on: [d]
+    prs:
+      - name: b1
+        branch: feat/b1/u
+        status: pending
+        depends-on: [m1]
+        changes:
+          - name: b1
+            status: pending
+EOF
+mkdir -p "$R7/openspec/changes/b1"; printf -- '- [ ] 1.1 x\n' > "$R7/openspec/changes/b1/tasks.md"
+printf '{"root/m1":{"mode":"autopilot","pane":"w5:pQ","agent":"claude","grants":[]}}' > "$FX/disp7.json"
+got="$(python3 -I -B "$OPSX_ROOT/bin/lib/chain.py" children "$R7" root m1 "$FX/disp7.json")"
+assert_eq "$got" "skip	沒有可以接的子卡" "壞名稱 feature 的依賴 d 沒合：b1 不接"
+sed -i.bak '/- name: d$/,/status:/ s/status: pending/status: merged/' "$R7/openspec/workplan.yaml"
+got="$(python3 -I -B "$OPSX_ROOT/bin/lib/chain.py" children "$R7" root m1 "$FX/disp7.json")"
+assert_eq "$got" "$(printf 'child\tb1\tfeat/b1/u\tdev')" "壞名稱 feature 的依賴 d 合了：b1 照單卡接"
+echo ok
