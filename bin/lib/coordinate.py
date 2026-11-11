@@ -701,7 +701,7 @@ class Round:
                 name = f.get("name")
                 if all(p.get("status") == "merged" for p in f.get("prs") or []):
                     continue
-                missing = [d for d in f["depends-on"] if status.get(d) != "merged"]
+                missing = [d for d in f.get("depends-on") or [] if status.get(d) != "merged"]
                 if missing:
                     self.log("⏳ %s 的 feature %s 等 %s merged 才開 session" % (repo, name, "、".join(missing)))
                     continue
@@ -866,8 +866,8 @@ def pr_of(prs, slug):
 
 
 def session_features(features):
-    """有 depends-on 的 feature 由一個 session 代管：依賴合了才由 coordinate 開 session，它的卡不單獨派。"""
-    return [f for f in features if f.get("depends-on")]
+    """由 session 代管的 feature（chain.session_managed）：依賴合了才由 coordinate 開 session，它的卡不單獨派。"""
+    return [f for f in features if chain.session_managed(f)]
 
 
 def deps_unmerged(slug, prs):
