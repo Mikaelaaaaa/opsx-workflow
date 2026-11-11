@@ -77,7 +77,7 @@ Run this for every unchecked task, in order. Numbers match the requirement doc s
 
 ## Test agent
 
-Spawn one **Agent** (general-purpose) when step 8 comes, and again after review fixes. Give it the project root, the list of test files from tasks.md, and the project's test and lint commands (CLAUDE.md first, then package.json / pyproject, then the usual `pnpm test`, `pytest`, `go test ./...`). It reports `STATUS: PASS|FAIL`, a one-line summary for tests and lint, the failing tests with the first lines of each error, and the full log.
+Spawn one **Agent** (general-purpose) when step 8 comes, and again after review fixes. Give it the project root, the list of test files from tasks.md, and the project's test and lint commands (CLAUDE.md first, then package.json / pyproject, then the usual `pnpm test`, `pytest`, `go test ./...`). A whole-suite run can take longer than the Bash tool's timeout (this repo's `tests/run.sh` takes about 20 minutes in an agent sandbox), so 背景跑 it with `run_in_background` and read its output file: `tests/run.sh` prints `START <name>` before each file and `PASS|FAIL <name> (<n>s)` after it, so a file that is still running is visible. It reports `STATUS: PASS|FAIL`, a one-line summary for tests and lint, the failing tests with the first lines of each error, and the full log.
 
 On FAIL: read the log, fix, with a scope guard (a fix that needs files outside this task's scope aborts the change instead). Re-run. At most two fix cycles per change; still red → leave the working tree as is, write the failure into the reply, `opsx status … --tests red`, continue to the next change.
 

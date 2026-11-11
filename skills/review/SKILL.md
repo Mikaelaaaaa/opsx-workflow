@@ -21,7 +21,7 @@ Three readers who do not share context, one lead who decides. The report they le
 
 ## Step 0: the gate
 
-Read `openspec/changes/<slug>/tasks.md` and `status.json`. For every checked task, the `測試：` file must exist (or the line says `測試：無 · <reason>`), and `status.json.tests` must be `green`. If either fails, do not review: say which tasks lack tests or that the suite is red, and that `/opsx-workflow:apply <slug>` has to finish first. A review of untested code is a review of a guess.
+Read `openspec/changes/<slug>/tasks.md` and `status.json`. For every checked task, the `測試：` file must exist (or the line says `測試：無 · <reason>`), and `status.json.tests` must be `green`. When you have to run the whole suite yourself, 背景跑 it and read the output file: it takes longer than the Bash tool's timeout, and `tests/run.sh` prints `START <name>` before each file, so a slow file is not a hang. If either fails, do not review: say which tasks lack tests or that the suite is red, and that `/opsx-workflow:apply <slug>` has to finish first. A review of untested code is a review of a guess.
 
 A main change with `subs/`: also run `opsx check <slug>`. Any line it prints is a sub-change shell that is incomplete; stop the same way and name the lines. A `Must-fix 候選` line is not an incomplete shell: leave it for Step 3. A line starting `explore.md 步驟` goes back to `/opsx-workflow:explore <slug>`, not to `/opsx-workflow:apply`.
 
