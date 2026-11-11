@@ -425,6 +425,23 @@ echo "$out" | grep -q split || fail "訊息要寫出 stage: $out"
 assert_eq "$(cat "$OPSX_FAKE_LOG")" "" "拒絕時不碰 herdr"
 rm "$RF/openspec/changes/m2/inbox.md"
 
+# --feature --only：只寫列出的卡，第一句照列出的順序給第一張；列了不能開工的卡就拒絕
+cp "$J" "$FX/j-before-only.json"
+printf '{}' > "$J"; : > "$OPSX_FAKE_LOG"
+out="$(opsx dispatch --feature fs --only m2 --agent claude --mode autopilot 2>&1)"; assert_eq "$?" 0 "--only m2: $out"
+assert_grep '^agent prompt fs /opsx-workflow:apply m2$' "$OPSX_FAKE_LOG"
+assert_eq "$(jq -r 'keys | join(" ")' "$J")" "Feat-Repo/@fs Feat-Repo/m2" "只寫 session 與 m2"
+printf '{}' > "$J"; : > "$OPSX_FAKE_LOG"
+out="$(opsx dispatch --feature fs --only m2,m1 --agent claude --mode autopilot 2>&1)"; assert_eq "$?" 0 "--only m2,m1: $out"
+assert_grep '^agent prompt fs /opsx-workflow:apply m2$' "$OPSX_FAKE_LOG"
+assert_eq "$(jq -r 'keys | join(" ")' "$J")" "Feat-Repo/@fs Feat-Repo/m1 Feat-Repo/m2" "m1、m2 都寫"
+printf '{}' > "$J"; : > "$OPSX_FAKE_LOG"
+out="$(opsx dispatch --feature fs --only m3 --agent claude --mode autopilot 2>&1)"; [ $? -eq 2 ] || fail "--only 列了不能開工的卡要拒絕: $out"
+echo "$out" | grep -q m3 || fail "訊息要說 m3: $out"
+assert_eq "$(cat "$OPSX_FAKE_LOG")" "" "拒絕時不碰 herdr"
+assert_rc 2 opsx dispatch m2 --only m2 --agent claude
+cp "$FX/j-before-only.json" "$J"
+
 # --- dispatch --note：送第一句之前寫進 inbox.md 的 ## 派工指示（specs/dispatch-note「opsx dispatch --note 在第一句之前寫入」） ---
 cd "$R"
 N="$R/openspec/changes/note-card"; mkdir -p "$N"; printf 'schema: opsx\nkind: dev\n' > "$N/.openspec.yaml"
