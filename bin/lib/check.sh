@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # opsx check <slug>：檢查 openspec/changes/<slug>/subs/ 底下每個子殼齊不齊（openspec CLI 只管主殼，子殼靠這支），
-# explore.md 的 ## 步驟 九行齊不齊，agent 開的卡的事實欄位（本卡是 agent 開的，或本卡開出去的卡），以及併入項目有沒有去處。
+# explore.md 的 ## 步驟 九行齊不齊，agent 開的卡的事實欄位（本卡是 agent 開的，或本卡開出去的卡），併入項目有沒有去處，以及主殼與子殼 spec 的 Gherkin 寫法。
 # 一個缺項一行「subs/<子>/<檔>: <缺什麼>」或「explore.md 步驟 <號> <名>: <缺什麼>」，有缺項退出 1。只用 bash 與 awk：Stop hook 直接 source 它，不能依賴 python。
 # 驗收：openspec/changes/split-plan/specs/subchange-propose/spec.md「opsx check 檢查子殼」；board-actions「agent 開的卡要帶事實欄位」。
 
@@ -10,11 +10,74 @@ opsx_check() {
   [ -n "$top" ] || die "check: 不在 git repo 裡"
   local dir="$top/openspec/changes/$1"
   [ -d "$dir" ] || die "check: 沒有這張卡：$dir"
-  local out cand; out="$(check_explore "$dir"; check_subs "$dir"; check_facts "$dir"; check_merged "$dir")"; cand="$(check_blast "$top" "$dir")"
+  local out cand gherkin; out="$(check_explore "$dir"; check_subs "$dir"; check_facts "$dir"; check_merged "$dir")"; cand="$(check_blast "$top" "$dir")"
+  gherkin="$(check_gherkin "$dir")" || exit 2
   [ -z "$cand" ] || printf '%s\n' "$cand"
-  [ -z "$out" ] && return 0
-  printf '%s\n' "$out"
+  [ -z "$out$gherkin" ] && return 0
+  [ -z "$out" ] || printf '%s\n' "$out"
+  [ -z "$gherkin" ] || printf '%s\n' "$gherkin"
   exit 1
+}
+
+# 主殼與子殼 specs 的 Gherkin 四條：Requirement 有正例與反例、Scenario Outline 底下有 Examples:、沒有禁用模糊詞、Background 沒有 THEN。
+# 正反例與 Outline 認 Scenario 名稱結尾的五種標記（schemas/opsx/artifacts-specs.yaml 的 specs instruction）。
+# 引號與反引號內是資料，不比對模糊詞；```區塊整段不查；REMOVED / RENAMED 段的 Requirement 沒有 Scenario，不查。
+# 主殼 .openspec.yaml 有 spec_format: when-then 就整張卡（含子殼）跳過。
+check_gherkin() { # <卡目錄>：一個問題一行「<相對路徑>: <問題>」；有問題且 repo schema 是舊版時，最後多一行叫人跑 opsx init
+  grep -qE '^[[:space:]]*spec_format:[[:space:]]*when-then[[:space:]]*$' "$1/.openspec.yaml" 2>/dev/null && return 0
+  local f specs=() words out list="$OPSX_ROOT/schemas/opsx/artifacts-specs.yaml"
+  for f in "$1"/specs/*/spec.md "$1"/subs/*/specs/*/spec.md; do
+    [ -f "$f" ] && specs+=("$f")
+  done
+  [ ${#specs[@]} -gt 0 ] || return 0
+  words="$(sed -n 's/^[[:space:]]*禁用模糊詞：//p' "$list" | head -1)"
+  [ -n "$words" ] || die "check: $list 沒有「禁用模糊詞：」那一行"
+  out="$(awk -v base="$1/" -v words="$words" '
+    function flushoutline() {
+      if (outline != "" && !examples) printf "%s: Scenario「%s」是 Scenario Outline，底下沒有 Examples:\n", rel, outline
+      outline = ""
+    }
+    function flushreq() {
+      if (req != "" && !pos) printf "%s: Requirement「%s」沒有正例\n", rel, req
+      if (req != "" && !neg) printf "%s: Requirement「%s」沒有反例\n", rel, req
+      req = ""
+    }
+    BEGIN {
+      nw = split(words, w, "、")
+      for (i = 1; i <= nw; i++) gsub(/^[ \t\r]+|[ \t\r]+$/, "", w[i])
+    }
+    FNR == 1 { flushoutline(); flushreq(); rel = substr(FILENAME, length(base) + 1); fence = 0; bg = 0; skip = 0 }
+    /^```/ { fence = !fence; next }
+    fence { next }
+    {
+      line = $0; gsub(/"[^"]*"/, "", line); gsub(/`[^`]*`/, "", line)
+      for (i = 1; i <= nw; i++) if (index(line, w[i])) printf "%s: 第 %d 行有模糊詞「%s」\n", rel, FNR, w[i]
+    }
+    /^#/ { bg = 0 }
+    /^Background:/ { bg = 1; next }
+    bg && /^[ \t]*- \*\*THEN\*\*/ { printf "%s: 第 %d 行 Background 含 THEN\n", rel, FNR; next }
+    /^## / { flushoutline(); flushreq(); skip = ($0 ~ /^## (REMOVED|RENAMED) /); next }
+    /^### / {
+      flushoutline(); flushreq()
+      if (!skip && $0 ~ /^### Requirement:/) { req = $0; sub(/^### Requirement:[ \t]*/, "", req); pos = 0; neg = 0 }
+      next
+    }
+    /^#### Scenario:/ {
+      flushoutline()
+      if (req == "") next
+      name = $0; sub(/^#### Scenario:[ \t]*/, "", name); sub(/[ \t\r]+$/, "", name)
+      if (name ~ /（(Scenario Outline，)?正例）$/ || name ~ /（Scenario Outline，正例＋反例）$/) pos = 1
+      if (name ~ /（(Scenario Outline，)?反例）$/ || name ~ /（Scenario Outline，正例＋反例）$/) neg = 1
+      if (name ~ /（Scenario Outline，(正例|反例|正例＋反例)）$/) { outline = name; examples = 0 }
+      next
+    }
+    outline != "" && /^Examples:/ { examples = 1 }
+    END { flushoutline(); flushreq() }
+  ' "${specs[@]}")"
+  [ -n "$out" ] || return 0
+  printf '%s\n' "$out"
+  grep -q '禁用模糊詞：' "$1/../../schemas/opsx/schema.yaml" 2>/dev/null \
+    || printf '%s\n' "spec 規則是舊版：先跑 opsx init 拿插件版 specs instruction，再照它改 spec"
 }
 
 # 併進這張卡的項目（inbox.md 的 ## 併入 段）要有去處：tasks.md 提到它的 id，或已經 opsx split-out。
