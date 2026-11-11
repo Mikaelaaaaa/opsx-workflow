@@ -1005,7 +1005,7 @@ document.addEventListener('keydown',e=>{
     if(e.key==='Enter'&&e.target.id==='note-add'){const c=byKey(ui.open);const v=e.target.value.trim();if(c&&v)submitNote(c,v);}
     return;
   }
-  if(e.key==='Escape'){if(ui.merge)closeMerge();else if(!$('#dialog').hidden)closeDispatch();else if(ui.open)closeDrawer();else closeMenu();return;}
+  if(e.key==='Escape'){if(!$('#dialog').hidden)closeDispatch();else if(ui.open)closeDrawer();else closeMenu();return;}
   if(e.key==='j'||e.key==='ArrowDown'){move(1);e.preventDefault();}
   else if(e.key==='k'||e.key==='ArrowUp'){move(-1);e.preventDefault();}
   else if(e.key==='Enter'&&ui.sel&&!ui.open)openDrawer(ui.sel);

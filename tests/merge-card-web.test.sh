@@ -98,6 +98,14 @@ const sel = el('merge-into', 'SELECT'); refocus(sel);
 assert.ok(sel.focused, '下拉拿回焦點');
 const inp = el('drop-reason', 'INPUT'); refocus(inp);
 assert.ok(inp.focused && inp.range[0] === 3 && inp.range[1] === 3, '輸入框游標放回尾端');
-assert.ok(html.includes('const typing=typingClass(document.activeElement);') && html.includes('if(i)refocus(i);'), 'render 用 typingClass/refocus');
+const r = fn('render');
+const rTyping = r.indexOf('const typing=typingClass(document.activeElement);'), rView = r.indexOf("setView($('#view')"), rRefocus = r.indexOf('if(i)refocus(i);');
+assert.ok(rTyping >= 0 && rView > rTyping && rRefocus > rView, '先記焦點、setView 換內容、之後才還焦點：' + [rTyping, rView, rRefocus]);
+
+// Escape：併進選單只由下拉自己的 Escape 關，全域 Escape 先給對話框與抽屜
+const kd = html.slice(html.indexOf("document.addEventListener('keydown'"));
+assert.ok(/classList\.contains\('merge-into'\)\)\{if\(e\.key==='Escape'\)closeMerge\(\)/.test(kd), '焦點在下拉時 Escape 關選單');
+const globalEsc = kd.split('\n').find(l => /^ {2}if\(e\.key==='Escape'\)\{/.test(l));
+assert.ok(globalEsc && globalEsc.includes('closeDispatch') && !globalEsc.includes('merge'), '全域 Escape 不碰併進選單：' + globalEsc);
 JS
 echo ok
