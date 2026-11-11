@@ -137,7 +137,9 @@ if [ "$tool" = "Edit" ] || [ "$tool" = "Write" ]; then
   wtop="$(git -C "$(hook_cwd)" rev-parse --show-toplevel 2>/dev/null || true)"
   [ -n "$wtop" ] || exit 0
   case "$file" in /*) ;; *) deny "opsx 授權閘門：file_path 不是絕對路徑（${file}），分不出它在哪個 worktree，先擋下。用絕對路徑" ;; esac
-  # 目錄還不存在時往上找最近存在的那層，用它判斷屬於哪個 worktree；pwd -P 讓 /tmp 與 /private/tmp 這類 symlink 對得上
+  # 下面往上找目錄是逐段剪字串，`..` 會讓它爬到跟檔案實際位置不同的地方
+  case "$file" in */../*|*/..) deny "opsx 授權閘門：file_path 含 ..（${file}），分不出它實際在哪個 worktree，先擋下。用不含 .. 的絕對路徑" ;; esac
+  # 目錄還不存在時往上找最近存在的那層，用它判斷屬於哪個 worktree；進不去就擋，不讓 git 默默失敗後放行
   base="${file%/*}"; missing=0
   while [ -n "$base" ] && [ ! -d "$base" ]; do base="${base%/*}"; missing=1; done
   real="$(cd "${base:-/}" && pwd -P)" || deny "opsx 授權閘門：進不了 ${base:-/}，分不出 ${file} 屬於哪個 worktree，先擋下"

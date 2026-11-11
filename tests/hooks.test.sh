@@ -475,6 +475,12 @@ for f in x.test.ts src/nope/x.test.ts; do
   out="$(twt "$f")"; assert_eq "$(decision "$out")" deny "test-path: 相對路徑 ${f} 要 deny，不能逾時放行"
   reason "$out" | grep -qF "$f" || fail "test-path: 相對路徑的 deny 要點名 ${f}：$(reason "$out")"
 done
+# 經 `..` 繞到 worktree 外再繞回來：檔案實際落在 worktree 裡沒有測試的目錄，不能因為往上找存在目錄時爬到外面就放行
+dotdot="$(dirname "$R")/nope/../$(basename "$R")/src/newdir/x.test.ts"
+out="$(tw "$dotdot")"; assert_eq "$(decision "$out")" deny "test-path: 含 .. 的路徑要 deny"
+reason "$out" | grep -qF "$dotdot" || fail "test-path: 含 .. 的 deny 要點名原值：$(reason "$out")"
+# 目標目錄還不存在時，上層有被追蹤的測試也不算這一層有
+out="$(tw "$R/tests/newsub/x.test.ts")"; assert_eq "$(decision "$out")" deny "test-path: 新子目錄的上層有測試也不算"
 # 這一層的被追蹤測試檔排在大量子目錄檔案前面（清單超過 pipe buffer）時仍要放行
 mkdir -p "$R/big/sub"; printf 'x\n' > "$R/big/a.test.sh"
 ( cd "$R/big/sub" && seq -f 'padding-padding-padding-%06g.ts' 1 3000 | xargs touch )
