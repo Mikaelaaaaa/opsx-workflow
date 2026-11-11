@@ -15,7 +15,7 @@
 
 ## Acceptance
 
-- spec Scenario「分位不到 10 補零」
+- spec Scenario「分位補成兩位（Scenario Outline，正例）」「分位不到 10 不少一個 0（反例）」
 - `npm test` 全綠
 
 ## Testing Decisions
