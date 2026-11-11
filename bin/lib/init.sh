@@ -116,7 +116,7 @@ builtin_command_for() { # <skill 名>
 # 使用者層、專案層（在 repo 裡時）的 skills 目錄名跟插件 skills/ 同名就警告。只警告：可能是刻意留的個人版本，opsx 不動使用者的檔案。
 # 另外列出插件 skill 名撞內建指令的：手打短名會跑到內建。
 warn_skill_clashes() {
-  local top plugin_skills dirs=() dir skill name real builtin advice seen=$'\n' hit=$'\n'
+  local top plugin_skills dirs=() dir skill name real builtin advice paths seen=$'\n' hit=$'\n' found=""
   top="$(git_toplevel)"
   plugin_skills="$(cd "$OPSX_ROOT/skills" && pwd -P)"
   dirs+=("$(dirname "$(claude_settings_file)")/skills")
@@ -130,18 +130,23 @@ warn_skill_clashes() {
       case "$real/" in "$plugin_skills"/*) continue ;; esac
       case "$seen" in *$'\n'"$real"$'\n'*) continue ;; esac
       seen="$seen$real"$'\n'
-      hit="$hit$name"$'\n'
-      builtin="$(builtin_command_for "$name")"
-      advice="要用插件的就把它搬走或改名"
-      [ -z "$builtin" ] || advice="搬走後手打 /${name} 會跑到內建 /${builtin}，一律打 /opsx-workflow:${name}"
-      warn "skill 同名：${skill%/} 跟 opsx 插件的 skills/${name} 同名，手打 /${name} 會跑到這份，模型也可能選錯。${advice}；這份是刻意留的就忽略這行（opsx 自己送的指令都帶 /opsx-workflow: 前綴，不受影響）"
+      case "$hit" in *$'\n'"$name"$'\n'*) ;; *) hit="$hit$name"$'\n' ;; esac
+      found="$found$name"$'\t'"${skill%/}"$'\n'
     done
+  done
+  # 同一個名字兩層各有一份時只警告一次、列出全部路徑；Claude Code 的同名優先順序沒有查證，不說哪份會贏
+  for name in $hit; do
+    builtin="$(builtin_command_for "$name")"
+    advice="要用插件的就把它們搬走或改名"
+    [ -z "$builtin" ] || advice="把這些都搬走後手打 /${name} 會跑到內建 /${builtin}，一律打 /opsx-workflow:${name}"
+    paths="$(awk -F'\t' -v n="$name" '$1 == n { printf "%s%s", sep, $2; sep = "、" }' <<< "$found")"
+    warn "skill 同名：${paths} 跟 opsx 插件的 skills/${name} 同名，手打 /${name} 可能跑到其中一份，模型也可能選錯。${advice}；刻意留的就忽略這行"
   done
   for skill in "$OPSX_ROOT"/skills/*/; do
     name="$(basename "$skill")"
     case "$hit" in *$'\n'"$name"$'\n'*) continue ;; esac
     builtin="$(builtin_command_for "$name")"
-    [ -z "$builtin" ] || warn "插件 skill ${name} 與內建 /${builtin} 撞名：手打 /${name} 會跑到內建指令，要用 /opsx-workflow:${name}（opsx 自己送的指令都已帶前綴）"
+    [ -z "$builtin" ] || warn "插件 skill ${name} 與內建 /${builtin} 撞名：手打 /${name} 會跑到內建指令，要用 /opsx-workflow:${name}"
   done
 }
 
