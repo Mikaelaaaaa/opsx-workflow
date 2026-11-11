@@ -113,7 +113,7 @@ if [ "$tool" = "Bash" ]; then
   [ "$UNMAPPED" = 1 ] && exit 0
   # 第二級
   printf '%s' "$sk" | grep -qE '(^|\s|&&|;)git\s+push(\s|$)' && level2 push "git push"
-  printf '%s' "$sk" | grep -qE '(glab mr (create|update)|gh pr (create|edit)|glab issue note|gh issue comment)' && level2 mr "開 / 改 MR"
+  printf '%s' "$sk" | grep -qE '(glab mr (create|update)|gh pr (create|edit)|glab issue (note|comment)|gh issue comment)' && level2 mr "開 / 改 MR"
   printf '%s' "$sk" | grep -qE 'db:migrate|drizzle-kit (migrate|push)|alembic upgrade' && level2 migrate "本機 migrate"
   printf '%s' "$sk" | grep -qE '(^|\s|&&|;)rm\s+-(r|f|rf|fr)\b' && level2 delete "刪檔（rm -r/-f）"
   printf '%s' "$sk" | grep -qE '(pnpm (add|install|i)\b|npm (install|i|ci)\b|uv (add|sync)|pip install|yarn add|brew install)' && level2 install "裝套件"
