@@ -1076,12 +1076,10 @@ def is_archived(top, name):
 
 
 def archived_declined(top, name):
-    """歸檔的卡是被捨棄的（opsx drop、opsx merge-card 會在 .openspec.yaml 寫 outcome: declined），不是合進 main。"""
-    for d in glob.glob(os.path.join(top, "openspec", "changes", "archive", "????-??-??-" + glob.escape(name))):
-        yaml_path = os.path.join(d, ".openspec.yaml")
-        if re.search(r"^outcome:\s*declined\s*$", priority.read_text(yaml_path), re.M):
-            return True
-    return False
+    """最新一份同名歸檔是被捨棄的（opsx drop、opsx merge-card 會在 .openspec.yaml 寫 outcome: declined），不是合進 main。
+    名字被捨棄過又重做的卡，看最新那份。"""
+    dirs = sorted(glob.glob(os.path.join(top, "openspec", "changes", "archive", "????-??-??-" + glob.escape(name))))
+    return bool(dirs) and bool(re.search(r"^outcome:\s*declined\s*$", priority.read_text(os.path.join(dirs[-1], ".openspec.yaml")), re.M))
 
 
 def waiting_on(prs, slug):

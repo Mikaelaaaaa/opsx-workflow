@@ -556,10 +556,24 @@ round || fail "waits-on 同名卡還在 rc: $(cat "$FX/out")"
 assert_grep "^opsx stop p1 --repo $R\$" "$OPSX_FAKE_LOG"; assert_eq "$(count '^opsx answer')" 0 "同名卡還在不答：$(cat "$OPSX_FAKE_LOG")"
 rm -rf "$R/openspec/changes/archive/2026-11-11-a" "$R/openspec/changes/a"; rm -f "$MEMO"
 [ ! -d "$FX/changes-a.save" ] || mv "$FX/changes-a.save" "$R/openspec/changes/a"
-# gate 已答、pane 剛重派（沒有 waiting）：下一輪不停 pane、不再答
-cards '[{"slug":"p1","section":"進行中","dispatch":'"$D"',"agent_status":"working"}]'
-round || fail "剛重派 rc: $(cat "$FX/out")"
-assert_eq "$(count '^opsx stop')" 0 "剛重派的 pane 不能被停：$(cat "$OPSX_FAKE_LOG")"; assert_eq "$(count '^opsx answer')" 0
+# 被捨棄過又重做、最新一份歸檔是正常合併的：算已合，答 gate、不停 pane
+[ ! -d "$R/openspec/changes/a" ] || mv "$R/openspec/changes/a" "$FX/changes-a.save"
+mkdir -p "$R/openspec/changes/archive/2026-11-01-a" "$R/openspec/changes/archive/2026-11-10-a"
+printf 'schema: opsx\noutcome: declined\n' > "$R/openspec/changes/archive/2026-11-01-a/.openspec.yaml"; printf 'schema: opsx\n' > "$R/openspec/changes/archive/2026-11-10-a/.openspec.yaml"
+cards "$W1"
+round || fail "waits-on 先被捨棄後重做 rc: $(cat "$FX/out")"
+assert_eq "$(count '^opsx stop')" 0 "最新歸檔正常就不停 pane：$(cat "$OPSX_FAKE_LOG")"
+assert_eq "$(count '^opsx answer p1 --gate g9 --repo ')" 1 "要答掉 g9：$(cat "$OPSX_FAKE_LOG")"
+rm -rf "$R/openspec/changes/archive/2026-11-01-a" "$R/openspec/changes/archive/2026-11-10-a"; rm -f "$MEMO"
+[ ! -d "$FX/changes-a.save" ] || mv "$FX/changes-a.save" "$R/openspec/changes/a"
+# gate 還開著（collect 要等 answer 生效才會關它）、pane 剛重派：連跑兩輪都不停 pane
+printf 'created: 2026-11-07\n\nfeatures:\n  - name: fa\n    prs:\n      - name: a\n        branch: feat/a/m\n        status: merged\n        depends-on: []\n' > "$R/openspec/workplan.yaml"
+cards "$W1"
+round || fail "剛重派第一輪 rc: $(cat "$FX/out")"
+assert_eq "$(count '^opsx stop')" 0 "剛重派的 pane 第一輪不能被停：$(cat "$OPSX_FAKE_LOG")"
+round || fail "剛重派第二輪 rc: $(cat "$FX/out")"
+assert_eq "$(count '^opsx stop')" 0 "gate 還開著的第二輪也不能停 pane：$(cat "$OPSX_FAKE_LOG")"
+assert_eq "$(count '^opsx answer p1 --gate g9 --repo ')" 1 "每輪各答一次：$(cat "$OPSX_FAKE_LOG")"
 rm -f "$MEMO"
 # 還沒合（PR 是 in-progress）：照舊停 pane、記 parked、不答
 printf 'created: 2026-11-07\n\nfeatures:\n  - name: fa\n    prs:\n      - name: a\n        branch: feat/a/m\n        status: in-progress\n        depends-on: []\n' > "$R/openspec/workplan.yaml"
