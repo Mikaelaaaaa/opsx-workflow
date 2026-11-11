@@ -157,6 +157,33 @@ unset OPSX_TEST_ON_WAIT OPSX_TEST_PANE_TEXT
 export OPSX_TEST_ON_PROMPT="$FX/on_prompt.sh"
 printf '{"Agentory-CS/retry-backoff":{"mode":"drive","pane":"p42","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"
 
+# --- drive 自己開的 gate 被回答：「重做」才繼續（不再送階段指令，做完後驗一次），其他答案結束並 kick ---
+export OPSX_TEST_ON_PROMPT="$FX/noop.sh"; export OPSX_TEST_PANE_TEXT="pane 尾巴"
+cat > "$FX/answer_on_wait.sh" <<EOF
+case "\$*" in *"--until working"*)
+  if grep -q '^## drive-apply-2' "$C/gates.md"; then printf '{}' > "$OPSX_STATE_DIR/dispatch.json"
+  else printf '## drive-apply-1\ntype: decision\nstatus: answered\nanswer: %s\n' "\$(cat "$FX/answer.txt")" > "$C/gates.md"; fi ;;
+esac
+EOF
+export OPSX_TEST_ON_WAIT="$FX/answer_on_wait.sh"
+answered_run() { # <答案>：卡住的 gate 一開就被答掉
+  reset_apply; printf '{"Agentory-CS/retry-backoff":{"mode":"drive","pane":"p42","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"
+  printf '%s' "$1" > "$FX/answer.txt"; : > "$KL"
+  out="$(opsx drive retry-backoff 2>&1)"; assert_eq "$?" 0 "drive gate 答「${1}」: $out"
+  assert_eq "$(grep -c '^agent prompt' "$OPSX_FAKE_LOG")" 1 "答「${1}」之後不該再送階段指令: $(cat "$OPSX_FAKE_LOG")"
+}
+answered_run "重做 /opsx-workflow:apply 一次，做不完就把卡在哪寫進 gates.md (Recommended)"
+assert_grep '^## drive-apply-2$' "$C/gates.md"   # 答案已由 opsx answer 送進 agent；做完後指紋沒變，再開一個
+assert_eq "$(grep -c '^opsx coordinate --kick$' "$KL")" 2 "兩個 stuck gate 各 kick 一次: $(cat "$KL")"
+for a in "跳過這一步，在 decisions.tsv 寫下原因再往下走" "停在這裡，把卡在哪寫進 gates.md 等人" "先別動，我看一下"; do
+  answered_run "$a"
+  assert_not_grep '^## drive-apply-2$' "$C/gates.md"
+  assert_eq "$(grep -c '^opsx coordinate --kick$' "$KL")" 2 "答「${a}」要再 kick 一次: $(cat "$KL")"
+  echo "$out" | grep -q "不是重做" || fail "要說為什麼結束: $out"
+done
+unset OPSX_TEST_ON_WAIT OPSX_TEST_PANE_TEXT
+export OPSX_TEST_ON_PROMPT="$FX/on_prompt.sh"
+
 # --- 送一次後有動就不寫 gate：階段、tasks 勾數、status.json 的 at、gate 數各一案（只跑一輪，看送完那刻有沒有 drive gate） ---
 run_once() { # <名稱>：fixture 與 $FX/moved.sh 已備好
   printf '{"Agentory-CS/retry-backoff":{"mode":"drive","pane":"p42","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"

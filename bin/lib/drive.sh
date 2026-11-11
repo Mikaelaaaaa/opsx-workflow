@@ -21,7 +21,7 @@ opsx_drive() {
   [ -d "$d" ] || die "drive: 沒有這張卡：$d"
   drive_register "$repo/$slug" || exit 2
   trap "drive_unregister $(printf '%q' "$repo/$slug")" EXIT   # 展開在設 trap 時：EXIT 跑時 local 已經沒了
-  local max="${OPSX_DRIVE_MAX:-200}" poll="${OPSX_DRIVE_POLL:-300}" i=0 settled=0
+  local max="${OPSX_DRIVE_MAX:-200}" poll="${OPSX_DRIVE_POLL:-300}" i=0 settled=0 watch="" watch_fp=""
 
   while [ "$i" -lt "$max" ]; do
     i=$((i+1))
@@ -36,12 +36,29 @@ opsx_drive() {
     fi
     if [ "$(st_open_gates "$d")" -gt 0 ]; then
       say "drive: $slug 有 $(st_open_gates "$d") 個 gate 等人，等板上回覆"
+      if [ -z "$watch" ]; then   # 答案送進 agent 之前記基準指紋，答完驗「重做」有沒有動
+        watch="$(drive_gate_open "$d")"; [ -z "$watch" ] || watch_fp="$(stage_fingerprint "$top" "$slug")"
+      fi
       # 回 gate 時 opsx answer 自己會 prompt agent，所以等它開工再等它做完，才輪到 drive 送下一句。
       # 有 timeout：answer 寫完 gates.md 但 prompt 沒送成時 agent 不會開工，要回頭重讀 gates.md
       herdr_step "$slug" agent wait "$slug" --until working --timeout $((poll * 1000)) || return 0
       [ "$HERDR_STEP_OK" = 1 ] || continue
       herdr_step "$slug" agent wait "$slug" || return 0
       continue
+    fi
+    if [ -n "$watch" ]; then
+      # shortcut: 答案的 prompt 沒送成時 agent 沒動，這裡會多開一個 gate；多一個 gate 給人看，升級時改成答完先確認 agent 開過工
+      local ans wstage; ans="$(gate_field "$d" "$watch" answer)"; wstage="${watch#drive-}"; wstage="${wstage%-*}"
+      case "$ans" in
+        重做*)
+          if [ "$(stage_fingerprint "$top" "$slug")" = "$watch_fp" ]; then
+            write_stuck_gate "$d" "$wstage" "$repo" "$slug"; say "drive: $slug 重做 /opsx-workflow:$wstage 之後階段還是沒動，寫了 gate 等人"
+            coordinate_kick "$slug"; watch=""; continue   # 新 gate 開著，回頭走 gate 分支，不送階段指令
+          fi
+          watch="" ;;
+        *)
+          say "drive: $slug 的 gate $watch 答「${ans}」，不是重做，drive 結束交回人"; coordinate_kick "$slug"; return 0 ;;
+      esac
     fi
     local stage; stage="$(stage_name "$top" "$slug")"
     case "$stage" in
@@ -94,6 +111,13 @@ herdr_step() { # <slug> <herdr args…>
     *)
       say "drive: herdr $1 $2 回 ${code:-$err}，等 $poll 秒"; sleep "$poll"; return 0 ;;
   esac
+}
+
+drive_gate_open() { # <card dir>：第一個 open 的 drive-<stage>-<n> gate 的標題，沒有印空
+  awk '/^## /{id = substr($0, 4)} /^status:[ \t]*open[ \t]*$/ && id ~ /^drive-[a-z]+-[0-9]+$/ {print id; exit}' "$1/gates.md"
+}
+gate_field() { # <card dir> <gate id> <欄位>：該 gate 的欄位值，沒有印空
+  awk -v id="$2" -v k="$3" '/^## /{cur = (substr($0, 4) == id)} cur && index($0, k ":") == 1 {sub(/^[^:]*:[ \t]*/, ""); print; exit}' "$1/gates.md"
 }
 
 write_stuck_gate() { # <card dir> <stage> <repo> <slug>：gates.md 加一個 open 的 decision gate，id 不跟舊的 drive gate 撞
