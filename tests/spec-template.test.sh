@@ -124,4 +124,18 @@ names="$(awk '/^## .*對應到 openspec/{exit} /^```gherkin$/{on=1;next} on && /
 while IFS= read -r n; do
   printf '%s\n' "$ALLOWED" | grep -qxF -- "$n" || fail "reference 有原文以外的範例名稱：$n"
 done <<< "$names"
+
+# --- Scenario：evals fixtures 的 schema 快照是插件版（正例）---
+# --- Scenario：fixtures 裡沒有 fork 來的 WHEN/THEN 範本（反例）---
+# specs 區塊用 init 安裝時的同一個 specs_block 抽出來比
+block_of() { ( OPSX_PY=python3; source "$OPSX_ROOT/bin/lib/common.sh"; source "$OPSX_ROOT/bin/lib/init.sh"; specs_block "$1" ); }
+n=0
+for d in "$OPSX_ROOT"/skills/*/evals/fixtures/*/repo/openspec/schemas/opsx; do
+  [ -d "$d" ] || continue
+  n=$((n + 1))
+  cmp -s "$T" "$d/templates/spec.md" || fail "fixture 範本不是插件版：$d/templates/spec.md"
+  [ "$(block_of "$d/schema.yaml")" = "$(cat "$B")" ] || fail "fixture 的 specs 區塊不是插件版：$d/schema.yaml"
+  ! grep -qF 'with WHEN/THEN format' "$d/schema.yaml" || fail "fixture 還有 'with WHEN/THEN format'：$d/schema.yaml"
+done
+[ "$n" -gt 0 ] || fail "找不到任何 evals fixture 的 schema 快照"
 echo ok
