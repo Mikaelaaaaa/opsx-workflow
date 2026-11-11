@@ -32,7 +32,7 @@ fi
 
 pkw=""
 for kw in babysit pickup pause forensics correct reflect audit deepen dispatch; do
-  case " $lower " in *"/$kw "*|*" $kw "*|*"/$kw"*) pkw="$kw"; break ;; esac
+  case " $lower " in *"/$kw "*|*" $kw "*|*"/$kw"*|*"/opsx-workflow:$kw"*) pkw="$kw"; break ;; esac
 done
 case "$prompt" in
   *反思*) pkw="${pkw:-reflect}" ;;

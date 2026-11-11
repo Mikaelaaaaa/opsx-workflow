@@ -29,7 +29,7 @@ Four docs coexist in a project. Each has a distinct audience and scope — don't
 |-----|----------|-------|---------------|
 | `CLAUDE.md` | AI | Behavioral rules: what to do, what not to do, commands, conventions | Human (manual) |
 | `CODEBASE.md` | AI | Structural map: modules, exports, dependencies, entry points | `/sync` (auto) |
-| `CONTEXT.md` | AI | Domain language: glossary, relationships, flagged ambiguities | `/explore` (proposed, human-confirmed) |
+| `CONTEXT.md` | AI | Domain language: glossary, relationships, flagged ambiguities | `/opsx-workflow:explore` (proposed, human-confirmed) |
 | `docs/ARCHITECTURE.md` | Human | Visual architecture: Mermaid diagrams, flow diagrams, tech stack | `/sync` (auto) |
 
 `CLAUDE.md` is the king — it may include key structural info (e.g., a stacks table for an infra repo) when that info is also an operational instruction. Overlap with `CODEBASE.md` is fine; contradiction is not. When generating `CODEBASE.md`, check `CLAUDE.md` first and don't duplicate what's already there unless the structural detail goes deeper.

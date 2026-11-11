@@ -269,13 +269,13 @@ PY
   case "$first" in explore|grill|propose|apply|review|pr|babysit) ;; *) first=explore ;; esac
   # 指示要在 agent 讀到第一句前就在卡上；放在前面每一步之後，失敗的派工不會留下指示，重跑也不會寫兩條
   if [ -n "$note" ]; then note_append "$d" "$note" || die "dispatch: 寫不進 $d/inbox.md 的派工指示，第一句沒送"; fi
-  herdr agent prompt "$slug" "/$first $card" >/dev/null
+  herdr agent prompt "$slug" "/opsx-workflow:$first $card" >/dev/null
   local c via=""
   [ -n "$feature" ] && via="（session ${feature}）"
   for c in $written; do
-    log_row "$top/openspec/changes/$c" 你 已指派 "指派給 ${agent}${via}，第一句 /${first} ${card}" "${agent} · ${mode} · ${model}"
+    log_row "$top/openspec/changes/$c" 你 已指派 "指派給 ${agent}${via}，第一句 /opsx-workflow:${first} ${card}" "${agent} · ${mode} · ${model}"
   done
-  say "dispatch: $repo/$slug → $agent $model · $mode · kind $kind · $ws $pane · 第一句 /$first $card"
+  say "dispatch: $repo/$slug → $agent $model · $mode · kind $kind · $ws $pane · 第一句 /opsx-workflow:$first $card"
 
   if [ -n "$feature" ]; then
     # drive 對 herdr agent 名 = 卡名送話；session 代管多張卡，跟 fan-out 的代管卡一樣不起 drive
@@ -295,7 +295,7 @@ send_to_session() { # <top> <repo> <slug> <feature> <note>：人停的成員卡�
   first="$(stage_name "$top" "$slug")"
   case "$first" in explore|grill|propose|apply|review|pr|babysit) ;; *) die "dispatch: $repo/$slug 現在的階段是 ${first:-（算不出來）}，不能交回 session ${feature}" ;; esac
   if [ -n "$note" ]; then note_append "$d" "$note" || die "dispatch: 寫不進 $d/inbox.md 的派工指示，沒送給 session"; fi
-  herdr agent prompt "$feature" "[$slug] /$first $slug" >/dev/null || die "dispatch: 送不到 session ${feature}，$repo/$slug 仍是 stopped"
+  herdr agent prompt "$feature" "[$slug] /opsx-workflow:$first $slug" >/dev/null || die "dispatch: 送不到 session ${feature}，$repo/$slug 仍是 stopped"
   # 送到了才清 stopped；pane 層的欄位重抄 session 條目，舊 pane 不會被拿去送話
   OPSX_KEY="$repo/$slug" OPSX_SESSION="$repo/@$feature" OPSX_AT="$(now_iso)" OPSX_LIB="$OPSX_ROOT/bin/lib" "$OPSX_PY" -I - "$OPSX_STATE_DIR/dispatch.json" <<'PY'
 import os, sys
@@ -309,8 +309,8 @@ def put(d):
     e.pop("pane_closed_at", None)
 jsonfile.update(sys.argv[1], put)
 PY
-  log_row "$d" 你 已指派 "交回 session ${feature}，送 [${slug}] /${first} ${slug}" "session ${feature}"
-  say "dispatch: $repo/$slug 交回 session ${feature}，送 [${slug}] /${first} ${slug}；不開 pane"
+  log_row "$d" 你 已指派 "交回 session ${feature}，送 [${slug}] /opsx-workflow:${first} ${slug}" "session ${feature}"
+  say "dispatch: $repo/$slug 交回 session ${feature}，送 [${slug}] /opsx-workflow:${first} ${slug}；不開 pane"
 }
 
 workplan_branch() { wp_pr_field "$1" "$2" branch; } # <top> <slug>：印 workplan 裡這張卡所屬 PR 的 branch，沒有就空

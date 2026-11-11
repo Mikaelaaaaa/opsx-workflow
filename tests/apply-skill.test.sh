@@ -16,7 +16,7 @@ for k in '先 propose 沒有 tasks.md 的子殼' 'depends-on' 'subagent' '<主>-
 done
 
 # --- Scenario：apply skill 寫明疊回規則（openspec/changes/apply-fanout/specs/subchange-stack/spec.md）---
-for k in 'opsx stack' 'workplan 順序' '退出 3' 'session 自己重做' '/review' '/pr' '不在衝突標記上手解'; do
+for k in 'opsx stack' 'workplan 順序' '退出 3' 'session 自己重做' '/opsx-workflow:review' '/opsx-workflow:pr' '不在衝突標記上手解'; do
   has "$k" "$SUBS"
 done
 
@@ -33,5 +33,5 @@ has "grant hook's deny message" "$SK"
 has '## R<N>. review 退回' "$SK"
 has '測試先紅再修' "$SK"
 has '待修（範圍內）' "$OPSX_ROOT/skills/pr/SKILL.md"
-has '/apply <slug>' "$OPSX_ROOT/skills/pr/SKILL.md"
+has '/opsx-workflow:apply <slug>' "$OPSX_ROOT/skills/pr/SKILL.md"
 echo ok
