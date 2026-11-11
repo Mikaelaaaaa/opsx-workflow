@@ -17,9 +17,14 @@ copy_pat='id: specs''\n('
 examples_have_delimiter() { # <檔>
   awk '/^Examples:/{n=NR} n && NR==n+2 && !/^\|( *-+ *\|)+$/{print FILENAME ":" NR ": " $0; bad=1} END{exit bad}' "$1"
 }
-# Scenario Outline 的標題一律是 #### Scenario: <名>（Scenario Outline，正例|反例）
+# Scenario Outline 的標題一律是 #### Scenario: <名>（Scenario Outline，正例|反例|正例＋反例）；
+# 帶 Examples: 的 Scenario 也必須是這種標題，不能只標（正例）
 outline_headings_ok() { # <檔>
-  awk '/^#### Scenario.*Scenario Outline/ && !/^#### Scenario: .+（Scenario Outline，(正例|反例)）$/{print FILENAME ":" NR ": " $0; bad=1} END{exit bad}' "$1"
+  awk '
+    /^#{2,4} / { h = $0; hn = NR }
+    /^#+ .*[Ss]cenario [Oo]utline/ && !/^#### Scenario: .+（Scenario Outline，(正例|反例|正例＋反例)）$/ { print FILENAME ":" NR ": " $0; bad = 1 }
+    /^Examples:/ && h !~ /^#### Scenario: .+（Scenario Outline，(正例|反例|正例＋反例)）$/ { print FILENAME ":" NR ": Examples 掛在不是 Outline 的標題下：" h; bad = 1 }
+    END { exit bad }' "$1"
 }
 
 # 一張 change，specs/demo/spec.md 放指定內容，跑真的 openspec validate --strict
@@ -43,7 +48,7 @@ grep -q '^## ADDED Requirements$' "$T" || fail "範本少 ## ADDED Requirements"
 grep -q '^### Requirement: ' "$T" || fail "範本少 ### Requirement:"
 grep -q '^#### Scenario: .*（正例）$' "$T" || fail "範本要有正例骨架"
 grep -q '^#### Scenario: .*（反例）$' "$T" || fail "範本要有反例骨架"
-grep -q '^#### Scenario: .*（Scenario Outline，' "$T" || fail "範本要有 Scenario Outline 骨架（#### Scenario: <行為>（Scenario Outline，…））"
+grep -q '^#### Scenario: .*（Scenario Outline，正例）$' "$T" || fail "範本要有 Scenario Outline 骨架（#### Scenario: <行為>（Scenario Outline，正例））"
 ! grep -q '^#### Scenario Outline:' "$T" || fail "Outline 標題照定案用 #### Scenario:，不用 #### Scenario Outline:"
 outline_headings_ok "$T" || fail "範本的 Outline 標題不是（Scenario Outline，正例|反例）"
 examples_have_delimiter "$T" || fail "範本的 Examples 表少分隔列"
@@ -95,6 +100,7 @@ done <<'RULES'
 Rule 是 `### Requirement: <名>`
 標題下第一個非空行是規則句，必須含 SHALL 或 MUST
 （Scenario Outline，正例）
+（Scenario Outline，正例＋反例）
 Examples 表放在 Scenario Outline 之下
 Background 放在規則句之後、第一個 Scenario 之前
 參數用雙引號標記
@@ -158,7 +164,9 @@ awk '/^## .*對應到 openspec/{sec=1;next} sec && /^```markdown$/{on=1;next} on
 [ -s "$EX" ] || fail "「對應到 openspec」一節沒有 \`\`\`markdown 範例"
 validate_spec "$R" refex "$EX"
 # 範例本身照 instruction 的規則：Outline 標題、Examples 分組與分隔列
-outline_headings_ok "$EX" || fail "reference 範例的 Outline 標題不是（Scenario Outline，正例|反例）"
+outline_headings_ok "$EX" || fail "reference 範例的 Outline 標題不是（Scenario Outline，正例|反例|正例＋反例）"
+# 範例的 Outline 同時有通過與失敗的列，標正例＋反例
+grep -q '^#### Scenario: .*（Scenario Outline，正例＋反例）$' "$EX" || fail "reference 範例含反例列的 Outline 要標（Scenario Outline，正例＋反例）"
 examples_have_delimiter "$EX" || fail "reference 範例的 Examples 表少分隔列"
 grep -qx 'Examples: 一般場景' "$EX" || fail "reference 範例少 Examples: 一般場景"
 grep -qx 'Examples: 邊界場景' "$EX" || fail "reference 範例少 Examples: 邊界場景"

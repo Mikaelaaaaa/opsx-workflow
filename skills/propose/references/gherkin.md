@@ -232,7 +232,7 @@ Scenario: 完成購物
 Background:
 - **GIVEN** repo 已執行過 `opsx init`
 
-#### Scenario: 檢查單一份檔案（Scenario Outline，正例）
+#### Scenario: 檢查單一份檔案（Scenario Outline，正例＋反例）
 - **GIVEN** repo 的 "<檔案>" 狀態為 "<狀態>"
 - **WHEN** 執行 `opsx init --check`
 - **THEN** exit code 為 <exit>
