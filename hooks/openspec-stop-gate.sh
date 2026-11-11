@@ -75,6 +75,7 @@ $missing
     # review 在背景開 reviewer 時主 agent 會結束 turn：status.json 還在 review 中間步就是在等，不算沒接站
     st_review_running "$d" && return 0
     if [ ! -f "$d/report.md" ]; then
+      [ "$(st_open_gates_blocking "$d")" -gt 0 ] && return 0
       printf '%s' "review|opsx：$slug tasks 全勾、測試綠，但還沒 review。跑 /opsx-workflow:review $slug 產 report.md 再停。"
       return 0
     fi

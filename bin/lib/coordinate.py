@@ -27,6 +27,7 @@ MAX_DISPATCH = 6
 DEFAULT_MAX_WORKING = 6
 REDISPATCH_MINUTES = 10
 # 真實訊息是 `Usage limit reached[ again] · …`，前面只有 Claude Code 畫的 ⎿ │ 與空白；引用、清單、diff 行都不算
+STUCK_GATE = re.compile(r"^卡在接 /(explore|grill|propose|apply|review|pr|babysit)(?: #\d+)?$")   # openspec-stop-gate.sh write_auto_gate 的標題
 USAGE_LIMIT_LINE = re.compile(r"[\s⎿│]*Usage limit reached(?: again)?\s*·")
 USAGE_LIMIT_STALE_MINUTES = 30
 USAGE_LIMIT_WARNING = "grace allowance"   # 「還有一小段寬限」是警告，agent 還在跑，不算停下
@@ -73,6 +74,7 @@ class Round:
         self.woken_cards = set()
         self.max_working = None
         self.woken = 0
+        self.limit_panes = set()
         self.worktrees = {}
 
     def log(self, msg):
@@ -500,6 +502,7 @@ class Round:
         """用量上限到了就暫停：不派、不重派、不代答。暫停到記下的重置時刻過了、而且沒有 agent 畫面還顯示訊息。
         重置時刻只在進入暫停時記一次：訊息還在時每輪重算會一直往後推（時刻過了還顯示，算出來是明天）。"""
         panes, resets_at = self.usage_limit_seen(live)
+        self.limit_panes = set(panes)
         held = self.memo.get("_usage_limit")
         if panes and not held:
             self.memo["_usage_limit"] = held = {"seen_at": self.now.isoformat(timespec="seconds"),
@@ -527,6 +530,22 @@ class Round:
             del self.memo["_usage_limit"]
         return False
 
+    def clear_stuck_gates(self, live, repo_paths):
+        """用量上限期間 Stop hook 開的「卡在接」gate：hook 跑在上限訊息寫進 transcript 之前，看不到上限，沒人答得了它。
+        畫面顯示上限訊息的 pane 上，這類 gate 代答「重做」，並清掉那張卡的 stop-chain 計數；別的 gate 照舊留給人。"""
+        for c in live:
+            pane = (c["dispatch"] or {}).get("pane")
+            if not pane or pane not in self.limit_panes:
+                continue
+            stuck = [(g["id"], STUCK_GATE.match(g["id"])) for g in c["open_gates"]]
+            stuck = [(gate, m.group(1)) for gate, m in stuck if m]
+            for gate, stage in stuck:
+                self.log("-- %s 用量上限期間 hook 開的 gate「%s」，代答重做（額度恢復後繼續）" % (card_key(c), gate))
+                self.answer(c, repo_paths[c["repo"]], gate, "重做 /opsx-workflow:%s（用量上限期間 hook 開的 gate，額度恢復後繼續）" % stage)
+            chain_file = os.path.join(self.state, "stop-chain", "%s-%s" % (c["repo"], c["slug"]))
+            if stuck and os.path.exists(chain_file):
+                os.remove(chain_file)
+
     def handle_gate(self, c, top):
         """派出去的卡的第一個 open gate，照 gaterule.decide 的處置答、停、或留給人。"""
         w, key = c["waiting"], card_key(c)
@@ -540,7 +559,7 @@ class Round:
             rc, _, _ = self.act(["opsx", "stop", c["slug"], "--repo", top])
             if rc == 0:
                 self.memo["_parked"][key] = {"at": self.now.isoformat(timespec="seconds"), "gate": w["gate_id"],
-                                             "merged": merged_prs(self.workplan(top))}
+                                             "merged": merged_prs(self.workplan(top)), "waits_on": verdict[1]}
             return
         if verdict[1] == "terminal":
             pane = c["dispatch"].get("pane")
@@ -610,7 +629,12 @@ class Round:
             return
         self.log("!! %s %s，stop 後重派" % (key, why))
         self.act(["opsx", "stop", c["slug"], "--repo", top])
-        self.act(["opsx", "dispatch", c["slug"], "--agent", c["dispatch"]["agent"], "--mode", "autopilot", "--kind", c["kind"], "--repo", top])
+        rc, _, err = self.act(["opsx", "dispatch", c["slug"], "--agent", c["dispatch"]["agent"], "--mode", "autopilot", "--kind", c["kind"], "--repo", top])
+        if rc != 0:
+            self.log("?? %s 重派開不了：%s" % (key, one_line(err)[:200]))
+            self.notify(c, "dead", "dispatch-failed", "重派開不了",
+                        "pane %s：%s；opsx dispatch 失敗：%s；看板上重派或停掉" % (c["dispatch"].get("pane"), why, one_line(err)[:150]))
+            return
         self.memo["_redispatched"][key] = self.now.isoformat(timespec="seconds")
         self.redispatched_now.add(key)
 
@@ -633,6 +657,20 @@ class Round:
         """這輪開始前在跑的卡，加上這輪代答或叫醒的。"""
         return self.woken + sum(1 for c in cards if c["dispatch"] and c["agent_status"] == "working")
 
+    def woken_by(self, key, parked, top):
+        """parked 的卡停下之後新 merged 的、算得上喚醒它的 PR。gate 寫了 waits-on 就只認那張（卡名或 PR 名）合了沒；
+        舊的 parked 記錄沒有 waits_on、或 waits-on 對不到 workplan 裡任何 PR 時，照任何新合併的 PR 都喚醒。"""
+        prs = self.workplan(top)
+        newly = [p for p in merged_prs(prs) if p not in parked["merged"]]
+        waits_on = parked.get("waits_on")
+        if not waits_on or not newly:
+            return newly
+        pr = pr_of(prs, waits_on)
+        if pr is None:
+            self.log("?? %s 的 gate 等 %s，workplan 沒有這張卡或 PR，照任何新合併的 PR 喚醒" % (key, waits_on))
+            return newly
+        return [pr["name"]] if pr["name"] in newly else []
+
     def dispatch_new(self, cards, repo_paths):
         n = 0
         working = self.working(cards)
@@ -648,7 +686,7 @@ class Round:
                 if c["section"] not in ("待指派", "待處理"):
                     continue
                 if not parked.get("answered"):
-                    newly = [p for p in merged_prs(self.workplan(top)) if p not in parked["merged"]]
+                    newly = self.woken_by(key, parked, top)
                     if not newly:
                         continue
             elif c["section"] != "待指派":
@@ -1064,6 +1102,8 @@ def one_round(state, dry):
     live = [c for c in cards if c not in merged]
     r.settle_parked(live)
     paused = r.usage_limit_paused(live)
+    if paused:
+        r.clear_stuck_gates(live, repo_paths)
 
     for c in live:
         w = c["waiting"]

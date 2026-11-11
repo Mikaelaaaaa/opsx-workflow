@@ -46,7 +46,7 @@ from urllib.parse import parse_qs
 HERE = pathlib.Path(__file__).resolve().parent
 OPSX = pathlib.Path(os.environ.get("OPSX_TEST_OPSX") or HERE.parent / "bin" / "opsx")   # 測試換成假的 opsx
 INDEX = HERE / "web" / "index.html"
-SLUG_RE = re.compile(r"^[a-z][a-z0-9_-]{0,31}$")
+SLUG_RE = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
 TOKEN_RE = re.compile(r"^[A-Za-z0-9_-]{32,}$")
 COLLECT_TIMEOUT = 60
 TIMELINE_TIMEOUT = 60

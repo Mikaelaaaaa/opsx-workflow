@@ -192,7 +192,9 @@ def issue_items(opsx_root: pathlib.Path, kind: str, state: pathlib.Path, repos: 
         tally.error(kind, p.stderr.strip() or "%s.sh 退出 %d" % (kind, p.returncode))
         return [], {}
     items, listed = [], {}
-    for raw in p.stdout.splitlines():
+    for raw in p.stdout.split("\n"):
+        if not raw:
+            continue
         row = json.loads(raw)
         if "error" in row:
             tally.error("%s:%s" % (kind, row["repo"]), row["error"])

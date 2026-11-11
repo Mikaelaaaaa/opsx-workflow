@@ -1,0 +1,81 @@
+#!/usr/bin/env bash
+# parked 的卡只被 gate 的 waits-on 指名的那張 merged 喚醒；對不到任何 PR 時照任何新 merged 的 PR 喚醒。
+# 驗收：openspec/changes/me-20261111-1824/specs/coordinate-waits-on-wake/spec.md
+source "$(dirname "${BASH_SOURCE[0]}")/coordinate-fixture.sh"
+
+wp() { # <x-pr 的 status> <y-pr 的 status>：每個 PR 各一個 feature，才不會被當成 session 代管
+  cat > "$R/openspec/workplan.yaml" <<EOF
+features:
+  - name: fx
+    status: active
+    depends-on: []
+    prs:
+      - name: x-pr
+        branch: feat/x-pr/u
+        status: $1
+        depends-on: []
+        changes:
+          - name: x-pr
+            status: done
+  - name: fy
+    status: active
+    depends-on: []
+    prs:
+      - name: y-pr
+        branch: feat/y-pr/u
+        status: $2
+        depends-on: []
+        changes:
+          - name: y-pr
+            status: done
+  - name: fa
+    status: active
+    depends-on: []
+    prs:
+      - name: card-a
+        branch: feat/card-a/u
+        status: pending
+        depends-on: []
+        changes:
+          - name: card-a
+            status: pending
+EOF
+}
+mkcard card-a
+printf '{"demo/card-a":{"mode":"stopped","agent":"claude","pane":"w1:p9","drive_pid":null}}' > "$DISP"
+parked() { printf '{"_parked":{"demo/card-a":{"at":"2026-11-10T10:00:00+08:00","gate":"g9","merged":[]%s}},"_redispatched":{}}' "$1" > "$MEMO"; }
+waiting() { # <waits_on JSON 值>
+  cards '[{"slug":"card-a","section":"待處理","open_gates":[{"id":"g9","opened_at":null}],"waiting":{"type":"等待決定","waits_on":'"$1"',"gate_id":"g9","question":"等 x-pr","recommended":null,"options":["等"]}}]'
+}
+
+# 停下時記下 waits-on
+wp pending pending
+printf '{}' > "$DISP"; rm -f "$MEMO"
+cards '[{"slug":"card-a","section":"待處理","dispatch":'"$D"',"agent_status":"idle","waiting":{"type":"等待決定","waits_on":"x-pr","gate_id":"g9","question":"等 x-pr","recommended":null,"options":["等"]}}]'
+round || fail "rc: $(cat "$FX/out")"
+assert_eq "$(memo_get _parked demo/card-a | grep -c "'waits_on': 'x-pr'")" 1 "parked 要記 waits_on：$(cat "$MEMO")"
+printf '{"demo/card-a":{"mode":"stopped","agent":"claude","pane":"w1:p9","drive_pid":null}}' > "$DISP"
+
+# 無關的 PR 合併：不喚醒
+wp pending merged; parked ',"waits_on":"x-pr"'; waiting '"x-pr"'
+round || fail "rc: $(cat "$FX/out")"
+assert_eq "$(count '^opsx dispatch')" 0 "y-pr 合了不該喚醒等 x-pr 的卡：$(cat "$OPSX_FAKE_LOG")"
+assert_eq "$(count '^opsx answer')" 0 "也不該答 gate"
+
+# 等的那張合併：喚醒，先答 gate 再派
+wp merged merged; parked ',"waits_on":"x-pr"'; waiting '"x-pr"'
+round || fail "rc: $(cat "$FX/out")"
+assert_grep '^opsx answer card-a --gate g9 ' "$OPSX_FAKE_LOG"
+assert_grep '^opsx dispatch card-a ' "$OPSX_FAKE_LOG"
+
+# waits-on 對不到任何 PR：照任何新合併的 PR 喚醒，記 ??
+wp pending merged; parked ',"waits_on":"nope"'; waiting '"nope"'
+round || fail "rc: $(cat "$FX/out")"
+assert_grep '^opsx dispatch card-a ' "$OPSX_FAKE_LOG"
+grep '??' "$LOG" | grep -q 'nope' || fail "要記 ?? 並點名 nope：$(cat "$LOG")"
+
+# 沒有 waits-on（舊的 parked 記錄）：任何新合併的 PR 都喚醒
+wp pending merged; parked ''; waiting 'null'
+round || fail "rc: $(cat "$FX/out")"
+assert_grep '^opsx dispatch card-a ' "$OPSX_FAKE_LOG"
+echo "coordinate-waits-on-wake ok"

@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# Bash 寫檔套用 Edit / Write 同一套第二級判斷：env 檔要 env 授權、沒有既有測試的目錄寫測試檔要 test-path 授權。
+# 驗收：openspec/changes/me-20261111-1824/specs/grant-gate-segments/spec.md
+source "$(dirname "${BASH_SOURCE[0]}")/grant-gate-fixture.sh"
+
+mkdir -p "$R/tests" "$R/src/newdir" "$R/app"
+printf 'x\n' > "$R/tests/a.test.sh"; git -C "$R" add tests/a.test.sh; git -C "$R" commit -q -m "fixture: tests"
+
+# test-path：沒有既有測試的目錄
+for c in 'cp /tmp/a.test.ts src/newdir/a.test.ts' 'mv /tmp/a.spec.ts src/newdir/a.spec.ts' 'git mv x.ts src/newdir/test_x.py' 'echo x > src/newdir/b_test.go' 'echo x >> src/newdir/c.test.ts' 'echo x | tee src/newdir/d.test.ts' 'echo x | tee -a src/newdir/e.test.ts'; do
+  out="$(gg "$c")"; assert_eq "$(decision "$out")" deny "Bash 寫測試檔要 test-path（${c}）: $(cat "$FX/hook.err")"
+  reason "$out" | grep -qF 'action: test-path' || fail "deny 要帶 action: test-path（${c}）: $(reason "$out")"
+done
+out="$(gg 'cat > src/newdir/f.test.ts <<EOF
+x
+EOF')"; assert_eq "$(decision "$out")" deny "heredoc 寫測試檔"
+# 有既有測試的目錄、檔名不像測試：不管
+for c in 'cp /tmp/b.test.ts tests/b.test.ts' 'echo x > src/newdir/helper.ts' 'cp a.txt src/newdir/' 'echo hi > out.log' 'echo hi > /dev/null' 'cmd 2>&1' 'echo hi > "$OUT"'; do
+  out="$(gg "$c")"; assert_eq "$out" "" "不該出聲（${c}）: $(reason "$out")"
+done
+# 授權之後放行
+card_grants '["test-path"]'
+out="$(gg 'cp /tmp/a.test.ts src/newdir/a.test.ts')"; assert_eq "$(decision "$out")" allow "有 test-path 授權: $(reason "$out")"
+card_grants '[]'
+
+# env
+for c in 'cat > app/.env.local <<EOF
+K=v
+EOF' 'echo K=v >> app/.env' 'cp /tmp/x app/prod.env'; do
+  out="$(gg "$c")"; assert_eq "$(decision "$out")" deny "Bash 寫 env 檔要 env 授權（${c}）"
+  reason "$out" | grep -qF 'action: env' || fail "deny 要帶 action: env（${c}）: $(reason "$out")"
+done
+out="$(gg 'cp /tmp/x app/.env.example')"; assert_eq "$out" "" ".env.example 不管"
+card_grants '["env"]'
+out="$(gg 'echo K=v >> app/.env')"; assert_eq "$(decision "$out")" allow "有 env 授權: $(reason "$out")"
+card_grants '[]'
+
+# 取不到字面目錄：deny 並說明
+for c in 'cp x.txt "$DEST"/a.test.ts' 'cp x.txt src/*/a.test.ts' 'echo x > $(pwd)/a.test.ts' 'cp x.txt ../a.test.ts'; do
+  out="$(gg "$c")"; assert_eq "$(decision "$out")" deny "讀不到目錄要 deny（${c}）"
+  reason "$out" | grep -qF '讀不到' || fail "deny 要說讀不到（${c}）: $(reason "$out")"
+done
+echo "grant-gate-bash-write ok"
