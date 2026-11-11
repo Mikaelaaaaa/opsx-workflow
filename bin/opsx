@@ -34,7 +34,9 @@ opsx <command> [args]
   new [--repo <path>] -- <一句話>       ＋新增收件卡（source: me）；不給 repo 就進 <state>/unfiled/ 待分類，印 slug
   file <slug> --repo <path>            待分類搬進 repo：unfiled/<slug>.md 原樣變成殼的 inbox.md
   drop <slug> [--repo <path>] -- <理由>  捨棄：歸檔並標 outcome: declined；不給 repo 就把待分類移到 unfiled/dropped/
+  merge-card <來源> --into <目標> --repo <path>   併進：捨棄來源（理由「併入 <repo>/<目標>」），目標 ## 證據 追加一行來源 id 與連結
   sync [--source gitlab|github|debt|obsidian]   撈 sources.toml 的 issue、shortcut: 註解與 obsidian 收件夾進收件匣，去重；每次在 <state>/sync.log 記一行
+  mr <card dir> [--refresh]            印卡的 MR 狀態（mr_json）；--refresh 跳過快取重抓並寫快取（collect 的背景重抓用）
   merge <slug> [--repo]                核准合併：重驗五條件、dispatch.json 寫一次性核准、叫 agent /opsx-workflow:babysit merge（不自己 glab mr merge）
   priority <slug> [--set P0|P1|P2 --reason <理由>] [--repo]   印卡的等級與理由（依事實算）；--set 由使用者覆寫，記 decisions.tsv
   log <slug> <who> <tag> <文字> [證據] [--repo]   在卡的 decisions.tsv 記一列（tag：已允許 已決定 替你決定 已指派 已停止 已合併 同步 驗證）

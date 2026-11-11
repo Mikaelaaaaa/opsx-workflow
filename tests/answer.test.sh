@@ -72,6 +72,12 @@ assert_eq "$(tail -1 "$C/decisions.tsv" | cut -f2-5)" $'你\t已允許\t允許\t
 assert_eq "$(cat "$FX/victim")" "keep me" "grants.toml 與 gates.md 的舊暫存檔名上的 symlink 不能被寫"
 rm -f "$C/gates.md.tmp" "$OPSX_STATE_DIR/grants.toml.tmp"
 
+# --- 授權：這個 repo 永遠，帶連字號的 action（grant-test-path）：寫出合法 TOML，閘門用同樣的讀法讀得到 ---
+gates; sed -i.bak 's/^action: push$/action: test-path/' "$C/gates.md"; rm -f "$C/gates.md.bak"
+out="$(opsx answer x --gate g1 --grant repo "允許" 2>&1)"; assert_eq "$?" 0 "answer test-path repo: $out"
+assert_grep '^test-path = true$' "$OPSX_STATE_DIR/grants.toml"
+python3 -I -c 'import tomllib,sys;g=tomllib.load(open(sys.argv[1],"rb"));r=g["repos"]["Agentory-AI"];assert r.get("test-path") is True and r.get("push") is True, g' "$OPSX_STATE_DIR/grants.toml" || fail "grants.toml 要有 test-path = true 且留著 push：$(cat "$OPSX_STATE_DIR/grants.toml")"
+
 # --- 授權：這張卡 ---
 gates; printf '# grants\n' > "$OPSX_STATE_DIR/grants.toml"
 out="$(opsx answer x --gate g1 --grant card "允許" 2>&1)"; assert_eq "$?" 0 "answer g1 card: $out"
@@ -111,12 +117,12 @@ gates; sed -i.bak 's/^action: push$/action: git push/' "$C/gates.md"; rm -f "$C/
 out="$(opsx answer x --gate g1 --grant repo "允許" 2>&1)"; [ $? -ne 0 ] || fail "壞 action 要拒絕"; echo "$out" | grep -q 'git push' || fail "要印出 action: $out"
 python3 -I -c 'import tomllib,sys;tomllib.load(open(sys.argv[1],"rb"))' "$OPSX_STATE_DIR/grants.toml" || fail "grants.toml 被寫壞了"
 
-# --- 字元合法但不在八個動作內（grant-action）：拒絕、點名 gate / 原值 / 合法值，三個檔都不動 ---
+# --- 字元合法但不在九個動作內（grant-action）：拒絕、點名 gate / 原值 / 合法值，三個檔都不動 ---
 gates; sed -i.bak 's/^action: push$/action: external-api/' "$C/gates.md"; rm -f "$C/gates.md.bak"
 cp "$C/gates.md" "$FX/before-ext.md"; cp "$OPSX_STATE_DIR/grants.toml" "$FX/before-grants.toml"; cat "$PD/authz.json" > "$FX/before-authz.json" 2>/dev/null || : > "$FX/before-authz.json"
 for g in card repo this; do
-  out="$(opsx answer x --gate g1 --grant "$g" "允許" 2>&1)"; [ $? -ne 0 ] || fail "${g}: 不在八個內的 action 要拒絕"
-  for want in g1 external-api push mr migrate delete install rebase external env; do echo "$out" | grep -qF "$want" || fail "${g}: 訊息要含 ${want}: $out"; done
+  out="$(opsx answer x --gate g1 --grant "$g" "允許" 2>&1)"; [ $? -ne 0 ] || fail "${g}: 不在九個內的 action 要拒絕"
+  for want in g1 external-api push mr migrate delete install rebase external env test-path; do echo "$out" | grep -qF "$want" || fail "${g}: 訊息要含 ${want}: $out"; done
 done
 cmp -s "$C/gates.md" "$FX/before-ext.md" || fail "拒絕時 gates.md 不該變"
 cmp -s "$OPSX_STATE_DIR/grants.toml" "$FX/before-grants.toml" || fail "拒絕時 grants.toml 不該變"
@@ -237,4 +243,22 @@ out="$(opsx answer x --gate '卡在接 /review' 再答 2>&1)"; rc=$?; [ $rc -ne 
 echo "$out" | grep -q '不是 open' || fail "訊息要含「不是 open」: $out"
 assert_eq "$(printf '%s' "$out" | grep -o 'answered' | wc -l | tr -d ' ')" 2 "兩段各自的 status: $out"
 cmp -s "$C/gates.md" "$FX/before.md" || fail "gates.md 不該變"
+
+# --- 標題是「id 加中文」的舊 gate：--gate 用第一個詞、不分大小寫回得到（驗收：board-actions「用第一個詞回得到、不分大小寫」）---
+printf '## G1 瀏覽器確認精靈畫出來了\ntype: decision\nstatus: open\n問題: x\n' > "$C/gates.md"
+out="$(opsx answer x --gate g1 好 2>&1)"; assert_eq "$?" 0 "第一個詞 g1 對到 G1 標題: $out"
+assert_grep '^## G1 瀏覽器確認精靈畫出來了$' "$C/gates.md"; assert_grep '^status: answered' "$C/gates.md"; assert_grep '^answer: 好$' "$C/gates.md"
+
+# --- 第一個詞不唯一：不猜，列出候選，gates.md 不變（驗收：board-actions「第一個詞不唯一不猜」）---
+printf '## G1 甲\ntype: decision\nstatus: open\n\n## G1 乙\ntype: decision\nstatus: open\n' > "$C/gates.md"
+cp "$C/gates.md" "$FX/before.md"
+out="$(opsx answer x --gate G1 好 2>&1)"; [ $? -ne 0 ] || fail "第一個詞不唯一要退出非零"
+echo "$out" | grep -q 'G1 甲' && echo "$out" | grep -q 'G1 乙' || fail "訊息要列出兩個標題: $out"
+cmp -s "$C/gates.md" "$FX/before.md" || fail "gates.md 不該變"
+
+# --- 整串全等優先：標題剛好是 g1 的那個被回，另一個仍 open（驗收：board-actions「整串全等優先」）---
+printf '## g1 另一題\ntype: decision\nstatus: open\n\n## g1\ntype: decision\nstatus: open\n' > "$C/gates.md"
+out="$(opsx answer x --gate g1 好 2>&1)"; assert_eq "$?" 0 "整串全等: $out"
+awk '/^## /{n++} n==1' "$C/gates.md" | grep -q '^status: open' || fail "g1 另一題 要還是 open: $(cat "$C/gates.md")"
+awk '/^## /{n++} n==2' "$C/gates.md" | grep -q '^answer: 好$' || fail "標題剛好 g1 的才該拿到答案: $(cat "$C/gates.md")"
 echo ok
