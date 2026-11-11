@@ -970,6 +970,16 @@ out="$(sg)"; assert_eq "$(decision "$out")" block "stop: step 不是數字照擋
 mk_sub attach-cli subagent-attach-cli "$FRESH"
 printf '## 1. x\n\n- [ ] 1.1 `attach-cli`：a\n- [x] 1.2 `attach-board`：b\n' > "$C/tasks.md"
 printf '## 1. x\n\n- [ ] 1.1 `attach-cli`：a\n- [x] 1.2 `attach-board`：b\n' > "$C/tasks.md"
+# propose 寫的主殼（references/work-split.md 的格式、驗收與測試子行）：兩項都未勾、只有 1.1 有 subagent，仍放行
+printf '## 1. attach-cli\n\n- [ ] 1.1 `attach-cli`：a\n  - 驗收：specs/x/spec.md · Requirement: r / Scenario: s\n  - 測試：tests/x.test.sh\n\n## 2. attach-board\n\n- [ ] 1.2 `attach-board`：b\n  - 驗收：specs/x/spec.md · Requirement: r / Scenario: s\n  - 測試：tests/x.test.sh\n' > "$C/tasks.md"
+out="$(KEEP=1 sg)"; out="$(KEEP=1 sg)"; out="$(KEEP=1 sg)"; out="$(KEEP=1 sg)"; out="$(KEEP=1 sg)"
+assert_eq "$out" "" "stop: propose 寫的主殼、1.1 有 subagent、1.2 沒有，連停五次都放行"
+assert_eq "$([ -e "$C/gates.md" ] && echo y || echo n)" n "stop: propose 寫的主殼放行不寫「卡在接 /apply」gate"
+# hook 與 opsx stack 認同一行：反引號項目兩邊都找得到，裸名兩邊都找不到
+assert_eq "$( source "$OPSX_ROOT/bin/lib/stack.sh"; task_line "$C/tasks.md" attach-cli '\[ \]' && echo y || echo n )" y "stack: 反引號項目 task_line 找得到"
+printf '## 1. x\n\n- [ ] 1.1 attach-cli：a\n- [ ] 1.2 attach-board：b\n' > "$C/tasks.md"
+assert_eq "$( source "$OPSX_ROOT/bin/lib/stack.sh"; task_line "$C/tasks.md" attach-cli '\[ \]' && echo y || echo n )" n "stack: 裸名項目 task_line 找不到"
+out="$(sg)"; assert_eq "$(decision "$out")" block "stop: 裸名項目 hook 也認不到，照擋（與 stack 一致）"
 rm -rf "$C/subs"; rm -f "$C/gates.md"; rm -rf "$STOP_STATE"
 # hook 自己寫的「卡在接」gate：建議是選項之一，不是 hook 內部說明
 printf '## 1. x\n\n- [ ] 1.1 a\n' > "$C/tasks.md"

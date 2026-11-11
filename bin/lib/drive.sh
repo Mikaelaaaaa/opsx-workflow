@@ -48,7 +48,11 @@ opsx_drive() {
     fi
     if [ -n "$watch" ]; then
       # shortcut: 答案的 prompt 沒送成時 agent 沒動，這裡會多開一個 gate；多一個 gate 給人看，升級時改成答完先確認 agent 開過工
-      local ans wstage; ans="$(gate_field "$d" "$watch" answer)"; wstage="${watch#drive-}"; wstage="${wstage%-*}"
+      local ans wstage; ans="$(gate_field "$d" "$watch" answer)"
+      case "$watch" in
+        drive-*) wstage="${watch#drive-}"; wstage="${wstage%-*}" ;;
+        *)       wstage="${watch#卡在接 /}"; wstage="${wstage%% *}" ;;
+      esac
       case "$ans" in
         重做*)
           if [ "$(stage_fingerprint "$top" "$slug")" = "$watch_fp" ]; then
@@ -130,8 +134,8 @@ herdr_step() { # <slug> <herdr args…>
 pane_tail() { # <repo> <slug>：pane 最後 20 行壓成一行；pane 讀不到印空
   herdr pane read "$(dispatch_pane "$1" "$2")" 2>/dev/null | tail -20 | tr '\n' ' ' || true
 }
-drive_gate_open() { # <card dir>：第一個 open 的 drive-<stage>-<n> gate 的標題，沒有印空
-  awk '/^## /{id = substr($0, 4)} /^status:[ \t]*open[ \t]*$/ && id ~ /^drive-[a-z]+-[0-9]+$/ {print id; exit}' "$1/gates.md"
+drive_gate_open() { # <card dir>：第一個 open 的 drive-<stage>-<n> 或 Stop hook 的「卡在接 /<stage>[ #<n>]」gate 的標題，沒有印空
+  awk '/^## /{id = substr($0, 4)} /^status:[ \t]*open[ \t]*$/ && id ~ /^(drive-[a-z]+-[0-9]+|卡在接 \/[a-z]+( #[0-9]+)?)$/ {print id; exit}' "$1/gates.md"
 }
 gate_field() { # <card dir> <gate id> <欄位>：該 gate 的欄位值，沒有印空
   awk -v id="$2" -v k="$3" '/^## /{cur = (substr($0, 4) == id)} cur && index($0, k ":") == 1 {sub(/^[^:]*:[ \t]*/, ""); print; exit}' "$1/gates.md"

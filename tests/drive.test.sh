@@ -193,6 +193,33 @@ reset_apply; printf '{"Agentory-CS/retry-backoff":{"mode":"drive","pane":"p42","
 out="$(opsx drive retry-backoff 2>&1)"; assert_eq "$?" 0 "drive 重做有動: $out"
 if echo "$out" | grep -q "重做 /opsx-workflow:apply 之後階段還是沒動"; then fail "重做後 tasks 動了，不該再寫 gate: $out"; fi
 assert_eq "$(grep -c '^agent prompt' "$OPSX_FAKE_LOG")" 2 "重做有動之後 drive 繼續送階段指令: $(cat "$OPSX_FAKE_LOG")"
+
+# --- Stop hook 開的「卡在接」gate 被回答：跟 drive 自己的 gate 一樣讀答案，不拿階段指令蓋掉 ---
+cat > "$FX/answer_hook_gate.sh" <<EOF
+case "\$*" in *"--until working"*)
+  if grep -q '^## drive-apply-1' "$C/gates.md"; then printf '{}' > "$OPSX_STATE_DIR/dispatch.json"
+  else printf '## 卡在接 /apply #1\ntype: decision\nstatus: answered\nanswer: %s\n' "\$(cat "$FX/answer.txt")" > "$C/gates.md"; [ ! -f "$FX/tick" ] || printf '## 1\n\n- [x] 1.1 a\n' > "$C/tasks.md"; fi ;;
+esac
+EOF
+export OPSX_TEST_ON_WAIT="$FX/answer_hook_gate.sh"
+hook_gate_run() { # <答案>：Stop hook 的 gate 一開始就是 open，等 agent 開工時被答掉
+  reset_apply; printf '{"Agentory-CS/retry-backoff":{"mode":"drive","pane":"p42","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"
+  printf '## 卡在接 /apply #1\ntype: decision\nstatus: open\n' > "$C/gates.md"
+  printf '%s' "$1" > "$FX/answer.txt"; : > "$KL"
+  out="$(opsx drive retry-backoff 2>&1)"; assert_eq "$?" 0 "卡在接 gate 答「${1}」: $out"
+}
+rm -f "$FX/tick"
+hook_gate_run "停在這裡，把卡在哪寫進 gates.md 等人"
+assert_eq "$(grep -c '^agent prompt' "$OPSX_FAKE_LOG")" 0 "卡在接 gate 答停在這裡，不該送階段指令: $(cat "$OPSX_FAKE_LOG")"
+echo "$out" | grep -q "不是重做" || fail "卡在接 gate 答停在這裡，要說為什麼結束: $out"
+hook_gate_run "重做 /opsx-workflow:apply 一次，做不完就把卡在哪寫進 gates.md (Recommended)"
+assert_eq "$(grep -c '^agent prompt' "$OPSX_FAKE_LOG")" 0 "卡在接 gate 答重做但沒動，不該送階段指令: $(cat "$OPSX_FAKE_LOG")"
+assert_grep '^## drive-apply-1$' "$C/gates.md"
+: > "$FX/tick"
+hook_gate_run "重做 /opsx-workflow:apply 一次，做不完就把卡在哪寫進 gates.md (Recommended)"
+if echo "$out" | grep -q "重做 /opsx-workflow:apply 之後階段還是沒動"; then fail "卡在接 gate 重做後 tasks 動了，不該寫 gate 說沒動: $out"; fi
+assert_eq "$(grep -c '^agent prompt' "$OPSX_FAKE_LOG")" 1 "卡在接 gate 重做有動之後 drive 繼續送階段指令: $(cat "$OPSX_FAKE_LOG")"
+rm -f "$FX/tick"
 unset OPSX_TEST_ON_WAIT OPSX_TEST_PANE_TEXT
 export OPSX_TEST_ON_PROMPT="$FX/on_prompt.sh"
 
