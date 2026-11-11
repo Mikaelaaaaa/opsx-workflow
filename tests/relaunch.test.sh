@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # opsx relaunch：用假 herdr 驗前置檢查、送鍵順序、標記、drive 與失敗回報。specs/opsx-relaunch/spec.md（主殼 relaunch-cmd D1–D5）。
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
-use_fakes herdr
+use_fakes herdr ps
 export OPSX_FAKE_LOG="$FX/herdr.log"; : > "$OPSX_FAKE_LOG"
 export OPSX_DRIVE_MAX=0   # 重開後起的 drive 登記完就結束，不在 fixture 上跑迴圈
 export OPSX_DISPATCH_RETRY_SLEEP=0
@@ -146,6 +146,7 @@ unset OPSX_TEST_BUSY_LEFT
 OLD="$(cat "$FX/old-drive.pid")"
 trap 'kill "$OLD" 2>/dev/null; rm -rf "$FX"' EXIT
 kill -0 "$OLD" || fail "fixture 的 drive 行程沒起來"
+export OPSX_TEST_PS_CMD="bash /x/bin/opsx drive retry-backoff --repo $R"   # 假 ps：這個 pid 看起來是這張卡的 drive
 put_entry Agentory-CS/retry-backoff "$(printf '%s' "$CARD" | sed "s/\"drive_pid\":null/\"drive_pid\":$OLD/")"
 # 壞的 grants.toml：寫 settings 失敗要在送鍵、kill drive 之前就停
 printf 'repos = [\n' > "$OPSX_STATE_DIR/grants.toml"; : > "$OPSX_FAKE_LOG"
@@ -162,6 +163,21 @@ unset OPSX_TEST_ON_SEND_KEYS
 assert_eq "$(cat "$FX/drive-at-esc")" dead "送 esc 之前 drive 要已經被 kill"
 n=0; until grep -q '跑滿 0 輪' "$DL" 2>/dev/null; do n=$((n+1)); [ $n -lt 50 ] || fail "relaunch 成功後要在背景起 drive：$(cat "$DL" 2>&1)"; sleep 0.1; done
 python3 -I -c 'import json,sys;e=json.load(open(sys.argv[1]))["Agentory-CS/retry-backoff"];assert e["drive_pid"]!=int(sys.argv[2]),e' "$J" "$OLD" || fail "被 kill 的 drive pid 不能留在條目上"
+# pid 被別的行程重用：command 不是這張卡的 drive 就不 kill（spec 的 Scenario Outline 四列），relaunch 照樣接回 session 並起 drive
+for row in "bash /x/bin/opsx drive retry-backoff --repo $R|dead" "bash /x/bin/opsx drive retry-backoff|dead" "/usr/bin/vim notes.md|alive" "bash /x/bin/opsx drive retry --repo $R|alive" "bash /x/bin/opsx drive retry-backoff-2 --repo $R|alive"; do
+  ( sleep 300 < /dev/null > /dev/null 2>&1 & echo $! > "$FX/row.pid" ); ROWPID="$(cat "$FX/row.pid")"
+  export OPSX_TEST_PS_CMD="${row%|*}"; want="${row##*|}"
+  put_entry Agentory-CS/retry-backoff "$(printf '%s' "$CARD" | sed "s/\"drive_pid\":null/\"drive_pid\":$ROWPID/")"
+  rm -f "$DL"; : > "$OPSX_FAKE_LOG"
+  out="$(opsx relaunch retry-backoff 2>&1)"; assert_eq "$?" 0 "relaunch（${row%|*}）: $out"
+  n=0; until grep -q '跑滿 0 輪' "$DL" 2>/dev/null; do n=$((n+1)); [ $n -lt 50 ] || fail "drive 沒起來：$(cat "$DL" 2>&1)"; sleep 0.1; done
+  if kill -0 "$ROWPID" 2>/dev/null; then got=alive; else got=dead; fi
+  kill "$ROWPID" 2>/dev/null
+  assert_eq "$got" "$want" "command「${row%|*}」"
+  [ "$want" = dead ] || case "$out" in *"$ROWPID"*) ;; *) fail "不 kill 時訊息要含 pid $ROWPID: $out" ;; esac
+  assert_grep '^agent start retry-backoff ' "$OPSX_FAKE_LOG"
+done
+export OPSX_TEST_PS_CMD="bash /x/bin/opsx drive retry-backoff --repo $R"
 # interactive 單卡：不起 drive
 put_entry Agentory-CS/retry-backoff "$(printf '%s' "$CARD" | sed 's/"mode":"autopilot"/"mode":"interactive"/')"
 rm -f "$DL"
