@@ -678,6 +678,39 @@ assert_eq "$(grep -c '^type: approval-ish$' "$G")" 1 "gate-type: 表外的值原
 printf '## g1\ntype: approval-ish\nstatus: open\n' > "$G"; printf '{"tool_name":"Write","tool_input":{"file_path":"%s"}}' "$G" | CLAUDE_PLUGIN_ROOT="$GP" OPSX_NOW=2026-11-06T14:05:00+08:00 bash "$H/gate-timestamp.sh" >/dev/null 2>&1
 assert_eq "$?" 0 "gate-type: 提醒時退出碼仍是 0"
 assert_eq "$(cat "$KL")" "$(printf 'opsx coordinate --kick\nopsx coordinate --kick')" "gate-type: 有 open 的 gate 兩次寫入各 kick 一次，且只叫到假的 bin/opsx"
+# gate 標題只放 slug：open 的「slug 加其餘文字」被縮成 slug，其餘進 問題:；第一個詞不是 slug 只提醒（gate-id-slug）
+printf '## G1 瀏覽器確認精靈畫出來了\ntype: decision\nstatus: open\n\n## g2 測試跑不起來\ntype: decision\nstatus: open\n問題: 需要你在終端機跑\n' > "$G"
+out="$(gts "$G")"; assert_eq "$out" "" "gate-slug: 縮標題不出聲"
+assert_eq "$(sed -n '1,2p' "$G")" "$(printf '## G1\n問題: 瀏覽器確認精靈畫出來了')" "gate-slug: 沒有問題欄時標題縮成 slug、其餘成為 問題:"
+assert_eq "$(grep -c '^## g2$' "$G")" 1 "gate-slug: 有問題欄的 gate 標題也縮成 slug"
+assert_eq "$(grep -c '^問題: 測試跑不起來：需要你在終端機跑$' "$G")" 1 "gate-slug: 既有問題欄時其餘接在前面、用「：」分開"
+assert_eq "$(grep -c '^問題:' "$G")" 2 "gate-slug: 每個 gate 只有一行 問題:"
+cp "$G" "$FX/gs-before.md"; out="$(gts "$G")"; assert_eq "$out" "" "gate-slug: 已是 slug 再跑不出聲"
+assert_eq "$(cmp -s "$G" "$FX/gs-before.md" && echo same)" same "gate-slug: 冪等，第二次不改檔"
+printf '## G1 舊的標題\ntype: decision\nstatus: answered\nanswer: A\n' > "$G"; cp "$G" "$FX/gs-before.md"
+out="$(gts "$G")"; assert_eq "$out" "" "gate-slug: answered 的 gate 不提醒"
+assert_eq "$(cmp -s "$G" "$FX/gs-before.md" && echo same)" same "gate-slug: answered 的標題不動"
+printf '## 測試跑不起來，需要你在終端機跑\ntype: decision\nstatus: open\n' > "$G"
+out="$(gts "$G")"; ctx="$(jq -r '.hookSpecificOutput.additionalContext' <<<"$out")"
+for want in '測試跑不起來，需要你在終端機跑' slug; do case "$ctx" in *"$want"*) ;; *) fail "gate-slug: 第一個詞不是 slug 的提醒要含「${want}」：$ctx" ;; esac; done
+assert_eq "$(sed -n 1p "$G")" '## 測試跑不起來，需要你在終端機跑' "gate-slug: 第一個詞不是 slug 不改標題"
+# review R1.1：縮出來的 slug 撞到同檔另一個 gate 就都不縮，只提醒（不然 answer 會默默回第一個）
+printf '## G1 甲\ntype: decision\nstatus: open\n\n## G1 乙\ntype: decision\nstatus: open\n' > "$G"
+out="$(gts "$G")"; ctx="$(jq -r '.hookSpecificOutput.additionalContext' <<<"$out")"
+assert_eq "$(grep -c '^## G1 [甲乙]$' "$G")" 2 "gate-slug: 縮出來會撞名的兩個標題都不縮"
+case "$ctx" in *G1*) ;; *) fail "gate-slug: 撞名要提醒並點名 G1：$ctx" ;; esac
+printf '## g1\ntype: decision\nstatus: answered\n\n## g1 新題\ntype: decision\nstatus: open\n' > "$G"
+out="$(gts "$G")"; assert_eq "$(grep -c '^## g1 新題$' "$G")" 1 "gate-slug: 撞到已答的 gate 標題也不縮"
+# review R1.2：stop-gate 自己寫的「卡在接」標題是它找 gate 的鑰匙，不提醒、不改
+printf '## 卡在接 /review #1\ntype: decision\nstatus: open\n' > "$G"
+out="$(gts "$G")"; assert_eq "$out" "" "gate-slug: 卡在接 的標題不提醒"
+assert_eq "$(sed -n 1p "$G")" '## 卡在接 /review #1' "gate-slug: 卡在接 的標題不動"
+# review R1.4：既有 問題: 是空的就不加尾端「：」；整個檔案內容照 spec 比對；續行不碰
+printf '## g1 foo bar\ntype: decision\nstatus: open\n問題:\n  續行一\n' > "$G"
+out="$(gts "$G")"; assert_eq "$(grep -c '^問題: foo bar$' "$G")" 1 "gate-slug: 空的 問題: 不留尾端「：」"
+assert_eq "$(grep -c '^  續行一$' "$G")" 1 "gate-slug: 問題: 後面的續行原樣保留"
+printf '## G1 瀏覽器確認精靈畫出來了\ntype: decision\nstatus: open\n\n## g2 測試跑不起來\ntype: decision\nstatus: open\n問題: 需要你在終端機跑\n' > "$G"; gts "$G" >/dev/null
+assert_eq "$(cat "$G")" "$(printf '## G1\n問題: 瀏覽器確認精靈畫出來了\ntype: decision\nstatus: open\nopened_at: 2026-11-06T14:05:00+08:00\n\n## g2\ntype: decision\nstatus: open\nopened_at: 2026-11-06T14:05:00+08:00\n問題: 測試跑不起來：需要你在終端機跑')" "gate-slug: 縮標題只動標題與 問題: 兩處，其他行與順序不變"
 # 兩份同義詞表一致：hook 的 SYN 與 bin/lib/gatetype.py 的 SYNONYMS
 hook_tbl="$(sed -n "s/^SYN='\(.*\)'$/\1/p" "$H/gate-timestamp.sh" | tr ' ' '\n' | sort)"
 py_tbl="$(OPSX_LIB="$OPSX_ROOT/bin/lib" python3 -I -c 'import os,sys;sys.path.insert(0,os.environ["OPSX_LIB"]);import gatetype;print("\n".join("%s=%s"%kv for kv in gatetype.SYNONYMS.items()))' | sort)"
@@ -927,6 +960,11 @@ out="$(sg)"; assert_eq "$(decision "$out")" block "stop: apply 站「要不要�
 # approval 旗標只管自己那個 gate：前一個 approval 不能把後面沒有 type 的「要不要接」gate 變成會擋的
 printf '## 核准 push\ntype: approval\nstatus: answered\n\n## 要不要接 /apply\nstatus: open\n' > "$C/gates.md"
 out="$(sg)"; assert_eq "$(decision "$out")" block "stop: approval 旗標不帶到下一個 gate"; reason "$out" | grep -q 'invoke /opsx-workflow:apply' || fail "stop: approval 後接「要不要接」gate，reason 要叫 invoke /apply"
+# review R1.3：gate-timestamp 把標題縮成 slug 併進既有 問題: 之後，「要不要繼續」仍然不擋 Stop（縮標題前後結果一樣）
+printf '## g1 要不要繼續\ntype: decision\nstatus: open\n問題: 跑完了\n' > "$C/gates.md"
+out="$(sg)"; assert_eq "$(decision "$out")" block "stop: 縮標題前「要不要繼續」不算 open"
+gts "$C/gates.md" >/dev/null
+out="$(sg)"; assert_eq "$(decision "$out")" block "stop: 縮標題後「要不要繼續：…」仍不算 open"
 rm -f "$C/gates.md" "$C/tasks.md"
 
 # 擋的次數：同一站 3 次，第 4 次 hook 寫 gate 放行；第 5 次不寫第二個
