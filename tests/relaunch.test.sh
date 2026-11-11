@@ -174,7 +174,7 @@ put_entry Agentory-CS/retry-backoff "$CARD"
 mkdir -p "$R/openspec/changes/archive/2026-11-10-par" "$R/openspec/changes/kid" "$R/openspec/changes/kid2"
 printf -- '- [ ] 1.1 x\n' > "$R/openspec/changes/kid/tasks.md"
 printf -- '- [ ] 1.1 x\n' > "$R/openspec/changes/kid2/tasks.md"
-put_entry Agentory-CS/par '{"pane":"w1:pP","agent":"claude","model":"claude-opus-5-5","mode":"autopilot","drive_pid":null}'
+put_entry Agentory-CS/par '{"pane":"w1:pP","agent":"claude","model":"claude-opus-5-5","mode":"autopilot","drive_pid":null,"handed_to":["kid","kid2","kid3"],"handed_at":"2026-11-10T10:00:00+08:00"}'
 KIDE='{"pane":"w1:pP","agent":"claude","model":"claude-opus-5-5","mode":"autopilot","via":"par","herdr_name":"par"}'
 put_entry Agentory-CS/kid "$KIDE"
 put_entry Agentory-CS/kid2 "$KIDE"
@@ -188,6 +188,25 @@ agent prompt par [kid2] /opsx-workflow:apply kid2" "每個沒停的子卡各收�
 sleep 0.3; assert_no_file "$OPSX_STATE_DIR/drive-Agentory-CS-par.log"; assert_no_file "$OPSX_STATE_DIR/drive-Agentory-CS-kid.log"
 tail -1 "$R/openspec/changes/kid/decisions.tsv" | grep -q 'relaunch' || fail "decisions.tsv 要記在被要求的子卡上"
 python3 -I -c 'import json,sys;e=json.load(open(sys.argv[1]))["Agentory-CS/par"];assert "relaunching_at" not in e,e' "$J" || fail "結束後要清掉父卡條目的標記"
+# 巢狀：kid 合併歸檔後自己再 fan-out 出 gk1、gk2（via kid、herdr 名仍是 par、同一個 pane）。
+# 重開的是根條目 par（它的 model 與鎖），走得到 par 的每張沒停、沒交接的卡都收一句
+mv "$R/openspec/changes/kid" "$R/openspec/changes/archive/2026-11-11-kid"
+mkdir -p "$R/openspec/changes/gk1" "$R/openspec/changes/gk2"
+printf -- '- [ ] 1.1 x\n' > "$R/openspec/changes/gk1/tasks.md"
+printf -- '- [ ] 1.1 x\n' > "$R/openspec/changes/gk2/tasks.md"
+put_entry Agentory-CS/kid "$(printf '%s' "$KIDE" | sed -e 's/"model":"claude-opus-5-5"/"model":"claude-sonnet-5-5"/' -e 's/"herdr_name":"par"/"herdr_name":"par","handed_to":["gk1","gk2"],"handed_at":"2026-11-11T10:00:00+08:00"/')"
+GKE='{"pane":"w1:pP","agent":"claude","model":"claude-haiku-5-5","mode":"autopilot","via":"kid","herdr_name":"par"}'
+put_entry Agentory-CS/gk1 "$GKE"
+put_entry Agentory-CS/gk2 "$GKE"
+printf '[ "$4" = esc ] && cp "%s" "%s"\nexit 0\n' "$J" "$FX/nest-at-esc.json" > "$FX/on-keys.sh"
+export OPSX_TEST_ON_SEND_KEYS="$FX/on-keys.sh"; : > "$OPSX_FAKE_LOG"
+out="$(opsx relaunch gk1 2>&1)"; assert_eq "$?" 0 "巢狀 fan-out relaunch: $out"
+unset OPSX_TEST_ON_SEND_KEYS
+assert_grep "^agent start par --kind claude --pane w1:pP -- --resume $SID --model claude-opus-5-5 " "$OPSX_FAKE_LOG"
+assert_eq "$(grep '^agent prompt' "$OPSX_FAKE_LOG")" "agent prompt par [kid2] /opsx-workflow:apply kid2
+agent prompt par [gk1] /opsx-workflow:apply gk1
+agent prompt par [gk2] /opsx-workflow:apply gk2" "同一個 pane 代管的每張沒停、沒交接的卡都收一句"
+python3 -I -c 'import json,sys;d=json.load(open(sys.argv[1]));assert d["Agentory-CS/par"].get("relaunching_at"),d["Agentory-CS/par"];assert "relaunching_at" not in d["Agentory-CS/kid"],d["Agentory-CS/kid"]' "$FX/nest-at-esc.json" || fail "鎖要寫在根條目 par，不是 kid"
 mk_agents "$OPSX_TEST_HERDR_AGENTS" w1:pE idle "$SID"
 
 # --- session 成員導到 session pane ---

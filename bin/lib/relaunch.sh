@@ -25,12 +25,40 @@ opsx_relaunch() {
   command -v herdr >/dev/null || die "relaunch: 找不到 herdr"
   refuse_if_handed "$repo" "$slug" relaunch
 
-  # 成員卡（via @<feature>）與 fan-out 子卡（via <父卡>）沒有自己的 agent：重開代管它的 pane（session 或父卡的條目），
-  # 對它代管的每張卡送話。fan-out 時父卡已經歸檔，所以不要求父卡的目錄
-  local route name via key="$repo/$slug"
+  # 成員卡（via @<feature>）與 fan-out 子卡（via <父卡>）沒有自己的 agent：重開代管它的 pane，對它代管的每張卡送話。
+  # 代管會巢狀（fan-out 的子卡合併後自己再 fan-out，孫卡 via 子卡、herdr 名與 pane 仍是最上層那張），
+  # 所以沿 via 走到沒有 via 的根條目：key、參數、鎖都用根條目；成員是走得到這個根、沒停、沒交接的所有條目。
+  # fan-out 時父卡已經歸檔，所以不要求根卡的目錄
+  local route name via key="$repo/$slug" members="" tree
   route="$(card_route "$repo" "$slug")" || die "relaunch: 讀不懂 dispatch.json"
   name="${route%%$'\t'*}"; via="${route#*$'\t'}"
-  [ -z "$via" ] || key="$repo/$via"
+  if [ -n "$via" ]; then
+    tree="$(OPSX_REPO="$repo" OPSX_SLUG="$slug" OPSX_LIB="$OPSX_ROOT/bin/lib" "$OPSX_PY" -I - "$OPSX_STATE_DIR/dispatch.json" <<'PY'
+import os, sys
+sys.path.insert(0, os.environ["OPSX_LIB"]); import jsonfile
+d = jsonfile.load(sys.argv[1]); repo = os.environ["OPSX_REPO"]
+def root(slug):
+    path = []
+    while True:
+        via = (d.get("%s/%s" % (repo, slug)) or {}).get("via")
+        if not via:
+            return slug
+        if slug in path:
+            sys.exit("relaunch: dispatch.json 的 via 繞成一圈：%s" % "、".join(path + [slug]))
+        path.append(slug)
+        slug = via
+top = root(os.environ["OPSX_SLUG"])
+members = [k.split("/", 1)[1] for k, v in d.items()
+           if k.startswith(repo + "/") and v.get("via") and v.get("mode") != "stopped" and not v.get("handed_to")
+           and root(k.split("/", 1)[1]) == top]
+if not members:
+    sys.exit("relaunch: %s/%s 代管的卡都 stopped 或交接了，沒有要送的那一站" % (repo, top))
+print(top)
+print("\n".join(members))
+PY
+)" || exit 2
+    key="$repo/${tree%%$'\n'*}"; members="${tree#*$'\n'}"
+  fi
   local entry pane model mode drive_pid
   entry="$(OPSX_KEY="$key" OPSX_ASKED="$repo/$slug" OPSX_LIB="$OPSX_ROOT/bin/lib" "$OPSX_PY" -I - "$OPSX_STATE_DIR/dispatch.json" <<'PY'
 import os, sys
@@ -75,21 +103,9 @@ PY
 )" || exit 2
 
   # 送哪一站先算好：算不出來就在送鍵之前停。單卡送 /<stage> <slug>；代管的卡照 send_to_session 的格式，每張沒停的一句
-  local d="$top/openspec/changes/$slug" members m stage prompts=()
+  local d="$top/openspec/changes/$slug" m stage prompts=()
   [ -d "$d" ] || die "relaunch: 沒有這張卡：$d"
-  if [ -z "$via" ]; then members="$slug"
-  else
-    members="$(OPSX_REPO="$repo" OPSX_VIA="$via" OPSX_LIB="$OPSX_ROOT/bin/lib" "$OPSX_PY" -I - "$OPSX_STATE_DIR/dispatch.json" <<'PY'
-import os, sys
-sys.path.insert(0, os.environ["OPSX_LIB"]); import jsonfile
-d = jsonfile.load(sys.argv[1]); repo = os.environ["OPSX_REPO"]
-for k, v in d.items():
-    if k.startswith(repo + "/") and v.get("via") == os.environ["OPSX_VIA"] and v.get("mode") != "stopped":
-        print(k.split("/", 1)[1])
-PY
-)" || exit 2
-    [ -n "$members" ] || die "relaunch: $key 代管的卡都 stopped 了，沒有要送的那一站"
-  fi
+  [ -n "$via" ] || members="$slug"
   for m in $members; do
     if [ ! -d "$top/openspec/changes/$m" ]; then
       # session 自己 /archive 的成員條目不會被標 stopped，略過；不在也沒歸檔才停，否則 stage_name 印 explore，等於對它送 /explore
