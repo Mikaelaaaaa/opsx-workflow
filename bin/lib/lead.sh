@@ -11,20 +11,21 @@ opsx_lead() {
   top="$(cd "$dir" && pwd -P)"
   [ -f "$settings" ] || die "lead: 沒有 ${settings}。先在沙盒外（你的終端機）跑 opsx init --global"
 
+  # agent get 的真輸出與錯誤碼沒有樣本，所以它只用來提早說「已在跑」：查不到（任何錯誤）就照常開，
+  # 第二個協調者由 herdr 的名字唯一性擋（agent start 回 agent_name_taken，herdr_start_agent 關 tab 並指出位置）
   if got="$(herdr agent get "$COORDINATOR_AGENT" 2>&1)"; then
     where="$(printf '%s' "$got" | jq -er '[.. | objects | select(has("pane_id"))][0] | "workspace \(.workspace_id) · tab \(.tab_id) · pane \(.pane_id)"' 2>/dev/null)" \
       || die "lead: herdr agent get $COORDINATOR_AGENT 回的格式讀不懂：$got"
     say "lead: 協調者已在跑（${where}），不開第二個。herdr agent focus $COORDINATOR_AGENT 切過去"
     return 0
   fi
-  case "$got" in *agent_not_found*) ;; *) die "lead: herdr agent get $COORDINATOR_AGENT 失敗：$got" ;; esac
 
   tabjson="$(herdr tab create --workspace "$HERDR_WORKSPACE_ID" --cwd "$top" --label "$COORDINATOR_AGENT" --no-focus)"
   pane="$(printf '%s' "$tabjson" | jq -r '.result.root_pane.pane_id // empty' 2>/dev/null || true)"
   tab="$(printf '%s' "$tabjson" | jq -r '.result.tab.tab_id // empty' 2>/dev/null || true)"
   [ -n "$pane" ] || die "lead: herdr tab create 沒回 root_pane：$tabjson"
   herdr_start_agent lead "$COORDINATOR_AGENT" claude "$pane" "$tab" --settings "$settings" --add-dir "$OPSX_STATE_DIR"
-  herdr agent prompt "$COORDINATOR_AGENT" "/opsx-workflow:lead" >/dev/null || die "lead: 協調者起來了但第一句送不進去（pane $pane）"
+  herdr agent prompt "$COORDINATOR_AGENT" "/opsx-workflow:lead" >/dev/null || die "lead: 協調者起來了但第一句送不進去。到 pane ${pane} 自己打 /opsx-workflow:lead（重跑 opsx lead 會說已在跑，不會補送）"
   herdr agent focus "$COORDINATOR_AGENT" >/dev/null || warn "焦點切不過去，協調者在 tab ${tab}（pane ${pane}）"
   say "lead: 協調者開在 tab ${tab}（pane ${pane}），cwd ${top}"
 }

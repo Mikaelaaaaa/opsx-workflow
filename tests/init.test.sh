@@ -262,7 +262,8 @@ assert_eq "$(cj "$CS" sandbox.network.allowUnixSockets)" MISSING "herdr socket �
 CO="$OPSX_STATE_DIR/coordinator-settings.json"
 assert_file "$CO"
 assert_eq "$(cj "$CO" sandbox.network.allowUnixSockets)" "[\"$HOME/.config/herdr/herdr.sock\"]" "主控 session 的設定要開 herdr socket"
-case "$outg" in *"claude --settings $CO"*) ;; *) fail "要印主控 session 的啟動方式：$outg" ;; esac
+case "$outg" in *"主控 session 用 opsx lead 啟動（它帶 --settings $CO"*) ;; *) fail "要印主控 session 用 opsx lead 啟動與設定檔路徑：$outg" ;; esac
+case "$outg" in *"用 claude --settings"*) fail "不能再叫人直接跑 claude --settings（起來的協調者沒有 herdr 名）：$outg" ;; esac
 assert_eq "$(printf '%s\n' "$outg" | tail -1)" "init --global: 開協調者：在 herdr pane 跑 opsx lead" "結尾要提示用 opsx lead 開協調者：$outg"
 co_before="$(cat "$CO")"
 assert_eq "$(cj "$CS" sandbox.excludedCommands)" '["gh pr *", "gh issue comment *"]' "只排除 gh pr * 與 gh issue comment *，不是整個 gh *"

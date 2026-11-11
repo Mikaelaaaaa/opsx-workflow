@@ -173,7 +173,7 @@ write_coordinator_settings() { # <python> <state>
   if [ -f "$f" ] && [ "$(cat "$f")" = "$new" ]; then say "init --global: ${f} 已有"
   else
     printf '%s\n' "$new" > "$f"
-    say "init --global: 寫 ${f}；主控 session 用 claude --settings ${f} 啟動（開 herdr socket，一般 agent 不給）"
+    say "init --global: 寫 ${f}；主控 session 用 opsx lead 啟動（它帶 --settings ${f}，開 herdr socket，一般 agent 不給）"
   fi
 }
 
