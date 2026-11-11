@@ -24,11 +24,17 @@ PY
 }
 mkcard() { local s; for s in "$@"; do mkdir -p "$R/openspec/changes/$s"; printf -- '- [ ] 1.1 x\n' > "$R/openspec/changes/$s/tasks.md"; done; }
 round() { : > "$OPSX_FAKE_LOG"; : > "$LOG"; bash "$OPSX_ROOT/bin/opsx" coordinate "$@" > "$FX/out" 2>&1; }
-count() { grep -c -- "$1" "$OPSX_FAKE_LOG" || true; }
+count() { grep -cE -- "$1" "$OPSX_FAKE_LOG" || true; }
 memo_get() { python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1])).get(sys.argv[2], {}).get(sys.argv[3], ""))' "$MEMO" "$1" "$2"; }
 ago() { python3 -I -c 'import datetime,sys; print((datetime.datetime.now().astimezone()-datetime.timedelta(minutes=int(sys.argv[1]))).isoformat(timespec="seconds"))' "$1"; }
 D='{"mode":"autopilot","agent":"claude","pane":"w1:p1","drive_pid":null}'
 READY='{"url":"https://github.com/o/r/pull/7","state":"ready","head_sha":"abc","conditions":{"no_conflicts":true},"merged_at":null}'
+
+# --- count 自檢：pattern 是 ERE，群組與 | 要數得到 ---
+printf 'opsx dispatch p1 --agent codex\n' > "$OPSX_FAKE_LOG"
+assert_eq "$(count '^opsx (answer|dispatch) p1')" 1 "count 的 ERE pattern 數得到"
+printf 'opsx stop p1 --repo /r\n' > "$OPSX_FAKE_LOG"
+assert_eq "$(count '^opsx (answer|dispatch) p1')" 0 "count 不數不相干的行"
 
 # --- 讀不到狀態就失敗：herdr ---
 mkcard a
