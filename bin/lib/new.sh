@@ -75,7 +75,7 @@ merge_target() { # <top> <area> <開卡 agent 的主殼名>
 # 通知失敗只警告：併入已經寫好，退出非零會讓 agent 以為沒開成、再開一次。
 merge_into() { # <top> <目標> <基本 id> <source> <kind> <impact> <evidence> <area> <一句話>
   local top="$1" tgt="$2" source="$4" text="$9" id own err
-  id="$("$OPSX_PY" -I "$OPSX_ROOT/bin/lib/inboxmerge.py" "$top/openspec/changes/$tgt" "$3" "$(now_iso)" "$source" "$5" "$6" "$7" "$8" "$text")" || die "new: 併不進 ${tgt}（上面是原因）"
+  id="$("$OPSX_PY" -I "$OPSX_ROOT/bin/lib/inboxmerge.py" append "$top/openspec/changes/$tgt" "$3" "$(now_iso)" "$source" "$5" "$6" "$7" "$8" "$text")" || die "new: 併不進 ${tgt}（上面是原因）"
   log_row "$top/openspec/changes/$tgt" 系統 已決定 "併入 ${id}：${text}" "$source"
   own="$(st_card_dir "$top" "${source#agent:}")"
   [ ! -d "$own" ] || log_row "$own" 系統 已決定 "併進 ${tgt}（id ${id}）" "$source"
