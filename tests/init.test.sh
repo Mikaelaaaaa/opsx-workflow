@@ -133,6 +133,57 @@ outo="$(OPSX_ROOT="$RO/plug" bash "$RO/plug/bin/opsx" init 2>&1)" || fail "opsx 
 case "$outo" in *"opsx 程式碼"*"$RO"*) ;; *) fail "要警告 opsx 程式碼對所有 session 可寫：$outo" ;; esac
 case "$(cj "$CR" permissions.additionalDirectories)" in *"\"$RO\""*) ;; *) fail "警告之後仍要登記 $RO" ;; esac
 
+# --- 重跑 init 用插件版覆寫 spec 範本與 specs instruction；--check 比對兩者（specs/opsx-init）---
+# 把 <dst> 的 specs 區塊換成 <src> 的；區塊是 "  - id: specs" 到下一個 artifact 前，不含中間的空行
+swap_specs() { python3 -I -c '
+import re, sys
+pat = re.compile(r"^  - id: specs\n(?:(?!  - id: ).*\n)*?(?=\n*  - id: |\Z)", re.M)
+new = pat.search(open(sys.argv[2], encoding="utf-8").read()).group(0)
+s = open(sys.argv[1], encoding="utf-8").read()
+m = pat.search(s)
+open(sys.argv[1], "w", encoding="utf-8").write(s[:m.start()] + new + s[m.end():])' "$1" "$2"; }
+RF="$(mk_repo forkref)"; ( cd "$RF" && openspec schema fork spec-driven opsx >/dev/null 2>&1 ) || fail "fork spec-driven 失敗"
+FS="$RF/openspec/schemas/opsx"; OS="$R/openspec/schemas/opsx"
+assert_grep "with WHEN/THEN format" "$FS/schema.yaml"
+cd "$R"
+# settings 也裝齊，--check 的 exit code 才只反映 spec 範本與 instruction；用自己的 state 與 settings，不影響後面 --global 的斷言
+export CLAUDE_CONFIG_DIR="$FX/cc-spec" OPSX_STATE_DIR="$FX/state-spec"
+mkdir -p "$OPSX_STATE_DIR"; cp "$FX/state/python" "$OPSX_STATE_DIR/python"
+opsx init --global >/dev/null 2>&1 || fail "init --global for cc-spec"
+printf '{"projects": {"%s": {"hasTrustDialogAccepted": true}}}' "$R" > "$CLAUDE_CONFIG_DIR/.claude.json"
+opsx init >/dev/null 2>&1 || fail "init in cc-spec"
+cp "$FS/templates/spec.md" "$OS/templates/spec.md"; swap_specs "$OS/schema.yaml" "$FS/schema.yaml"
+assert_grep "with WHEN/THEN format" "$OS/schema.yaml"
+# init --check 抓到舊版 spec 範本（反例）
+outc="$(opsx init --check 2>&1)"; rc=$?
+assert_eq "$rc" 1 "舊版 spec 範本時 --check 要失敗：$outc"
+case "$outc" in *"spec 範本"*) ;; *) fail "要說 spec 範本不同：$outc" ;; esac
+case "$outc" in *"specs instruction"*) ;; *) fail "要說 specs instruction 不同：$outc" ;; esac
+case "$outc" in *"opsx init"*) ;; *) fail "要建議跑 opsx init：$outc" ;; esac
+# 重跑 init 更新舊範本（正例）
+outr="$(opsx init 2>&1)" || fail "已裝的 repo 重跑 init 失敗：$outr"
+cmp -s "$OS/templates/spec.md" "$OPSX_ROOT/schemas/opsx/templates/spec.md" || fail "重跑後 spec.md 不是插件版"
+assert_not_grep "with WHEN/THEN format" "$OS/schema.yaml"
+assert_grep "written in Gherkin form" "$OS/schema.yaml"
+( cd "$R" && openspec schema validate opsx >/dev/null 2>&1 ) || fail "重跑後 schema validate 失敗"
+case "$outr" in *"spec 範本"*"插件版"*) ;; *) fail "要印一行說更新了 spec 範本與 specs instruction：$outr" ;; esac
+# 重跑 init 不重複插入 artifact（反例）
+cp "$OS/schema.yaml" "$FX/schema-1st"
+opsx init >/dev/null 2>&1 || fail "第二次重跑 init 失敗"
+cmp -s "$OS/schema.yaml" "$FX/schema-1st" || fail "第二次跑完 schema.yaml 跟第一次不同：$(diff "$FX/schema-1st" "$OS/schema.yaml")"
+assert_eq "$(grep -c -- '- id: grill' "$OS/schema.yaml")" 1 "grill 重複"
+assert_eq "$(grep -c -- '- id: specs' "$OS/schema.yaml")" 1 "specs 重複"
+# init --check 在插件版時不報 spec（正例）
+outc="$(opsx init --check 2>&1)"; rc=$?
+case "$outc" in *"spec 範本"*|*"specs instruction"*) fail "插件版時不該報 spec：$outc" ;; esac
+assert_eq "$rc" 0 "插件版、settings 一致時 --check 要過：$outc"
+# 邊界：schema.yaml 沒有 specs artifact → init 失敗並點名 schema.yaml 路徑
+python3 -I -c 'import sys; p=sys.argv[1]; s=open(p).read(); open(p,"w").write(s.replace("  - id: specs\n", "  - id: specz\n"))' "$OS/schema.yaml"
+oute="$(opsx init 2>&1)" && fail "沒有 specs artifact 時 init 要失敗：$oute"
+case "$oute" in *"$OS/schema.yaml"*) ;; *) fail "訊息要點名 schema.yaml 路徑：$oute" ;; esac
+cp "$FX/schema-1st" "$OS/schema.yaml"
+export OPSX_STATE_DIR="$FX/state"
+
 # --- --global ---
 export CLAUDE_CONFIG_DIR="$FX/claude-config"   # repo 層那段用 $FX/cc-repo，這裡換回乾淨的
 cd "$FX"; use_fakes herdr launchctl; export OPSX_FAKE_LOG="$FX/herdr.log"; : > "$OPSX_FAKE_LOG"
