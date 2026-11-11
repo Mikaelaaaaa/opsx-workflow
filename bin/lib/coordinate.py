@@ -200,6 +200,22 @@ class Round:
             if rc != 0:
                 self.log("?? %s 主 checkout pull --ff-only 失敗：%s" % (top, err[:200]))
 
+    def unpushed(self, top, branch, head_sha=None):
+        """本機分支上有只存在本機的 commit，或查不出來，回一句說明；沒有回 None。刪分支前叫它：-D 之後那些 commit 就沒了。
+        排除 head_sha（MR 合併當下的分支 head）以前的 commit 與所有 remote ref 上的 commit；
+        關 session 的路徑沒有 head_sha，只排除 remote ref（remote 分支被 forge 刪掉時會保守地留著分支）。"""
+        args = ["git", "-C", top, "rev-list", "--count", "refs/heads/" + branch, "--not"]
+        if head_sha:
+            args.append(head_sha)
+        rc, out, err = self.run(args + ["--remotes"])
+        if rc != 0:
+            return "查不出有沒有未推的 commit：%s" % err[:200]
+        if not out.isdigit():
+            return "rev-list --count 的輸出不是整數：%r" % out[:200]
+        if int(out) != 0:
+            return "有 %s 個只在本機的 commit" % out
+        return None
+
     def archive_card(self, top, c):
         key = card_key(c)
         entry = self.dispatch_file.get(key)
@@ -228,6 +244,11 @@ class Round:
             return True
         # 沒記 worktree 的是早期派的卡，當時 worktree 一律開在這裡
         wt = entry["worktree"] if entry and entry.get("worktree") else os.path.join(top, ".claude", "worktrees", c["slug"])
+        if entry and entry.get("branch"):
+            why = self.unpushed(top, entry["branch"], c["mr"]["head_sha"])
+            if why:
+                self.log("?? %s 分支 %s %s，分支與 worktree 都不刪，留給人" % (key, entry["branch"], why))
+                return True
         if os.path.isdir(wt):
             # 不 --force：worktree 裡有沒 commit 的東西就刪不掉，留給人
             rc, _, err = self.act(["git", "-C", top, "worktree", "remove", wt])
@@ -328,6 +349,10 @@ class Round:
                 continue
             if rc != 0:
                 self.log("?? %s 查不了分支 %s，session 條目留給人：%s" % (session_key, v["branch"], err[:200]))
+                return
+            why = self.unpushed(top, v["branch"])
+            if why:
+                self.log("?? %s 分支 %s %s，不刪，session 條目留給人" % (session_key, v["branch"], why))
                 return
             rc, _, err = self.act(["git", "-C", top, "branch", "-D", v["branch"]])
             if rc != 0:

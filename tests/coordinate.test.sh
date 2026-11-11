@@ -191,6 +191,7 @@ want="git -C $R rev-parse --abbrev-ref HEAD
 git -C $R status --porcelain
 git -C $R pull -q --ff-only
 openspec archive g -y
+git -C $R rev-list --count refs/heads/feat/g/m --not def --remotes
 git -C $R worktree remove $R/.claude/worktrees/g-wt
 git -C $R branch -D feat/g/m
 git -C $R worktree prune"
@@ -214,6 +215,19 @@ cp "$WP0" "$R/openspec/workplan.yaml"
 OPSX_TEST_GIT_FAIL=remove round || fail "rc: $(cat "$FX/out")"
 assert_eq "$(count 'branch -D')" 0 "worktree 刪不掉不刪分支"
 grep '??' "$LOG" | grep -q g || fail "要記 ??：$(cat "$LOG")"
+cp "$WP0" "$R/openspec/workplan.yaml"
+
+# --- 收尾：分支上有只在本機的 commit，不刪分支與 worktree，卡照常歸檔 ---
+OPSX_TEST_GIT_UNPUSHED=1 round || fail "rc: $(cat "$FX/out")"
+assert_grep '^openspec archive g -y$' "$OPSX_FAKE_LOG"
+assert_eq "$(grep -cE '^git .*(worktree remove|branch -D)' "$OPSX_FAKE_LOG")" 0 "有未推的 commit 不刪：$(cat "$OPSX_FAKE_LOG")"
+grep '??' "$LOG" | grep g | grep -q 'feat/g/m' || fail "要記 ?? 含分支名：$(cat "$LOG")"
+cp "$WP0" "$R/openspec/workplan.yaml"
+
+# --- 收尾：查不出有沒有未推的 commit，當成有，不刪，log 帶 stderr ---
+OPSX_TEST_GIT_FAIL=--count round || fail "rc: $(cat "$FX/out")"
+assert_eq "$(grep -cE '^git .*(worktree remove|branch -D)' "$OPSX_FAKE_LOG")" 0 "查不出來不刪：$(cat "$OPSX_FAKE_LOG")"
+grep '??' "$LOG" | grep -q 'fake 失敗' || fail "log 要帶 git 的 stderr：$(cat "$LOG")"
 cp "$WP0" "$R/openspec/workplan.yaml"
 
 # --- 收尾：合併後分支又多了 commit，不收尾、通知一次；gate 答過（acked）才收尾 ---
@@ -1537,6 +1551,14 @@ assert_eq "$(count 'branch -D')" 0 "git 出錯不刪分支：$(cat "$OPSX_FAKE_L
 assert_eq "$(jq -r '."demo/@g" | type' "$DISP")" object "git 出錯 session 條目留著"
 grep '??' "$LOG" | grep -q 'feat/m3/u' || fail "要記 ?? 含分支名：$(cat "$LOG")"
 cards "[$(merged m4 2026-11-07T12:30:00Z "$GM" '"idle"')]"
+
+# 成員分支上有只在本機的 commit：不刪，session 條目留著，記 ??（關 session 的路徑沒有 head_sha，只排除 remote ref）
+wake_wp merged; close_disp
+OPSX_TEST_GIT_UNPUSHED=1 round || fail "rc: $(cat "$FX/out")"
+assert_eq "$(count 'branch -D')" 0 "有未推的 commit 不刪：$(cat "$OPSX_FAKE_LOG")"
+assert_grep "^git -C $R rev-list --count refs/heads/feat/m3/u --not --remotes\$" "$OPSX_FAKE_LOG"
+assert_eq "$(jq -r '."demo/@g" | type' "$DISP")" object "有未推的 commit session 條目留著"
+grep '??' "$LOG" | grep -q 'feat/m3/u' || fail "要記 ?? 含分支名：$(cat "$LOG")"
 
 # worktree 移不掉時留給人
 wake_wp merged; close_disp
