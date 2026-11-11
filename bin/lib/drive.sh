@@ -80,8 +80,9 @@ opsx_drive() {
         say "drive: $slug → /opsx-workflow:$stage"
         local before sent_at; before="$(stage_fingerprint "$top" "$slug")"; sent_at="$(date +%s)"
         herdr_step "$slug" agent prompt "$slug" "/opsx-workflow:$stage $slug" --wait || return 0
+        # prompt 已送、只是沒在時限內 settle：算一次送出（下一輪受間隔下限），但沒 settle 不驗
+        if [ "$HERDR_STEP_OK" = 1 ] || [ "$HERDR_STEP_TIMEOUT" = 1 ]; then last_stage="$stage"; last_at="$sent_at"; fi
         [ "$HERDR_STEP_OK" = 1 ] || continue   # 沒送進去的不驗、不算一次送出（herdr_step 已經退避過）
-        last_stage="$stage"; last_at="$sent_at"
         if [ "$(stage_fingerprint "$top" "$slug")" != "$before" ]; then backoff=0
         else
           case "$(pane_tail "$repo" "$slug")" in
@@ -105,12 +106,12 @@ opsx_drive() {
 # 錯誤一律先等過再回，迴圈才不會在同一個錯誤上空轉。
 herdr_step() { # <slug> <herdr args…>
   local slug="$1" err code; shift
-  HERDR_STEP_OK=0
+  HERDR_STEP_OK=0; HERDR_STEP_TIMEOUT=0
   if err="$(herdr "$@" 2>&1 >/dev/null)"; then HERDR_STEP_OK=1; return 0; fi
   code="$(printf '%s' "$err" | jq -r '.error.code // empty' 2>/dev/null || true)"
   case "$code" in
     timeout)
-      return 0 ;;
+      HERDR_STEP_TIMEOUT=1; return 0 ;;
     agent_prompt_stalled)
       # herdr 收下了，只是 5 秒內沒看到 agent 動（指令馬上出錯、hook 擋掉）。算送過，送出後的驗證才跑得到
       say "drive: $slug 的 prompt 送進去了但 agent 沒動（agent_prompt_stalled）"; HERDR_STEP_OK=1; return 0 ;;

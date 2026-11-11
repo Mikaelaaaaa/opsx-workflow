@@ -181,6 +181,18 @@ for a in "跳過這一步，在 decisions.tsv 寫下原因再往下走" "停在�
   assert_eq "$(grep -c '^opsx coordinate --kick$' "$KL")" 2 "答「${a}」要再 kick 一次: $(cat "$KL")"
   echo "$out" | grep -q "不是重做" || fail "要說為什麼結束: $out"
 done
+# 答「重做」之後 agent 動了（tasks 勾數變）：不寫 drive-apply-2，drive 往下走、再送階段指令
+cat > "$FX/answer_and_tick.sh" <<EOF
+case "\$*" in *"--until working"*)
+  if grep -q '^## drive-apply-2' "$C/gates.md"; then printf '{}' > "$OPSX_STATE_DIR/dispatch.json"
+  else printf '## drive-apply-1\ntype: decision\nstatus: answered\nanswer: 重做 /opsx-workflow:apply 一次\n' > "$C/gates.md"; printf '## 1\n\n- [x] 1.1 a\n' > "$C/tasks.md"; fi ;;
+esac
+EOF
+export OPSX_TEST_ON_WAIT="$FX/answer_and_tick.sh"
+reset_apply; printf '{"Agentory-CS/retry-backoff":{"mode":"drive","pane":"p42","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"
+out="$(opsx drive retry-backoff 2>&1)"; assert_eq "$?" 0 "drive 重做有動: $out"
+if echo "$out" | grep -q "重做 /opsx-workflow:apply 之後階段還是沒動"; then fail "重做後 tasks 動了，不該再寫 gate: $out"; fi
+assert_eq "$(grep -c '^agent prompt' "$OPSX_FAKE_LOG")" 2 "重做有動之後 drive 繼續送階段指令: $(cat "$OPSX_FAKE_LOG")"
 unset OPSX_TEST_ON_WAIT OPSX_TEST_PANE_TEXT
 export OPSX_TEST_ON_PROMPT="$FX/on_prompt.sh"
 
@@ -208,6 +220,27 @@ assert_eq "$(grep -c '^agent prompt' "$OPSX_FAKE_LOG")" 2 "兩輪各送一次: $
 assert_eq "$(grep -c '^sleep' "$OPSX_FAKE_LOG")" 1 "第二次送出前 sleep 一次: $(cat "$OPSX_FAKE_LOG")"
 gap="$(grep '^sleep' "$OPSX_FAKE_LOG" | cut -d' ' -f2)"
 [ "$gap" -ge 990 ] && [ "$gap" -le 1000 ] || fail "間隔要接近 poll 秒，得到 $gap"
+# --- 送出逾時（prompt 已送、agent 還沒 settle）也算一次送出：第二次送出前照樣受下限 ---
+reset_apply; printf 'timeout\n' > "$FX/perr"; export OPSX_TEST_PROMPT_ERR="$FX/perr" OPSX_TEST_ON_PROMPT="$FX/noop.sh"
+out="$(PATH="$FX/sleepbin:$PATH" OPSX_DRIVE_POLL=1000 OPSX_DRIVE_MAX=2 opsx drive retry-backoff 2>&1)"; assert_eq "$?" 0 "drive 逾時: $out"
+assert_eq "$(grep -c '^agent prompt' "$OPSX_FAKE_LOG")" 2 "逾時後再送一次: $(cat "$OPSX_FAKE_LOG")"
+gap="$(grep '^sleep' "$OPSX_FAKE_LOG" | head -1 | cut -d' ' -f2)"
+[ -n "$gap" ] && [ "$gap" -ge 990 ] && [ "$gap" -le 1000 ] || fail "逾時後的第二次送出前要 sleep 接近 poll 秒，得到「${gap}」: $(cat "$OPSX_FAKE_LOG")"
+unset OPSX_TEST_PROMPT_ERR
+# --- 退避有動歸零：失敗、有動、再失敗，第二次退避仍是 poll 秒，不是翻倍 ---
+reset_apply; printf '0' > "$FX/cnt"
+cat > "$FX/flaky.sh" <<EOF
+n="\$(cat "$FX/cnt")"; printf '%s' \$((n + 1)) > "$FX/cnt"
+[ "\$n" = 1 ] && printf '{"phase":"apply","step":1,"total":8,"label":"x","tests":"red","at":"2026-11-05T17:00:00+08:00"}' > "$C/status.json"
+true
+EOF
+export OPSX_TEST_ON_PROMPT="$FX/flaky.sh" OPSX_TEST_PANE_TEXT="API Error: HTTP 429 rate_limit"
+out="$(PATH="$FX/sleepbin:$PATH" OPSX_DRIVE_POLL=7 OPSX_DRIVE_MAX=3 opsx drive retry-backoff 2>&1)"; assert_eq "$?" 0 "drive 歸零: $out"
+assert_eq "$(grep -c '^agent prompt' "$OPSX_FAKE_LOG")" 3 "三輪各送一次: $(cat "$OPSX_FAKE_LOG")"
+assert_eq "$(printf '%s\n' "$out" | grep -c '退避 7 秒')" 2 "有動之後退避要從 poll 秒重來: $out"
+assert_not_grep '^sleep 14$' "$OPSX_FAKE_LOG"
+unset OPSX_TEST_PANE_TEXT
+export OPSX_TEST_ON_PROMPT="$FX/on_prompt.sh"
 # --- 階段前進的那一輪不受限：apply → review → pr 之間不 sleep ---
 reset_apply; export OPSX_TEST_ON_PROMPT="$FX/on_prompt.sh"
 out="$(PATH="$FX/sleepbin:$PATH" OPSX_DRIVE_POLL=1000 opsx drive retry-backoff 2>&1)"; assert_eq "$?" 0 "drive 階段前進: $out"
