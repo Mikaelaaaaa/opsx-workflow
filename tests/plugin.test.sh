@@ -72,6 +72,38 @@ out="$(bash "$OPSX_ROOT/herdr-board/scripts/open-board.sh" 2>&1)"; assert_eq "$?
 assert_eq "$(cat "$pidf")" "$pid1" "第二次不該換 pid"
 assert_eq "$(grep -c '^open ' "$FX/open.log" || true)" 2 "兩次都要開瀏覽器"
 assert_eq "$(grep -c '^listening' "$OPSX_STATE_DIR/board.log" || true)" 1 "只該起過一支 server（沙盒不能 pgrep，數 log 的 listening 行）"
+# --- open-board.sh <repo>/<slug>：card= 跟 token 放同一個 fragment（specs/board-plugin「open-board 開單卡」）---
+: > "$FX/open.log"
+out="$(bash "$OPSX_ROOT/herdr-board/scripts/open-board.sh" opsx-workflow/tui-keys 2>&1)"; assert_eq "$?" 0 "open-board 帶卡: $out"
+assert_eq "$(cat "$FX/open.log")" "open http://127.0.0.1:$port/#token=$tok&card=opsx-workflow/tui-keys" "帶卡開網頁"
+: > "$FX/open.log"
+out="$(bash "$OPSX_ROOT/herdr-board/scripts/open-board.sh" 'a&b#c/tui-keys' 2>&1)"; assert_eq "$?" 0 "open-board repo 含 & #: $out"
+assert_eq "$(cat "$FX/open.log")" "open http://127.0.0.1:$port/#token=$tok&card=a%26b%23c/tui-keys" "repo 名要編碼，/ 保留"
+: > "$FX/open.log"
+out="$(bash "$OPSX_ROOT/herdr-board/scripts/open-board.sh" 2>&1)"; assert_eq "$?" 0 "open-board 不帶卡: $out"
+assert_eq "$(cat "$FX/open.log")" "open http://127.0.0.1:$port/#token=$tok" "不帶卡照舊"
+for bad in tui-keys /tui-keys opsx-workflow/ opsx-workflow/a/b; do
+  : > "$FX/open.log"
+  err="$(bash "$OPSX_ROOT/herdr-board/scripts/open-board.sh" "$bad" 2>&1 >/dev/null)"; rc=$?
+  [ "$rc" -ne 0 ] || fail "參數 [$bad] 形狀不對要非零結束"
+  case "$err" in *"$bad"*) ;; *) fail "stderr 要指出參數 [$bad]：$err";; esac
+  assert_eq "$(cat "$FX/open.log")" "" "參數 [$bad] 不對不開瀏覽器"
+done
+# collect 的 slug 就是目錄名：超過 32 字、數字開頭、大寫都是真的卡，都要開得了
+for good in "notification-toast-replays-on-load" "a$(printf 'b%.0s' $(seq 1 40))" 9x Tui-keys; do
+  : > "$FX/open.log"
+  out="$(bash "$OPSX_ROOT/herdr-board/scripts/open-board.sh" "opsx-workflow/$good" 2>&1)"; assert_eq "$?" 0 "slug [$good] 要開得了: $out"
+  assert_eq "$(cat "$FX/open.log")" "open http://127.0.0.1:$port/#token=$tok&card=opsx-workflow/$good" "slug [$good] 帶進 card="
+done
+# --- 沒有 open / xdg-open：非零結束、網址寫到 stderr，呼叫的人（TUI 的 o）才不會當成開好了 ---
+mkdir -p "$FX/noopen"
+for t in bash dirname cat mkdir seq sleep rmdir curl grep tail nohup; do ln -sf "$(command -v "$t")" "$FX/noopen/$t"; done
+ln -sf "$(python3 -I -c 'import sys; print(sys.executable)')" "$FX/noopen/python3"
+: > "$FX/open.log"
+err="$(PATH="$FX/noopen" "$FX/noopen/bash" "$OPSX_ROOT/herdr-board/scripts/open-board.sh" opsx-workflow/tui-keys 2>&1 >/dev/null)"; rc=$?
+[ "$rc" -ne 0 ] || fail "沒有 open/xdg-open 要非零結束：$err"
+case "$err" in *"自己開 http://127.0.0.1:$port/#token=$tok&card=opsx-workflow/tui-keys"*) ;; *) fail "stderr 要有完整網址：$err";; esac
+assert_eq "$(cat "$FX/open.log")" "" "沒有 opener 不該叫到假的 open"
 # --- token 檔被刪 → 下一次 open-board 重起 server，新 token ---
 rm -f "$OPSX_STATE_DIR/board-token"
 out="$(bash "$OPSX_ROOT/herdr-board/scripts/open-board.sh" 2>&1)"; assert_eq "$?" 0 "open-board 第三次: $out"
