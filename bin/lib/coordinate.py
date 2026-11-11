@@ -17,7 +17,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import chain  # noqa: E402
-import grantactions  # noqa: E402
+import gaterule  # noqa: E402
 import jsonfile  # noqa: E402
 import priority  # noqa: E402
 import safefile  # noqa: E402
@@ -38,18 +38,17 @@ COORDINATOR = "opsx-coordinator"
 # herdr 收不下這則 prompt 的兩種情形：沒有這個 agent、或它卡在對話框。兩種都改發桌面通知，人才收得到
 COORDINATOR_UNAVAILABLE = ("agent_not_found", "agent_blocked")
 AGENT_NAME = re.compile(r"^[a-z][a-z0-9_-]{0,31}$")
-VERIFY_WORDS = ("真機", "實測", "瀏覽器", "herdr 驗", "resume", "真的 claude", "真 herdr", "量測")
-GRANT_WORDS = ("授權", "開 PR", "開 / 改 MR", "gh pr create", "push", "推到 origin", "rebase")
-# 建議或選項裡有這些字，代表要人動手；不替人承諾
-HUMAN_WORDS = ("你", "使用者", "沙盒外", "自己跑", "本人", "人工", "跑指令", "跑腳本", "錄", "貼路徑")
-HUMAN_QUESTION = ("只有你能做", "誰來跑")
-MERGE_WORDS = ("合併", "merge")
-# explore 寫的拆法確認 gate 的 id：要人決定，永遠不代答
-SPLIT_GATE = "split"
-# drive 與 Stop hook 卡住時寫的 gate 標題（drive-<站>-<n>、卡在接 /<站> [#<n>]）：建議欄是給人看的提示，不是答案，永遠不代答
-STUCK_GATE = re.compile(r"drive-[a-z]+-[0-9]+|卡在接 /[a-z]+( #[0-9]+)?")
-VERIFY_ANSWER = "這個要真機跑的驗證使用者之後自己做：把它標成「等使用者驗」寫進 report.md 的 Consider，不要再開 gate，繼續做完剩下的 task 到 /opsx-workflow:review、/opsx-workflow:pr。"
-GRANT_ANSWER = "允許。長期授權在 grants.toml，直接做。"
+# gaterule.decide 回「留給人」時，各理由代碼寫進 log 的那行與通知標題後半
+GATE_HUMAN = {
+    "stuck": ("?? %(key)s gate %(gate)s 是 drive 或 Stop hook 卡住時寫的，建議欄是給人看的提示，不代答：%(q100)s", "卡住了，要你看"),
+    "run": ("?? %(key)s gate %(gate)s 要人在終端機跑指令再貼結果，不代答：%(rec100)s", "要你在終端機跑指令"),
+    "merge-grant": ("?? %(key)s gate %(gate)s 要合併授權，不代答：合併由人在板上按", "要合併授權"),
+    "type": ("?? %(key)s gate %(gate)s 的 type 沒寫或不在 approval | decision，不代答，要人看：%(q100)s", "的 type 不明"),
+    "split": ("?? %(key)s gate %(gate)s 是拆法確認，只有使用者能答，不代答、不停 pane：%(q100)s", "要你確認拆法"),
+    "merge": ("?? %(key)s gate %(gate)s 是合併類決定題，不代答：%(q100)s → %(pick60)s", "是合併的決定"),
+    "no-pick": ("?? %(key)s gate %(gate)s 沒有選項也沒有建議，要人看：%(q120)s", "沒有選項也沒有建議"),
+    "hands": ("?? %(key)s gate %(gate)s 要人動手，不代答：%(q100)s → %(pick60)s", "要你動手"),
+}
 
 
 class CoordinateError(Exception):
@@ -519,69 +518,31 @@ class Round:
         return False
 
     def handle_gate(self, c, top):
-        """派出去的卡的第一個 open gate，照固定規則答、停、或留給人。"""
+        """派出去的卡的第一個 open gate，照 gaterule.decide 的處置答、停、或留給人。"""
         w, key = c["waiting"], card_key(c)
-        if w["gate_id"] and STUCK_GATE.fullmatch(w["gate_id"]):
-            self.log("?? %s gate %s 是 drive 或 Stop hook 卡住時寫的，建議欄是給人看的提示，不代答：%s" % (key, w["gate_id"], (w.get("question") or "")[:100]))
-            self.notify_gate(c, w, "卡住了，要你看")
-            return
-        if w.get("needs") == "run":
-            self.log("?? %s gate %s 要人在終端機跑指令再貼結果，不代答：%s" % (key, w["gate_id"], (w.get("recommended") or "")[:100]))
-            self.notify_gate(c, w, "要你在終端機跑指令")
-            return
-        if w["type"] == "等待授權":
-            # 合併永遠由人按：action 不一定剛好寫成 merge（mr-merge、external 打合併 API），題目也要看
-            if any(k in ((w["action"] or "") + " " + (w.get("question") or "")).lower() for k in MERGE_WORDS):
-                self.log("?? %s gate %s 要合併授權，不代答：合併由人在板上按" % (key, w["gate_id"]))
-                self.notify_gate(c, w, "要合併授權")
-                return
-            self.answer(c, top, w["gate_id"], "允許", grant=w["action"] in grantactions.ACTIONS)
-            return
-        if w["type"] == "終端機等待輸入":
-            pane = c["dispatch"].get("pane")
-            self.log("?? %s 在 pane %s 等終端機輸入（autopilot 不該問 pane），要人看" % (key, pane))
-            self.notify(c, "blocked", pane, "在終端機等輸入", "pane %s：%s" % (pane, one_line(w.get("question") or "")),
-                        scope=session_scope(c))
-            return
-        if w["type"] == "type 不明":
-            self.log("?? %s gate %s 的 type 沒寫或不在 approval | decision，不代答，要人看：%s" % (key, w["gate_id"], (w.get("question") or "")[:100]))
-            self.notify_gate(c, w, "的 type 不明")
-            return
-        if w["gate_id"] == SPLIT_GATE:
-            self.log("?? %s gate %s 是拆法確認，只有使用者能答，不代答、不停 pane：%s" % (key, w["gate_id"], (w.get("question") or "")[:100]))
-            self.notify_gate(c, w, "要你確認拆法")
+        verdict = gaterule.decide(w)
+        if verdict[0] == "answer":
+            self.answer(c, top, w["gate_id"], verdict[1], grant=verdict[2])
             return
         q = w.get("question") or ""
-        pick = w.get("recommended") or (w.get("options") or [None])[0]
-        text = q + " " + (pick or "")
-        # gate 明寫 waits-on 才算等別張卡：不答，答了它查完又會開一個 gate。要先認，不然會被下面的合併類規則吃掉
-        if w.get("waits_on"):
-            self.log("⏳ %s gate %s 等 %s，先停 pane，有卡合進 main 那輪再派：%s" % (key, w["gate_id"], w["waits_on"], q[:100]))
+        if verdict[0] == "park":
+            self.log("⏳ %s gate %s 等 %s，先停 pane，有卡合進 main 那輪再派：%s" % (key, w["gate_id"], verdict[1], q[:100]))
             rc, _, _ = self.act(["opsx", "stop", c["slug"], "--repo", top])
             if rc == 0:
                 self.memo["_parked"][key] = {"at": self.now.isoformat(timespec="seconds"), "gate": w["gate_id"],
                                              "merged": merged_prs(self.workplan(top))}
             return
-        # merge 永遠人：合併授權綁 head sha，代答「重試合併」這類題就等於替人決定合併
-        if any(k in text.lower() for k in MERGE_WORDS):
-            self.log("?? %s gate %s 是合併類決定題，不代答：%s → %s" % (key, w["gate_id"], q[:100], (pick or "")[:60]))
-            self.notify_gate(c, w, "是合併的決定")
+        if verdict[1] == "terminal":
+            pane = c["dispatch"].get("pane")
+            self.log("?? %s 在 pane %s 等終端機輸入（autopilot 不該問 pane），要人看" % (key, pane))
+            self.notify(c, "blocked", pane, "在終端機等輸入", "pane %s：%s" % (pane, one_line(q)),
+                        scope=session_scope(c))
             return
-        if any(k in q for k in VERIFY_WORDS):
-            self.answer(c, top, w["gate_id"], VERIFY_ANSWER)
-            return
-        if any(k in q for k in GRANT_WORDS):
-            self.answer(c, top, w["gate_id"], GRANT_ANSWER)
-            return
-        if not pick:
-            self.log("?? %s gate %s 沒有選項也沒有建議，要人看：%s" % (key, w["gate_id"], q[:120]))
-            self.notify_gate(c, w, "沒有選項也沒有建議")
-            return
-        if any(k in pick for k in HUMAN_WORDS) or any(k in q for k in HUMAN_QUESTION):
-            self.log("?? %s gate %s 要人動手，不代答：%s → %s" % (key, w["gate_id"], q[:100], pick[:60]))
-            self.notify_gate(c, w, "要你動手")
-            return
-        self.answer(c, top, w["gate_id"], pick)
+        pick = w.get("recommended") or (w.get("options") or [None])[0] or ""
+        line, why = GATE_HUMAN[verdict[1]]
+        self.log(line % {"key": key, "gate": w["gate_id"], "q100": q[:100], "q120": q[:120], "pick60": pick[:60],
+                         "rec100": (w.get("recommended") or "")[:100]})
+        self.notify_gate(c, w, why)
 
     def session_siblings(self, key, top):
         """同 feature 還活著的其他卡的 key（chain.session_siblings）。"""
