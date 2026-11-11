@@ -23,7 +23,7 @@ trap 'rmdir "$lock" 2>/dev/null' EXIT
 if ! alive; then
   pid="$(cat "$pidfile" 2>/dev/null || true)"; [ -n "$pid" ] && kill "$pid" 2>/dev/null || true   # token 不見或 healthz 不對：重起
   rm -f "$pidfile"
-  nohup python3 -I "$root/herdr-board/server.py" --port "$port" --state "$state" >>"$logfile" 2>&1 &
+  ( trap '' HUP; exec python3 -I "$root/herdr-board/server.py" --port "$port" --state "$state" ) </dev/null >>"$logfile" 2>&1 &
   printf '%s\n' "$!" > "$pidfile"
   for _ in $(seq 1 50); do
     curl -sf --max-time 1 "${url}healthz" >/dev/null 2>&1 && break

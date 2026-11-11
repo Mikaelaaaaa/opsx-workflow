@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# 假 nohup：agent 沙盒的 pane 裡真 nohup 一律印這行並失敗（原因不明，bash 對背景指令本來就把 stdin 接 /dev/null，
+# 重導 stdin 也救不了）。測試裡每個 nohup 都這樣，所以只要有呼叫點用了 nohup，走到它的測試就紅。
+echo "nohup: can't detach from console" >&2
+exit 1

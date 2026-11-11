@@ -32,7 +32,7 @@ for q in "$qd/$repo"-*.tsv; do
         drivelog="$OPSX_STATE_DIR/drive-$repo-$a.log"
         # shortcut: 檢查到開檔之間有空窗，沙盒內要在毫秒內換成 symlink 才打得中，且只能附加 drive 的輸出；要補就改成 O_NOFOLLOW 的 wrapper
         if [ -L "$drivelog" ]; then out="refuse to write through symlink: $drivelog"; ok=0; else
-        nohup bash "$OPSX_ROOT/bin/opsx" drive "$a" --repo "$b" >> "$drivelog" 2>&1 &
+        ( trap '' HUP; exec bash "$OPSX_ROOT/bin/opsx" drive "$a" --repo "$b" ) < /dev/null >> "$drivelog" 2>&1 &
         pid=$!
         out="$(OPSX_KEY="$repo/$a" OPSX_PID="$pid" OPSX_LIB="$OPSX_ROOT/bin/lib" "$OPSX_PY" -I - "$OPSX_STATE_DIR/dispatch.json" <<'PY' 2>&1
 import os, sys
