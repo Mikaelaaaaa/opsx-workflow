@@ -1615,6 +1615,8 @@ bash "$OPSX_ROOT/bin/opsx" dispatch --feature g --agent claude --mode autopilot 
 assert_not_grep '已經派出去' "$FX/dispatch-out"
 assert_not_grep 'agent_name_taken' "$FX/dispatch-out"
 assert_grep '^agent start g ' "$OPSX_FAKE_LOG"
+# 真的 dispatch 寫了 g 的 settings 檔；留著的話，後面 session g 的 idle 卡每輪都會讀假 herdr 的 process-info 判成遺失
+rm -f "$OPSX_STATE_DIR/settings/demo-g-autopilot.json"
 
 # 同名 feature 第二次關 session：上一輪的成員 m3 條目還在、分支已刪（假 git 對 refs/heads/feat/m3/u 回錯），不對它 branch -D，照樣關完
 cat > "$R/openspec/workplan.yaml" <<'EOF'
@@ -1918,4 +1920,270 @@ grep -q 'demo/m1/s2' "$LOG" && fail "沒有 gate 的子 change 不記：$(cat "$
 round || fail "子 change gate 第二輪 rc: $(cat "$FX/out")"
 assert_eq "$(count '^notification show')" 0 "同一個子 change gate 第二輪不再通知"
 rm -f "$MEMO"
+
+# --- 啟動參數遺失就 relaunch（relaunch-auto）---
+# pi <名> <jq 濾鏡>：從 claude 的真樣本改出一份 process-info，$SET 是這張卡的 settings 檔
+PIS="$OPSX_ROOT/tests/fakes/herdr-samples"
+CL='.result.process_info.foreground_processes[] | select(.argv0 == "claude")'
+pi() { jq --arg s "$SET" "$2" "$PIS/process-info-claude.json" > "$FX/pi-$1.json"; }
+mkdir -p "$OPSX_STATE_DIR/settings"; mkcard ra
+SET="$OPSX_STATE_DIR/settings/demo-ra-autopilot.json"; printf '{}' > "$SET"
+pi full "($CL | .argv[6]) = \$s"
+pi lost "($CL | .argv) = [\"claude\",\"--resume\",\"abc\"]"
+pi two '.result.process_info.foreground_processes += [.result.process_info.foreground_processes[1]]'
+pi empty "($CL | .argv) = []"
+printf '{"result":{"type":"pane_process_info"}}' > "$FX/pi-bad.json"
+RA='{"slug":"ra","section":"進行中","dispatch":{"mode":"autopilot","agent":"claude","pane":"w1:p1","drive_pid":null},"agent_status":"idle"}'
+ra() { cards "[${RA/\"idle\"/\"$1\"}]"; }   # ra <agent_status>
+relaunches() { count '^opsx relaunch'; }
+ecount() { grep -cE -- "$1" "$OPSX_FAKE_LOG" || true; }   # count 是 BRE，(a|b) 要用這個
+printf '{}' > "$DISP"; rm -f "$MEMO"
+
+# 參數遺失的 idle 卡：讀 process-info，執行 opsx relaunch，log 寫原因
+ra idle
+OPSX_TEST_PROCESS_INFO="$FX/pi-lost.json" round || fail "rc: $(cat "$FX/out")"
+assert_grep '^pane process-info --pane w1:p1$' "$OPSX_FAKE_LOG"
+assert_grep "^opsx relaunch ra --repo $R\$" "$OPSX_FAKE_LOG"
+grep 'demo/ra' "$LOG" | grep -q -- "$SET" || fail "log 要寫原因（含 settings 檔）：$(cat "$LOG")"
+assert_eq "$(ecount '^opsx (stop|dispatch)')" 0 "relaunch 不是重派"
+# blocked 也看（清 memo：上一輪的 relaunch 成功紀錄 10 分鐘內會擋下第二次）
+rm -f "$MEMO"; ra blocked
+OPSX_TEST_PROCESS_INFO="$FX/pi-lost.json" round || fail "rc: $(cat "$FX/out")"
+assert_eq "$(relaunches)" 1 "blocked 的卡也 relaunch：$(cat "$OPSX_FAKE_LOG")"
+
+# 帶齊參數（caffeinate 排在 claude 前面）：不動、不寫 ??
+ra idle
+OPSX_TEST_PROCESS_INFO="$FX/pi-full.json" round || fail "rc: $(cat "$FX/out")"
+assert_grep '^pane process-info --pane w1:p1$' "$OPSX_FAKE_LOG"
+assert_eq "$(relaunches)" 0 "帶齊參數不 relaunch：$(cat "$OPSX_FAKE_LOG")"
+assert_not_grep '??' "$LOG"
+
+# working 的卡、互動模式、settings 檔不存在、被 park、用量上限暫停：都不讀 process-info
+ra working
+OPSX_TEST_PROCESS_INFO="$FX/pi-lost.json" round || fail "rc: $(cat "$FX/out")"
+assert_eq "$(count 'process-info')" 0 "working 不讀：$(cat "$OPSX_FAKE_LOG")"
+cards "[${RA/autopilot/interactive}]"
+OPSX_TEST_PROCESS_INFO="$FX/pi-lost.json" round || fail "rc: $(cat "$FX/out")"
+assert_eq "$(count 'process-info')" 0 "互動模式不讀：$(cat "$OPSX_FAKE_LOG")"
+ra idle; mv "$SET" "$SET.off"
+OPSX_TEST_PROCESS_INFO="$FX/pi-lost.json" round || fail "rc: $(cat "$FX/out")"
+assert_eq "$(count 'process-info')" 0 "settings 檔不存在不讀：$(cat "$OPSX_FAKE_LOG")"
+mv "$SET.off" "$SET"
+# parked 的卡被 opsx stop 過，collect 給的 dispatch 是 null（還有 dispatch 的會被 settle_parked 清掉 parked）
+printf '{"_parked":{"demo/ra":{"at":"%s","gate":"g1","merged":[]}}}' "$(ago 1)" > "$MEMO"
+cards '[{"slug":"ra","section":"待處理","dispatch":null,"agent_status":"idle"}]'
+OPSX_TEST_PROCESS_INFO="$FX/pi-lost.json" round || fail "rc: $(cat "$FX/out")"
+assert_eq "$(count 'process-info')" 0 "被 park 不讀：$(cat "$OPSX_FAKE_LOG")"
+rm -f "$MEMO"; printf '  ⎿ Usage limit reached · resets 7pm\n' > "$FX/limit.txt"
+ra idle
+OPSX_TEST_AGENT_READ="$FX/limit.txt" OPSX_TEST_PROCESS_INFO="$FX/pi-lost.json" round || fail "rc: $(cat "$FX/out")"
+assert_grep '用量上限' "$LOG"
+assert_eq "$(count 'process-info')" 0 "用量上限暫停不讀：$(cat "$OPSX_FAKE_LOG")"
+rm -f "$MEMO"
+
+# session 成員用 feature 名找 settings 檔；兩張成員卡共用 pane w1:p9，一輪只 relaunch 一次
+mkcard m3 m4
+SET="$OPSX_STATE_DIR/settings/demo-g-autopilot.json"; printf '{}' > "$SET"
+GRD='{"mode":"autopilot","agent":"claude","pane":"w1:p9","feature":"g","drive_pid":null}'
+cards '[{"slug":"m3","section":"進行中","dispatch":'"$GRD"',"agent_status":"idle"},{"slug":"m4","section":"進行中","dispatch":'"$GRD"',"agent_status":"idle"}]'
+OPSX_TEST_PROCESS_INFO="$FX/pi-lost.json" round || fail "rc: $(cat "$FX/out")"
+assert_eq "$(relaunches)" 1 "同 pane 一輪只 relaunch 一次：$(cat "$OPSX_FAKE_LOG")"
+assert_eq "$(count 'process-info')" 1 "同 pane 一輪只讀一次：$(cat "$OPSX_FAKE_LOG")"
+pi gfull "($CL | .argv[6]) = \$s"
+OPSX_TEST_PROCESS_INFO="$FX/pi-gfull.json" round || fail "rc: $(cat "$FX/out")"
+assert_eq "$(relaunches)" 0 "session 的 settings 檔用 feature 名：$(cat "$OPSX_FAKE_LOG")"
+rm -f "$MEMO"; SET="$OPSX_STATE_DIR/settings/demo-ra-autopilot.json"
+
+# 讀不到、形狀不對、前景沒有或不只一個 claude、args_lost raise：?? 加一次通知，不 stop、不 relaunch
+ra idle
+OPSX_TEST_PROCESS_INFO_ERR=pane_not_found round || fail "rc: $(cat "$FX/out")"
+grep '??' "$LOG" | grep 'demo/ra' | grep -q 'pane_not_found' || fail "?? 要含卡 key 與 herdr 的錯誤：$(cat "$LOG")"
+assert_eq "$(notes)" 1 "讀不到通知一次：$(cat "$OPSX_FAKE_LOG")"
+assert_eq "$(ecount '^opsx (relaunch|stop|dispatch)')" 0 "讀不到不換路"
+OPSX_TEST_PROCESS_INFO_ERR=pane_not_found round || fail "rc: $(cat "$FX/out")"
+assert_eq "$(notes)" 0 "同一件事不重送通知"
+rm -f "$MEMO"
+OPSX_TEST_PROCESS_INFO="$PIS/process-info-shell.json" round || fail "rc: $(cat "$FX/out")"
+grep '??' "$LOG" | grep 'demo/ra' | grep -q '前景沒有 claude' || fail "空 shell 要寫前景沒有 claude：$(cat "$LOG")"
+assert_eq "$(notes)" 1 "前景沒有 claude 通知一次"
+rm -f "$MEMO"
+OPSX_TEST_PROCESS_INFO="$FX/pi-two.json" round || fail "rc: $(cat "$FX/out")"
+grep '??' "$LOG" | grep 'demo/ra' | grep -q '2 個 claude' || fail "兩個 claude 要大聲報：$(cat "$LOG")"
+assert_eq "$(notes)" 1 "兩個 claude 通知一次"
+assert_eq "$(relaunches)" 0 "兩個 claude 不 relaunch"
+rm -f "$MEMO"
+OPSX_TEST_PROCESS_INFO="$FX/pi-bad.json" round || fail "rc: $(cat "$FX/out")"
+grep '??' "$LOG" | grep 'demo/ra' | grep -q 'foreground_processes' || fail "形狀不對要點名欄位：$(cat "$LOG")"
+rm -f "$MEMO"
+OPSX_TEST_PROCESS_INFO="$FX/pi-empty.json" round || fail "rc: $(cat "$FX/out")"
+grep '??' "$LOG" | grep 'demo/ra' | grep -q 'argv 是空的' || fail "args_lost 的 ValueError 要大聲報：$(cat "$LOG")"
+assert_eq "$(ecount '^opsx (relaunch|stop|dispatch)')" 0 "判不了不換路：$(cat "$OPSX_FAKE_LOG")"
+rm -f "$MEMO"
+
+# relaunch 失敗：?? 加一次通知，記進 _relaunched；10 分鐘內不再試，過了才再試
+OPSX_TEST_FAIL_relaunch="relaunch: boom" OPSX_TEST_PROCESS_INFO="$FX/pi-lost.json" round || fail "rc: $(cat "$FX/out")"
+grep '??' "$LOG" | grep 'demo/ra' | grep -q 'boom' || fail "relaunch 失敗要大聲報：$(cat "$LOG")"
+assert_eq "$(notes)" 1 "relaunch 失敗通知一次"
+[ -n "$(memo_get _relaunched demo/ra)" ] || fail "_relaunched 要記 demo/ra：$(cat "$MEMO")"
+assert_eq "$(ecount '^opsx (stop|dispatch)')" 0 "relaunch 失敗不退回重派"
+assert_eq "$(jq -r '._relaunched."demo/ra".ok' "$MEMO")" false "失敗記成 ok:false"
+printf '{"_relaunched":{"demo/ra":{"at":"%s","ok":false}}}' "$(ago 5)" > "$MEMO"
+OPSX_TEST_PROCESS_INFO="$FX/pi-lost.json" round || fail "rc: $(cat "$FX/out")"
+assert_eq "$(relaunches)" 0 "失敗後 10 分鐘內不再 relaunch：$(cat "$OPSX_FAKE_LOG")"
+printf '{"_relaunched":{"demo/ra":{"at":"%s","ok":false}}}' "$(ago 11)" > "$MEMO"
+OPSX_TEST_PROCESS_INFO="$FX/pi-lost.json" round || fail "rc: $(cat "$FX/out")"
+assert_eq "$(relaunches)" 1 "失敗 10 分鐘後再試：$(cat "$OPSX_FAKE_LOG")"
+rm -f "$MEMO"
+
+# relaunch 成功也記；之後又判出遺失：不再 relaunch，?? 加一次通知，等參數判讀正常一次才會再試（review R1.2、R2.2）
+OPSX_TEST_PROCESS_INFO="$FX/pi-lost.json" round || fail "rc: $(cat "$FX/out")"
+assert_eq "$(relaunches)" 1 "第一次照常 relaunch"
+assert_eq "$(jq -r '._relaunched."demo/ra".ok' "$MEMO")" true "成功記成 ok:true：$(cat "$MEMO")"
+OPSX_TEST_PROCESS_INFO="$FX/pi-lost.json" round || fail "rc: $(cat "$FX/out")"
+assert_eq "$(relaunches)" 0 "relaunch 成功後仍遺失，10 分鐘內不再 relaunch：$(cat "$OPSX_FAKE_LOG")"
+grep '??' "$LOG" | grep 'demo/ra' | grep -q 'relaunch 後仍沒帶' || fail "要大聲報 relaunch 沒修好：$(cat "$LOG")"
+assert_eq "$(notes)" 1 "relaunch 沒修好通知一次"
+printf '{"_relaunched":{"demo/ra":{"at":"%s","ok":true}}}' "$(ago 11)" > "$MEMO"
+OPSX_TEST_PROCESS_INFO="$FX/pi-lost.json" round || fail "rc: $(cat "$FX/out")"
+assert_eq "$(relaunches)" 0 "relaunch 沒修好，過了 10 分鐘也不再自動 relaunch：$(cat "$OPSX_FAKE_LOG")"
+# 中間有一輪帶齊：清掉成功紀錄，之後新的遺失照常 relaunch
+OPSX_TEST_PROCESS_INFO="$FX/pi-full.json" round || fail "rc: $(cat "$FX/out")"
+assert_eq "$(jq -r '._relaunched."demo/ra" // "gone"' "$MEMO")" gone "帶齊後清掉成功紀錄：$(cat "$MEMO")"
+OPSX_TEST_PROCESS_INFO="$FX/pi-lost.json" round || fail "rc: $(cat "$FX/out")"
+assert_eq "$(relaunches)" 1 "判讀正常過之後的新遺失照常 relaunch"
+rm -f "$MEMO"
+# 判不了與 relaunch 沒修好是兩件事，各通知一次
+OPSX_TEST_PROCESS_INFO_ERR=pane_not_found round || fail "rc: $(cat "$FX/out")"
+assert_eq "$(notes)" 1 "判不了通知一次"
+python3 -I -c 'import json,sys; m=json.load(open(sys.argv[1])); m["_relaunched"]={"demo/ra":{"at":sys.argv[2],"ok":True}}; json.dump(m,open(sys.argv[1],"w"))' "$MEMO" "$(ago 1)"
+OPSX_TEST_PROCESS_INFO="$FX/pi-lost.json" round || fail "rc: $(cat "$FX/out")"
+assert_eq "$(notes)" 1 "relaunch 沒修好是另一件事，要再通知：$(cat "$OPSX_FAKE_LOG")"
+rm -f "$MEMO"
+
+# 判不了的通知，等參數判讀正常時清掉；同一個 pane 之後再判不了要再通知（review R1.4）
+OPSX_TEST_PROCESS_INFO_ERR=pane_not_found round || fail "rc: $(cat "$FX/out")"
+assert_eq "$(notes)" 1 "判不了通知一次"
+OPSX_TEST_PROCESS_INFO="$FX/pi-full.json" round || fail "rc: $(cat "$FX/out")"
+assert_eq "$(jq -r '[._notified | keys[] | select(startswith("demo/ra/args/"))] | length' "$MEMO")" 0 "帶齊後清掉 args 通知鍵：$(cat "$MEMO")"
+OPSX_TEST_PROCESS_INFO_ERR=pane_not_found round || fail "rc: $(cat "$FX/out")"
+assert_eq "$(notes)" 1 "清掉後再判不了要再通知"
+rm -f "$MEMO"
+
+# 同一輪剛代答喚醒的卡，collect 的 idle 已經過時：不讀 process-info、不 relaunch（review R1.3）
+cards '[{"slug":"ra","section":"待處理","dispatch":{"mode":"autopilot","agent":"claude","pane":"w1:p1","drive_pid":null},"agent_status":"idle","waiting":{"type":"等待授權","gate_id":"g1","action":"x","question":"允許嗎","recommended":null,"options":[]}}]'
+OPSX_TEST_PROCESS_INFO="$FX/pi-lost.json" round || fail "rc: $(cat "$FX/out")"
+assert_grep '^opsx answer ra --gate g1 ' "$OPSX_FAKE_LOG"
+assert_eq "$(count 'process-info')" 0 "代答過的卡這輪不讀：$(cat "$OPSX_FAKE_LOG")"
+assert_eq "$(relaunches)" 0 "代答過的卡這輪不 relaunch"
+rm -f "$MEMO" "$SET"
+
+# fan-out 子卡（via 父卡、herdr 名是父卡、沒有 feature）：settings 檔用根條目 par 的名字，兩張子卡共用 pane 一輪只看一次（review R1.1）
+FAN='"mode":"autopilot","agent":"claude","pane":"w1:pP","drive_pid":null'
+printf '{"demo/par":{%s,"handed_to":["kid","kid2"]},"demo/kid":{%s,"via":"par","herdr_name":"par"},"demo/kid2":{%s,"via":"par","herdr_name":"par"}}' "$FAN" "$FAN" "$FAN" > "$DISP"
+cards '[{"slug":"kid","section":"進行中","dispatch":{'"$FAN"',"via":"par","herdr_name":"par"},"agent_status":"idle"},{"slug":"kid2","section":"進行中","dispatch":{'"$FAN"',"via":"par","herdr_name":"par"},"agent_status":"idle"}]'
+SET="$OPSX_STATE_DIR/settings/demo-par-autopilot.json"; printf '{}' > "$SET"
+OPSX_TEST_PROCESS_INFO="$FX/pi-lost.json" round || fail "rc: $(cat "$FX/out")"
+assert_eq "$(count 'process-info')" 1 "fan-out 共用 pane 一輪只讀一次：$(cat "$OPSX_FAKE_LOG")"
+assert_eq "$(relaunches)" 1 "fan-out 共用 pane 一輪只 relaunch 一次：$(cat "$OPSX_FAKE_LOG")"
+pi parfull "($CL | .argv[6]) = \$s"
+rm -f "$MEMO"
+OPSX_TEST_PROCESS_INFO="$FX/pi-parfull.json" round || fail "rc: $(cat "$FX/out")"
+assert_eq "$(relaunches)" 0 "pane 帶的是父卡的 settings 就是帶齊：$(cat "$OPSX_FAKE_LOG")"
+# 只有子卡自己名字的殘留 settings 檔：不是這個 pane 的，不判定
+rm -f "$SET" "$MEMO"; printf '{}' > "$OPSX_STATE_DIR/settings/demo-kid-autopilot.json"
+OPSX_TEST_PROCESS_INFO="$FX/pi-lost.json" round || fail "rc: $(cat "$FX/out")"
+assert_eq "$(count 'process-info')" 0 "子卡名的殘留 settings 不算：$(cat "$OPSX_FAKE_LOG")"
+rm -f "$MEMO" "$OPSX_STATE_DIR/settings/demo-kid-autopilot.json"
+
+# 根條目 par 是 drive、子卡是 autopilot（fan-out 會轉）：settings 檔名的 mode 取根條目，跟 relaunch.sh 一樣（review R2.3）
+printf '{"demo/par":{%s,"handed_to":["kid"]},"demo/kid":{%s,"via":"par","herdr_name":"par"}}' "${FAN/autopilot/drive}" "$FAN" > "$DISP"
+cards '[{"slug":"kid","section":"進行中","dispatch":{'"$FAN"',"via":"par","herdr_name":"par"},"agent_status":"idle"}]'
+SET="$OPSX_STATE_DIR/settings/demo-par-drive.json"; printf '{}' > "$SET"; pi drivefull "($CL | .argv[6]) = \$s"
+OPSX_TEST_PROCESS_INFO="$FX/pi-drivefull.json" round || fail "rc: $(cat "$FX/out")"
+assert_eq "$(count 'process-info')" 1 "根條目是 drive 時找 drive 的 settings 檔：$(cat "$OPSX_FAKE_LOG")"
+assert_eq "$(relaunches)" 0 "帶的是根條目 drive 的 settings 就是帶齊"
+OPSX_TEST_PROCESS_INFO="$FX/pi-lost.json" round || fail "rc: $(cat "$FX/out")"
+assert_eq "$(relaunches)" 1 "遺失時 relaunch 一次"
+rm -f "$MEMO" "$SET"
+
+# session 成員 m1、m2 共用 pane，只有 m1 的 gate 被代答：整個 pane 這輪都不看（review R2.1）
+SET="$OPSX_STATE_DIR/settings/demo-g-autopilot.json"; printf '{}' > "$SET"; printf '{}' > "$DISP"
+cards '[{"slug":"m1","section":"待處理","dispatch":'"$GRD"',"agent_status":"idle","waiting":{"type":"等待授權","gate_id":"g1","action":"x","question":"允許嗎","recommended":null,"options":[]}},{"slug":"m2","section":"進行中","dispatch":'"$GRD"',"agent_status":"idle"}]'
+OPSX_TEST_PROCESS_INFO="$FX/pi-lost.json" round || fail "rc: $(cat "$FX/out")"
+assert_grep '^opsx answer m1 --gate g1 ' "$OPSX_FAKE_LOG"
+assert_eq "$(count 'process-info')" 0 "同 pane 的另一張成員卡也不讀：$(cat "$OPSX_FAKE_LOG")"
+assert_eq "$(relaunches)" 0 "同 pane 剛代答過，不 relaunch"
+rm -f "$MEMO"
+
+# 收尾 m3 時叫醒 session g 做 m4：同 pane 還在 idle 的成員 m9 這輪也不讀（review R2.1）
+mkcard m3 m4 m9; mkdir -p "$R/.claude/worktrees/g"
+wake_wp pending; wake_disp autopilot
+cards "[$(merged m3 2026-11-07T12:00:00Z "$GM" '"idle"'),{\"slug\":\"m4\"},{\"slug\":\"m9\",\"section\":\"進行中\",\"dispatch\":$GM,\"agent_status\":\"idle\"}]"
+OPSX_TEST_PROCESS_INFO="$FX/pi-lost.json" round || fail "rc: $(cat "$FX/out")"
+assert_grep '^agent prompt g \[m4\] ' "$OPSX_FAKE_LOG"
+assert_eq "$(count 'process-info')" 0 "剛叫醒的 session pane 這輪不讀：$(cat "$OPSX_FAKE_LOG")"
+assert_eq "$(relaunches)" 0 "剛叫醒的 session pane 不 relaunch"
+rm -f "$MEMO" "$SET"; cp "$WP0" "$R/openspec/workplan.yaml"
+SET="$OPSX_STATE_DIR/settings/demo-ra-autopilot.json"; printf '{}' > "$DISP"
+# --- 重派略過 relaunch 中的 pane（relaunch-auto）---
+# rl_disp <demo/ra 的 relaunching_at 分鐘前，空字串是沒有>：ra 的 dispatch.json 條目
+rl_disp() {
+  if [ -n "$1" ]; then printf '{"demo/ra":{"mode":"autopilot","agent":"claude","pane":"w1:p1","drive_pid":null,"relaunching_at":"%s"}}' "$(ago "$1")" > "$DISP"
+  else printf '{"demo/ra":{"mode":"autopilot","agent":"claude","pane":"w1:p1","drive_pid":null}}' > "$DISP"; fi
+}
+rm -f "$MEMO"
+
+# agent 不在 herdr，條目 2 分鐘前開始 relaunch：不 stop、不 dispatch，log 一行 -- 含 relaunching_at，不寫 _redispatched
+rl_disp 2; RL_AT="$(jq -r '."demo/ra".relaunching_at' "$DISP")"
+ra unknown
+round || fail "rc: $(cat "$FX/out")"
+assert_eq "$(ecount '^opsx (stop|dispatch)')" 0 "relaunch 中不重派：$(cat "$OPSX_FAKE_LOG")"
+grep '^.\{19\} -- ' "$LOG" | grep 'demo/ra' | grep -q -- "$RL_AT" || fail "log 要有 -- 行含 relaunching_at：$(cat "$LOG")"
+assert_eq "$(memo_get _redispatched demo/ra)" "" "略過不寫進 _redispatched"
+
+# drive 死掉但 1 分鐘前開始 relaunch：不 stop
+sleep 0 & dead=$!; wait "$dead"
+rl_disp 1
+cards '[{"slug":"ra","section":"進行中","dispatch":{"mode":"autopilot","agent":"claude","pane":"w1:p1","drive_pid":'"$dead"'},"agent_status":"idle"}]'
+round || fail "rc: $(cat "$FX/out")"
+assert_eq "$(count '^opsx stop')" 0 "drive 死掉但在 relaunch 中不重派：$(cat "$OPSX_FAKE_LOG")"
+
+# 標記 11 分鐘前：過期，照常 stop 加 dispatch
+rl_disp 11; ra unknown
+round || fail "rc: $(cat "$FX/out")"
+got="$(grep -E '^opsx (stop|dispatch)' "$OPSX_FAKE_LOG")"
+assert_eq "$got" "opsx stop ra --repo $R
+opsx dispatch ra --agent claude --mode autopilot --kind dev --repo $R" "relaunch 標記過期照常重派"
+rm -f "$MEMO"
+
+# 代答遇到 agent_not_found，1 分鐘前開始 relaunch：不 stop
+rl_disp 1
+cards '[{"slug":"ra","section":"待處理","dispatch":{"mode":"autopilot","agent":"claude","pane":"w1:p1","drive_pid":null},"agent_status":"idle","waiting":{"type":"等待授權","gate_id":"g1","action":"x","question":"允許嗎","recommended":null,"options":[]}}]'
+OPSX_TEST_FAIL_answer=agent_not_found round || fail "rc: $(cat "$FX/out")"
+assert_grep '^opsx answer ra ' "$OPSX_FAKE_LOG"
+assert_eq "$(ecount '^opsx (stop|dispatch)')" 0 "代答送不到但在 relaunch 中不重派：$(cat "$OPSX_FAKE_LOG")"
+rm -f "$MEMO"
+
+# relaunch 中的卡也不讀 process-info（沒過期的 relaunching_at 不判定）
+SET="$OPSX_STATE_DIR/settings/demo-ra-autopilot.json"; printf '{}' > "$SET"
+rl_disp 1; ra idle
+OPSX_TEST_PROCESS_INFO="$FX/pi-lost.json" round || fail "rc: $(cat "$FX/out")"
+assert_eq "$(count 'process-info')" 0 "relaunch 中不讀 process-info：$(cat "$OPSX_FAKE_LOG")"
+rm -f "$SET" "$MEMO"
+
+# 成員卡 m3 自己沒有標記，session 條目 @g 1 分鐘前開始 relaunch：不 stop @g、不 dispatch --feature g
+printf '{"demo/@g":{"mode":"autopilot","agent":"claude","pane":"w1:p9","drive_pid":null,"relaunching_at":"%s"},"demo/m3":{"mode":"autopilot","agent":"claude","pane":"w1:p9","herdr_name":"g","via":"@g","feature":"g","drive_pid":null}}' "$(ago 1)" > "$DISP"
+cards '[{"slug":"m3","section":"進行中","dispatch":{"mode":"autopilot","agent":"claude","pane":"w1:p9","feature":"g","drive_pid":null},"agent_status":"unknown"}]'
+round || fail "rc: $(cat "$FX/out")"
+assert_not_grep '^opsx stop @g' "$OPSX_FAKE_LOG"
+assert_not_grep '^opsx dispatch --feature g ' "$OPSX_FAKE_LOG"
+grep -- ' -- ' "$LOG" | grep -q 'demo/@g' || fail "log 要寫是 session 條目在 relaunch：$(cat "$LOG")"
+rm -f "$MEMO"
+
+# dispatch.json 的 via 繞成一圈（ra → rb → ra）：沿 via 往上看要停得下來，照常重派（review R1.5）
+printf '{"demo/ra":{"mode":"autopilot","agent":"claude","pane":"w1:p1","drive_pid":null,"via":"rb"},"demo/rb":{"mode":"autopilot","agent":"claude","pane":"w1:p1","drive_pid":null,"via":"ra"}}' > "$DISP"
+ra unknown
+round || fail "via 繞圈也要跑完這一輪：$(cat "$FX/out")"
+assert_grep '^opsx stop ra ' "$OPSX_FAKE_LOG"
+rm -f "$MEMO"; printf '{}' > "$DISP"
 echo "coordinate: ok"

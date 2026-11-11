@@ -16,6 +16,7 @@ import subprocess
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from argslost import args_lost  # noqa: E402
 import chain  # noqa: E402
 import gaterule  # noqa: E402
 import jsonfile  # noqa: E402
@@ -26,6 +27,8 @@ MAX_DISPATCH = 6
 # 同時 working 的卡數上限預設值；<state>/max-working 可改
 DEFAULT_MAX_WORKING = 6
 REDISPATCH_MINUTES = 10
+# relaunch 失敗後同一個 pane 不再試的時間；跟重派同一個節流，不會每輪對壞掉的 pane 送 Esc、/exit
+RELAUNCH_MINUTES = REDISPATCH_MINUTES
 # 真實訊息是 `Usage limit reached[ again] · …`，前面只有 Claude Code 畫的 ⎿ │ 與空白；引用、清單、diff 行都不算
 USAGE_LIMIT_LINE = re.compile(r"[\s⎿│]*Usage limit reached(?: again)?\s*·")
 USAGE_LIMIT_STALE_MINUTES = 30
@@ -69,6 +72,8 @@ class Round:
         self.level_errors = {}
         self.orders = {}
         self.redispatched_now = set()
+        # 這輪已經看過、或已經動過（代答、叫醒、重派）的 pane 根條目：check_args 不再看
+        self.args_checked = set()
         self.stages = {}
         self.woken_cards = set()
         self.max_working = None
@@ -107,7 +112,7 @@ class Round:
         if herdr:
             raise CoordinateError("herdr 讀不到，agent 狀態不可得，這輪不動：%s" % "；".join(herdr))
         self.memo = read_json(self.memo_path, "coordinator memo")
-        for k in ("_parked", "_redispatched", "_notified"):
+        for k in ("_parked", "_redispatched", "_notified", "_relaunched"):
             self.memo.setdefault(k, {})   # 沒有這個 key 就是還沒記過任何一張
         self.dispatch_file = read_json(os.path.join(self.state, "dispatch.json"), "dispatch.json")
         self.stages = {card_key(c): c["stage"] for c in data["cards"]}
@@ -330,6 +335,7 @@ class Round:
                 self.log("?? %s 送不到 session %s，條目已寫，下一輪由 session 重派接手：%s" % (child, feature, (err or out)[:200]))
             else:
                 self.woken += 1   # 叫醒的 session 開始做這張，同時上限要算它
+                self.args_checked.add("%s/@%s" % (c["repo"], feature))
 
     def close_session(self, top, repo, feature):
         """同 feature 沒有活成員了：停 session、移 worktree、刪已合併成員的分支、拿掉 session 條目。哪一步失敗就停在那一步，留給人。"""
@@ -420,6 +426,7 @@ class Round:
         rc, out, err = self.act(args)
         if rc == 0:
             self.woken += 1   # 代答會喚醒 idle 的 agent，同時上限要算它
+            self.args_checked.add(self.pane_chain(c)[-1])
         if "agent_not_found" in out + err:
             self.redispatch(c, top, "answer 送不到")
         elif rc != 0:
@@ -592,8 +599,38 @@ class Round:
             return
         self.memo["_redispatched"][key] = self.now.isoformat(timespec="seconds")
         self.redispatched_now.add(key)
+        self.args_checked.add(key)
+
+    def pane_chain(self, c):
+        """從卡自己的條目沿 via 往上到代管 pane 的根條目，加上 session 條目；最後一筆是根。
+        fan-out 子卡 via 父卡、成員卡 via @<feature>，pane 與它的 settings 檔、relaunch 標記都屬於根。"""
+        keys, k = [], card_key(c)
+        while k in self.dispatch_file and k not in keys:
+            keys.append(k)
+            via = self.dispatch_file[k].get("via")
+            if not via:
+                break
+            k = "%s/%s" % (c["repo"], via)
+        scope = session_scope(c)
+        if scope and scope not in keys:
+            keys.append(scope)
+        return keys or [card_key(c)]
+
+    def relaunching(self, c):
+        """opsx relaunch 正在重開這張卡的 pane：回 (條目 key, relaunching_at)，否則 None。
+        過了 RELAUNCH_MINUTES 的是被 kill 的 relaunch 留下的，不算。"""
+        for k in self.pane_chain(c):
+            at = (self.dispatch_file.get(k) or {}).get("relaunching_at")
+            if at and self.now - datetime.datetime.fromisoformat(at) < datetime.timedelta(minutes=RELAUNCH_MINUTES):
+                return k, at
+        return None
 
     def redispatch(self, c, top, why):
+        # relaunch 的空窗裡 claude 已經 /exit，看起來就是 agent 不在、或代答送不到；這時收掉 pane 會打斷 relaunch
+        busy = self.relaunching(c)
+        if busy:
+            self.log("-- %s %s，但 %s 從 %s 起在 relaunch，不重派" % (card_key(c), why, busy[0], busy[1]))
+            return
         if c["dispatch"].get("feature"):
             self.redispatch_feature(c, top, why)
             return
@@ -613,6 +650,66 @@ class Round:
         self.act(["opsx", "dispatch", c["slug"], "--agent", c["dispatch"]["agent"], "--mode", "autopilot", "--kind", c["kind"], "--repo", top])
         self.memo["_redispatched"][key] = self.now.isoformat(timespec="seconds")
         self.redispatched_now.add(key)
+        self.args_checked.add(self.pane_chain(c)[-1])
+
+    def check_args(self, c, top):
+        """pane 裡的 claude 丟了 dispatch 給的 --settings（herdr 還原 pane、手動 resume）就 opsx relaunch。
+        只看 autopilot 或 drive 的 claude、idle 或 blocked、settings 檔在的卡；session 成員共用 pane，一輪只看一次。
+        讀不到、判不了、relaunch 失敗都記 ?? 並通知，不改走 stop 加重派：那會開新 session、丟掉原本的 context。"""
+        d = c["dispatch"]
+        if d.get("mode") not in ("autopilot", "drive") or d.get("agent") != "claude" or c["agent_status"] not in ("idle", "blocked"):
+            return
+        # 這輪代答、叫醒、重派過的 pane 已記在 args_checked：collect 的 agent_status 是動手前讀的，已經過時
+        key = self.pane_chain(c)[-1]
+        if key in self.args_checked:
+            return
+        self.args_checked.add(key)
+        if self.relaunching(c):
+            return
+        # launch_args 用根條目的 herdr 名（單卡是 slug，session 是 feature 名）與 mode 命名 settings 檔；fan-out 會把父卡的 drive 轉成子卡的 autopilot。
+        # 根條目不在 dispatch.json 時（session 條目已被拿掉），用卡自己的條目
+        name = key.split("/", 1)[1].lstrip("@")
+        mode = (self.dispatch_file.get(key) or d)["mode"]
+        settings = os.path.join(self.state, "settings", "%s-%s-%s.json" % (c["repo"], name, mode))
+        if not os.path.isfile(settings):
+            return
+        last = self.memo["_relaunched"].get(key)
+        if last and not last["ok"] and self.now - datetime.datetime.fromisoformat(last["at"]) < datetime.timedelta(minutes=RELAUNCH_MINUTES):
+            self.log("-- %s relaunch %s 失敗過，%d 分鐘內不再試" % (key, last["at"], RELAUNCH_MINUTES))
+            return
+        pane = d["pane"]
+        rc, out, err = self.run(["herdr", "pane", "process-info", "--pane", pane])
+        if rc != 0:
+            self.args_unknown(c, key, pane, "unknown", "herdr pane process-info 失敗（rc %d）：%s" % (rc, (err or out).replace("\n", " ")[:200]))
+            return
+        try:
+            lost = args_lost(claude_argv(json.loads(out)), settings)
+        except (CoordinateError, ValueError) as e:
+            self.args_unknown(c, key, pane, "unknown", str(e))
+            return
+        if not lost:
+            for k in [k for k in self.memo["_notified"] if k.startswith(key + "/args/")]:
+                del self.memo["_notified"][k]
+            if last and last["ok"]:
+                del self.memo["_relaunched"][key]
+            return
+        if last and last["ok"]:
+            # 上一次 relaunch 回 0 卻沒把參數帶回來：再 relaunch 只會一再對 pane 送 Esc、/exit，等人看過、參數判讀正常一次才再試
+            self.args_unknown(c, key, pane, "unfixed", "relaunch 後仍沒帶 --settings %s（上次 relaunch %s）" % (settings, last["at"]))
+            return
+        self.log("!! %s pane %s 的 claude 沒帶 --settings %s，relaunch" % (key, pane, settings))
+        rc, out, err = self.act(["opsx", "relaunch", c["slug"], "--repo", top])
+        at = self.now.isoformat(timespec="seconds")
+        self.memo["_relaunched"][key] = {"at": at, "ok": rc == 0}
+        if rc != 0:
+            self.log("?? %s opsx relaunch 失敗，%d 分鐘內不再試：%s" % (key, RELAUNCH_MINUTES, (err or out).replace("\n", " ")[:200]))
+            self.notify(c, "relaunch", at, "relaunch 失敗", "pane %s 留著沒關，到 pane 看；%d 分鐘後 coordinator 再試" % (pane, RELAUNCH_MINUTES),
+                        scope=key)
+
+    def args_unknown(self, c, key, pane, reason, why):
+        """reason 是 unknown（判不了）或 unfixed（relaunch 沒修好），兩件事各通知一次。"""
+        self.log("?? %s pane %s 的啟動參數判不了，不 relaunch：%s" % (key, pane, why))
+        self.notify(c, "args", "%s/%s" % (pane, reason), "啟動參數判不了", "pane %s：%s" % (pane, one_line(why)), scope=key)
 
     def settle_parked(self, cards):
         """人手動重派了的 parked 卡不再由這裡管。人在板上把那個 gate 答掉了，記成已答，
@@ -993,6 +1090,25 @@ def status_line(lines, key, name):
     return None
 
 
+def claude_argv(info):
+    """herdr pane process-info 的輸出裡，前景行程中唯一一筆 argv0 是 claude 的 argv。
+    不用 name 欄位：claude 那筆的 name 是版本號。認不得就 raise CoordinateError，點名欄位與值。"""
+    try:
+        procs = info["result"]["process_info"]["foreground_processes"]
+    except (KeyError, TypeError) as e:
+        raise CoordinateError("process-info 沒有 result.process_info.foreground_processes：%s" % json.dumps(info, ensure_ascii=False)[:200]) from e
+    if not isinstance(procs, list) or not all(isinstance(p, dict) for p in procs):
+        raise CoordinateError("foreground_processes 要是物件的 list：%s" % json.dumps(procs, ensure_ascii=False)[:200])
+    hits = [p for p in procs if p.get("argv0") == "claude"]
+    if not hits:
+        raise CoordinateError("前景沒有 claude（argv0 是 %s）" % "、".join(str(p.get("argv0")) for p in procs))
+    if len(hits) > 1:
+        raise CoordinateError("前景有 %d 個 claude，認不出是哪一個（pid %s）" % (len(hits), "、".join(str(p.get("pid")) for p in hits)))
+    if "argv" not in hits[0]:
+        raise CoordinateError("claude 那筆前景行程沒有 argv 欄位：%s" % json.dumps(hits[0], ensure_ascii=False)[:200])
+    return hits[0]["argv"]
+
+
 def drive_dead(disp):
     pid = disp.get("drive_pid")
     if not pid:
@@ -1083,6 +1199,8 @@ def one_round(state, dry):
             r.redispatch(c, repo_paths[c["repo"]], "agent 不在 herdr 裡（pane %s）" % c["dispatch"].get("pane"))
         elif drive_dead(c["dispatch"]):
             r.redispatch(c, repo_paths[c["repo"]], "drive pid %s 已經不在" % c["dispatch"]["drive_pid"])
+        else:
+            r.check_args(c, repo_paths[c["repo"]])
     if not paused:
         r.dispatch_features(repo_paths, r.dispatch_new(live, repo_paths), r.working(live))
     r.act(["opsx", "reap"])   # 失敗 act 已經記 log；孤兒的判斷與關閉條件都在 opsx reap
