@@ -11,6 +11,7 @@
 #        source, upstream, stale, priority{level, reason, overridden}（已歸檔或算不出來時 null）,
 #        notes[{at, text}]（inbox.md ## 派工指示，舊的在前）,
 #        merged[{id, when, source, text, kind_of_work, area, evidence?}]（inbox.md 的 ## 併入： 段，依檔案順序；已歸檔的卡是 []）,
+#        logic_map（卡目錄 logic-map.md 的全文，已歸檔的卡也讀；沒有檔時 null）,
 #        session（收進 session 的主 change 才有："<repo>/<feature>"）,
 #        progress_class ∈ mergeable | waiting_on_you | testing | developing | not_dispatched（不在進度範圍內為 null）}
 # sessions[]：{repo, feature, section, main_done, main_total, sub_done, sub_total, current{slug, stage}|null,
@@ -318,6 +319,7 @@ for line in read(os.path.join(work, "cards.tsv")).split("\n"):
         "priority": priority_of(c["repo"], c["slug"], c["archived"], os.path.join(d, "inbox.md")),
         "notes": notes_of(inbox, c["slug"], os.path.join(d, "inbox.md")),
         "merged": [] if c["archived"] else merged_of(inbox, c["slug"], os.path.join(d, "inbox.md")),
+        "logic_map": read(os.path.join(d, "logic-map.md"), None),
     })
 
 order = {"待處理": 0, "進行中": 1, "待指派": 2, "收件匣": 3, "已完成": 4}
