@@ -393,7 +393,7 @@ const pendBadge=x=>x.dispatching==='sending'?'<span class="badge accent">派工�
 /* pending 是送出中清單；seq 同時給項目 id、POST 成功與 GET 送出的時間點（同一毫秒時 Date.now() 分不出先後）；rs 是刷新排程狀態，刷新排程段定義初值 */
 const live={pending:[],seq:0,rs:null};
 
-/* ---------- 等級與 milestone：collect 的 priority 與 milestones，tests/priority-board.test.sh 切片執行 ---------- */
+/* ---------- 等級與 milestone：collect 的 priority 與 progress，tests/priority-board.test.sh 切片執行 ---------- */
 const PRIO_BADGE={P0:'danger',P1:'warn',P2:'line'};
 const PRIO_HINT='等級只影響還沒派出去的卡的排隊順序；已經在跑的卡不會因為等級變動（升或降）被停、被暫停或被搶位子。';
 /* 列上只放徽章；withReason 給展開區，多放理由 */
@@ -402,10 +402,10 @@ function priorityBadge(card,withReason){
   const b=`<span class="badge ${PRIO_BADGE[p.level]}" title="${esc(p.reason)}">${esc(p.level)}</span>`+(p.overridden?'<span class="badge accent" title="使用者改過等級">改</span>':'');
   return withReason?`${b}<span class="prio-why">${esc(p.reason)}</span>`:b;
 }
-/* milestones 可能缺：--collect 固定檔是舊格式 */
-function milestoneLine(milestones,repos){
-  const m=milestones||{};
-  return repos.filter(r=>m[r]).map(r=>`<span class="ms"><span class="faint">${esc(r)}</span> ${esc(m[r].current)} · ${esc(m[r].goal)} · 還差 ${esc(m[r].remaining)} 張</span>`).join('');
+/* progress 可能缺：--collect 固定檔是舊格式；沒設 current milestone 的 repo 不列 */
+function milestoneLine(progress,repos){
+  const m=progress||{};
+  return repos.filter(r=>m[r]&&m[r].milestone).map(r=>`<span class="ms"><span class="faint">${esc(r)}</span> ${esc(m[r].milestone)} · ${esc(m[r].goal)} · 還差 ${esc(m[r].remaining)} 張</span>`).join('');
 }
 
 /* ---------- 範圍 ---------- */
@@ -718,7 +718,7 @@ function render(){
   $('#inbox-n').textContent=sect('收件匣').length+(data.unfiled||[]).length||'';
   for(const t of ['home','inbox','log'])$('#tab-'+t).setAttribute('aria-selected',ui.tab===t);
   $('#stamp').textContent=data.generated_at?'collect '+ago(data.generated_at):'';
-  $('#milestones').innerHTML=milestoneLine(data.milestones,Object.keys(data.repo_paths||{}).filter(r=>inScope({repo:r})));
+  $('#milestones').innerHTML=milestoneLine(data.progress,Object.keys(data.repo_paths||{}).filter(r=>inScope({repo:r})));
   const y=window.scrollY;const typing=typingClass(document.activeElement);
   setView($('#view'),ui.tab==='inbox'?renderInbox():ui.tab==='log'?renderLog():renderHome(),ui.tab==='log');
   window.scrollTo(0,y);

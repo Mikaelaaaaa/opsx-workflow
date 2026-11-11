@@ -18,6 +18,22 @@
         "openspec/changes/retry-backoff/tasks.md exists and at least one task names a test file to write",
         "No file under src/ was modified or created (git status --short -- src is empty)"
       ]
+    },
+    {
+      "id": 1,
+      "name": "spec-gherkin-rules",
+      "prompt": "retry-backoff 這張卡的決定都定好了，幫我把 proposal 寫出來。spec 我之後要拿來逐條對照實作，邊界要寫清楚。這個專案的工作流程 skill 在 .claude/skills/，照適用的那支做。我這段時間不在，要問我的話把問題和選項寫進 repo 根目錄的 questions.md。",
+      "expected_output": "Writes proposal, design, specs and tasks under openspec/changes/retry-backoff/. Each spec.md follows the specs instruction: every Requirement has a 正例 and a 反例 Scenario, the boundary values from grill.md (the 30-second cap on a single wait) sit in an Examples table under a Scenario Outline, no word from the instruction's 禁用模糊詞 line appears, and openspec validate --strict passes.",
+      "files": [
+        "fixtures/retry-backoff"
+      ],
+      "assertions": [
+        "At least one spec.md exists under openspec/changes/retry-backoff/specs/",
+        "Every `### Requirement:` in every spec.md under openspec/changes/retry-backoff/specs/ has at least one `#### Scenario:` whose title is marked 正例 and at least one whose title is marked 反例 (a Scenario Outline marked 正例＋反例 counts as both); one Requirement missing either fails",
+        "The 30-second cap on a single wait from D1 appears as a data row of an `Examples:` table under a Scenario Outline in a spec.md, not only in a sentence or a step; a cap stated only in prose fails",
+        "No spec.md under openspec/changes/retry-backoff/specs/ contains any word from the 禁用模糊詞 line of openspec/schemas/opsx/schema.yaml in the work repo; check every word on that line, a single hit fails",
+        "Running `openspec validate retry-backoff --strict` in the work repo reports the change as valid"
+      ]
     }
   ]
 }

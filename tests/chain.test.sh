@@ -42,6 +42,8 @@ features:
         changes:
           - name: p
             status: done
+  - name: demo-q
+    prs:
       - name: q
         branch: feat/q/mikaela
         status: pending   # 還沒合
@@ -49,6 +51,8 @@ features:
         changes:
           - name: q
             status: pending
+  - name: demo-d
+    prs:
       - name: d
         branch: feat/d/mikaela
         status: pending
@@ -56,6 +60,8 @@ features:
         changes:
           - name: d
             status: pending
+  - name: demo-e
+    prs:
       - name: e
         branch: feat/e/mikaela
         status: pending
@@ -63,6 +69,8 @@ features:
         changes:
           - name: e
             status: pending
+  - name: demo-f
+    prs:
       - name: f
         branch: feat/f/mikaela
         status: pending
@@ -129,6 +137,8 @@ features:
         changes:
           - name: p
             status: done
+  - name: x1
+    prs:
       - name: c1
         branch: feat/c1/mikaela
         status: pending
@@ -136,6 +146,8 @@ features:
         changes:
           - name: c1
             status: pending
+  - name: x2
+    prs:
       - name: c2
         branch: feat/c2/mikaela
         status: pending
@@ -207,6 +219,8 @@ features:
         changes:
           - name: p
             status: done
+  - name: x2
+    prs:
       - name: c
         branch: feat/c/mikaela
         status: pending
@@ -296,6 +310,8 @@ features:
         changes:
           - name: p
             status: done
+  - name: xa
+    prs:
       - name: child-a
         branch: feat/child-a/mikaela
         status: pending
@@ -303,6 +319,8 @@ features:
         changes:
           - name: child-a
             status: pending
+  - name: xb
+    prs:
       - name: child-b
         branch: feat/child-b/mikaela
         status: pending
@@ -333,7 +351,8 @@ echo "$out" | grep -q '^child' && fail "全是 P2 不能印 child：$out"
 
 # --- 主 change（殼名 = PR 名，changes[] 是子 change）：chain 用 PR 名找得到 ---
 R4="$(mk_repo sess)"; mk_change "$R4" m1
-cat > "$R4/openspec/workplan.yaml" <<'EOF'
+# sess_wp <m2 前面插的行>：單卡續接時 m2 自成一個 feature（同 feature 兩個 PR 就由 session 代管），feature session 時 m2 留在 f
+sess_wp() { cat > "$R4/openspec/workplan.yaml" <<EOF
 features:
   - name: f
     depends-on: []
@@ -347,7 +366,7 @@ features:
             status: done
           - name: s2
             status: done
-      - name: m2
+$1      - name: m2
         branch: feat/m2/u
         status: pending
         depends-on: [m1]
@@ -365,6 +384,10 @@ features:
           - name: m3
             status: pending
 EOF
+}
+sess_wp "  - name: f2
+    prs:
+"
 for s in m2 m3; do mkdir -p "$R4/openspec/changes/$s"; printf 'schema: opsx\nkind: dev\n' > "$R4/openspec/changes/$s/.openspec.yaml"; printf -- '- [ ] 1.1 x\n' > "$R4/openspec/changes/$s/tasks.md"; done
 J="$OPSX_STATE_DIR/dispatch.json"
 printf '{"sess/m1":{"mode":"autopilot","pane":"w5:pQ","tab":"w5:tJ","workspace":"opsx","workspace_id":"w5","agent":"claude","kind":"dev","grants":[],"worktree":"%s","branch":"feat/m1/u"}}' "$R4" > "$J"
@@ -373,6 +396,7 @@ assert_eq "$got" "$(printf 'child\tm2\tfeat/m2/u\tdev')" "主 change 合併後�
 
 # --- feature session：m1 合併後同一個 session 接 m2（同 feature），m3 在別的 feature 留給 coordinate ---
 # m1 的 pane 是舊值（session 重派過）：新成員的 pane 要取自 session 條目 sess/@f
+sess_wp ""
 printf '{"sess/@f":{"mode":"autopilot","pane":"w5:pS","tab":"w5:tK","workspace":"opsx","workspace_id":"w5","agent":"claude","model":"m","worktree":"%s","started_at":"t","drive_pid":null},"sess/m1":{"mode":"autopilot","pane":"w5:pQ","tab":"w5:tJ","workspace":"opsx","workspace_id":"w5","agent":"claude","kind":"dev","grants":[],"worktree":"%s","branch":"feat/m1/u","herdr_name":"f","via":"@f","feature":"f"}}' "$R4" "$R4" > "$J"
 cd "$R4"; : > "$OPSX_FAKE_LOG"
 printf 'keep me\n' > "$FX/victim"; ln -s "$FX/victim" "$OPSX_STATE_DIR/herdr-queue/sess-m2.tsv"   # symlink-safe-writes
@@ -386,4 +410,227 @@ assert_eq "$(jq -r '."sess/m1".handed_to // "none"' "$J")" none "session 沒交�
 assert_eq "$(jq -r '."sess/m3" // "none"' "$J")" none "別的 feature 不由 chain 開"
 assert_eq "$(git -C "$R4" branch --show-current)" "feat/m1/mikaela" "chain 不替 session 切 branch"
 cd "$R"
+
+# --- 被拆的原卡（split-continue-register）：原卡不在 workplan，照 split_into 接第一個能開工的主 change ---
+ORIGIN6="$FX/origin6.git"; git init -q --bare "$ORIGIN6"
+R6="$(mk_repo split "$ORIGIN6")"; git -C "$R6" branch -M main; git -C "$R6" push -q origin main
+printf 'openspec/\n' >> "$R6/.git/info/exclude"
+mk_change "$R6" c
+printf -- '---\ntype: bug\nsplit_into: m1, m2\n---\n\n## 一句話\n\nc\n' > "$R6/openspec/changes/c/inbox.md"
+for s in m1 m2; do mkdir -p "$R6/openspec/changes/$s"; printf '## 一句話\n\n%s\n' "$s" > "$R6/openspec/changes/$s/inbox.md"; done
+split_wp() { cat > "$R6/openspec/workplan.yaml" <<EOF
+features:
+  - name: x
+    prs:
+      - name: m1
+        branch: fix/m1/mikaela
+        status: pending
+        depends-on: [$1]
+        changes:
+          - name: m1
+            status: pending
+  - name: y
+    prs:
+      - name: m2
+        branch: fix/m2/mikaela
+        status: pending
+        depends-on: []
+        changes:
+          - name: m2
+            status: pending
+EOF
+}
+split_entry() { printf '{"split/c":{"mode":"autopilot","pane":"w5:pC","tab":"w5:tC","workspace":"opsx","workspace_id":"w5","agent":"claude","model":"claude-opus-5-5","kind":"bug-fix","grants":[],"worktree":"%s","branch":"feat/c/mikaela","herdr_name":"c","started_at":"2026-11-11T10:00:00+08:00","drive_pid":null}}' "$R6" > "$OPSX_STATE_DIR/dispatch.json"; }
+split_reset() { git -C "$R6" switch -q feat/c/mikaela; git -C "$R6" branch -q -D fix/m1/mikaela fix/m2/mikaela 2>/dev/null; : > "$OPSX_FAKE_LOG"; rm -f "$OPSX_STATE_DIR"/herdr-queue/split-*.tsv; split_entry; }
+cd "$R6"
+
+# 拆卡後接第一個主 change：m1、m2 都沒依賴、都只有 inbox.md
+split_wp ""; split_reset
+out="$(opsx chain c 2>&1)"; assert_eq "$?" 0 "拆卡續接: $out"
+assert_eq "$(git -C "$R6" branch --show-current)" "fix/m1/mikaela" "原卡的 worktree 切到 m1 的分支"
+assert_eq "$(jq -r '."split/m1" | [.pane, .tab, .herdr_name, .mode, .branch, .worktree] | join(" ")' "$J")" "w5:pC w5:tC m1 autopilot fix/m1/mikaela $R6" "m1 登記在原卡的 pane"
+assert_eq "$(jq -r '."split/c".handed_to | join(",")' "$J")" "m1" "原卡記 handed_to"
+assert_eq "$(jq -r '."split/m2" // "none"' "$J")" none "只接一張，不 fan out"
+assert_eq "$(cat "$OPSX_STATE_DIR/herdr-queue/split-m1.tsv")" "$(printf 'rename\tc\tm1\nprompt\tm1\t/opsx-workflow:explore m1\ndrive\tm1\t%s' "$R6")" "佇列：改名成 m1、送 explore"
+assert_eq "$(cat "$OPSX_FAKE_LOG")" "" "chain 不直接叫 herdr"
+
+# 原卡已交接過不再接
+cp "$J" "$FX/disp6.before"
+out="$(opsx chain c 2>&1)"; assert_eq "$?" 0 "已交接: $out"
+echo "$out" | grep -q '已經交接給 m1' || fail "要說已經交接給 m1: $out"
+cmp -s "$J" "$FX/disp6.before" || fail "已交接過，dispatch.json 不該動"
+
+# 拆出來的主 change 還沒 propose 也接：m1 依賴 m2，接的是 m2
+split_wp m2; split_reset
+out="$(opsx chain c 2>&1)"; assert_eq "$?" 0 "拆卡續接 m2: $out"
+assert_eq "$(git -C "$R6" branch --show-current)" "fix/m2/mikaela" "m1 依賴沒合，接 m2"
+assert_eq "$(jq -r '."split/c".handed_to | join(",")' "$J")" "m2"
+assert_eq "$(jq -r '."split/m1" // "none"' "$J")" none
+
+# split_into 是空值：照舊當成不在 workplan
+for v in '[]' '""' '~' 'null' ''; do
+  printf -- '---\nsplit_into: %s\n---\n' "$v" > "$R6/openspec/changes/c/inbox.md"; split_reset
+  out="$(opsx chain c 2>&1)"; assert_eq "$?" 0 "split_into 空值 $v: $out"
+  echo "$out" | grep -q 'workplan 裡沒有 c' || fail "split_into「$v」算沒拆: $out"
+done
+
+# split_into 寫成 [m1, m2] 也認得
+printf -- '---\nsplit_into: [m1, "m2"]\n---\n' > "$R6/openspec/changes/c/inbox.md"; split_wp ""; split_reset
+got="$(python3 -I "$OPSX_ROOT/bin/lib/chain.py" children "$R6" split c "$J")"
+assert_eq "$got" "$(printf 'child\tm1\tfix/m1/mikaela\tdev')" "list 寫法"
+
+# split_into 的主 change 都有活的條目：skip
+printf '{"split/c":{"mode":"autopilot","pane":"w5:pC","worktree":"%s"},"split/m1":{"mode":"autopilot"},"split/m2":{"mode":"autopilot"}}' "$R6" > "$J"
+out="$(python3 -I "$OPSX_ROOT/bin/lib/chain.py" children "$R6" split c "$J")"
+echo "$out" | grep -q $'^skip\t' || fail "主 change 都在做要 skip: $out"
+
+# m1、m2 拆進同一個沒有 depends-on 的 feature x（由 session 代管）：剛拆出來的殼只有 inbox.md，coordinate 不接，所以原卡照樣單卡接 m1
+cat > "$R6/openspec/workplan.yaml" <<'EOF'
+features:
+  - name: x
+    prs:
+      - name: m1
+        branch: fix/m1/mikaela
+        status: pending
+        depends-on: []
+        changes:
+          - name: m1
+            status: pending
+      - name: m2
+        branch: fix/m2/mikaela
+        status: pending
+        depends-on: []
+        changes:
+          - name: m2
+            status: pending
+EOF
+printf '{"split/c":{"mode":"autopilot","pane":"w5:pC","worktree":"%s"}}' "$R6" > "$J"
+out="$(python3 -I "$OPSX_ROOT/bin/lib/chain.py" children "$R6" split c "$J")"
+assert_eq "$out" "$(printf 'child\tm1\tfix/m1/mikaela\tdev')" "session 代管的 feature 拆卡照樣接第一張"
+
+# split_into 指到有 depends-on 的 feature 底下的主 change：交給 coordinate 照 feature 依賴開 session，不接
+cat > "$R6/openspec/workplan.yaml" <<'EOF'
+features:
+  - name: f1
+    prs:
+      - name: a
+        branch: fix/a/mikaela
+        status: pending
+        depends-on: []
+        changes:
+          - name: a
+            status: pending
+  - name: f2
+    depends-on: [a]
+    prs:
+      - name: m1
+        branch: fix/m1/mikaela
+        status: pending
+        depends-on: []
+        changes:
+          - name: m1
+            status: pending
+EOF
+printf -- '---\nsplit_into: m1\n---\n' > "$R6/openspec/changes/c/inbox.md"; split_entry
+out="$(python3 -I "$OPSX_ROOT/bin/lib/chain.py" children "$R6" split c "$J")"
+echo "$out" | grep -q $'^skip\t' || fail "feature 有 depends-on 的主 change 要 skip: $out"
+# feature 的依賴都合了：照常接（coordinate 的 feature_plan 不派沒有 tasks.md 的殼，這裡不接就沒人接）
+python3 -I -c 'import sys;p=sys.argv[1];s=open(p).read();open(p,"w").write(s.replace("status: pending","status: merged",1))' "$R6/openspec/workplan.yaml"
+out="$(python3 -I "$OPSX_ROOT/bin/lib/chain.py" children "$R6" split c "$J")"
+assert_eq "$out" "$(printf 'child\tm1\tfix/m1/mikaela\tdev')" "feature 依賴已合要接 m1"
+
+# --unclaimed：split_into 裡沒合、沒有活條目、沒有 tasks.md 的主 change，一行一張，附還沒合的依賴（PR 與 feature 兩層）
+cat > "$R6/openspec/workplan.yaml" <<'EOF'
+features:
+  - name: f1
+    prs:
+      - name: a
+        branch: fix/a/mikaela
+        status: pending
+        depends-on: []
+        changes:
+          - name: a
+            status: pending
+      - name: m1
+        branch: fix/m1/mikaela
+        status: pending
+        depends-on: []
+        changes:
+          - name: m1
+            status: pending
+      - name: m2
+        branch: fix/m2/mikaela
+        status: pending
+        depends-on: [m1]
+        changes:
+          - name: m2
+            status: pending
+  - name: f2
+    depends-on: [a]
+    prs:
+      - name: m3
+        branch: fix/m3/mikaela
+        status: pending
+        depends-on: []
+        changes:
+          - name: m3
+            status: pending
+EOF
+mkdir -p "$R6/openspec/changes/m3"; printf '## 一句話\n\nm3\n' > "$R6/openspec/changes/m3/inbox.md"
+printf -- '---\nsplit_into: m1, m2, m3\n---\n' > "$R6/openspec/changes/c/inbox.md"
+printf '{"split/c":{"mode":"autopilot","pane":"w5:pC","worktree":"%s","handed_to":["m1"]},"split/m1":{"mode":"autopilot","pane":"w5:pC"}}' "$R6" > "$J"
+cp "$J" "$FX/disp-unclaimed.before"
+out="$(opsx chain --unclaimed c 2>&1)"; assert_eq "$?" 0 "--unclaimed: $out"
+assert_eq "$out" "$(printf 'm2\tm1\nm3\ta')" "m1 有活條目不列；m2 等 m1；m3 等 feature 依賴 a"
+cmp -s "$J" "$FX/disp-unclaimed.before" || fail "--unclaimed 只讀，dispatch.json 不該動"
+# 有 tasks.md 的交給 coordinate，不列；人停掉的條目不算活的
+: > "$R6/openspec/changes/m2/tasks.md"
+printf '{"split/m1":{"mode":"stopped","pane":"w5:pC"}}' > "$J"
+out="$(opsx chain --unclaimed c 2>&1)"
+assert_eq "$out" "$(printf 'm1\t\nm3\ta')" "有 tasks.md 的 m2 不列；停掉的 m1 要列"
+rm -f "$R6/openspec/changes/m2/tasks.md"
+cd "$R"
+
+# --- 多 PR 根 feature 由 session 代管：單卡 m1 合併後，chain 不接 r2，照接單 PR 根 feature 的 s1 ---
+R7="$(mk_repo root)"; mk_change "$R7" m1
+cat > "$R7/openspec/workplan.yaml" <<'EOF'
+features:
+  - name: solo
+    prs:
+      - name: m1
+        branch: feat/m1/u
+        status: merged
+        changes:
+          - name: m1
+            status: done
+  - name: r
+    prs:
+      - name: r1
+        branch: feat/r1/u
+        status: pending
+        depends-on: []
+        changes:
+          - name: r1
+            status: pending
+      - name: r2
+        branch: feat/r2/u
+        status: pending
+        depends-on: [m1]
+        changes:
+          - name: r2
+            status: pending
+  - name: s
+    prs:
+      - name: s1
+        branch: feat/s1/u
+        status: pending
+        depends-on: [m1]
+        changes:
+          - name: s1
+            status: pending
+EOF
+for s in r2 s1; do mkdir -p "$R7/openspec/changes/$s"; printf -- '- [ ] 1.1 x\n' > "$R7/openspec/changes/$s/tasks.md"; done
+printf '{"root/m1":{"mode":"autopilot","pane":"w5:pQ","agent":"claude","grants":[]}}' > "$FX/disp7.json"
+got="$(python3 -I -B "$OPSX_ROOT/bin/lib/chain.py" children "$R7" root m1 "$FX/disp7.json")"
+assert_eq "$got" "$(printf 'child\ts1\tfeat/s1/u\tdev')" "多 PR 根 feature 的 r2 留給 coordinate 開 session，單 PR 根 feature 的 s1 照接"
 echo ok

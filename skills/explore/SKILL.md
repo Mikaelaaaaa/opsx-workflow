@@ -201,7 +201,20 @@ A gate's `type` is `approval` (a permission) or `decision` (a choice) and nothin
 1. Each main change: `openspec new change <pr> --schema opsx`, with an inbox.md that says what the whole main change does and lists its sub-changes.
 2. Each sub-change: `openspec/changes/<main>/subs/<sub>/` with `inbox.md` (frontmatter `parent: <main>`, `depends-on: [<sibling>]`) and `.openspec.yaml` (`schema: opsx`, `kind:`, `parent: <main>`). The openspec CLI does not know about these; `opsx check <main>` does.
 3. `openspec/workplan.yaml`: the features, PRs and changes with all three levels of `depends-on`. No dependency means no waiting.
-4. The original card's inbox frontmatter gets `split_into: <main1>, <main2>`. Its stage becomes `split` and the flow stops there; continue with the first main change that has no unmet dependency. Before writing `split_into`, turn each `## 併入：` section of the original card's inbox.md into its own card with `opsx split-out <original> <id>`: nobody works a split card again, so a merged item left on it is lost.
+4. The original card's inbox frontmatter gets `split_into: <main1>, <main2>`. Its stage becomes `split` and the flow stops there. Before writing `split_into`, turn each `## 併入：` section of the original card's inbox.md into its own card with `opsx split-out <original> <id>`: nobody works a split card again, so a merged item left on it is lost. Log the split (below), then run `opsx chain <original>`: it takes the first main change in `split_into` order that has no unmet dependency, switches this worktree to its branch, and records it in dispatch.json under this pane. Do not switch branches yourself. Whether it continued or printed `chain: …` with a reason it did not (skip, 沒有續接), then run `opsx chain --unclaimed <original>`. It prints one line per main change nobody will pick up on their own, `<main><TAB><unmerged dependencies, comma-separated>`: the coordinator only dispatches a card that has tasks.md, and a freshly split main change has only inbox.md. A main change that is merged, already has a live pane, or has tasks.md is not printed. For each printed line, write this gate in that main change's `openspec/changes/<main>/gates.md`; leave out the `waits-on:` line when the dependency column is empty, and when it is not, recommend waiting for those to merge instead of dispatching now. Write no gate when nothing is printed. Then report what chain did and stop. If it continued, the main change's first command arrives as the next prompt.
+
+```
+## dispatch-<main>
+type: decision
+status: open
+waits-on: <the first unmerged dependency>
+問題: 派 <main>？
+已確認: <original> 已拆卡，<main> 只有 inbox.md，沒有 pane 在做
+選項: 從看板派 <main> (Recommended) | 先不派
+建議: 從看板派 <main>，它從 explore 接著做（有依賴沒合時：等 <dependencies> merged 再派）
+風險: 不派的話這張主 change 沒人做
+預設: 不派，等回覆
+```
 
 Every inbox.md you write here, and any card you open while exploring, gets the facts in its frontmatter (`kind_of_work`, plus `impact` and `evidence` for an incident); then run `opsx priority <slug>`, and if it prints P0 without a user override write the `p0-review` gate per `references/priority.md`.
 

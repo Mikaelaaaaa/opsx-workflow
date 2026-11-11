@@ -48,6 +48,8 @@ Do NOT proceed without understanding what the user wants to build.
 
 ### 2. Create the change directory (if it does not exist yet)
 
+A dispatch worktree has no `openspec/` (it is not in git). Run every `openspec` command here as `cd <主 checkout absolute path> && openspec …` and `cd <worktree root>` back in the next command (the `cd` stays for every later Bash call, and tests, `opsx`, git and the router all read the cwd), and read and write the card's files at the 主 checkout's `openspec/changes/<name>/`. Run tests only as `bash tests/run.sh <file-name filter>`, with no `VAR=…` or `export` in front of the command.
+
 ```bash
 openspec new change "<name>" --schema opsx
 ```
@@ -98,8 +100,8 @@ a. **For each artifact that is `ready` (dependencies satisfied)**:
        - 驗收：<specs/<capability>/spec.md 的 Requirement / Scenario 名>
        - 測試：<the test file apply writes first, e.g. packages/db/src/kb-export.test.ts>
      ```
-     A task with no verifiable behavior (moving files, pure config, docs) writes `測試：無 · <reason>`, and you must be able to say why. Apply writes that test before the code and review refuses a task whose test is missing, so a vague 驗收 here becomes a blocked review later.
-   - Specs stay testable: one `#### Scenario:` per behavior, WHEN / THEN; those scenario names are what 驗收 points at.
+     A task with no verifiable behavior (moving files, pure config, docs) writes `測試：無 · <reason>`, and you must be able to say why. Apply writes that test before the code and review refuses a task whose test is missing, so a vague 驗收 here becomes a blocked review later. When the Scenario a task's 驗收 names has an Examples table, its 測試 covers every row of that table (the instruction's 與 tasks 的關係 says the same), because review checks the table row by row and a row with no test is a finding.
+   - **Specs follow the Gherkin rules in the specs instruction.** Write each spec.md from the `instruction` that `openspec instructions specs --change <name> --json` returns, and open `references/gherkin.md` when you want a worked example; this line does not repeat either of them. The rules exist for the people who check the work later. The instruction asks for a positive and a negative Scenario per Requirement so the spec says what must not happen as well as what must, and when one rule has to hold for several sets of values it asks for a Scenario Outline whose Examples table carries the boundary values, so review can match each row to a test instead of trusting that "the edges" were covered. Scenario names are still what 驗收 points at.
    - **Merged items in inbox.md.** Each `## 併入：<time> <source>` section in inbox.md is a problem another agent's card was merged into this one. Before writing tasks.md, every such section either becomes a task (name its `- id:` in the task line) or is split out with `opsx split-out <name> <id>` when it does not belong in this change. One left in place with no task is lost once the card archives.
    - **Cut tasks as tracer bullets, not layers.** Each task is a thin vertical slice through every layer it touches (schema, API, UI, test), demoable or verifiable on its own, in the order a user would hit it. "All the schema, then all the API, then all the UI" is the shape that leaves nothing testable until the end and nothing shippable if the card stops halfway. Mark a task that needs a human decision mid-way (design review, product call) as such so apply writes a gate instead of guessing; prefer tasks that do not.
    - proposal.md and design.md go through `../technical-writing/SKILL.md` then `../unslop/SKILL.md` before you move on.
@@ -119,7 +121,7 @@ d. **In autopilot** (the router line carries `autopilot：`), never use AskUserQ
 
 When `openspec/changes/<name>/subs/` exists, `<name>` is a main change (`../../references/work-split.md`). The openspec CLI sees only the main shell, so:
 
-- The main shell's tasks.md has one item per sub-change, in workplan `depends-on` order. Each item's `驗收：` points at that sub-change's spec and its `測試：` at the test files the sub-change's tasks name. Checking it off means that sub-change is committed on the PR branch.
+- The main shell's tasks.md has one item per sub-change, in workplan `depends-on` order. Write each as ``- [ ] 1.1 `<子 change 名>`：<說明>``, the sub-change name wrapped in backticks (反引號) right after the number: `opsx stack` finds the item by that name and refuses a bare one. Each item's `驗收：` points at that sub-change's spec and its `測試：` at the test files the sub-change's tasks name. Checking it off means that sub-change is committed on the PR branch.
 - Each `subs/<sub>/` gets proposal.md, specs/<capability>/spec.md, design.md and tasks.md from the same templates and rules as above. Its design.md cites the main shell's D-ids rather than inventing new ones; its tasks are cut against the D5 limit (more than 6 means the split was wrong, say so).
 - The main shell's specs/ holds the union of the sub-change specs, because archive merges only the main shell's specs. A sub spec that changes is copied to the main shell.
 - Last, run `opsx check <name>`. Any line it prints is a missing piece: fix it and run again. While it fails, do not continue to `/opsx-workflow:apply`.

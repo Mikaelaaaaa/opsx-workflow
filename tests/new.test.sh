@@ -199,8 +199,16 @@ out="$(cd "$W" && opsx new --kind-of-work planned --repo "$A" -- 發現一個問
 assert_eq "$out" agent-20261110-1630; assert_eq "$(src "$out")" agent:foo
 # 使用者終端機開卡（repo 根目錄）
 out="$(cd "$A" && opsx new --repo "$A" -- 使用者的卡)"; assert_eq "$out" me-20261110-1630; assert_eq "$(src "$out")" me
-# 明確 --source 蓋過偵測
-out="$(cd "$W" && opsx new --source me --repo "$A" -- 明確是我)"; assert_eq "$out" me-20261110-1630-2; assert_eq "$(src "$out")" me
+# worktree 外帶 --source me 照舊（me-20261111-1326）
+out="$(cd "$A" && opsx new --source me --repo "$A" -- 明確是我)"; assert_eq "$out" me-20261110-1630-2; assert_eq "$(src "$out")" me
+# 非 git 目錄（看板在 state 目錄跑）帶 --source me 照舊
+out="$(cd "$T" && opsx new --source me --repo "$A" -- 看板的用法)"; assert_eq "$?" 0 "非 git 目錄: $out"; assert_eq "$(src "$out")" me
+# worktree 裡帶 --source me 被拒：退出 2、訊息點名 --source、什麼都不寫（me-20261111-1326）
+before="$(snap)"; ub="$(find "$OPSX_STATE_DIR/unfiled" | sort)"
+err="$(cd "$W" && opsx new --source me --kind-of-work planned --repo "$A" -- 想蓋掉來源 2>&1 >/dev/null)"; assert_eq "$?" 2 "worktree 裡 --source me: $err"
+case "$err" in *--source*) ;; *) fail "stderr 要點名 --source：$err" ;; esac
+(cd "$W" && opsx new --source me --kind-of-work planned -- 沒給 repo) >/dev/null 2>&1; assert_eq "$?" 2 "worktree 裡沒給 repo 也要拒"
+assert_eq "$(snap)" "$before"; assert_eq "$(find "$OPSX_STATE_DIR/unfiled" | sort)" "$ub" "被拒時不能寫任何檔"
 # 明確 --source agent:<slug> 在 repo 根目錄也成立
 out="$(cd "$A" && opsx new --source agent:bar --kind-of-work planned --repo "$A" -- 明確是 agent)"; assert_eq "$out" agent-20261110-1630-2; assert_eq "$(src "$out")" agent:bar
 # agent 帶附件：來源取 agent，附件照常
@@ -239,8 +247,8 @@ out="$(cd "$W" && opsx new --kind-of-work planned --repo "$A" -- 想做的)"; as
 out="$(cd "$A" && opsx new --repo "$A" -- 使用者的卡二)"; assert_grep '^kind_of_work: planned$' "$A/openspec/changes/$out/inbox.md"
 
 # --- review 退回的邊界 ---
-# 明確 --source me 只關偵測，帶附件仍是 paste
-out="$(cd "$W" && opsx new --source me --repo "$A" --attach "$T/shot.png" -- 明確我加附件)"; assert_eq "$(src "$out")" paste
+# 明確 --source me（worktree 外）帶附件仍是 paste
+out="$(cd "$A" && opsx new --source me --repo "$A" --attach "$T/shot.png" -- 明確我加附件)"; assert_eq "$(src "$out")" paste
 # worktree 子目錄
 mkdir -p "$W/sub"; out="$(cd "$W/sub" && opsx new --kind-of-work planned --repo "$A" -- 子目錄)"; assert_eq "$(src "$out")" agent:foo
 # worktree 資料夾名與卡名不同：branch 對得到卡就用卡名，對不到才用資料夾名

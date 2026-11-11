@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# logic-map fixture 共用：把 opsx 的一個 commit 建成只有 base、head 兩個 commit、沒有 remote 的新 repo。
+# 不用 clone：clone 會留下指向本 repo 的 origin 和原本的 commit 訊息，兩樣都是 skill 禁讀的意圖。
+# setup.sh 用法：source 這支，再 build <commit> <dest> <branch>
+set -euo pipefail
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
+# 字眼跟 tests/scenarios.test.sh 同一份。opsx 自己的快照帶著 evals/、別的 skill 的題目和答案、
+# 描述評測工具的 tests/*.test.sh，候選者看到就知道自己在被評，所以 base 與 head 都刪掉。
+# tests/ 底下的其他檔（lib.sh、fakes/、一般測試）是 repo 的測試，照 scenarios 的規則留著，題目自己的測試才跑得起來。
+# 這個 commit 改到的檔一律留：那些是 PR 的內容，刪了 diff 就不對。
+banned='eval|test|judge|experiment|rubric|score|compare|benchmark|candidate|arena'
+own_tests='(\.test\.|_test\.|(^|/)tests?/)'
+harness_tests='^tests/(run-candidate|scenarios|eval-playbook)\.test\.sh$'
+
+snapshot() { # snapshot <commit> <dest> <message> <keep-file>：工作樹換成 commit 的內容，刪掉洩題路徑後 commit
+  local listed pruned
+  listed="$(mktemp "${TMPDIR:-/tmp}/listed.XXXXXX")"
+  pruned="$(mktemp "${TMPDIR:-/tmp}/pruned.XXXXXX")"
+  git -C "$root" ls-tree -r --name-only "$1" > "$listed"
+  grep -Ei "$banned" "$listed" | grep -Ev "$own_tests" | grep -vxF -f "$4" > "$pruned" || true
+  grep -E "$harness_tests" "$listed" | grep -vxF -f "$4" >> "$pruned" || true
+  # 先刪再 add：add 過的檔即使之後 rm，blob 也會留在 .git/objects，git fsck 挖得回來
+  git -C "$root" archive "$1" | tar -x -C "$2"
+  if [ -s "$pruned" ]; then
+    (cd "$2" && xargs rm -f -- < "$pruned")
+  fi
+  rm -f "$listed" "$pruned"
+  git -C "$2" add -A
+  git -C "$2" -c user.name=dev -c user.email=dev@example.com commit -q -m "$3"
+}
+
+build() { # build <commit> <dest> <branch>
+  local commit="${1:?commit}" dest="${2:?dest}" branch="${3:?branch}" keep
+  keep="$(mktemp "${TMPDIR:-/tmp}/keep.XXXXXX")"
+  git -C "$root" diff --name-only "$commit^" "$commit" > "$keep"
+  mkdir -p "$dest"
+  git -C "$dest" init -q -b "$branch"
+  snapshot "$commit^" "$dest" base "$keep"
+  git -C "$dest" rm -rq .
+  snapshot "$commit" "$dest" head "$keep"
+  rm -f "$keep"
+}
