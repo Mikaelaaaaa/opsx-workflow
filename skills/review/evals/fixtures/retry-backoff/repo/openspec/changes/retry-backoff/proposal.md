@@ -16,7 +16,7 @@ Upstream 重新部署時回 503，nightly sync job 一遇到就整頁失敗。
 
 ## Acceptance
 
-- spec Scenario「503 重試到恢復」「單次等待不超過 30 秒」「4xx 不重試」「重試用完的錯誤訊息」
+- spec Scenario「503 重試到恢復（正例）」「單次等待不超過 30 秒（正例）」「4xx 不重試（反例）」「重試用完的錯誤訊息（正例）」「總等待時間不算最後一次失敗之後（反例）」
 - `npm test` 全綠
 
 ## Testing Decisions
