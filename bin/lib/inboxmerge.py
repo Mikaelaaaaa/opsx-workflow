@@ -9,6 +9,8 @@
         刪掉那一段，其餘位元組不動。找不到退出 2。
     $OPSX_PY -I inboxmerge.py ids <卡目錄>
         一行印一個這張卡現有的併入 id（opsx drop 用來拒絕還有併入項目的卡）。
+    $OPSX_PY -I inboxmerge.py drop <卡目錄> <理由> -- <歸檔指令…>
+        卡鎖內重查併入段（有就退出 1）、寫 outcome: declined 與 ## 捨棄理由、跑歸檔指令，鎖到指令結束才放。指令失敗退出 3。
 兩個 agent 可能同時併進同一張卡：鎖在卡目錄上（inbox.md 會被原子替換換掉 inode，鎖它本身擋不住），鎖內重讀再改。
 一段併入從標題到下一個 `## ` 或檔尾為止。specs/card-auto-merge「同 area 併入」「拆出來」。
 """
@@ -16,6 +18,7 @@ from __future__ import annotations
 
 import os
 import re
+import subprocess
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -156,15 +159,34 @@ def remove(card_dir: str, mid: str) -> None:
         safefile.write_atomic(inbox, "".join(lines[:start] + lines[end:]))
 
 
+def drop(card_dir: str, reason: str, argv: list) -> int:
+    """在卡鎖內重查併入段、寫 outcome 與捨棄理由、跑 argv（歸檔），到 argv 結束才放鎖。argv 失敗回 3。"""
+    inbox = os.path.join(card_dir, "inbox.md")
+    with safefile.CardLock(card_dir):
+        if os.path.exists(inbox):
+            with open(inbox, encoding="utf-8") as f:
+                ids = sorted(merged_ids(f.read()))
+            if ids:
+                raise ValueError("還有併入的項目（%s），先用 opsx split-out 拆出來再捨棄" % " ".join(ids))
+        with safefile.open_append(os.path.join(card_dir, ".openspec.yaml")) as f:
+            f.write("outcome: declined\n")
+        with safefile.open_append(inbox) as f:
+            f.write("\n## 捨棄理由\n\n%s\n" % reason)
+        return 0 if subprocess.run(argv).returncode == 0 else 3
+
+
 def main() -> None:
     args = sys.argv[1:]
     cmd = args[0] if args else ""
     want = {"append": 9, "card": 3, "remove": 3, "ids": 2}
-    if cmd not in want or len(args) != want[cmd]:
-        sys.exit("用法：inboxmerge.py append <卡目錄> <基本 id> <ISO 時間> <來源> <kind_of_work> <evidence> <area> <一句話> | card <卡目錄> <id> | remove <卡目錄> <id> | ids <卡目錄>")
+    ok = len(args) >= 5 and args[3] == "--" if cmd == "drop" else cmd in want and len(args) == want[cmd]
+    if not ok:
+        sys.exit("用法：inboxmerge.py append <卡目錄> <基本 id> <ISO 時間> <來源> <kind_of_work> <evidence> <area> <一句話> | card <卡目錄> <id> | remove <卡目錄> <id> | ids <卡目錄> | drop <卡目錄> <理由> -- <歸檔指令…>")
     try:
         if cmd == "append":
             print(append(*args[1:]))
+        elif cmd == "drop":
+            sys.exit(drop(args[1], args[2], args[4:]))
         elif cmd == "card":
             sys.stdout.write(card(*args[1:]))
         elif cmd == "ids":
