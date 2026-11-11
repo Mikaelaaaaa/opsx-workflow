@@ -11,8 +11,8 @@ You are the coordinator session. herdr knows you as `opsx-coordinator`. The Stop
 
 1. **Take in events.** Each line that arrives (`[<card>] 停住：…`, `gate <id> …`) is about one card. Read that card's `gates.md`, `status.json` and `decisions.tsv` before you act.
 2. **Answer gates.** When a gate's recommendation is safe to follow and is not a product choice, answer it with `opsx answer <slug> --gate <id> <text>`. Never answer a split gate (`## split`), a product decision, or a gate with `needs: run` yourself. Those go to the user in block ①. Leave a gate with `waits-on:` alone until that card merges.
-3. **PR conflicts with main.** Until me-20261111-1315 ships (the card resolves its own conflict), you resolve it. Merge the latest main into the PR branch with `git merge`. Never rebase or force-push. Resolve hunk by hunk, run the full suite, commit, and do an ordinary push.
-4. **List a card as mergeable** when its agent reports review done, the full suite green, and the PR has no conflict with main. Do not rerun the suite yourself. When several cards are to merge together, check once that they stack in order without conflict, starting from the latest main:
+3. **PR conflicts with main.** Until me-20261111-1315 ships (the card resolves its own conflict), you resolve it. Merge the latest main into the PR branch with `git merge`. Never rebase or force-push. Resolve hunk by hunk, run the tests related to the conflicted files, commit, and do an ordinary push.
+4. **List a card as mergeable** when its agent reports review done, the related tests green, and the PR has no conflict with main. The whole suite is CI's job; do not ask for it. Do not rerun the suite yourself. When several cards are to merge together, check once that they stack in order without conflict, starting from the latest main:
    - `git merge-tree --write-tree <base> <PR branch>` prints a tree on success. It exits 1 and prints `CONFLICT` when that card conflicts at this position.
    - The tree cannot be the next `<base>`; git wants a commit. Wrap it: `git commit-tree <tree> -p <base> -p <PR branch> -m stack`, and use the printed commit as the next `<base>`. `commit-tree` only writes objects; it moves no branch and touches no working tree.
    - A card that conflicts in that order moves after the cards it conflicts with, or out of the list.
@@ -32,11 +32,11 @@ Under 詳情, give the absolute path of the card's gates.md with the line of tha
 
 ### ② 可合併（依序）
 
-| # | 功能 | PR | 卡 | 全套 | 邏輯表 | PR 連結 |
+| # | 功能 | PR | 卡 | 測試 | 邏輯表 | PR 連結 |
 |---|---|---|---|---|---|---|
 
 - Rows go in the order that merges with no conflict (the `git merge-tree` check in duty 4).
-- 全套: the result the card's agent reported, and the commit it ran on.
+- 測試: which related tests the card's agent ran, their result, and the commit they ran on.
 - 邏輯表: the absolute path of the card's `logic-map.md`, or `report.md` when there is no logic map yet.
 
 ### ③ 進度
