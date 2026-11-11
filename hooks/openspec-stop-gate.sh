@@ -9,6 +9,7 @@
 source "$(dirname "${BASH_SOURCE[0]}")/_lib.sh"
 source "$OPSX_ROOT/bin/lib/common.sh"
 source "$OPSX_ROOT/bin/lib/mr.sh"
+source "$OPSX_ROOT/bin/lib/check.sh"
 
 MAX_BLOCKS=3
 # 這支 hook 在 hooks.json 只有 10 秒：forge 查詢（mr_forge）限 5 秒，逾時當查不到
@@ -17,9 +18,18 @@ export OPSX_MR_TIMEOUT="${OPSX_MR_TIMEOUT:-5}"
 # 印要擋的原因；空字串表示放行。
 stop_reason() { # <dir> <slug> <stage>
   local d="$1" slug="$2" stage="$3" open missing last_commit report_ts confirmed head_sha
+  # 等人答的 gate、背景的 subagent 與 reviewer 是合法的等待，事實欄位的檢查排在它們後面
+  if [ "$(st_open_gates_blocking "$d")" -eq 0 ] && ! st_subagent_running "$d" && ! st_review_running "$d"; then
+    missing="$(check_facts "$d")"
+    if [ -n "$missing" ]; then
+      printf '%s' "facts|opsx：${slug} 或它開出去的卡缺事實欄位（opsx check ${slug}）：
+$missing
+開卡用 opsx new --kind-of-work …（incident 加 --impact 與 --evidence）；手寫的卡補 inbox.md 的 kind_of_work、impact、evidence。補齊再停；事實查不到就用 Edit 或 Write 寫 gates.md 說缺哪一欄、為什麼，不要編 evidence。"
+      return 0
+    fi
+  fi
   if [ -f "$d/tasks.md" ]; then
     if [ -d "$d/subs" ] && [ "$(st_open_gates "$d")" -eq 0 ]; then
-      source "$OPSX_ROOT/bin/lib/check.sh"
       missing="$(check_subs "$d")"
       if [ -n "$missing" ]; then
         printf '%s' "apply|opsx：${slug} 的子殼不齊（opsx check ${slug}）：
@@ -89,8 +99,13 @@ titled_gate_open() { # <dir> <站>
 
 # 標題帶流水號：答完的舊 gate 跟新 gate 同名的話，opsx answer 只找得到第一個。
 # 取現有 #N 的最大值加一（gates.md 少了較早的 gate 時數量會小於最大號）；沒有數字的舊標題算 1。
-write_auto_gate() { # <dir> <slug> <站>
-  local f="$1/gates.md" n=0 redo="重做 /opsx-workflow:$3 一次，做不完就把卡在哪寫進 gates.md"
+write_auto_gate() { # <dir> <slug> <站>；站是 facts 時問的是事實欄位，不是接站
+  local f="$1/gates.md" n=0 redo="重做 /opsx-workflow:$3 一次，做不完就把卡在哪寫進 gates.md" ask
+  ask="$(printf 'opsx：%s 連續 %s 次停在 /opsx-workflow:%s 之前沒有 invoke，卡在哪？' "$2" "$MAX_BLOCKS" "$3")"
+  if [ "$3" = facts ]; then
+    redo="補 inbox.md 的 kind_of_work、impact、evidence（opsx check $2 看缺什麼）"
+    ask="$(printf 'opsx：%s 或它開出去的卡的事實欄位連續 %s 次沒補齊，卡在哪？' "$2" "$MAX_BLOCKS")"
+  fi
   [ -f "$f" ] && n="$(awk -v t="## 卡在接 /$3" '
     index($0, t) == 1 { rest = substr($0, length(t) + 1)
       if (rest ~ /^[ \t]*$/) k = 1
@@ -101,7 +116,7 @@ write_auto_gate() { # <dir> <slug> <站>
   {
     [ -s "$f" ] && printf '\n'
     printf '## 卡在接 /%s #%s\ntype: decision\nstatus: open\nopened_at: %s\n' "$3" "$((n + 1))" "$(now_iso)"
-    printf '問題: opsx：%s 連續 %s 次停在 /opsx-workflow:%s 之前沒有 invoke，卡在哪？\n' "$2" "$MAX_BLOCKS" "$3"
+    printf '問題: %s\n' "$ask"
     printf '選項: %s (Recommended) | 停在這裡，把卡在哪寫進 gates.md 等人\n' "$redo"
     printf '建議: %s\n' "$redo"
     printf '預設: hook 不再擋這一站\n'
@@ -129,6 +144,8 @@ reason="${out#*|}"
 # 進度指紋：勾了 task 算有在做事；commit 只在 apply 站算（別的站 commit 不會把卡往前推，算的話上限永遠到不了）
 fp="$(tasks_done "$d")"
 [ "$want" = apply ] && fp="$fp-$(git -C "$(hook_cwd)" rev-parse HEAD)"
+# 事實欄位：每補好一項，擋停理由就少一行，算有在做事
+[ "$want" = facts ] && fp="$fp-$(printf '%s' "$reason" | wc -l | tr -d ' ')"
 last_stage=""; n=0; gated="-"; last_fp=""
 [ -f "$state" ] && read -r last_stage n gated last_fp < "$state"
 if [ "$last_stage" != "$want" ] || [ "$last_fp" != "$fp" ]; then n=0; gated="-"; fi

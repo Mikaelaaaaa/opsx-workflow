@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SessionStart / UserPromptSubmit：看 changes/<slug>/ 的狀態，注入一行「階段 · slug · kind · Read 清單」，
-# 卡派出去過的話後面再接這張卡模式的行為規則。
+# 卡派出去過的話後面再接這張卡模式的行為規則。沒對到卡時那一行改列進行中 change 與各自的 `/<stage> <slug>`。
 # 平行流程關鍵詞優先；prompt 說 tdd → apply 3b 只寫測試。要求檔 §8.3 Router 表、§8.5、§3.6 自主程度表。
 source "$(dirname "${BASH_SOURCE[0]}")/_lib.sh"
 # shellcheck source=/dev/null
@@ -36,7 +36,10 @@ for kw in babysit pickup pause forensics correct reflect audit deepen dispatch; 
   esac
 done
 
-stage="$(card_stage)"
+if [ -n "$card" ]; then stage="$(card_stage)"
+else
+  stage="$(active_changes "$top" | awk '{ s = s (NR == 1 ? "：" : " · ") $0 } END { printf "explore · 沒有對到卡 · 進行中 %d 張%s · 新工作先建殼 · skills/explore/SKILL.md", NR, s }')"
+fi
 case " $lower " in *" tdd "*|*"/tdd"*|*"tdd "*)
   ctx "$ev" "opsx：tdd · ${slug:-?} · 只做 apply 骨架 3b（照 tasks.md 的 驗收 / 測試 兩行寫測試含邊界，跑一次確認紅，不單獨 commit，測試留在工作區，之後跟實作同進該 change 的一個 commit），寫完停，不實作 · Read skills/apply/SKILL.md · skills/tdd/SKILL.md$rule"; exit 0 ;;
 esac

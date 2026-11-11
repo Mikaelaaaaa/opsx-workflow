@@ -3,6 +3,7 @@
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 use_fakes date
 export OPSX_TEST_NOW="2026-11-06 14:30"
+cd "$FX"   # 從 dispatch 的 worktree 跑時，cwd 不能讓 opsx new 把 fixture 的卡當成 agent 開的
 A="$(mk_opsx_repo a)"; mkdir -p "$OPSX_STATE_DIR"
 X="$(opsx new --repo "$A" -- 要捨棄的)"; Y="$(opsx new --repo "$A" -- 還在跑的)"
 CH="$A/openspec/changes"

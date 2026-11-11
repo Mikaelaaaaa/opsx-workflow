@@ -29,8 +29,8 @@ When the artifacts are done it continues straight into `/opsx-workflow:apply` (`
 If `openspec/workplan.yaml` exists, silently verify it matches reality before proceeding:
 
 1. For each PR where status ≠ `merged`:
-   - `gh pr list --head <branch> --json state --jq '.[0].state' 2>/dev/null` — is it merged on GitHub?
-   - If merged on GitHub but workplan says `pending`/`in-progress` → auto-update to `merged`
+   - Find the forge from `git remote get-url gitlab` (else `origin`). A GitLab host: `glab mr list --source-branch <branch> --merged -F json`. `github.com`: `gh pr list --head <branch> --state merged --json number`. Any other host: skip this check and say so.
+   - If the list is not empty (merged on the forge) but workplan says `pending`/`in-progress` → auto-update to `merged`
 2. For each change where status ≠ `done`:
    - Check if `openspec/changes/<name>/` still exists
    - If missing (archived or deleted) → auto-update to `done`
@@ -121,6 +121,8 @@ When `openspec/changes/<name>/subs/` exists, `<name>` is a main change (`../../r
 - The main shell's specs/ holds the union of the sub-change specs, because archive merges only the main shell's specs. A sub spec that changes is copied to the main shell.
 - Last, run `opsx check <name>`. Any line it prints is a missing piece: fix it and run again. While it fails, do not continue to `/opsx-workflow:apply`.
 
+Run `opsx check <name>` for every change, not only a main change with `subs/`: it also checks the card's fact fields (`kind_of_work`, and `impact` plus `evidence` for an incident) when an agent opened the card, and for every card this one opened.
+
 ### 5. Update workplan
 
 If `openspec/workplan.yaml` exists, check whether this change is already listed:
@@ -147,7 +149,7 @@ After completing all artifacts, summarize:
 - List of artifacts created with brief descriptions
 - What's ready: "All artifacts created! Ready for implementation."
 
-Then continue to `/opsx-workflow:apply <name>` per `../../references/continue.md`: invoke it now unless a gate is open or, for a main change with `subs/`, `opsx check <name>` still fails. Apply switches to the PR's branch itself.
+Then continue to `/opsx-workflow:apply <name>` per `../../references/continue.md`: invoke it now unless a gate is open or `opsx check <name>` still prints lines. Apply switches to the PR's branch itself.
 
 ## Artifact Creation Guidelines
 
