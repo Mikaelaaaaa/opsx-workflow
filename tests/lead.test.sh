@@ -49,25 +49,43 @@ assert_grep "^tab create --workspace w5 --cwd $(cd "$FX/other" && pwd -P) " "$OP
 assert_rc 2 opsx lead "$FX/nope"
 
 # --- 協調者已在跑：印它在哪，不開第二個 ---
-: > "$OPSX_FAKE_LOG"
+: > "$OPSX_FAKE_LOG"; rm -f "$OPSX_FAKE_LOG.coordinator-up"
 out="$(OPSX_TEST_COORDINATOR_UP=1 opsx lead 2>&1)"; assert_eq "$?" 0 "已在跑要退出 0：$out"
 case "$out" in *w3:p7*) ;; *) fail "要印出它的 pane：$out" ;; esac
 case "$out" in *w3:t2*) ;; *) fail "要印出它的 tab：$out" ;; esac
 assert_not_grep '^tab create' "$OPSX_FAKE_LOG"
 assert_not_grep '^agent start' "$OPSX_FAKE_LOG"
 
-# --- 兩個 lead 同時跑，start 回 agent_name_taken：關掉剛開的 tab、指出另一個在哪 ---
+# --- start 回 agent_name_taken（兩個 lead 同時跑；或 get 查不到但其實在跑）：已在跑不是錯誤 ---
+# 關掉剛開的 tab、印出另一個在哪、退出 0；不能叫人關掉那個 pane（那就是正在跑的協調者）
+name_taken_ok() { # <情境>
+  echo "$out" | grep -q 'pane_id=w9:p1' || fail "$1：要印出同名 agent 在哪：$out"
+  case "$out" in *已在跑*) ;; *) fail "$1：要說協調者已在跑：$out" ;; esac
+  case "$out" in *關掉那個*) fail "$1：不能叫人關掉正在跑的協調者：$out" ;; esac
+  assert_grep '^tab close w1:tB$' "$OPSX_FAKE_LOG"
+  assert_not_grep '^agent prompt' "$OPSX_FAKE_LOG"
+}
 : > "$OPSX_FAKE_LOG"; rm -f "$OPSX_FAKE_LOG.coordinator-up"
-out="$(OPSX_TEST_START_FAIL=agent_name_taken opsx lead 2>&1)"; [ $? -ne 0 ] || fail "name taken 要非 0：$out"
-echo "$out" | grep -q 'pane_id=w9:p1' || fail "要印出同名 agent 在哪：$out"
-assert_grep '^tab close w1:tB$' "$OPSX_FAKE_LOG"
-assert_not_grep '^agent prompt' "$OPSX_FAKE_LOG"
+out="$(OPSX_TEST_START_FAIL=agent_name_taken opsx lead 2>&1)"; assert_eq "$?" 0 "name taken 要退出 0：$out"
+name_taken_ok "兩個 lead 同時跑"
+: > "$OPSX_FAKE_LOG"; rm -f "$OPSX_FAKE_LOG.coordinator-up"
+out="$(OPSX_TEST_AGENT_GET_ERR=socket_unreachable OPSX_TEST_START_FAIL=agent_name_taken opsx lead 2>&1)"; assert_eq "$?" 0 "get 失敗加 name taken 要退出 0：$out"
+name_taken_ok "get 失敗但協調者在跑"
 
-# --- 查協調者失敗時照常開：agent get 的真錯誤碼沒樣本，查不到就交給 agent start 的名字唯一性 ---
+# --- 查協調者失敗時照常開：agent get 的真錯誤碼與輸出都沒樣本，查不到或讀不出位置就交給 agent start 的名字唯一性 ---
 : > "$OPSX_FAKE_LOG"; rm -f "$OPSX_FAKE_LOG.coordinator-up"
 out="$(OPSX_TEST_AGENT_GET_ERR=socket_unreachable opsx lead 2>&1)"; assert_eq "$?" 0 "agent get 失敗仍要開：$out"
 assert_grep '^tab create' "$OPSX_FAKE_LOG"
 assert_grep '^agent start opsx-coordinator ' "$OPSX_FAKE_LOG"
+: > "$OPSX_FAKE_LOG"; rm -f "$OPSX_FAKE_LOG.coordinator-up"
+out="$(OPSX_TEST_AGENT_GET_RAW='{"result":{"agent":{"name":"opsx-coordinator"}}}' opsx lead 2>&1)"; assert_eq "$?" 0 "get 成功但讀不出位置仍要開：$out"
+assert_grep '^tab create' "$OPSX_FAKE_LOG"
+assert_grep '^agent start opsx-coordinator ' "$OPSX_FAKE_LOG"
+
+# --- tab create 沒回 tab id：報錯（不然失敗時關不掉剛開的 tab） ---
+: > "$OPSX_FAKE_LOG"; rm -f "$OPSX_FAKE_LOG.coordinator-up"
+out="$(OPSX_TEST_TAB_NO_TAB=1 opsx lead 2>&1)"; [ $? -ne 0 ] || fail "沒有 tab id 要非 0：$out"
+assert_not_grep '^agent start' "$OPSX_FAKE_LOG"
 
 # --- 第一句送不進去：非 0，叫人在那個 pane 自己打 /opsx-workflow:lead ---
 : > "$OPSX_FAKE_LOG"; rm -f "$OPSX_FAKE_LOG.coordinator-up"

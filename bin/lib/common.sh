@@ -13,6 +13,7 @@ coordinator_say() { # <一行>
 
 # 在剛開的 tab 的 pane 起 agent。shell 還沒到 prompt 時 herdr 回 agent_pane_busy，同一個 pane 最多試六次；
 # 起不來就收掉剛開的 tab（不留空 tab 給人收）並以 <who> 開頭的訊息結束。dispatch 與 lead 共用。
+# 名字已被占用（agent_name_taken）時收掉 tab、把另一個的位置放進 HERDR_TAKEN_AT、回 3：該怎麼說由呼叫者決定。
 herdr_start_agent() { # <who> <agent 名> <kind> <pane> <tab> [agent 參數…]
   local who="$1" name="$2" kind="$3" pane="$4" tab="$5" out try=1 screen
   shift 5
@@ -29,7 +30,9 @@ herdr_start_agent() { # <who> <agent 名> <kind> <pane> <tab> [agent 參數…]
 pane 畫面：
 ${screen}" ;;
       *agent_name_taken*)
-        out="herdr 已經有叫 ${name} 的 agent：$(printf '%s' "$out" | grep -oE '(workspace_id|tab_id|pane_id|status)=[^ "]*' | tr '\n' ' ')。關掉那個 pane 再試" ;;
+        HERDR_TAKEN_AT="$(printf '%s' "$out" | grep -oE '(workspace_id|tab_id|pane_id|status)=[^ "]*' | tr '\n' ' ')"
+        herdr tab close "$tab" >/dev/null 2>&1 || true
+        return 3 ;;
       *agent_not_ready*)
         # Claude Code 在沒信任過的目錄先問 trust，herdr 判成 blocked；名字已記下，按 Yes 等到 idle 就等於 start 成功
         if herdr pane wait-output --match "trust this folder" --timeout 3000 "$pane" >/dev/null 2>&1; then

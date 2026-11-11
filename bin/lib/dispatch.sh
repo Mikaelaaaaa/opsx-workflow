@@ -200,7 +200,9 @@ PY
     # 卡的檔在主 repo 的 openspec/，不在 worktree；沒有這兩個，規則叫它寫的 gates.md / status.json 寫不進
     aargs+=(--add-dir "$top/openspec" --add-dir "$OPSX_STATE_DIR")
   fi
-  herdr_start_agent dispatch "$slug" "$agent" "$pane" "$tab" "${aargs[@]}"
+  # 名字被占用：dispatch.json 沒記著（手動開的、或 stop 時 pane 沒關成）但 herdr 還有同名 agent，指出它在哪
+  herdr_start_agent dispatch "$slug" "$agent" "$pane" "$tab" "${aargs[@]}" \
+    || die "dispatch: herdr agent start 失敗：herdr 已經有叫 ${slug} 的 agent，dispatch.json 沒記：${HERDR_TAKEN_AT}。關掉那個 pane 再派"
 
   # dispatch.json
   # 一般卡一筆。feature session 另有自己的條目 <repo>/@<feature>（pane 層的欄位），每個能開工的主 change 再各一筆：
