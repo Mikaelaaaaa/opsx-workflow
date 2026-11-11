@@ -16,12 +16,14 @@ mode() { printf '{"Agentory-AI/eval-core":{"mode":"%s"}}' "$1" > "$OPSX_STATE_DI
 
 # 假 ps 與假 herdr（回報協調者的那行記在 $CL）
 mkdir -p "$FX/cbin"
-printf '#!/usr/bin/env bash\nprintf "%%s\\n" "${OPSX_FAKE_PS:-}"\nexit "${OPSX_FAKE_PS_RC:-0}"\n' > "$FX/cbin/ps"; chmod +x "$FX/cbin/ps"
+# 只接受 `-o args= -p <hook 的 parent pid>`：hook 問的不是自己的 parent 就非 0 結束
+export OPSX_FAKE_PS_PID="$FX/hook-parent"
+printf '#!/usr/bin/env bash\n[ "$*" = "-o args= -p $(cat "$OPSX_FAKE_PS_PID")" ] || { echo "fake ps: 不是問 hook 的 parent：$*" >&2; exit 1; }\nprintf "%%s\\n" "${OPSX_FAKE_PS:-}"\nexit "${OPSX_FAKE_PS_RC:-0}"\n' > "$FX/cbin/ps"; chmod +x "$FX/cbin/ps"
 printf '#!/usr/bin/env bash\nexec bash "%s/tests/fakes/herdr" "$@"\n' "$OPSX_ROOT" > "$FX/cbin/herdr"; chmod +x "$FX/cbin/herdr"
 CL="$FX/coord.log"
-stop() { # 狀態（擋的次數）跨呼叫保留；要重來自己 rm -rf stop-chain
+stop() { # 狀態（擋的次數）跨呼叫保留；要重來自己 rm -rf stop-chain。hook 的 PPID 就是這個 bash -c 的 $$
   PATH="$FX/cbin:$PATH" OPSX_FAKE_LOG="$CL" OPSX_TEST_COORDINATOR_UP=1 bash -c \
-    'printf "{\"cwd\":\"%s\",\"stop_hook_active\":false}" "$0" | bash "$1/openspec-stop-gate.sh" 2>/dev/null; true' "$R" "$H"
+    'echo $$ > "$OPSX_FAKE_PS_PID"; printf "{\"cwd\":\"%s\",\"stop_hook_active\":false}" "$0" | bash "$1/openspec-stop-gate.sh" 2>/dev/null; true' "$R" "$H"
 }
 fresh() { rm -rf "$OPSX_STATE_DIR/stop-chain" "$OPSX_STATE_DIR/stop-said" "$C/gates.md"; : > "$CL"; }
 blocked() { [ "$(printf '%s' "$1" | jq -r '.decision // "allow"')" = block ]; }

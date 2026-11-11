@@ -2,9 +2,10 @@
 
 函式（coordinate 直接 import）：
     args_lost(argv, settings_path) -> bool
-        True：沒有 `--settings <settings_path>` 也沒有 `--settings=<settings_path>`（完整路徑相等）。
+        True：沒有 `--settings <settings_path>` 也沒有 `--settings=<settings_path>`（完整路徑相等；
+        `--settings` 出現多次時任何一個相等就算有帶）。
         認不得的輸入 raise ValueError，訊息點名欄位與值：argv 不是 list 或含非 str、argv 空、
-        basename(argv[0]) 不是 claude、`--settings` 後面沒有值、settings_path 不是絕對路徑。
+        basename(argv[0]) 不是 claude、`--settings` 後面沒有值、settings_path 不是絕對路徑或含空白。
 
 CLI（hook 用）：stdin 一行 ps 輸出，參數是 settings_path。
     退出碼 0 有帶、1 遺失、2 認不得（原因寫 stderr）。
@@ -27,14 +28,17 @@ def args_lost(argv: list[str], settings_path: str) -> bool:
         raise ValueError(f"argv[0] 不是 claude：{argv[0]!r}")
     if not os.path.isabs(settings_path):
         raise ValueError(f"settings_path 要是絕對路徑：{settings_path!r}")
+    if any(c.isspace() for c in settings_path):
+        raise ValueError(f"settings_path 含空白，ps 輸出切不回 argv：{settings_path!r}")
+    given = []
     for i, a in enumerate(argv[1:], start=1):
         if a == FLAG:
             if i + 1 >= len(argv):
                 raise ValueError(f"{FLAG} 後面沒有值：{argv!r}")
-            return argv[i + 1] != settings_path
-        if a.startswith(FLAG + "="):
-            return a[len(FLAG) + 1:] != settings_path
-    return True
+            given.append(argv[i + 1])
+        elif a.startswith(FLAG + "="):
+            given.append(a[len(FLAG) + 1:])
+    return settings_path not in given
 
 
 def main(line: str, settings_path: str) -> int:

@@ -56,4 +56,20 @@ assert_grep "argv\[0\]" "$FX/cli.err"
 cli ""; assert_eq "$?" 2 "CLI 空輸入"
 cli "claude --settings 'unclosed"; assert_eq "$?" 2 "CLI 引號沒收"
 assert_grep "unclosed" "$FX/cli.err"
+# --settings 出現多次：任何一個等於該卡的檔就算有帶（寧可不放行，不要把健康的 agent 判成遺失）
+assert_eq "$(lost claude --settings /state/settings/other.json --model m --settings "$S")" False "第二個 --settings 才是該卡的"
+assert_eq "$(lost claude --settings "$S" --settings /state/settings/other.json)" False "第一個是該卡的"
+assert_eq "$(lost claude --settings /a.json --settings /b.json)" True "兩個都不是"
+
+# settings_path 含空白：ps 輸出切不回 argv，會把健康的 agent 判成遺失，所以 raise
+sp="$(OPSX_LIB="$OPSX_ROOT/bin/lib" python3 -I -c '
+import os, sys
+sys.path.insert(0, os.environ["OPSX_LIB"]); import argslost
+try:
+    argslost.args_lost(["claude", "--settings", "/a", "b/s.json"], "/a b/s.json")
+except ValueError as e:
+    print("ERR:" + str(e))')"
+case "$sp" in ERR:*settings_path*"/a b/s.json"*) ;; *) fail "含空白的 settings_path 要 raise 並點名欄位與值：$sp" ;; esac
+printf '%s\n' "claude --settings /a b/s.json" | OPSX_LIB="$OPSX_ROOT/bin/lib" python3 -I "$OPSX_ROOT/bin/lib/argslost.py" "/a b/s.json" 2>"$FX/cli.err"
+assert_eq "$?" 2 "CLI：含空白的 settings_path 認不得"
 echo ok

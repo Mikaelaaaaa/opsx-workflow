@@ -13,11 +13,13 @@ S="$OPSX_STATE_DIR/settings/Agentory-AI-eval-core-autopilot.json"
 
 # 假 ps：輸出 $OPSX_FAKE_PS，退出碼 $OPSX_FAKE_PS_RC（預設 0）
 mkdir -p "$FX/psbin"
-printf '#!/usr/bin/env bash\nprintf "%%s\\n" "${OPSX_FAKE_PS:-}"\nexit "${OPSX_FAKE_PS_RC:-0}"\n' > "$FX/psbin/ps"; chmod +x "$FX/psbin/ps"
+# 只接受 `-o args= -p <hook 的 parent pid>`：hook 問的不是自己的 parent 就非 0 結束
+export OPSX_FAKE_PS_PID="$FX/hook-parent"
+printf '#!/usr/bin/env bash\n[ "$*" = "-o args= -p $(cat "$OPSX_FAKE_PS_PID")" ] || { echo "fake ps: 不是問 hook 的 parent：$*" >&2; exit 1; }\nprintf "%%s\\n" "${OPSX_FAKE_PS:-}"\nexit "${OPSX_FAKE_PS_RC:-0}"\n' > "$FX/psbin/ps"; chmod +x "$FX/psbin/ps"
 
-start() { # <事件> → router 注入的文字
+start() { # <事件> → router 注入的文字。hook 是 bash -c 這個行程的子行程，所以它的 PPID 就是那個 bash -c 的 $$
   local json; json="$(python3 -I -c 'import json,sys;print(json.dumps(dict(cwd=sys.argv[1],prompt="",hook_event_name=sys.argv[2])))' "$R" "$1")"
-  printf '%s' "$json" | PATH="$FX/psbin:$PATH" bash "$H/openspec-router.sh" 2>/dev/null | jq -r '.hookSpecificOutput.additionalContext // ""'
+  PATH="$FX/psbin:$PATH" bash -c 'echo $$ > "$OPSX_FAKE_PS_PID"; printf "%s" "$0" | bash "$1"' "$json" "$H/openspec-router.sh" 2>/dev/null | jq -r '.hookSpecificOutput.additionalContext // ""'
 }
 mode() { mkdir -p "$OPSX_STATE_DIR"; printf '{"Agentory-AI/eval-core":{"mode":"%s"}}' "$1" > "$OPSX_STATE_DIR/dispatch.json"; }
 
