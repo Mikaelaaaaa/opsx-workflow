@@ -11,7 +11,7 @@
 | `kind_of_work` | `incident` 或 `planned` | 每張卡。壞掉、出事、擋路的是 incident；要新做或改進的是 planned。沒寫當 planned |
 | `impact` | `security`、`data`、`prod_or_main`、`workaround_exists`、`blocks_all_agents`，逗號分隔，列出來的就是成立的 | 只有 incident 填；沒有就留空 |
 | `evidence` | 一行：重現指令、log 位置、測試輸出；長的貼在 `## 證據`，這裡寫指向 | `impact` 有值就一定要填 |
-| `area` | repo 的 `openspec/areas.txt` 裡的一行（`opsx new --area`） | repo 有 `areas.txt` 時 agent 開的卡一定要填；沒有清單的 repo 不填。不參與算等級 |
+| `type` | `bug`、`功能`、`想法`、`技術債`、`待定` 之一（`opsx new --type`） | 每張卡。沒帶時 agent 開的卡是 `bug`，其他來源是 `待定`。不參與算等級；只有 `bug` 與 `技術債` 會被自動併入別張卡 |
 
 各 impact 的意思：
 

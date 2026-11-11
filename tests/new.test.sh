@@ -12,7 +12,7 @@ out="$(opsx new --repo "$A" -- 聊天視窗被鍵盤蓋住)"; assert_eq "$?" 0 "
 assert_eq "$out" me-20261106-1430 "stdout 只印 slug"
 C="$A/openspec/changes/me-20261106-1430"
 assert_file "$C/inbox.md"; assert_grep '^schema: opsx$' "$C/.openspec.yaml"
-assert_grep '^type: 功能$' "$C/inbox.md"; assert_grep '^source: me$' "$C/inbox.md"; assert_grep '^found: 2026-11-06$' "$C/inbox.md"
+assert_grep '^type: 待定$' "$C/inbox.md"; assert_grep '^source: me$' "$C/inbox.md"; assert_grep '^found: 2026-11-06$' "$C/inbox.md"
 assert_eq "$(awk '/^## 一句話/{f=1;next} f&&NF{print;exit}' "$C/inbox.md")" 聊天視窗被鍵盤蓋住
 
 # --- 同一分鐘兩次 ---
@@ -24,7 +24,7 @@ assert_grep '^聊天視窗被鍵盤蓋住$' "$C/inbox.md"
 before="$(snap)"
 out="$(opsx new -- 試試看)"; assert_eq "$?" 0; assert_eq "$out" me-20261106-1430
 U="$OPSX_STATE_DIR/unfiled/me-20261106-1430.md"
-assert_file "$U"; assert_grep '^source: me$' "$U"; assert_grep '^試試看$' "$U"
+assert_file "$U"; assert_grep '^source: me$' "$U"; assert_grep '^試試看$' "$U"; assert_grep '^type: 待定$' "$U"
 assert_eq "$(snap)" "$before" "不帶 --repo 不能動任何 repo"
 assert_eq "$(opsx new -- 再一個)" me-20261106-1430-2
 
@@ -197,6 +197,7 @@ src() { awk -F': ' '$1=="source"{print $2}' "$A/openspec/changes/$1/inbox.md"; }
 # agent worktree 裡開卡
 out="$(cd "$W" && opsx new --kind-of-work planned --repo "$A" -- 發現一個問題)"; assert_eq "$?" 0 "agent new: $out"
 assert_eq "$out" agent-20261110-1630; assert_eq "$(src "$out")" agent:foo
+assert_grep '^type: bug$' "$A/openspec/changes/$out/inbox.md"
 # 使用者終端機開卡（repo 根目錄）
 out="$(cd "$A" && opsx new --repo "$A" -- 使用者的卡)"; assert_eq "$out" me-20261110-1630; assert_eq "$(src "$out")" me
 # worktree 外帶 --source me 照舊（me-20261111-1326）
@@ -277,62 +278,29 @@ assert_eq "$(cat "$FX/q1.out" "$FX/q2.out" | sort -u | wc -l | tr -d ' ')" 2 "�
 assert_eq "$(grep -l '^並行甲$' "$OPSX_STATE_DIR"/unfiled/agent-20261110-1701*.md | wc -l | tr -d ' ')" 1
 assert_eq "$(grep -l '^並行乙$' "$OPSX_STATE_DIR"/unfiled/agent-20261110-1701*.md | wc -l | tr -d ' ')" 1
 
-# --- area 欄位（new-auto-merge card-area-field，specs/card-auto-merge「area 清單」「--area 寫進 frontmatter」）---
-# E 有 openspec/areas.txt；A 沒有。在 $W 裡跑就是 agent 開的卡（source 看 cwd，不看 --repo）。
+# --- type 欄位（board-actions「新增到收件匣」：帶 type、agent 卡預設 bug、type 不在值域）---
 export OPSX_TEST_NOW="2026-11-11 10:00"
-E="$(mk_opsx_repo e)"
-snapE() { find "$E/openspec/changes" "$A/openspec/changes" "$OPSX_STATE_DIR/unfiled" | sort; }
-area_err() { # area_err <cwd> <opsx new 參數…>：要退出 2，印 stderr
-  local d="$1" e; shift
-  e="$(cd "$d" && opsx new "$@" 2>&1 >/dev/null)"; assert_eq "$?" 2 "要退出 2：$* — $e"; printf '%s' "$e"
-}
-area_of() { awk -F': ' '$1=="area"{print $2}' "$E/openspec/changes/$1/inbox.md"; }
-
-# 註解、空行、行尾空白不算；清單內的值寫進 frontmatter
-printf '# 子系統\n\nhooks  \nskills/apply\n' > "$E/openspec/areas.txt"
-out="$(cd "$W" && opsx new --kind-of-work planned --area hooks --repo "$E" -- 有 area)"; assert_eq "$?" 0 "area hooks: $out"
-assert_eq "$(area_of "$out")" hooks
-assert_eq "$(grep -c '^area:' "$E/openspec/changes/$out/inbox.md")" 1 "area 只寫一行"
-out="$(cd "$W" && opsx new --kind-of-work planned --area skills/apply --repo "$E" -- 帶斜線)"; assert_eq "$(area_of "$out")" skills/apply
-
-before="$(snapE)"
-# 清單外的值：stderr 含該值，並列出清單讓 agent 知道能選什麼
-e="$(area_err "$W" --kind-of-work planned --area board --repo "$E" -- 清單外)"
-case "$e" in *board*hooks*) ;; *) fail "清單外的 area：stderr 要含 board 與清單內容：$e" ;; esac
-# 使用者卡帶清單外的值一樣拒絕
-case "$(area_err "$A" --area board --repo "$E" -- 使用者清單外)" in *board*) ;; *) fail "使用者卡清單外也要拒絕" ;; esac
-# 前綴、大小寫不同都不算在清單裡
-area_err "$W" --kind-of-work planned --area hook --repo "$E" -- 前綴 > /dev/null
-area_err "$W" --kind-of-work planned --area Hooks --repo "$E" -- 大寫 > /dev/null
-# --area 後面沒給值
-area_err "$W" --kind-of-work planned --repo "$E" --area > /dev/null
-# agent 卡沒帶 --area
-case "$(area_err "$W" --kind-of-work planned --repo "$E" -- 沒帶 area)" in *--area*) ;; *) fail "agent 卡沒帶 area 的訊息要含 --area" ;; esac
-# unfiled 帶 --area：訊息含 --repo（有沒有 areas.txt 都一樣）
-case "$(area_err "$A" --area hooks -- 待分類)" in *--repo*) ;; *) fail "unfiled 帶 area 的訊息要含 --repo" ;; esac
-case "$(area_err "$W" --kind-of-work planned --area hooks -- agent 待分類)" in *--repo*) ;; *) fail "agent unfiled 帶 area 的訊息要含 --repo" ;; esac
-# 沒有清單的 repo 帶 --area：訊息含 areas.txt
-case "$(area_err "$W" --kind-of-work planned --area hooks --repo "$A" -- 沒清單)" in *areas.txt*) ;; *) fail "沒清單帶 area 的訊息要含 areas.txt" ;; esac
-assert_eq "$(snapE)" "$before" "area 不合格不能寫任何檔"
-
-# 清單有不合格的行：退出 2，stderr 含 areas.txt 與行號；帶 --area 或 agent 卡都擋
-printf '# 子系統\nhooks\nHooks!\n' > "$E/openspec/areas.txt"
-case "$(area_err "$W" --kind-of-work planned --area hooks --repo "$E" -- 壞清單)" in *areas.txt*3*) ;; *) fail "壞清單的訊息要含 areas.txt 與行號 3" ;; esac
-case "$(area_err "$W" --kind-of-work planned --repo "$E" -- 壞清單沒帶)" in *areas.txt*3*) ;; *) fail "agent 卡遇到壞清單要報行號" ;; esac
-printf 'hooks\n-lead\n' > "$E/openspec/areas.txt"
-case "$(area_err "$W" --kind-of-work planned --area hooks --repo "$E" -- 開頭是減號)" in *areas.txt*2*) ;; *) fail "- 開頭的行要拒絕並報行號 2" ;; esac
-printf 'hooks\nbad area\n' > "$E/openspec/areas.txt"
-case "$(area_err "$W" --kind-of-work planned --area hooks --repo "$E" -- 中間空白)" in *areas.txt*2*) ;; *) fail "中間有空白的行要拒絕" ;; esac
-assert_eq "$(snapE)" "$before" "壞清單不能寫任何檔"
-
-# 使用者卡不必帶 area，沒有 area: 行
-printf 'hooks\n' > "$E/openspec/areas.txt"
-out="$(cd "$E" && opsx new --repo "$E" -- 使用者不帶)"; assert_eq "$?" 0 "使用者卡: $out"
-assert_not_grep '^area:' "$E/openspec/changes/$out/inbox.md"
-# 使用者卡帶清單內的值也收
-out="$(cd "$E" && opsx new --area hooks --repo "$E" -- 使用者帶)"; assert_eq "$(area_of "$out")" hooks
-
-# 沒有清單的 repo：agent 卡不帶 area 跟原本一樣
-out="$(cd "$W" && opsx new --kind-of-work planned --repo "$A" -- 沒清單照舊)"; assert_eq "$?" 0 "沒清單: $out"
-assert_not_grep '^area:' "$A/openspec/changes/$out/inbox.md"
+type_of() { awk -F': ' '$1=="type"{print $2; exit}' "$1"; }
+out="$(opsx new --type 技術債 --repo "$A" -- 帶 type)"; assert_eq "$?" 0 "--type 技術債: $out"
+assert_eq "$(type_of "$A/openspec/changes/$out/inbox.md")" 技術債
+assert_eq "$(grep -c '^type:' "$A/openspec/changes/$out/inbox.md")" 1 "type 只寫一行"
+out="$(cd "$W" && opsx new --kind-of-work incident --impact data --evidence e --repo "$A" -- agent incident)"
+assert_eq "$(type_of "$A/openspec/changes/$out/inbox.md")" bug "agent 的 incident 卡預設 bug"
+out="$(cd "$W" && opsx new --type 想法 --kind-of-work planned --repo "$A" -- agent 帶 type)"
+assert_eq "$(type_of "$A/openspec/changes/$out/inbox.md")" 想法 "agent 帶 --type 照收"
+out="$(cd "$W" && opsx new --kind-of-work planned -- agent 待分類)"
+assert_eq "$(type_of "$OPSX_STATE_DIR/unfiled/$out.md")" bug "agent 的待分類卡也是 bug"
+out="$(opsx new --type 功能 -- 使用者待分類帶 type)"
+assert_eq "$(type_of "$OPSX_STATE_DIR/unfiled/$out.md")" 功能
+# type 不在值域、--area、--dup-of：退出 2，什麼都不寫
+before="$(snap)"; ub="$(find "$OPSX_STATE_DIR/unfiled" | sort)"
+err="$(opsx new --type 改善 --repo "$A" -- x 2>&1 >/dev/null)"; assert_eq "$?" 2 "--type 改善: $err"
+case "$err" in *改善*) ;; *) fail "stderr 要含拿到的值：$err" ;; esac
+assert_rc 2 opsx new --type "" --repo "$A" -- x
+assert_rc 2 opsx new --type Bug --repo "$A" -- x
+assert_rc 2 opsx new --type --repo "$A" -- x
+assert_rc 2 opsx new --type 改善 -- x
+assert_rc 2 opsx new --area hooks --repo "$A" -- x
+assert_rc 2 opsx new --dup-of x --repo "$A" -- y
+assert_eq "$(snap)" "$before"; assert_eq "$(find "$OPSX_STATE_DIR/unfiled" | sort)" "$ub" "被拒時不能寫任何檔"
 echo ok
