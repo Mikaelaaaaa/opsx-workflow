@@ -136,4 +136,113 @@ printf '%s' "$out" | grep -q 'lib.sh.*user.sh' || fail "候選要點名被引用
 printf '%s' "$out" | grep -q 'alone.sh' && fail "沒被別處引用的 alone.sh 不該列: $out"
 mk_blast "已知：沒有別的引用"
 out="$(cd "$B" && opsx check blast 2>&1)" || fail "步驟 3 不是 skip 不跑對照: $out"
+
+# --- Scenario：agent 開的卡要有事實欄位（board-actions「agent 開的卡要帶事實欄位」）---
+mk_inbox() { # <slug> <frontmatter 內容>；source 寫在內容裡
+  mkdir -p "$R/openspec/changes/$1"; printf 'schema: opsx\n' > "$R/openspec/changes/$1/.openspec.yaml"
+  printf -- '---\n%s\n---\n\n## 一句話\n\nx\n' "$2" > "$R/openspec/changes/$1/inbox.md"
+}
+NL=$'\n'
+mk_inbox f-nokind 'source: agent:p'
+out="$(chk f-nokind)" && fail "agent 卡沒有 kind_of_work 要非零"
+printf '%s' "$out" | grep 'inbox.md: ' | grep -q 'kind_of_work' || fail "要指出 kind_of_work: $out"
+mk_inbox f-badkind "source: agent:p${NL}kind_of_work: urgent"
+out="$(chk f-badkind)" && fail "kind_of_work 值域外要非零"
+printf '%s' "$out" | grep -q 'urgent' || fail "要指出值 urgent: $out"
+mk_inbox f-inc "source: agent:p${NL}kind_of_work: incident"
+out="$(chk f-inc)" && fail "incident 缺 impact 與 evidence 要非零"
+printf '%s' "$out" | grep -q 'impact' || fail "要指出 impact: $out"
+printf '%s' "$out" | grep -q 'evidence' || fail "要指出 evidence: $out"
+mk_inbox f-inc2 "source: agent:p${NL}kind_of_work: incident${NL}impact: data"
+out="$(chk f-inc2)" && fail "incident 缺 evidence 要非零"
+printf '%s' "$out" | grep -q 'evidence' || fail "要指出 evidence: $out"
+mk_inbox f-okinc "source: agent:p${NL}kind_of_work: incident${NL}impact: data${NL}evidence: tests/x.test.sh"
+out="$(chk f-okinc)" || fail "incident 事實齊要通過: $out"
+mk_inbox f-nested "source: agent:p${NL}kind_of_work: incident${NL}impact:${NL}  workaround_exists: true${NL}  evidence: \"log 在 ## 證據\""
+out="$(chk f-nested)" || fail "巢狀寫法的 impact 與 evidence 要通過: $out"
+mk_inbox f-planned "source: agent:p${NL}kind_of_work: planned"
+out="$(chk f-planned)" || fail "planned 不需要 evidence: $out"
+mk_inbox f-me 'source: me'
+out="$(chk f-me)" || fail "使用者開的卡不強制: $out"
+mk_inbox f-gitlab 'source: gitlab:a#1'
+out="$(chk f-gitlab)" || fail "同步來的卡不強制: $out"
+# 這張卡開出去的卡（source: agent:<這張卡>）也要齊
+mk_inbox f-parent 'source: me'; mk_inbox f-child 'source: agent:f-parent'
+out="$(chk f-parent)" && fail "它開的卡缺 kind 要非零"
+printf '%s' "$out" | grep -q 'f-child/inbox.md: ' || fail "要指出 f-child/inbox.md: $out"
+mk_inbox f-child "source: agent:f-parent${NL}kind_of_work: planned"
+out="$(chk f-parent)" || fail "它開的卡補齊就通過: $out"
+
+# --- Scenario：Stop hook 擋事實欄位不齊 ---
+mk_inbox f-stop 'source: agent:q'; printf '## 1. x\n\n- [ ] 1.1 a\n' > "$R/openspec/changes/f-stop/tasks.md"
+git -C "$R" checkout -q -b feat/f-stop/mikaela
+out="$(printf '{"cwd":"%s","stop_hook_active":false}' "$R" | bash "$H/openspec-stop-gate.sh" 2>/dev/null)"
+assert_eq "$(printf '%s' "$out" | jq -r '.decision // ""')" block "stop: 事實欄位缺要擋"
+printf '%s' "$out" | jq -r '.reason' | grep -q 'kind_of_work' || fail "stop: 理由要含缺的欄位: $out"
+mk_inbox f-stop "source: agent:q${NL}kind_of_work: planned"
+out="$(printf '{"cwd":"%s","stop_hook_active":false}' "$R" | bash "$H/openspec-stop-gate.sh" 2>/dev/null)"
+printf '%s' "$out" | jq -r '.reason' | grep -q 'task 沒勾' || fail "stop: 事實欄位齊了就照舊判斷: $out"
+
+# --- review 退回的邊界 ---
+# 模板原樣的 incident：impact 與 evidence 還是 <!-- … -->
+mk_inbox f-ph "source: agent:p${NL}kind_of_work: incident${NL}impact: <!-- incident 才填 -->${NL}evidence: <!-- 有 impact 就要 evidence -->"
+out="$(chk f-ph)" && fail "模板佔位字不能算有填"
+printf '%s' "$out" | grep -q 'incident 缺 impact' || fail "佔位的 impact 要報缺: $out"
+printf '%s' "$out" | grep -q 'incident 缺 evidence' || fail "佔位的 evidence 要報缺: $out"
+# 尾端空白、CRLF：開出去的卡仍被掃到
+mk_inbox f-ws 'source: me'; mk_inbox f-ws-child "source: agent:f-ws "
+out="$(chk f-ws)" && fail "source 尾端空白的卡缺 kind 要非零"
+printf '%s' "$out" | grep -q 'f-ws-child/inbox.md: ' || fail "尾端空白: $out"
+mk_inbox f-cr 'source: me'; mkdir -p "$R/openspec/changes/f-cr-child"
+printf -- '---\r\nsource: agent:f-cr\r\n---\r\n\r\n## 一句話\r\n\r\nx\r\n' > "$R/openspec/changes/f-cr-child/inbox.md"
+out="$(chk f-cr)" && fail "CRLF 的卡缺 kind 要非零"
+printf '%s' "$out" | grep -q 'f-cr-child/inbox.md: ' || fail "CRLF: $out"
+printf -- '---\r\nsource: agent:f-cr\r\nkind_of_work: planned\r\n---\r\n' > "$R/openspec/changes/f-cr-child/inbox.md"
+out="$(chk f-cr)" || fail "CRLF 補齊要通過: $out"
+
+stop() { printf '{"cwd":"%s","stop_hook_active":false}' "$R" | bash "$H/openspec-stop-gate.sh" 2>/dev/null; }
+# 它開出去的卡缺 kind：Stop 擋，理由含那張卡
+mk_inbox f-sp 'source: me'; printf '## 1. x\n\n- [ ] 1.1 a\n' > "$R/openspec/changes/f-sp/tasks.md"; mk_inbox f-sp-child 'source: agent:f-sp'
+git -C "$R" checkout -q -b feat/f-sp/mikaela
+out="$(stop)"; assert_eq "$(printf '%s' "$out" | jq -r '.decision // ""')" block "stop: 開出去的卡缺欄位要擋"
+printf '%s' "$out" | jq -r '.reason' | grep -q 'f-sp-child/inbox.md' || fail "stop: 理由要含子卡: $out"
+# 等待中不擋：有會擋的 open gate、或 review 的 subagent 還在跑
+mk_inbox f-wait 'source: agent:q'; printf '## 1. x\n\n- [ ] 1.1 a\n' > "$R/openspec/changes/f-wait/tasks.md"
+git -C "$R" checkout -q -b feat/f-wait/mikaela
+printf '## g1\ntype: decision\nstatus: open\n' > "$R/openspec/changes/f-wait/gates.md"
+assert_eq "$(stop)" "" "stop: 有 open gate 時事實欄位不擋"
+rm "$R/openspec/changes/f-wait/gates.md"
+printf '## 1. x\n\n- [x] 1.1 a\n' > "$R/openspec/changes/f-wait/tasks.md"   # review 在跑時 task 都已勾
+printf '{"phase":"review","step":2,"total":7,"tests":"green"}' > "$R/openspec/changes/f-wait/status.json"
+assert_eq "$(stop)" "" "stop: review 在跑時事實欄位不擋"
+rm "$R/openspec/changes/f-wait/status.json"
+# 擋滿 3 次：自動 gate 標題是 /facts，文字說的是事實欄位
+mk_inbox f-loop 'source: agent:q'; printf '## 1. x\n\n- [ ] 1.1 a\n' > "$R/openspec/changes/f-loop/tasks.md"
+git -C "$R" checkout -q -b feat/f-loop/mikaela
+stop >/dev/null; stop >/dev/null; stop >/dev/null; stop >/dev/null
+assert_grep '^## 卡在接 /facts #1$' "$R/openspec/changes/f-loop/gates.md"
+assert_grep '^問題: .*事實欄位' "$R/openspec/changes/f-loop/gates.md"
+assert_not_grep '沒有 invoke' "$R/openspec/changes/f-loop/gates.md"
+
+# --- review 第 2 輪退回 ---
+# 主殼掃得到子殼 subagent 開的卡（source: agent:<主>--<子>）
+mk_inbox f-m 'source: me'; mk_inbox f-m-child 'source: agent:f-m--s'
+out="$(chk f-m)" && fail "子殼 subagent 開的卡缺 kind 要非零"
+printf '%s' "$out" | grep -q 'f-m-child/inbox.md: ' || fail "要指出子殼開的卡: $out"
+# 子殼的 subagent 在跑：事實欄位不擋（只在 subagent 條件被拿掉時才會紅）
+mk_main f-sub >/dev/null; mk_inbox f-sub 'source: agent:q'   # mk_inbox 重寫 .openspec.yaml，子殼仍齊全
+printf 'schema: opsx\nkind: dev\n' > "$R/openspec/changes/f-sub/.openspec.yaml"
+printf '## 1. x\n\n- [ ] 1.1 `a`：子殼\n' > "$R/openspec/changes/f-sub/tasks.md"
+printf '{"phase":"apply","step":1,"total":3,"worker":"subagent-a","at":"%s"}' "$(date -u '+%Y-%m-%dT%H:%M:%S+00:00')" > "$R/openspec/changes/f-sub/subs/a/status.json"
+git -C "$R" checkout -q -b feat/f-sub/mikaela
+assert_eq "$(stop)" "" "stop: 子殼 subagent 在跑時事實欄位不擋"
+# 補一張缺欄位的卡算進度：擋滿 3 次後補一張，仍然 block，不寫 /facts gate
+mk_inbox f-prog 'source: me'; printf '## 1. x\n\n- [ ] 1.1 a\n' > "$R/openspec/changes/f-prog/tasks.md"
+mk_inbox f-prog-1 'source: agent:f-prog'; mk_inbox f-prog-2 'source: agent:f-prog'; mk_inbox f-prog-3 'source: agent:f-prog'
+git -C "$R" checkout -q -b feat/f-prog/mikaela
+stop >/dev/null; stop >/dev/null; stop >/dev/null
+mk_inbox f-prog-1 "source: agent:f-prog${NL}kind_of_work: planned"
+out="$(stop)"; assert_eq "$(printf '%s' "$out" | jq -r '.decision // ""')" block "stop: 補了一張就是進度，不開 gate"
+assert_no_file "$R/openspec/changes/f-prog/gates.md"
+printf '%s' "$out" | jq -r '.reason' | grep -q 'gates.md' || fail "stop: 理由要提可以寫 gates.md: $out"
 echo ok

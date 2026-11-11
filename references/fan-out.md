@@ -36,4 +36,4 @@ Prompts for a fanned-out card reach this pane prefixed with the card's slug:
 
 If the subagent cannot be reached (it ended and the worktree is gone), write a gate (`type: decision`) in that card's `gates.md`: the card has to be re-dispatched (`opsx stop <slug>`, then 指派 on the board).
 
-When a subagent reports `NEEDS-USER`, write the gate (`type: approval | decision`; add `needs: run` when the user must run a command) in **that card's** `gates.md`, not the parent's, then keep relaying for the others. The answer comes back as `[<slug>] …`.
+When a subagent reports `NEEDS-USER`, write the gate (`type: approval | decision`; add `needs: run` when the user must run a command; add `waits-on: <card name>` on a `decision` that waits for another card to merge) in **that card's** `gates.md`, not the parent's, then keep relaying for the others. The answer comes back as `[<slug>] …`.
