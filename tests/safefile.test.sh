@@ -99,4 +99,36 @@ case "$out" in *dispatch.json.lock*) ;; *) fail "訊息要含 dispatch.json.lock
 assert_eq "$(hash_of "$D/victim")" "$before" "jsonfile.update 不能截斷 symlink 的目標"
 assert_no_file "$D/dispatch.json"
 
+# --- CardLock：另一個 process 持鎖時，要鎖的人等到放鎖才進去 ---
+mkdir -p "$D/card"; : > "$D/lock-order"
+"$PY" -I -c '
+import sys, time
+sys.path.insert(0, sys.argv[1]); import safefile
+with safefile.CardLock(sys.argv[2]):
+    open(sys.argv[3], "w").close()
+    time.sleep(1)
+    open(sys.argv[4], "a").write("release\n")
+' "$LIB" "$D/card" "$D/lock-ready" "$D/lock-order" &
+for _ in $(seq 100); do [ -e "$D/lock-ready" ] && break; sleep 0.05; done
+[ -e "$D/lock-ready" ] || fail "持鎖的 process 沒有拿到鎖"
+"$PY" -I -c '
+import sys
+sys.path.insert(0, sys.argv[1]); import safefile
+with safefile.CardLock(sys.argv[2]):
+    open(sys.argv[3], "a").write("waiter\n")
+' "$LIB" "$D/card" "$D/lock-order" || fail "CardLock 等鎖失敗"
+wait
+assert_eq "$(cat "$D/lock-order")" "$(printf 'release\nwaiter')" "持鎖者放鎖後，等鎖的才能進去"
+
+# --- CardLock：卡目錄不存在 → 大聲失敗、報出路徑、不建東西 ---
+"$PY" -I -c '
+import sys
+sys.path.insert(0, sys.argv[1]); import safefile
+with safefile.CardLock(sys.argv[2]):
+    pass
+' "$LIB" "$D/no-such-card" 2> "$D/err"; rc=$?
+[ "$rc" -ne 0 ] || fail "卡目錄不存在要失敗"
+assert_grep "$D/no-such-card" "$D/err"
+assert_no_file "$D/no-such-card"
+
 echo "safefile ok"
