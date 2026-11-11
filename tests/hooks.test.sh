@@ -139,11 +139,11 @@ out="$(cg 'git commit -m "feat: x" -- a.ts')"; assert_eq "$(decision "$out")" al
 out="$(cg 'git -C /x commit -m "feat: x"')"; assert_eq "$(decision "$out")" allow "commit: git -C 也認得"
 # gate-bypass-closure：所有會執行 git commit 的寫法都要走同一道閘門（tasks 全未勾時擋）
 printf '## 1. x\n\n- [ ] 1.1 a\n' > "$C/tasks.md"
-for c in 'git commit -m x' 'echo `git commit -m x`' 'echo $(git commit -m x)' '\git commit -m x' '/usr/bin/git commit -m x' 'git -c alias.ci=commit ci -m x' 'git -c user.name=a commit -m x' 'git --no-pager commit -m x' 'git push gitlab feat/a/b && echo `git commit -m x`' 'git -p commit -m x' 'git -P commit -m x' 'git --git-dir .git commit -m x' 'git --work-tree . commit -m x'; do
+for c in 'git commit -m x' 'echo `git commit -m x`' 'echo $(git commit -m x)' '\git commit -m x' '/usr/bin/git commit -m x' 'git -c alias.ci=commit ci -m x' 'git -c user.name=a commit -m x' 'git --no-pager commit -m x' 'git push gitlab feat/a/b && echo `git commit -m x`' 'git -p commit -m x' 'git -P commit -m x' 'git --git-dir .git commit -m x' 'git --work-tree . commit -m x' 'git --namespace ns commit -m x'; do
   out="$(cg "$c")"; assert_eq "$(decision "$out")" deny "commit: $c 沒勾 task 要擋"
   reason "$out" | grep -q 'tasks.md' || fail "commit: $c 的 deny 要說 tasks.md：$(reason "$out")"
 done
-for c in 'git log --oneline' 'echo "git commit"' 'git commit-tree HEAD' 'echo git-commit' 'ls /usr/bin/git-commit'; do
+for c in 'git log --oneline' 'echo "git commit"' 'git commit-tree HEAD' 'echo git-commit' 'ls /usr/bin/git-commit' 'git --no-pager log --grep commit' 'git --no-pager grep commit' 'git --no-pager show commit'; do
   out="$(cg "$c")"; assert_eq "$out" "" "commit: $c 不是 commit，不出聲"
 done
 # session cwd 在別的 repo、commit 實際作用在 $R（沒勾 task）：每一種寫法都要對到 $R 的卡
@@ -324,6 +324,10 @@ done
 for c in 'git push -u gitlab feat/x' 'git push gitlab feat/x' 'git push --follow-tags gitlab feat/x'; do
   out="$(gg Bash "$(cmdj "$c")")"; assert_eq "$(decision "$out")" allow "grant: $c 照常放行"
 done
+# 行尾反斜線續行是同一條 push；引號內的 | ; & 不是段落分隔
+for c in $'git push gitlab \\\n--force feat/x' $'git push gitlab \\\n-f feat/x' $'git push gitlab \\\nmain' $'git push \\\n--receive-pack=/tmp/x gitlab feat/x' 'git push -o "a|b" gitlab +feat/x' 'git push -o "a|b" --receive-pack=/tmp/x gitlab feat/x' 'git push -o "a|b" --force gitlab feat/x'; do
+  out="$(gg Bash "$(cmdj "$c")")"; assert_eq "$(decision "$out")" deny "grant: $c 不能放行"
+done
 # 第三級的 force 旗標只看同一段 push：後面串的指令自己的 -f、+5 不算
 for c in 'git push gitlab feat/x 2>&1 | tail -n +5' 'git push -u gitlab feat/x && echo "see +1" && ls -lf'; do
   out="$(gg Bash "$(cmdj "$c")")"; assert_eq "$(decision "$out")" allow "grant: $c 的 push 本身沒有 force，不能當第三級擋"
@@ -351,8 +355,14 @@ cmd="$(printf "cat <<\$'EOF'\nhello\nEOF\nglab mr create -F d.md\n\$EOF\n")"
 sk="$(printf '%s' "$cmd" | perl "$H/cmd-skeleton.pl")"
 case "$sk" in *'glab mr create'*) ;; *) fail "skeleton: <<\$'EOF' 之後的指令不能從骨架消失：$sk" ;; esac
 out="$(gg Bash "$(cmdj "$cmd")")"; assert_eq "$(decision "$out")" deny "grant: <<\$'EOF' 後面的 mr 指令沒授權要擋"
-# 沒結尾的重複開頭不能讓骨架慢到 hook 逾時（逾時等於放行）
-perl -e 'print "cat <<\x27aaa\x27\n" x 2000' | perl -e 'alarm 10; exec @ARGV' perl "$H/cmd-skeleton.pl" >/dev/null || fail "skeleton: 2000 個沒結尾的 heredoc 開頭要在 10 秒內跑完"
+# 分隔字含 ANSI-C 跳脫（$'A\x41' 是 AA）：不剝 heredoc，後面的指令留在骨架（fail-closed）
+cmd="$(printf "cat <<\$'A\\\\x41' >/dev/null\nhi\nAA\ngit commit -m x\nA\\\\x41\n")"
+sk="$(printf '%s' "$cmd" | perl "$H/cmd-skeleton.pl")"
+case "$sk" in *'git commit -m x'*) ;; *) fail "skeleton: <<\$'A\\x41' 之後的指令不能從骨架消失：$sk" ;; esac
+# 沒結尾的重複開頭不能讓骨架慢到 hook 逾時（逾時等於放行）：超過大小上限就原樣輸出
+perl -e 'print "cat <<\x27aaa\x27\n" x 20000' > "$FX/many-heredocs.txt"
+perl -e 'alarm 5; exec @ARGV' perl "$H/cmd-skeleton.pl" < "$FX/many-heredocs.txt" > "$FX/many-heredocs.out" || fail "skeleton: 20000 個沒結尾的 heredoc 開頭要在 5 秒內跑完"
+cmp -s "$FX/many-heredocs.txt" "$FX/many-heredocs.out" || fail "skeleton: 超過大小上限要原樣輸出"
 cmd="$(printf "cat <<'EOF'\nglab mr create -F d.md\nEOF\n")"
 sk="$(printf '%s' "$cmd" | perl "$H/cmd-skeleton.pl")"
 case "$sk" in *'glab mr create'*) fail "skeleton: 一般 heredoc 本體不進骨架：$sk" ;; esac

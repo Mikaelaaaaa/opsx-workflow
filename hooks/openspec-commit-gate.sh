@@ -9,7 +9,7 @@ sk="$(cmd_skeleton "$cmd")" || deny "opsx commit 閘門：perl 執行失敗，�
 # git 的寫法：反引號、$(…)、\git、絕對路徑都算；全域選項（-C x、-c k=v、-p、-P、--no-pager、--git-dir=x、--git-dir x…）夾在 git 與 commit 之間也算。
 # -c alias.<名>=… 可以把任何字變成 commit，只要出現就當成 commit 處理（寧可誤擋）。
 git_word='(^|[^[:alnum:]_./-])(\\|/[^[:space:];&|()`$]*/)?git'
-git_opts='(([[:space:]]+-C[[:space:]]+[^[:space:]]+)|([[:space:]]+-c[[:space:]]+[^[:space:]]+)|([[:space:]]+-[pP])|([[:space:]]+--[a-z][a-z-]*(=[^[:space:]]+|[[:space:]]+[^-[:space:]][^[:space:]]*)?))*'
+git_opts='(([[:space:]]+-C[[:space:]]+[^[:space:]]+)|([[:space:]]+-c[[:space:]]+[^[:space:]]+)|([[:space:]]+-[pP])|([[:space:]]+--(git-dir|work-tree|namespace|exec-path|super-prefix|config-env)[[:space:]]+[^-[:space:]][^[:space:]]*)|([[:space:]]+--[a-z][a-z-]*(=[^[:space:]]+)?))*'
 commit_re="${git_word}${git_opts}[[:space:]]+commit([[:space:]]|\$)"
 printf '%s' "$sk" | grep -qE "${commit_re}|${git_word}([[:space:]]+[^;&|]*)?[[:space:]]-c[[:space:]]+alias\\." || exit 0
 

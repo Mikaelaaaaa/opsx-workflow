@@ -13,6 +13,7 @@ use FindBin;
 require "$FindBin::Bin/cmd-lex.pl";    # skip_dq、paren_body
 
 use constant MAX_DEPTH => 3;
+use constant MAX_BYTES => 32768;
 my $SQ = "'";
 my $RUNS_STRING = qr/(?:\b(?:bash|sh|zsh|dash|ksh)(?:\s+-\S+)*?\s+-\w*c\w*\s+|\beval\s+)$/;
 my $EXECUTOR = qr/\b(?:bash|sh|zsh|dash|ksh|eval|source|psql|mysql|sqlite3|ssh|python[0-9]?|node|perl|ruby)\b/;
@@ -82,7 +83,9 @@ sub strip_heredocs {
     while ($rest =~ /(^|\n)([^\n]*?)(?<!<)(<<-?[ \t]*($HEREDOC_WORD)[^\n]*)\n/s) {
         my ($pre, $lead, $prefix, $opener, $word, $after) = ($`, $1, $2, $3, $4, $');
         my $delim = unquote_word($word);
-        if ($after =~ /\A(.*?)\n[ \t]*\Q$delim\E[ \t]*(?:\n|\z)/s) {
+        # $'…\x41…' 的跳脫 bash 會展開，這裡不展開：算不準分隔字就不剝本體（fail-closed）
+        my $ansi_c = $word =~ /\$['"]/ && $word =~ /\\/;
+        if (!$ansi_c && $after =~ /\A(.*?)\n[ \t]*\Q$delim\E[ \t]*(?:\n|\z)/s) {
             my ($body, $tail) = ($1, $');
             $out .= $pre . heredoc($lead, $prefix, $opener, $word =~ /[\x27"\\]/ ? $SQ : '', $body, $depth);
             $rest = $tail;
@@ -139,4 +142,5 @@ sub skeleton {
 
 local $/;
 my $cmd = <STDIN> // '';
-print skeleton($cmd, 0);
+# shortcut: 沒結尾的 heredoc 開頭每個都重掃後面全文（二次方），hook 逾時等於放行，所以超過上限就原樣輸出（引號與 heredoc 本體都不去除，比對只會更嚴）；真有超過 32KB 的指令，分次執行或請人放行
+print length($cmd) > MAX_BYTES ? $cmd : skeleton($cmd, 0);
