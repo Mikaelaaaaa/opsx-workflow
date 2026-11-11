@@ -109,6 +109,21 @@ unset OPSX_TEST_ON_SEND_KEYS
   launch_args claude claude-sonnet-5-5 autopilot Agentory-CS retry-backoff "$R"; printf '%s' "${LAUNCH_ARGS[*]}" ) > "$FX/args.txt"
 assert_eq "${START#*--resume $SID }" "$(cat "$FX/args.txt")" "relaunch 的參數要等於 launch_args"
 
+# --- relaunching_at 是鎖：10 分鐘內有別的 relaunch 在跑就拒絕，它的標記不動 ---
+NOW="$(python3 -I -c 'import datetime;print(datetime.datetime.now().astimezone().isoformat(timespec="seconds"))')"
+put_entry Agentory-CS/retry-backoff "$(printf '%s' "$CARD" | sed "s/\"drive_pid\":null/\"drive_pid\":null,\"relaunching_at\":\"$NOW\"/")"
+: > "$OPSX_FAKE_LOG"
+out="$(opsx relaunch retry-backoff 2>&1)"; [ $? -ne 0 ] || fail "已有人在 relaunch 要拒絕: $out"
+case "$out" in *"$NOW"*) ;; *) fail "訊息要印出既有標記的時間: $out" ;; esac
+no_keys_sent "已有人在 relaunch 不能送鍵"
+python3 -I -c 'import json,sys;e=json.load(open(sys.argv[1]))["Agentory-CS/retry-backoff"];assert e.get("relaunching_at")==sys.argv[2],e' "$J" "$NOW" || fail "別人的標記不能被清掉"
+# 超過 10 分鐘的標記當作殘留（relaunch 被 kill），照常重開
+OLDMARK="$(python3 -I -c 'import datetime;print((datetime.datetime.now().astimezone()-datetime.timedelta(hours=1)).isoformat(timespec="seconds"))')"
+put_entry Agentory-CS/retry-backoff "$(printf '%s' "$CARD" | sed "s/\"drive_pid\":null/\"drive_pid\":null,\"relaunching_at\":\"$OLDMARK\"/")"
+out="$(opsx relaunch retry-backoff 2>&1)"; assert_eq "$?" 0 "殘留的舊標記不擋: $out"
+python3 -I -c 'import json,sys;e=json.load(open(sys.argv[1]))["Agentory-CS/retry-backoff"];assert "relaunching_at" not in e,e' "$J" || fail "結束後要清掉標記"
+put_entry Agentory-CS/retry-backoff "$CARD"
+
 # --- shell 還沒好就重試：兩次 agent_pane_busy 再成功 ---
 export OPSX_TEST_BUSY_LEFT="$FX/busy-left"; echo 2 > "$OPSX_TEST_BUSY_LEFT"; : > "$OPSX_FAKE_LOG"
 out="$(opsx relaunch retry-backoff 2>&1)"; assert_eq "$?" 0 "busy 兩次再成功: $out"
@@ -132,6 +147,13 @@ OLD="$(cat "$FX/old-drive.pid")"
 trap 'kill "$OLD" 2>/dev/null; rm -rf "$FX"' EXIT
 kill -0 "$OLD" || fail "fixture 的 drive 行程沒起來"
 put_entry Agentory-CS/retry-backoff "$(printf '%s' "$CARD" | sed "s/\"drive_pid\":null/\"drive_pid\":$OLD/")"
+# 壞的 grants.toml：寫 settings 失敗要在送鍵、kill drive 之前就停
+printf 'repos = [\n' > "$OPSX_STATE_DIR/grants.toml"; : > "$OPSX_FAKE_LOG"
+out="$(opsx relaunch retry-backoff 2>&1)"; [ $? -ne 0 ] || fail "壞 grants.toml 要失敗: $out"
+rm -f "$OPSX_STATE_DIR/grants.toml"
+no_keys_sent "壞 grants.toml 不能送鍵"
+kill -0 "$OLD" || fail "壞 grants.toml 時 drive 不能被 kill"
+python3 -I -c 'import json,sys;e=json.load(open(sys.argv[1]))["Agentory-CS/retry-backoff"];assert "relaunching_at" not in e,e' "$J" || fail "沒動手不該留標記"
 DL="$OPSX_STATE_DIR/drive-Agentory-CS-retry-backoff.log"; rm -f "$DL"
 printf '[ "$4" = esc ] || exit 0\nif kill -0 %s 2>/dev/null; then echo alive; else echo dead; fi > "%s"\n' "$OLD" "$FX/drive-at-esc" > "$FX/on-keys.sh"
 export OPSX_TEST_ON_SEND_KEYS="$FX/on-keys.sh"; : > "$OPSX_FAKE_LOG"
@@ -148,14 +170,25 @@ assert_grep "^agent start retry-backoff --kind claude --pane w1:pE -- --resume $
 sleep 0.3; assert_no_file "$DL"
 put_entry Agentory-CS/retry-backoff "$CARD"
 
-# --- fan-out 子卡（via 普通卡）：導到 herdr 名那張卡的條目，重開它、送它的那一站 ---
-put_entry Agentory-CS/kid '{"pane":"w9:pK","agent":"claude","model":"x","mode":"autopilot","via":"retry-backoff","herdr_name":"retry-backoff"}'
-put_entry Agentory-CS/retry-backoff "$(printf '%s' "$CARD" | sed 's/"mode":"autopilot"/"mode":"interactive"/')"
-: > "$OPSX_FAKE_LOG"
+# --- fan-out 子卡（via 父卡名）：父卡在 fan-out 前就已歸檔；重開父卡的 pane，對每個沒停的子卡送 [<kid>] …，不起 drive ---
+mkdir -p "$R/openspec/changes/archive/2026-11-10-par" "$R/openspec/changes/kid" "$R/openspec/changes/kid2"
+printf -- '- [ ] 1.1 x\n' > "$R/openspec/changes/kid/tasks.md"
+printf -- '- [ ] 1.1 x\n' > "$R/openspec/changes/kid2/tasks.md"
+put_entry Agentory-CS/par '{"pane":"w1:pP","agent":"claude","model":"claude-opus-5-5","mode":"autopilot","drive_pid":null}'
+KIDE='{"pane":"w1:pP","agent":"claude","model":"claude-opus-5-5","mode":"autopilot","via":"par","herdr_name":"par"}'
+put_entry Agentory-CS/kid "$KIDE"
+put_entry Agentory-CS/kid2 "$KIDE"
+put_entry Agentory-CS/kid3 "$(printf '%s' "$KIDE" | sed 's/"mode":"autopilot"/"mode":"stopped"/')"
+mk_agents "$OPSX_TEST_HERDR_AGENTS" w1:pP idle "$SID"; : > "$OPSX_FAKE_LOG"
+rm -f "$OPSX_STATE_DIR/drive-Agentory-CS-par.log" "$OPSX_STATE_DIR/drive-Agentory-CS-kid.log"
 out="$(opsx relaunch kid 2>&1)"; assert_eq "$?" 0 "fan-out 子卡 relaunch: $out"
-assert_grep "^agent start retry-backoff --kind claude --pane w1:pE -- --resume $SID " "$OPSX_FAKE_LOG"
-assert_grep '^agent prompt retry-backoff /opsx-workflow:apply retry-backoff$' "$OPSX_FAKE_LOG"
-put_entry Agentory-CS/retry-backoff "$CARD"
+assert_grep "^agent start par --kind claude --pane w1:pP -- --resume $SID --model claude-opus-5-5 --permission-mode dontAsk --settings $OPSX_STATE_DIR/settings/Agentory-CS-par-autopilot.json " "$OPSX_FAKE_LOG"
+assert_eq "$(grep '^agent prompt' "$OPSX_FAKE_LOG")" "agent prompt par [kid] /opsx-workflow:apply kid
+agent prompt par [kid2] /opsx-workflow:apply kid2" "每個沒停的子卡各收到一句，帶 [<kid>]"
+sleep 0.3; assert_no_file "$OPSX_STATE_DIR/drive-Agentory-CS-par.log"; assert_no_file "$OPSX_STATE_DIR/drive-Agentory-CS-kid.log"
+tail -1 "$R/openspec/changes/kid/decisions.tsv" | grep -q 'relaunch' || fail "decisions.tsv 要記在被要求的子卡上"
+python3 -I -c 'import json,sys;e=json.load(open(sys.argv[1]))["Agentory-CS/par"];assert "relaunching_at" not in e,e' "$J" || fail "結束後要清掉父卡條目的標記"
+mk_agents "$OPSX_TEST_HERDR_AGENTS" w1:pE idle "$SID"
 
 # --- session 成員導到 session pane ---
 RF="$(mk_repo Feat-Repo)"
@@ -186,6 +219,11 @@ out="$(cd "$RF" && opsx relaunch m1 2>&1)"; [ $? -ne 0 ] || fail "成員卡目�
 case "$out" in *gone*) ;; *) fail "訊息要指名 gone: $out" ;; esac
 no_keys_sent "成員卡目錄不在不能送鍵"
 put_entry Feat-Repo/gone "$(printf '%s' "$MEMBER" | sed 's/"mode":"autopilot"/"mode":"stopped"/')"
+# 成員已歸檔（session 自己 /archive 過，條目沒標 stopped）：略過它，照送其他成員
+mkdir -p "$RF/openspec/changes/archive/2026-11-10-old"; put_entry Feat-Repo/old "$MEMBER"; : > "$OPSX_FAKE_LOG"
+out="$(cd "$RF" && opsx relaunch m1 2>&1)"; assert_eq "$?" 0 "已歸檔的成員要略過: $out"
+assert_eq "$(grep '^agent prompt' "$OPSX_FAKE_LOG")" "agent prompt fs [m1] /opsx-workflow:apply m1
+agent prompt fs [m3] /opsx-workflow:propose m3" "已歸檔的成員不收話，其他成員照送"
 
 # --- agent start 失敗大聲報：exit 非 0、herdr 錯誤與 pane 畫面、decisions.tsv 一列、標記清掉、不關 pane / tab ---
 cd "$R"; mk_agents "$OPSX_TEST_HERDR_AGENTS" w1:pE idle "$SID"; : > "$OPSX_FAKE_LOG"
