@@ -6,6 +6,7 @@
 # 在 dispatch 的 worktree（<top>/.claude/worktrees/<slug>）裡呼叫是 agent 開的：source: agent:<slug>、slug 前綴 agent-；--source me 蓋過偵測。
 # agent 開的卡必帶 --kind-of-work；incident 還要 --impact 與 --evidence（references/priority.md 的事實欄位）。使用者開的卡不強制，沒帶是 planned。
 # --area 寫進 frontmatter 的 area:，值要在 repo 的 openspec/areas.txt 裡；有清單時 agent 開的卡必帶。沒有清單的 repo 不收 --area，其餘照舊（new-auto-merge D2、D3）。
+# agent 開的卡遇到同 area、還沒有 tasks.md 的卡就併進那張的 inbox.md，不建殼，印的是那張的 slug（new-auto-merge D1、D4）。
 
 OPSX_ATTACH_MAX=10485760
 
@@ -53,6 +54,36 @@ check_area() { # <top> <source> <area>
   list="$(opsx_areas "$f")" || exit 2
   [ -n "$area" ] || die "new: 這個 repo 有 openspec/areas.txt，agent 開的卡要帶 --area <名>，可選：${list//$'\n'/ }"
   grep -qxF -- "$area" <<< "$list" || die "new: --area「${area}」不在 openspec/areas.txt 裡，可選：${list//$'\n'/ }"
+}
+
+# 自動併入的目標（new-auto-merge D1–D3）：主殼 frontmatter area: 等於 <area>、stage 是 explore/grill/propose、不是開卡 agent 自己的主殼。
+# 好幾張取 slug 字母序（C locale）第一張；沒有就不印。archive 目錄沒有 inbox.md，子殼在 subs/ 底下，glob 都碰不到。
+merge_target() { # <top> <area> <開卡 agent 的主殼名>
+  local f=("$1"/openspec/changes/*/inbox.md) s
+  [ -e "${f[0]}" ] || return 0
+  while IFS= read -r s; do
+    [ "$s" != "$3" ] || continue
+    case "$(stage_name "$1" "$s")" in explore|grill|propose) printf '%s\n' "$s"; return ;; esac
+  done < <(awk -v a="$2" '
+    FNR == 1 { fm = ($0 ~ /^---[[:space:]]*$/); next }
+    fm && /^---[[:space:]]*$/ { fm = 0; nextfile }
+    fm && /^area:/ { v = $0; sub(/^area:[[:space:]]*/, "", v); sub(/[[:space:]]+$/, "", v); if (v == a) print FILENAME; fm = 0; nextfile }
+  ' "${f[@]}" | sed -E 's#/inbox\.md$##; s#.*/##' | LC_ALL=C sort)
+}
+
+# 併進 <目標>：追加 ## 併入 段（id 在鎖內算）、兩邊記 decisions.tsv、在 herdr 裡才通知。stdout 印目標 slug，stderr 印併進哪裡。
+# 通知失敗只警告：併入已經寫好，退出非零會讓 agent 以為沒開成、再開一次。
+merge_into() { # <top> <目標> <基本 id> <source> <kind> <impact> <evidence> <area> <一句話>
+  local top="$1" tgt="$2" source="$4" text="$9" id own err
+  id="$("$OPSX_PY" -I "$OPSX_ROOT/bin/lib/inboxmerge.py" "$top/openspec/changes/$tgt" "$3" "$(now_iso)" "$source" "$5" "$6" "$7" "$8" "$text")" || die "new: 併不進 ${tgt}（上面是原因）"
+  log_row "$top/openspec/changes/$tgt" 系統 已決定 "併入 ${id}：${text}" "$source"
+  own="$(st_card_dir "$top" "${source#agent:}")"
+  [ ! -d "$own" ] || log_row "$own" 系統 已決定 "併進 ${tgt}（id ${id}）" "$source"
+  if [ -n "${HERDR_ENV:-}" ]; then
+    err="$(herdr notification show "[${top##*/}/${tgt}] 併入" --body "${text} 併進 ${tgt}" 2>&1 >/dev/null)" || warn "new: 已併進 ${tgt}，但 herdr 通知送不出去：$err"
+  fi
+  printf '併進 %s（id %s）\n' "$tgt" "$id" >&2
+  printf '%s\n' "$tgt"
 }
 
 opsx_new() {
@@ -104,7 +135,16 @@ opsx_new() {
     agent:*) prefix=agent ;;
     *) source=me; [ ${#names[@]} -eq 0 ] || source=paste ;;
   esac
-  local slug body; slug="$prefix-$(date '+%Y%m%d-%H%M')"; body="$(mktemp "${TMPDIR:-/tmp}/opsx-new.XXXXXX")"
+  local slug body lv tgt; slug="$prefix-$(date '+%Y%m%d-%H%M')"
+  # agent 開、有 repo 與 area、沒附件、不是 P0 的卡才找目標；等級由 priority.py 算
+  if [ "$prefix" = agent ] && [ -n "$top" ] && [ -n "$area" ] && [ ${#names[@]} -eq 0 ]; then
+    lv="$("$OPSX_PY" -I "$OPSX_ROOT/bin/lib/priority.py" level "${kind:-planned}" "$impact")" || die "new: 算不出新卡的等級（上面是原因）"
+    if [ "${lv%%$'\t'*}" != P0 ]; then
+      tgt="$(merge_target "$top" "$area" "$(b="${source#agent:}"; printf '%s' "${b%%--*}")")"
+      if [ -n "$tgt" ]; then merge_into "$top" "$tgt" "$slug" "$source" "${kind:-planned}" "$impact" "$evidence" "$area" "$text"; return; fi
+    fi
+  fi
+  body="$(mktemp "${TMPDIR:-/tmp}/opsx-new.XXXXXX")"
   trap 'rm -f "$body"' RETURN
   printf -- '---\ntype: 功能\nsource: %s\nfound: %s\nrelated:\nkind_of_work: %s\n' "$source" "$(date '+%Y-%m-%d')" "${kind:-planned}" > "$body"
   [ -z "$impact" ] || printf 'impact: %s\n' "$impact" >> "$body"

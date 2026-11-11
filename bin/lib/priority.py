@@ -2,6 +2,7 @@
 
 用法：$OPSX_PY -I priority.py get <top> <slug>      印 `<level>\t<理由>`，算不出來 stderr 說明、退出 1
       $OPSX_PY -I priority.py set <inbox.md> <level> <理由>   覆寫等級，寫 frontmatter 的 priority / priority_reason
+      $OPSX_PY -I priority.py level <kind_of_work> <impact,…>  只從事實欄位算，印 `<level>\t<理由>`（opsx new 用，卡還沒建）
 規則：references/priority.md；specs/opsx-priority/spec.md。coordinate、chain、collect import 這個模組，不另算。
 """
 from __future__ import annotations
@@ -179,25 +180,42 @@ def waiters(features: list) -> dict:
     return out
 
 
+def rule_level(kind: str, impact: list, plan, owner) -> tuple:
+    """事實欄位與 workplan 位置算出的 (level, 理由)，不看使用者覆寫。owner 是 None 時用不到 plan。"""
+    if kind == "incident":
+        hit = [x for x in impact if x in IMPACT_P0]
+        if hit:
+            return "P0", "P0：%s（附證據）" % "、".join(hit)
+        hit = [x for x in impact if x in IMPACT_P1]
+        if hit:
+            return "P1", "P1：%s" % "、".join(hit)
+        return "P2", "P2：incident，沒有 impact"
+    if owner is None:
+        return "P2", "P2：不在 workplan"
+    m = owner[0].get("milestone")
+    if not plan["current"]:
+        return "P1", "P1：在 workplan 裡（沒設目前 milestone）"
+    if m == plan["current"]:
+        return "P1", "P1：在 %s（%s）清單裡" % (m, plan["goals"][m])
+    return "P2", "P2：%s，不是目前 milestone" % (("在 " + m) if m else "沒有 milestone")
+
+
+def fact_level(kind: str, impact_csv: str) -> tuple:
+    """還不在磁碟上的新卡（opsx new 判斷 P0 不併）：只有事實欄位、不在 workplan。"""
+    if kind not in KINDS:
+        raise PriorityError("kind_of_work 要是 incident 或 planned，收到「%s」" % kind)
+    impact = [x.strip() for x in impact_csv.split(",") if x.strip()]
+    for x in impact:
+        if x not in IMPACT_P0 + IMPACT_P1:
+            raise PriorityError("impact 不認得「%s」，要是 %s 之一" % (x, "、".join(IMPACT_P0 + IMPACT_P1)))
+    return rule_level(kind, impact, None, None)
+
+
 def base_level(slug: str, facts: dict, plan: dict, owner) -> tuple:
     if facts["priority"]:
         return facts["priority"], "%s：使用者：%s" % (facts["priority"], facts["priority_reason"]), True
-    if facts["kind"] == "incident":
-        hit = [x for x in facts["impact"] if x in IMPACT_P0]
-        if hit:
-            return "P0", "P0：%s（附證據）" % "、".join(hit), False
-        hit = [x for x in facts["impact"] if x in IMPACT_P1]
-        if hit:
-            return "P1", "P1：%s" % "、".join(hit), False
-        return "P2", "P2：incident，沒有 impact", False
-    if owner is None:
-        return "P2", "P2：不在 workplan", False
-    m = owner[0].get("milestone")
-    if not plan["current"]:
-        return "P1", "P1：在 workplan 裡（沒設目前 milestone）", False
-    if m == plan["current"]:
-        return "P1", "P1：在 %s（%s）清單裡" % (m, plan["goals"][m]), False
-    return "P2", "P2：%s，不是目前 milestone" % (("在 " + m) if m else "沒有 milestone"), False
+    lv, why = rule_level(facts["kind"], facts["impact"], plan, owner)
+    return lv, why, False
 
 
 def upstream(pr_name: str, wait: dict) -> list:
@@ -277,8 +295,10 @@ def main() -> None:
             print("%s\t%s" % (got["level"], got["reason"]))
         elif len(args) == 4 and args[0] == "set":
             set_override(args[1], args[2], args[3])
+        elif len(args) == 3 and args[0] == "level":
+            print("%s\t%s" % fact_level(args[1], args[2]))
         else:
-            sys.exit("用法：priority.py get <top> <slug> | priority.py set <inbox.md> <level> <理由>")
+            sys.exit("用法：priority.py get <top> <slug> | priority.py set <inbox.md> <level> <理由> | priority.py level <kind_of_work> <impact,…>")
     except PriorityError as e:
         print("priority: %s" % e, file=sys.stderr)
         sys.exit(1)
