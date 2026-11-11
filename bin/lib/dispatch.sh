@@ -189,10 +189,18 @@ PY
     aargs+=(--add-dir "$top/openspec" --add-dir "$OPSX_STATE_DIR")
   fi
   # 剛開的 pane 的 shell 還沒到 prompt 時 herdr 回 agent_pane_busy，同一個 pane 最多試六次；起不來就收掉剛開的 tab，不留空 tab 給人收
-  local out try=1
+  local out try=1 screen
   until out="$(herdr agent start "$slug" --kind "$agent" --pane "$pane" -- "${aargs[@]}" 2>&1)"; do
     case "$out" in
-      *agent_pane_busy*) if [ "$try" -lt 6 ]; then try=$((try + 1)); sleep "${OPSX_DISPATCH_RETRY_SLEEP:-1}"; continue; fi ;;
+      *agent_pane_busy*)
+        if [ "$try" -lt 6 ]; then try=$((try + 1)); sleep "${OPSX_DISPATCH_RETRY_SLEEP:-1}"; continue; fi
+        # pane 已壞時 pane read 會失敗，當成沒輸出，不讓診斷擋住錯誤回報
+        screen="$(herdr pane read "$pane" 2>/dev/null | tail -20)"
+        [ -n "${screen//[[:space:]]/}" ] || screen="pane 沒有任何輸出"
+        out="${out}
+新 pane 的 shell 超過 $(( (try - 1) * ${OPSX_DISPATCH_RETRY_SLEEP:-1} )) 秒沒有出現提示字元，可能是 shell 啟動卡住。常見原因：pyenv 鎖檔 ~/.pyenv/shims/.pyenv-shim 殘留（opsx init --check 會檢查）
+pane 畫面：
+${screen}" ;;
       *agent_name_taken*)
         # dispatch.json 沒記著（手動開的、或 stop 時 pane 沒關成）但 herdr 還有同名 agent：指出它在哪
         out="herdr 已經有叫 ${slug} 的 agent，dispatch.json 沒記：$(printf '%s' "$out" | grep -oE '(workspace_id|tab_id|pane_id|status)=[^ "]*' | tr '\n' ' ')。關掉那個 pane 再派" ;;

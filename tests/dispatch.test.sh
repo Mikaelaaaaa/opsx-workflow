@@ -92,6 +92,14 @@ assert_grep '^tab close w1:tB$' "$OPSX_FAKE_LOG"
 echo "$out" | grep -q 'agent_pane_busy' || fail "should print herdr error: $out"
 python3 -I -c 'import json,sys;assert "Agentory-CS/stuck-card" not in json.load(open(sys.argv[1]))' "$OPSX_STATE_DIR/dispatch.json"
 [ -f "$R/openspec/changes/stuck-card/decisions.tsv" ] && grep -q dispatched "$R/openspec/changes/stuck-card/decisions.tsv" && fail "must not record dispatched"
+# 一直 busy 的訊息要指出 shell 啟動卡住、常見原因、等了幾秒（5 次間隔 × 2 秒），並附 pane 畫面；假 sleep 讓測試不真的等
+mkdir -p "$FX/nosleep"; printf '#!/usr/bin/env bash\n' > "$FX/nosleep/sleep"; chmod +x "$FX/nosleep/sleep"
+echo 99 > "$OPSX_TEST_BUSY_LEFT"
+out="$(PATH="$FX/nosleep:$PATH" OPSX_DISPATCH_RETRY_SLEEP=2 OPSX_TEST_PANE_TEXT='pyenv: cannot rehash: couldn'"'"'t acquire lock' opsx dispatch stuck-card --agent claude --mode interactive --kind dev 2>&1)"; [ $? -ne 0 ] || fail "persistent busy must fail"
+for w in shell 提示字元 .pyenv-shim '10 秒' agent_pane_busy 'cannot rehash'; do echo "$out" | grep -qF -- "$w" || fail "busy 訊息缺「${w}」: $out"; done
+echo 99 > "$OPSX_TEST_BUSY_LEFT"
+out="$(opsx dispatch stuck-card --agent claude --mode interactive --kind dev 2>&1)"; [ $? -ne 0 ] || fail "persistent busy must fail"
+echo "$out" | grep -qF 'pane 沒有任何輸出' || fail "pane 空的要註明: $out"
 # 別的錯：不重試，一樣關 tab
 : > "$OPSX_FAKE_LOG"; echo 0 > "$OPSX_TEST_BUSY_LEFT"
 out="$(OPSX_TEST_START_FAIL=agent_kind_unsupported opsx dispatch stuck-card --agent claude --mode interactive --kind dev 2>&1)"; [ $? -ne 0 ] || fail "other error must fail"
