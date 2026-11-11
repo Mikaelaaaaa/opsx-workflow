@@ -573,6 +573,7 @@ function mergeCtl(c,cards){
 function submitMerge(c){
   const into=ui.mergeInto;
   if(!mergeCandidates(data.cards,c).some(t=>t.slug===into))return;
+  if(ui.busy){toast('上一個動作還在跑，輸入先留著，等一下再送',true);return;}
   ui.merge=null;ui.mergeInto='';
   act(`opsx merge-card ${c.slug} --into ${into} --repo ${repoTop(c)}`,()=>api.post('merge-card',mergeBody(c,into)));
 }
@@ -888,6 +889,7 @@ function submitNew(){
 /* 先 explore：互動模式派出，第一句由 dispatch 從 stage 推，收件卡一定是 /explore（board-inbox D5） */
 function exploreFirst(c){act(`opsx dispatch ${c.slug} --mode interactive --kind ${c.kind}`,()=>api.post('dispatch',{slug:c.slug,mode:'interactive',kind:c.kind,repo:repoTop(c)}),{key:key(c),kind:'dispatch'});}
 function submitDrop(id,text){
+  if(ui.busy){toast('上一個動作還在跑，輸入先留著，等一下再送',true);return;}
   ui.drop=null;ui.dropText='';
   if(id.startsWith('unfiled:')){const slug=id.slice(8);act(`opsx drop ${slug} -- ${text}`,()=>api.post('drop',{slug,text}));return;}
   const c=byKey(id);if(!c){render();return;}
@@ -897,6 +899,7 @@ const closeMerge=()=>{ui.merge=null;ui.mergeInto='';render();};
 function submitPriority(c){
   const level=$('.prio-level').value,reason=ui.prioText.trim();
   if(!reason)return;
+  if(ui.busy){toast('上一個動作還在跑，輸入先留著，等一下再送',true);return;}
   ui.prio=null;ui.prioText='';ui.prioLevel=null;
   act(`opsx priority ${c.slug} --set ${level} --reason ${reason}`,()=>api.post('priority',{repo:repoTop(c),slug:c.slug,level,reason}));
 }
@@ -937,6 +940,7 @@ function openDispatch(c){
 function closeDispatch(){dlgFor=null;$('#dialog').hidden=true;$('#scrim').hidden=$('#drawer').hidden;}
 function doDispatch(){
   const c=byKey(dlgFor);if(!c)return;
+  if(ui.busy){toast('上一個動作還在跑，輸入先留著，等一下再送',true);return;}
   const agent=$('#dialog input[name=ag]:checked').value,mode=$('#dialog input[name=md]:checked').value;
   const kb=$('#dialog .kinds:not(.models) button[aria-pressed=true]');const mb=$('#dialog .models button[aria-pressed=true]');
   const kind=kb?kb.dataset.kind:c.kind;const model=agent==='codex'?'gpt-5':(mb?mb.dataset.model:MODEL_BY_KIND[kind]);

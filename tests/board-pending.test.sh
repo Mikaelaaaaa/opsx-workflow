@@ -279,4 +279,38 @@ assert.ok(/class="note-row sending"[^]*先跑 lint[^]*送出中/.test(h), '暫�
 assert.ok(!/class="note-row sending"[^]*舊的/.test(h), '一般指示不是暫存樣式：' + h);
 assert.ok(!notesSection({...c, notes: [{...c.notes[1], sending: false}]}).includes('送出中'), '成功後不標送出中');
 JS
+
+# 忙碌時送出併進、捨棄、改等級、指派：不送、輸入全留著（跟貼上送出一樣先查 busy 再動輸入）
+node - "$OPSX_ROOT/herdr-board/web/index.html" <<'JS' || fail "忙碌時輸入留著"
+const fs = require('node:fs');
+const assert = require('node:assert');
+const html = fs.readFileSync(process.argv[2], 'utf8');
+const fn = name => { const a = html.indexOf(`function ${name}(`), b = html.indexOf('\n}', a);
+  if (a < 0) throw new Error(`index.html 找不到 function ${name}(`); return html.slice(a, b + 2); };
+const c = {repo: 'a', slug: 'x', kind: 'dev', path: '/code/a/openspec/changes/x'};
+const ui = {busy: true, merge: 'a/x', mergeInto: 'y', drop: 'a/x', dropText: '重複', prio: 'a/x', prioText: '比較急', prioLevel: 'P1'};
+const toasts = [], acts = [], closed = [];
+const env = {
+  ui, data: {cards: [c, {...c, slug: 'y'}]},
+  toast: (m, bad) => toasts.push([m, !!bad]),
+  act: label => acts.push(label),
+  api: {post: () => { throw new Error('忙碌時不該 POST'); }},
+  key: k => k.repo + '/' + k.slug, repoTop: () => '/code/a', byKey: () => c,
+  mergeCandidates: cards => cards.filter(t => t.slug !== 'x'), mergeBody: () => ({}), dispatchBody: () => ({}),
+  closeDispatch: () => closed.push('dispatch'), render: () => {},
+  MODEL_BY_KIND: {dev: 'claude-opus-5-5'},
+  $: sel => sel === '.prio-level' ? {value: 'P1'} : sel === '#dlg-note' ? {value: '先跑 lint'} : sel.includes('input') ? {value: 'claude'} : null,
+};
+const names = Object.keys(env);
+const src = ['submitMerge', 'submitDrop', 'submitPriority', 'doDispatch'].map(fn).join('\n') + ';let dlgFor="a/x";return {submitMerge, submitDrop, submitPriority, doDispatch};';
+const f = new Function(...names, src)(...names.map(k => env[k]));
+f.submitMerge(c); f.submitDrop('a/x', '重複'); f.submitPriority(c); f.doDispatch();
+assert.deepStrictEqual(acts, [], '忙碌時四個動作都不送：' + acts);
+assert.ok(ui.merge === 'a/x' && ui.mergeInto === 'y', '併進目標留著');
+assert.ok(ui.drop === 'a/x' && ui.dropText === '重複', '捨棄理由留著');
+assert.ok(ui.prio === 'a/x' && ui.prioText === '比較急' && ui.prioLevel === 'P1', '等級與理由留著');
+assert.deepStrictEqual(closed, [], '指派對話框沒關');
+assert.strictEqual(toasts.length, 4, '每個都有提示：' + JSON.stringify(toasts));
+assert.ok(toasts.every(([m, bad]) => bad && m === '上一個動作還在跑，輸入先留著，等一下再送'), JSON.stringify(toasts));
+JS
 echo ok
