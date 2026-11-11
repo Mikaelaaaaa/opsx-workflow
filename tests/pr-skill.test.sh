@@ -43,7 +43,7 @@ lines = prompt[0].strip().splitlines()
 want = ["repo: ", "range: <remote>/main...HEAD", "output: ", "Load "]
 if len(lines) != 4 or not all(l.strip().startswith(w) for l, w in zip(lines, want)):
     sys.exit("prompt：%r" % lines)
-if "openspec/changes/<slug>/logic-map.md" not in lines[2]:
+if lines[2].strip() != "output: <map path>":
     sys.exit("輸出路徑：%r" % lines[2])
 if "../logic-map/SKILL.md" not in lines[3]:
     sys.exit("skill 路徑：%r" % lines[3])
@@ -53,10 +53,15 @@ for k in 'spec' 'proposal' 'design' 'report' 'conversation' 'PR title or descrip
 done
 
 # --- 新開：GitHub 用 gh pr comment，GitLab 用 glab api POST，內文都從檔案讀 ---
-assert_fixed '`gh pr comment <n> --body-file openspec/changes/<slug>/logic-map.md`' "$STEP"
-assert_fixed '`glab api --method POST "projects/:id/merge_requests/<iid>/notes" --field body=@openspec/changes/<slug>/logic-map.md`' "$STEP"
+assert_fixed '`gh pr comment <n> --body-file <map path>`' "$STEP"
+assert_fixed '`glab api --method POST "projects/:id/merge_requests/<iid>/notes" --field body=@<map path>`' "$STEP"
 assert_fixed '#issuecomment-<id>' "$STEP"
 assert_fixed '#note_<id>' "$STEP"
+
+# --- R1.2 留言指令用絕對路徑：dispatch worktree 的 cwd 沒有 openspec/ ---
+assert_fixed '`<map path>` is the absolute path of `openspec/changes/<slug>/logic-map.md` in the checkout that holds `openspec/`' "$STEP"
+assert_not_fixed 'body-file openspec/' "$STEP"
+assert_not_fixed 'body=@openspec/' "$STEP"
 
 # --- report.md 的 ## 邏輯表 一行，重產時整行覆寫 ---
 assert_fixed '## 邏輯表' "$STEP"
@@ -67,18 +72,33 @@ assert_fixed 'overwrite the whole line' "$STEP"
 assert_fixed '產表失敗：<' "$STEP"
 assert_fixed 'does not stop /pr' "$STEP"
 
-# --- 超過上限不截斷（Scenario「表超過留言上限」）---
+# --- R1.1 每種失敗都保留已記的留言 URL，下一輪才編輯得到同一則 ---
+assert_fixed '`產表失敗：<reason> · 留言 <recorded url>`' "$STEP"
+assert_fixed '`留言失敗：<reason> · 留言 <recorded url>`' "$STEP"
+assert_fixed 'Every failure line keeps the comment URL already recorded' "$STEP"
+assert_fixed 'never build the map in this session' "$STEP"
+assert_fixed '產表失敗：無 Agent 工具' "$STEP"
+assert_fixed 'returns 404' "$STEP"
+assert_not_fixed 'go on to step 6' "$STEP"
+assert_fixed "go on to the caller's next step" "$STEP"
+
+# --- 超過上限不截斷（Scenario「表超過留言上限」）；一行說明寫進另一個檔，不蓋掉表 ---
 assert_fixed '65,536' "$STEP"
 assert_fixed '1,000,000' "$STEP"
 assert_fixed 'never truncate' "$STEP"
 assert_fixed '超過留言上限' "$STEP"
+assert_fixed '`wc -m < <map path>`' "$STEP"
+assert_fixed 'logic-map-comment.md' "$STEP"
 
 # --- 更新：GitHub 讀回比對後才 --edit-last，對不上發新的；GitLab PUT 同一則 ---
 assert_fixed '`gh pr view <n> --json comments`' "$STEP"
-assert_fixed '`gh pr comment <n> --edit-last --body-file openspec/changes/<slug>/logic-map.md`' "$STEP"
+assert_fixed '`gh pr comment <n> --edit-last --body-file <map path>`' "$STEP"
 assert_fixed 'post a new comment and replace the URL' "$STEP"
 assert_fixed 'never edit any other comment' "$STEP"
-assert_fixed '`glab api --method PUT "projects/:id/merge_requests/<iid>/notes/<note_id>" --field body=@openspec/changes/<slug>/logic-map.md`' "$STEP"
+assert_fixed '`glab api --method PUT "projects/:id/merge_requests/<iid>/notes/<note_id>" --field body=@<map path>`' "$STEP"
+
+# --- R1.3 `--edit-last` 動的是目前帳號：記的那則要是自己的，且之後沒有自己的留言 ---
+assert_fixed 'its `viewerDidAuthor` is true and no later comment has `viewerDidAuthor` true' "$STEP"
 assert_not_fixed 'gh api' "$STEP"
 
 # --- 每個 gh 呼叫單獨一個 Bash 指令 ---

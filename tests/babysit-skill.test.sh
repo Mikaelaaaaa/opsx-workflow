@@ -30,6 +30,11 @@ if not push < regen < reply:
     sys.exit("順序：push=%d regen=%d reply=%d" % (push, regen, reply))
 PY
 
+# --- R1.4 只跑 5c 的子步，出口回 babysit 回覆，不走 pr 步 6（它會再叫 babysit）；remote 照 pr 步 1 的規則 ---
+assert_fixed 'run sub-steps 1–6 of `../pr/SKILL.md` step 5c' "$STEP"
+assert_fixed 'come back here and reply to the threads; never run pr step 6' "$STEP"
+assert_fixed '`<remote>` is the primary remote by pr step 1'"'"'s rule' "$STEP"
+
 # --- 沒有 ## 邏輯表 時走新開 ---
 assert_fixed 'no `## 邏輯表` line' "$STEP"
 assert_fixed 'post a new comment' "$STEP"
