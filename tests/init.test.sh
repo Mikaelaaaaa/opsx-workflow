@@ -274,13 +274,28 @@ CLAUDE_CONFIG_DIR="$CCS" opsx init >/dev/null 2>&1 || fail "init R in cc-skills"
 mkdir -p "$R/.claude/skills/review"; printf -- '---\nname: review\n---\n' > "$R/.claude/skills/review/SKILL.md"
 outk="$(CLAUDE_CONFIG_DIR="$CCS" opsx init --check 2>&1)"; assert_eq "$?" 0 "專案層同名不改 rc：$outk"
 case "$outk" in *"$R/.claude/skills/review"*) ;; *) fail "repo 裡 --check 要警告專案層的 review：$outk" ;; esac
+# 同名且撞內建：不能同時說「會跑到這份」和「會跑到內建」；搬走的後果要講
+case "$outk" in *"與內建 /code-review 撞名"*) fail "已有同名 review 時不該再說會跑到內建：$outk" ;; esac
+case "$outk" in *"搬走後手打 /review 會跑到內建 /code-review，一律打 /opsx-workflow:review"*) ;; *) fail "同名且撞內建時要說搬走後的後果：$outk" ;; esac
 cd "$FX"
 outk="$(CLAUDE_CONFIG_DIR="$CCS" opsx init --check 2>&1)"
 case "$outk" in *"$R/.claude/skills/review"*) fail "repo 外不掃專案層：$outk" ;; esac
+# 去重：使用者層與專案層是同一個目錄時，同名警告只出一次
+cd "$R"
+CLAUDE_CONFIG_DIR="$R/.claude" opsx init --global >/dev/null 2>&1 || fail "global for repo-local config dir"
+outk="$(CLAUDE_CONFIG_DIR="$R/.claude" opsx init --check 2>&1)"
+assert_eq "$(grep -c 'skill 同名：' <<< "$outk")" 1 "同一個 skill 路徑只警告一次：$outk"
+cd "$FX"
+# settings 不一致（rc=1）又有同名 skill：rc 仍是 1，警告照出
+mkdir -p "$FX/cc7/skills/tdd"; printf '{"theme":"dark"}' > "$FX/cc7/settings.json"
+printf -- '---\nname: tdd\n---\n' > "$FX/cc7/skills/tdd/SKILL.md"
+outk="$(CLAUDE_CONFIG_DIR="$FX/cc7" opsx init --check 2>&1)"; assert_eq "$?" 1 "settings 不一致時 rc 要維持 1：$outk"
+case "$outk" in *"$FX/cc7/skills/tdd 跟 opsx 插件的 skills/tdd 同名"*) ;; *) fail "rc=1 時也要有同名警告：$outk" ;; esac
 
 # --- 插件 skill 名撞內建指令：查表，--check 與 --global 警告，不改 rc ---
 assert_eq "$( source "$OPSX_ROOT/bin/lib/common.sh"; source "$OPSX_ROOT/bin/lib/init.sh"; builtin_command_for review )" "code-review" "review 撞內建 code-review"
 assert_eq "$( source "$OPSX_ROOT/bin/lib/common.sh"; source "$OPSX_ROOT/bin/lib/init.sh"; builtin_command_for explore )" "" "表外的名字回空"
+outk="$(CLAUDE_CONFIG_DIR="$CCS" opsx init --check 2>&1)"
 case "$outk" in *"插件 skill review 與內建 /code-review 撞名"*"/opsx-workflow:review"*) ;; *) fail "--check 要警告 review 撞 /code-review 並說用 /opsx-workflow:review：$outk" ;; esac
 case "$outk" in *"插件 skill explore 與內建"*) fail "表外的 explore 不該警告：$outk" ;; esac
 outk="$(CLAUDE_CONFIG_DIR="$CCS" opsx init --global 2>&1)"; assert_eq "$?" 0 "內建撞名不讓 --global 失敗：$outk"
