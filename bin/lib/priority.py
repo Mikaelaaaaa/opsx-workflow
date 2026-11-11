@@ -272,15 +272,16 @@ def set_override(inbox: str, level: str, reason: str) -> None:
     reason = " ".join(reason.split())
     if not reason:
         raise PriorityError("改等級要寫理由")
-    lines = read_text(inbox).split("\n")
-    if not lines or lines[0].strip() != "---":
-        raise PriorityError("%s 沒有 frontmatter" % inbox)
-    end = next((i for i in range(1, len(lines)) if lines[i].strip() == "---"), None)
-    if end is None:
-        raise PriorityError("%s 的 frontmatter 沒有結尾的 ---" % inbox)
-    body = [l for l in lines[1:end] if not re.match(r"^priority(_reason)?:", l)]
-    new = [lines[0]] + body + ["priority: " + level, "priority_reason: " + reason] + lines[end:]
-    safefile.write_atomic(inbox, "\n".join(new))
+    with safefile.CardLock(os.path.dirname(inbox)):
+        lines = read_text(inbox).split("\n")
+        if not lines or lines[0].strip() != "---":
+            raise PriorityError("%s 沒有 frontmatter" % inbox)
+        end = next((i for i in range(1, len(lines)) if lines[i].strip() == "---"), None)
+        if end is None:
+            raise PriorityError("%s 的 frontmatter 沒有結尾的 ---" % inbox)
+        body = [l for l in lines[1:end] if not re.match(r"^priority(_reason)?:", l)]
+        new = [lines[0]] + body + ["priority: " + level, "priority_reason: " + reason] + lines[end:]
+        safefile.write_atomic(inbox, "\n".join(new))
 
 
 def main() -> None:

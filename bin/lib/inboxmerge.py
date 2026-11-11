@@ -14,7 +14,6 @@
 """
 from __future__ import annotations
 
-import fcntl
 import os
 import re
 import sys
@@ -32,20 +31,6 @@ DATE = re.compile(r"^\d{4}-\d{2}-\d{2}")
 
 class SectionNotFound(LookupError):
     pass
-
-
-class CardLock:
-    def __init__(self, card_dir: str):
-        self.card_dir = card_dir
-        self.fd = -1
-
-    def __enter__(self) -> "CardLock":
-        self.fd = os.open(self.card_dir, os.O_RDONLY)
-        fcntl.flock(self.fd, fcntl.LOCK_EX)
-        return self
-
-    def __exit__(self, *exc) -> None:
-        os.close(self.fd)
 
 
 def merged_ids(text: str) -> set:
@@ -79,7 +64,7 @@ def section(mid: str, when: str, source: str, kind: str, evidence: str, area: st
 
 def append(card_dir: str, base: str, when: str, source: str, kind: str, evidence: str, area: str, text: str) -> str:
     inbox = os.path.join(card_dir, "inbox.md")
-    with CardLock(card_dir):
+    with safefile.CardLock(card_dir):
         with open(inbox, encoding="utf-8") as f:
             cur = f.read()
         mid = free_id(base, merged_ids(cur))
@@ -139,7 +124,7 @@ def card_body(fields: dict) -> str:
 
 
 def card(card_dir: str, mid: str) -> str:
-    with CardLock(card_dir):
+    with safefile.CardLock(card_dir):
         with open(os.path.join(card_dir, "inbox.md"), encoding="utf-8") as f:
             cur = f.read()
     start, end = find(cur, mid)
@@ -148,7 +133,7 @@ def card(card_dir: str, mid: str) -> str:
 
 def remove(card_dir: str, mid: str) -> None:
     inbox = os.path.join(card_dir, "inbox.md")
-    with CardLock(card_dir):
+    with safefile.CardLock(card_dir):
         with open(inbox, encoding="utf-8") as f:
             cur = f.read()
         start, end = find(cur, mid)

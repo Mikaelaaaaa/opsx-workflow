@@ -233,6 +233,32 @@ cmp -s "$INB" "$FX/inbox.before" || fail "拒絕時 inbox.md 不能變"
 cmp -s "$R/openspec/changes/later/decisions.tsv" "$FX/dec.before" || fail "拒絕時 decisions.tsv 不能變"
 
 opsx priority later --set P2 --reason "客戶延期" --repo "$R" > /dev/null || fail "第二次 --set"
+
+# --- inbox-write-lock：別人持卡目錄鎖時 --set 等到放鎖才寫；並行的併入不被蓋掉 ---
+PYBIN="$(cat "$OPSX_STATE_DIR/python")"; LIBDIR="$OPSX_ROOT/bin/lib"
+rm -f "$FX/held"
+"$PYBIN" -I -c '
+import sys, time
+sys.path.insert(0, sys.argv[1]); import safefile
+with safefile.CardLock(sys.argv[2]):
+    open(sys.argv[3], "w").close()
+    time.sleep(1.5)
+' "$LIBDIR" "$R/openspec/changes/later" "$FX/held" &
+for _ in $(seq 100); do [ -e "$FX/held" ] && break; sleep 0.05; done
+[ -e "$FX/held" ] || fail "持鎖的 process 沒有拿到鎖"
+opsx priority later --set P1 --reason "等鎖" --repo "$R" > /dev/null 2>&1 &
+sleep 0.5
+assert_grep '^priority: P2$' "$INB"
+wait
+assert_grep '^priority: P1$' "$INB"
+for i in 1 2 3 4 5 6; do
+  opsx priority later --set P0 --reason "並行$i" --repo "$R" > /dev/null 2>&1 &
+  "$PYBIN" -I "$LIBDIR/inboxmerge.py" append "$R/openspec/changes/later" "m$i" "2026-11-11T10:0$i:00+08:00" "agent:t" planned "" hooks "並行併入$i" > /dev/null &
+done
+wait
+assert_eq "$(grep -c '^## 併入：' "$INB")" 6 "並行後 6 段併入都要在"
+assert_grep '^priority: P0$' "$INB"
+opsx priority later --set P2 --reason "客戶延期" --repo "$R" > /dev/null || fail "還原 P2"
 assert_eq "$(grep -c '^priority:' "$INB")" 1 "只留一行 priority:"
 assert_eq "$(grep -c '^priority_reason:' "$INB")" 1 "只留一行 priority_reason:"
 assert_grep '^priority: P2$' "$INB"
