@@ -429,6 +429,8 @@ features:
         changes:
           - name: m1
             status: pending
+  - name: y
+    prs:
       - name: m2
         branch: fix/m2/mikaela
         status: pending
@@ -481,6 +483,31 @@ assert_eq "$got" "$(printf 'child\tm1\tfix/m1/mikaela\tdev')" "list 寫法"
 printf '{"split/c":{"mode":"autopilot","pane":"w5:pC","worktree":"%s"},"split/m1":{"mode":"autopilot"},"split/m2":{"mode":"autopilot"}}' "$R6" > "$J"
 out="$(python3 -I "$OPSX_ROOT/bin/lib/chain.py" children "$R6" split c "$J")"
 echo "$out" | grep -q $'^skip\t' || fail "主 change 都在做要 skip: $out"
+
+# m1、m2 拆進同一個沒有 depends-on 的 feature x：x 由 session 代管，原卡不單卡續接，交給 coordinate 開 session
+cat > "$R6/openspec/workplan.yaml" <<'EOF'
+features:
+  - name: x
+    prs:
+      - name: m1
+        branch: fix/m1/mikaela
+        status: pending
+        depends-on: []
+        changes:
+          - name: m1
+            status: pending
+      - name: m2
+        branch: fix/m2/mikaela
+        status: pending
+        depends-on: []
+        changes:
+          - name: m2
+            status: pending
+EOF
+printf '{"split/c":{"mode":"autopilot","pane":"w5:pC","worktree":"%s"}}' "$R6" > "$J"
+out="$(python3 -I "$OPSX_ROOT/bin/lib/chain.py" children "$R6" split c "$J")"
+echo "$out" | grep -q $'^skip\t' || fail "session 代管的 feature 不單卡續接要 skip: $out"
+echo "$out" | grep -q $'^child\t' && fail "session 代管的 feature 不印 child: $out"
 cd "$R"
 
 # --- 多 PR 根 feature 由 session 代管：單卡 m1 合併後，chain 不接 r2，照接單 PR 根 feature 的 s1 ---

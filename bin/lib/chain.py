@@ -16,6 +16,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import jsonfile  # noqa: E402
 import priority  # noqa: E402
 
+AGENT_NAME = re.compile(r"^[a-z][a-z0-9_-]{0,31}$")
+
 
 def _scalar(v: str):
     v = v.strip()
@@ -100,8 +102,11 @@ def card_of(top: str, pr: dict, todo: list) -> str:
 
 
 def session_managed(feature: dict) -> bool:
-    """feature 由 session 代管：有 depends-on，或 prs 有 2 個以上。已合的 PR 也算，代管方式才不會做到一半切換。"""
-    return bool(feature.get("depends-on")) or len(feature.get("prs") or []) >= 2
+    """feature 由 session 代管：有 depends-on，或 prs 有 2 個以上且名稱能當 herdr agent 名。已合的 PR 也算，代管方式才不會做到一半切換。
+    名稱不合法的多 PR feature 開不了 session，照單卡派。"""
+    if feature.get("depends-on"):
+        return True
+    return len(feature.get("prs") or []) >= 2 and bool(AGENT_NAME.match(feature.get("name") or ""))
 
 
 def children(top: str, repo: str, parent: str, dispatch_path: str) -> list:
@@ -125,7 +130,11 @@ def children(top: str, repo: str, parent: str, dispatch_path: str) -> list:
     if mine is None:
         split = split_into(top, parent)
         if split:
-            return split_next(top, repo, prs, split, dispatch)
+            managed = {pr.get("name") for f in features if session_managed(f) for pr in f.get("prs") or []}
+            single = [s for s in split if s not in managed]
+            if not single:
+                return [("skip", "split_into（%s）都由 session 代管，交給 coordinate 開 session" % "、".join(split))]
+            return split_next(top, repo, prs, single, dispatch)
         return [("skip", "workplan 裡沒有 %s" % parent)]
     session = me.get("feature")
     gated = {f.get("name") for f in features if session_managed(f)}

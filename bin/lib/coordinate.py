@@ -37,7 +37,7 @@ ARCHIVE_GRACE_MINUTES = 30
 COORDINATOR = "opsx-coordinator"
 # herdr 收不下這則 prompt 的兩種情形：沒有這個 agent、或它卡在對話框。兩種都改發桌面通知，人才收得到
 COORDINATOR_UNAVAILABLE = ("agent_not_found", "agent_blocked")
-AGENT_NAME = re.compile(r"^[a-z][a-z0-9_-]{0,31}$")
+AGENT_NAME = chain.AGENT_NAME
 VERIFY_WORDS = ("真機", "實測", "瀏覽器", "herdr 驗", "resume", "真的 claude", "真 herdr", "量測")
 GRANT_WORDS = ("授權", "開 PR", "開 / 改 MR", "gh pr create", "push", "推到 origin", "rebase")
 # 建議或選項裡有這些字，代表要人動手；不替人承諾
@@ -639,7 +639,8 @@ class Round:
                 continue   # 人在板上停掉的
             if not os.path.isfile(os.path.join(c["path"], "tasks.md")) or c["mr"]:
                 continue
-            owner = self.session_feature_of(top, c["slug"])
+            # parked 的卡是這裡自己停下的，重派是接回原本那個 pane 的工作；交給 session 的話，它的 worktree 會擋住 session
+            owner = None if parked else self.session_feature_of(top, c["slug"])
             if owner:
                 self.log("-- %s 屬於 feature %s，由那個 session 做，不單獨派" % (key, owner))
                 continue
@@ -697,7 +698,11 @@ class Round:
         for repo, top in sorted(repo_paths.items()):
             prs = self.workplan(top)
             status = {p.get("name"): p.get("status") for p in prs}
-            for f in session_features(read_features(os.path.join(top, "openspec", "workplan.yaml"))):
+            features = read_features(os.path.join(top, "openspec", "workplan.yaml"))
+            for f in features:
+                if not chain.session_managed(f) and len(f.get("prs") or []) >= 2:
+                    self.log("?? %s 的 feature %s 不是合法的 agent 名，開不了 session，它的卡照單卡派" % (repo, f.get("name")))
+            for f in session_features(features):
                 name = f.get("name")
                 if all(p.get("status") == "merged" for p in f.get("prs") or []):
                     continue
@@ -725,11 +730,15 @@ class Round:
                     continue
                 # 單卡派過的卡（上線前派的、人手動派的）只要 worktree 還在就佔著它的分支，dispatch --feature 會在 worktree add 撞上
                 single = [p[0] for p in plan if self.holds_branch(repo, p[0], name)]
-                if single:
-                    self.log("-- %s 的 feature %s 不開 session：%s 已經單卡派著（或停了但 worktree 還在）" % (repo, name, "、".join(single)))
+                live = [s for s in single if self.dispatch_file["%s/%s" % (repo, s)].get("mode") != "stopped"]
+                if live:
+                    self.log("-- %s 的 feature %s 不開 session：%s 已經單卡派著" % (repo, name, "、".join(live)))
                     continue
+                # 停了的單卡不會自己合併，擋整個 feature 就永遠不開；只把它從 --only 拿掉，它的分支留給它自己
+                if single:
+                    self.log("-- %s 的 feature %s 不交 %s：單卡派過、停了但 worktree 還在" % (repo, name, "、".join(single)))
                 # 人停的成員 dispatch --feature 會跳過，等級也不算它
-                slugs = [p[0] for p in plan if not chain.human_stopped(self.dispatch_file.get("%s/%s" % (repo, p[0])), name)]
+                slugs = [p[0] for p in plan if p[0] not in single and not chain.human_stopped(self.dispatch_file.get("%s/%s" % (repo, p[0])), name)]
                 levels = [(s, self.level(top, s)) for s in slugs]
                 held = ["%s %s" % (s, got["error"] if "error" in got else got["reason"]) for s, got in levels if "error" in got or got["level"] == "P2"]
                 ready = [(priority.LEVELS.index(got["level"]), i, s) for i, (s, got) in enumerate(levels) if "error" not in got and got["level"] != "P2"]

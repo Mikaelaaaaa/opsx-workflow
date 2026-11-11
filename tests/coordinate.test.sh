@@ -791,12 +791,12 @@ assert_not_grep "^opsx dispatch --feature g" "$OPSX_FAKE_LOG"
 grep '已經單卡派' "$LOG" | grep 'feature g' | grep -q 'm3' || fail "要記 m3 已經單卡派：$(cat "$LOG")"
 rm -f "$MEMO"; printf '{}' > "$DISP"
 
-# m3 單卡派過又停了，worktree 還在（分支還被它 checkout）：照樣不開 session
+# m3 單卡派過又停了，worktree 還在（分支還被它 checkout）：m3 不交給 session；g 沒有別張能開工，不開
 mkdir -p "$R/.claude/worktrees/m3"
 printf '{"demo/m3":{"mode":"stopped","agent":"claude","pane":"w1:p3","drive_pid":null,"branch":"feat/m3/u","worktree":"%s"}}' "$R/.claude/worktrees/m3" > "$DISP"
 round || fail "rc: $(cat "$FX/out")"
 assert_not_grep "^opsx dispatch --feature g" "$OPSX_FAKE_LOG"
-grep '已經單卡派' "$LOG" | grep 'feature g' | grep -q 'm3' || fail "停了但 worktree 還在也要記：$(cat "$LOG")"
+grep 'worktree 還在' "$LOG" | grep 'feature g' | grep -q 'm3' || fail "停了但 worktree 還在也要記：$(cat "$LOG")"
 # worktree 收掉了：不再佔分支，照開
 rmdir "$R/.claude/worktrees/m3"
 round || fail "rc: $(cat "$FX/out")"
@@ -928,6 +928,50 @@ cards '[{"slug":"r2"}]'
 round || fail "rc: $(cat "$FX/out")"
 assert_grep "^opsx dispatch --feature r --only r2 " "$OPSX_FAKE_LOG"
 assert_not_grep "^opsx dispatch r2 " "$OPSX_FAKE_LOG"
+rm -f "$MEMO"
+
+# r1 單卡派過、停了但 worktree 還在：只把 r1 從 --only 拿掉，r 照開 session，不讓整個 feature 卡住
+root_wp pending
+mkdir -p "$R/.claude/worktrees/r1"
+printf '{"demo/r1":{"mode":"stopped","agent":"claude","pane":"w1:p3","drive_pid":null,"branch":"feat/r1/u","worktree":"%s"}}' "$R/.claude/worktrees/r1" > "$DISP"
+cards '[{"slug":"r2"}]'
+round || fail "rc: $(cat "$FX/out")"
+assert_grep "^opsx dispatch --feature r --only r2 " "$OPSX_FAKE_LOG"
+grep 'feature r' "$LOG" | grep 'r1' | grep -q 'worktree 還在' || fail "要記 r1 停了但 worktree 還在：$(cat "$LOG")"
+rm -f "$MEMO"
+
+# r1 是 coordinator 自己 parked 的（gate 已答、條目 stopped、worktree 在）：照舊單卡重派，不因 r 由 session 代管就永遠沒人派
+printf '{"_parked":{"demo/r1":{"at":"2026-11-10T10:00:00+08:00","gate":"g9","merged":[],"answered":true}},"_redispatched":{}}' > "$MEMO"
+cards '[{"slug":"r1","section":"待處理"},{"slug":"r2"}]'
+round || fail "rc: $(cat "$FX/out")"
+assert_grep "^opsx dispatch r1 --agent claude" "$OPSX_FAKE_LOG"
+rmdir "$R/.claude/worktrees/r1"; rm -f "$MEMO"; printf '{}' > "$DISP"
+
+# feature 名稱不是合法的 agent 名、底下 2 個 PR：不算 session 代管，照單卡派，log 記 ?? 與名稱
+cat > "$R/openspec/workplan.yaml" <<'EOF'
+features:
+  - name: Bad_X
+    prs:
+      - name: r1
+        branch: feat/r1/u
+        status: pending
+        depends-on: []
+        changes:
+          - name: r1
+            status: pending
+      - name: r2
+        branch: feat/r2/u
+        status: pending
+        depends-on: []
+        changes:
+          - name: r2
+            status: pending
+EOF
+cards '[{"slug":"r1"},{"slug":"r2"}]'
+round || fail "rc: $(cat "$FX/out")"
+assert_grep "^opsx dispatch r1 --agent claude" "$OPSX_FAKE_LOG"
+assert_grep "^opsx dispatch r2 --agent claude" "$OPSX_FAKE_LOG"
+grep '??' "$LOG" | grep -q 'Bad_X' || fail "不合法的 feature 名要記 ??：$(cat "$LOG")"
 rm -rf "$R/openspec/changes/r1" "$R/openspec/changes/r2" "$R/openspec/changes/s1"; rm -f "$MEMO"
 
 cp "$WP0" "$R/openspec/workplan.yaml"
