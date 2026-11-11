@@ -81,6 +81,13 @@ printf '\n## 併入：2026-11-10T09:00:00+08:00 agent:bar\n\n- id: agent-2026111
 agent_new --kind-of-work planned --repo "$E" -- "bin/y.sh 又錯"; merged_into x 1
 agent_new --kind-of-work planned --repo "$E" -- "bin/x.sh 再錯"; merged_into x 1
 
+# --- 目標卡的路徑只在 frontmatter evidence（opsx new --evidence 寫的位置）也算 ---
+reset
+agent_new --kind-of-work planned --evidence "bin/x.sh:7 紅" --repo "$E" -- 第一張沒寫路徑; first="$(cat "$OUT")"
+case "$first" in agent-*) ;; *) fail "第一張要建殼：$first $(cat "$ERR")" ;; esac
+assert_grep '^evidence: bin/x.sh:7 紅$' "$C/$first/inbox.md"
+agent_new --kind-of-work planned --repo "$E" -- "bin/x.sh:9 又紅"; merged_into "$first" 1
+
 # --- 共同檔案多的優先 ---
 reset; card a 'bin/x.sh'; card b 'bin/x.sh bin/y.sh'
 agent_new --kind-of-work planned --repo "$E" -- "bin/x.sh bin/y.sh 都錯"; merged_into b 2

@@ -48,9 +48,17 @@ def files_in(top: str, text: str) -> set:
 
 
 def card_text(inbox: str) -> str:
-    """卡 inbox.md 裡會拿來比對的段：一句話、證據、每段併入（含它的一句話與 - evidence:）。"""
-    keep, out = False, []
-    for line in inbox.split("\n"):
+    """卡 inbox.md 裡會拿來比對的段：frontmatter 的 evidence（opsx new --evidence 寫在這）、一句話、證據、每段併入（含它的一句話與 - evidence:）。"""
+    lines = inbox.split("\n")
+    keep, out, start = False, [], 0
+    if lines and lines[0].startswith("---"):
+        for i, line in enumerate(lines[1:], 1):
+            if line.startswith("---"):
+                start = i + 1
+                break
+            if line.startswith("evidence:"):
+                out.append(line[len("evidence:"):])
+    for line in lines[start:]:
         m = HEAD.match(line)
         if m:
             keep = bool(SCANNED.match(m.group(1)))
