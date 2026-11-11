@@ -152,7 +152,7 @@ function mk() {
   const live = {pending: [], seq: 0, rs: REFRESH_IDLE}, ui = {busy: false}, log = [], gets = [];
   const renv = {live, collect: () => { const d = deferred(); gets.push(d); return d.p; },
     show: (j, force) => log.push(['show', force]), fail: e => log.push(['fail', e.message]), schedule: () => log.push(['schedule'])};
-  const aenv = {live, ui, render: () => log.push(['render']), toast: (m, bad) => log.push(['toast', !!bad]), refresh: f => runRefresh(renv, f)};
+  const aenv = {live, ui, render: () => log.push(['render']), toast: (m, bad) => log.push(['toast', !!bad, m]), refresh: f => runRefresh(renv, f)};
   return {live, ui, log, gets, renv, aenv};
 }
 const P = {key: 'r/x', kind: 'answer', gate: 'g1'};
@@ -196,12 +196,22 @@ const states = R => R.live.pending.map(e => e.state);
   assert.strictEqual(R.gets.length, 0, '失敗不打 collect');
   assert.strictEqual(R.ui.busy, false);
 
-  // busy 時第二個動作不加項目（ui.busy 規則不變）
+  // busy 時第二個動作不送出、不加送出中，toast 提示（specs/board-web「忙碌時的第二個動作有提示」）
   R = mk(); post = deferred();
   const a4 = runAct(R.aenv, 'x', () => post.p, P);
-  await runAct(R.aenv, 'y', () => Promise.resolve({ok: true}), {...P, key: 'r/y'});
+  let yPosts = 0;
+  const yPost = () => { yPosts++; return Promise.resolve({ok: true}); };
+  R.log.length = 0;
+  await runAct(R.aenv, 'y', yPost, {...P, key: 'r/y'});
+  assert.strictEqual(yPosts, 0, 'busy 時不送第二個 POST');
   assert.deepStrictEqual(R.live.pending.map(e => e.key), ['r/x'], 'busy 時不加第二筆');
+  assert.deepStrictEqual(R.log, [['toast', true, '上一個動作還在跑，等一下再按']], 'busy 時只 toast 提示：' + JSON.stringify(R.log));
   post.res({ok: true}); await tick(); R.gets[0].res({}); await a4;
+  // 上一個結束後照常送出
+  const a4b = runAct(R.aenv, 'y', yPost, {...P, key: 'r/y'});
+  await tick();
+  assert.strictEqual(yPosts, 1, '上一個結束後 POST 送出');
+  R.gets[1].res({}); await a4b;
 
   // POST 成功之後重畫出錯：不回滾、不報失敗、busy 放開
   R = mk(); post = deferred();
