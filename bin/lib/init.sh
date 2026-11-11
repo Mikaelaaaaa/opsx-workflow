@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # opsx init：repo 層（在 repo 根目錄跑）與 --global（裝一次）。要求檔 §3.6「CLI helper」。
-# 重跑一律 no-op。所有寫入前先檢查，已有就印「已有」。
+# 重跑冪等：設定與登記已有就印「已有」不動；openspec/schemas/opsx 的範本與 specs 區塊每次都覆寫成插件版。
 
 opsx_init() {
   case "${1:-}" in
@@ -191,7 +191,8 @@ refuse_broad_writable() { # <repo 主 checkout 根>
   esac
 }
 
-# opsx init --check：只讀。使用者層 settings 缺標準設定的項目就逐項印出、exit 1；在 repo 裡再看該 repo 是否在可寫目錄、有沒有信任
+# opsx init --check：只讀。使用者層 settings 缺標準設定的項目就逐項印出、exit 1；在 repo 裡再看該 repo 是否在可寫目錄、有沒有信任，
+# 裝了 opsx schema 的 repo 再比 spec 範本與 specs 區塊是不是插件版
 init_check() {
   local file out rc=0 top args=()
   file="$(claude_settings_file)"
@@ -211,7 +212,20 @@ init_check() {
     rc=1
   fi
   [ -z "$top" ] || warn_untrusted "$top"
-  [ "$rc" = 0 ]
+  local dst="$top/openspec/schemas/opsx" overlay="$OPSX_ROOT/schemas/opsx" spec_rc=0 block
+  if [ -n "$top" ] && [ -d "$dst" ]; then
+    cmp -s "$dst/templates/spec.md" "$overlay/templates/spec.md" \
+      || { say "init --check: $dst/templates/spec.md 的 spec 範本與插件版不同"; spec_rc=1; }
+    if [ ! -f "$dst/schema.yaml" ]; then
+      say "init --check: $dst/schema.yaml 不在"; spec_rc=1
+    elif ! block="$(specs_block "$dst/schema.yaml" 2>&1)"; then
+      say "init --check: $dst/schema.yaml 讀不到 specs 區塊（${block}）"; spec_rc=1
+    elif [ "$block" != "$(cat "$overlay/artifacts-specs.yaml")" ]; then
+      say "init --check: $dst/schema.yaml 的 specs instruction 與插件版不同"; spec_rc=1
+    fi
+    [ "$spec_rc" = 0 ] || say "init --check: 在 $top 跑 opsx init 換成插件版"
+  fi
+  [ "$rc" = 0 ] && [ "$spec_rc" = 0 ]
 }
 
 # 兩支 launchd job：每天 09:00 跑 opsx sync（board-inbox），每 5 分鐘跑一輪 opsx coordinate（opsx-coordinate）。
@@ -340,18 +354,52 @@ init_repo() {
   register_workspace "$name"
 }
 
+# fork 與 head 插入只做一次；範本與 specs 區塊每次都用插件版覆寫，插件更新後重跑 init 就會帶進 repo
 install_schema() { # <top>
   local top="$1" dst="$1/openspec/schemas/opsx" overlay="$OPSX_ROOT/schemas/opsx"
   if [ -f "$dst/schema.yaml" ] && grep -q '^  - id: grill' "$dst/schema.yaml"; then
-    say "init: schema opsx 已裝"; return
+    say "init: schema opsx 已裝"
+  else
+    if [ ! -f "$dst/schema.yaml" ]; then
+      ( cd "$top" && openspec schema fork spec-driven opsx >/dev/null )
+    fi
+    patch_schema "$dst/schema.yaml" "$overlay/artifacts-head.yaml"
+    say "init: schema opsx 裝好（fork spec-driven + inbox / explore / grill）"
   fi
-  if [ ! -f "$dst/schema.yaml" ]; then
-    ( cd "$top" && openspec schema fork spec-driven opsx >/dev/null )
+  # openspec/ 不進 git，覆寫前留一份；換區塊或驗證失敗就還原，已裝好的 repo 不會停在壞掉的 schema
+  local bak; bak="$(mktemp -d "${TMPDIR:-/tmp}/opsx-schema.XXXXXX")"
+  cp -R "$dst/templates" "$dst/schema.yaml" "$bak/"
+  if ! refresh_schema "$top" "$dst" "$overlay"; then
+    rm -rf "$dst/templates"; cp -R "$bak/templates" "$dst/templates"; cp "$bak/schema.yaml" "$dst/schema.yaml"
+    rm -rf "$bak"
+    die "init: 把 specs 區塊換成 $overlay/artifacts-specs.yaml 之後 schema opsx 驗證失敗（上面是原因），$dst/schema.yaml 與 templates/ 已還原"
   fi
-  patch_schema "$dst/schema.yaml" "$overlay/artifacts-head.yaml"
-  cp "$overlay/templates/"*.md "$dst/templates/"
-  ( cd "$top" && openspec schema validate opsx >/dev/null ) || die "schema opsx 裝完驗證失敗：$dst/schema.yaml"
-  say "init: schema opsx 裝好（fork spec-driven + inbox / explore / grill）"
+  rm -rf "$bak"
+  say "init: spec 範本與 specs instruction 更新為插件版"
+}
+
+refresh_schema() { # <top> <dst> <overlay>
+  cp "$3/templates/"*.md "$2/templates/" \
+    && specs_block "$2/schema.yaml" "$3/artifacts-specs.yaml" \
+    && ( cd "$1" && openspec schema validate opsx >/dev/null )
+}
+
+# schema.yaml 的 specs 區塊：從 "  - id: specs" 起，連續縮排 4 格以上或空白的行，不含結尾的空行；
+# 下一個 artifact 或任何頂層 key（例如 apply:）都在區塊外。
+# 只給 <schema.yaml> 就印出區塊；多給 <new> 就把區塊換成那個檔的內容，寫 tmp 再換名。找不到區塊就失敗並點名檔案。
+specs_block() { # <schema.yaml> [<new>]
+  "$OPSX_PY" -I - "$@" <<'PY'
+import os, re, sys
+p = sys.argv[1]
+s = open(p, encoding='utf-8').read()
+m = re.search(r'^  - id: specs\n(?:(?:    .*)?\n)*', s, re.M)
+if not m: sys.exit(f"schema.yaml 沒有 '  - id: specs'：{p}")
+end = m.start() + len(m.group(0).rstrip('\n')) + 1
+if len(sys.argv) == 2: sys.stdout.write(s[m.start():end]); sys.exit()
+new = open(sys.argv[2], encoding='utf-8').read()
+open(p + '.tmp', 'w', encoding='utf-8').write(s[:m.start()] + new + s[end:])
+os.replace(p + '.tmp', p)
+PY
 }
 
 # 在 fork 出來的 schema.yaml 的 artifacts: 後面插入我們的三個 artifact；proposal 改成 requires explore。
