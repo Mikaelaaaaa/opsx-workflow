@@ -66,6 +66,10 @@ Count tasks marked with `- [ ]` (incomplete) vs `- [x]` (complete).
 
 **If no tasks file exists:** this is a card being closed without being built (declined at explore or grill, or a duplicate). Before moving it, make sure `explore.md`'s 不做 section says **why** in a paragraph a stranger can follow in six months (what it would take, why that does not fit, what a requester should do instead), and add `outcome: declined` to `.openspec.yaml`. A declined card with no reason is re-litigated the next time someone pastes the same request; the archive is the memory that stops that, and 收件 greps it.
 
+### 3b. Reflect on a long card
+
+A card is long when `tasks.md` has an `## R1.` review group, meaning review sent work back at least once. For a long card, `Read ../reflect/SKILL.md` and follow it: three reviewers and a synthesizer sort what went wrong into Accepted, Rejected and Backlog. Nothing in opsx's own skills changes until the user approves an Accepted item; each approved change goes through `/opsx-workflow:propose` as its own card. Do not wait for that approval here, so skip step 5 of that skill: file each Accepted item as an inbox card (`opsx new --kind-of-work planned -- "<item>"`; a card an agent opens has to carry its kind), change no skill, and go on to step 4. A card without an R group skips this step.
+
 ### 4. Assess delta spec sync state
 
 Check for delta specs at `openspec/changes/<name>/specs/`. If none exist, proceed without sync prompt.

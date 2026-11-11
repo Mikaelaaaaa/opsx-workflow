@@ -590,8 +590,8 @@ opsx-workflow/
 | 節點 | opsx 現有（不動） | 掛進去的擴充步驟 | 來源 |
 |---|---|---|---|
 | **收** | — | `openspec new change <slug> --schema opsx` + 寫 inbox.md（一句話 / agent 發現含證據 / GitLab issue 內文） | — |
-| **explore** | 讀檔、查 codebase、ASCII 圖、術語對 CONTEXT.md（不寫 code） | 固定步驟表：① 讀 inbox.md ② `how` 受影響子系統 ③ `blast-radius` 會動到誰 ④ `why` 只在要改結構時 ⑤ 有「跑了才知道」的問題 → `prototype` ⑥ 寫 explore.md：影響範圍、相關檔、實驗結果、未確定的。小事各步 `skip: 原因`，節點不跳過 | pstack `how`、`blast-radius`、`why`、playbook `prototype` |
-| **grill**（閘門，非節點） | 一題一題、AskUserQuestion | ① 讀 explore.md 的待決段，空 → 回「沒有待決」停 ② 每題附推薦答案 ③ 碰到查 code / 跑一次能答的題 → 退回 explore 補，不問人也不自己查 ④ 輸出 D1…Dn 進 grill.md ⑤ 總結過 unslop | Non-negotiables 的分類規則、grill-with-docs、`unslop` |
+| **explore** | 讀檔、查 codebase、ASCII 圖、術語對 CONTEXT.md（不寫 code） | 固定步驟表（九步，名稱與順序見下方 explore 詳表）：① 讀卡 ② `how` 受影響子系統 ③ 影響範圍（`blast-radius`）會動到誰 ④ `why` 只在要改結構時 ⑤ 有「跑了才知道」的問題 → `prototype` ⑥ 查資料 ⑦ 對照 code ⑧ 待決 ⑨ 過 `unslop` 寫成 explore.md。小事各步 `skip: 原因`，節點不跳過 | pstack `how`、`blast-radius`、`why`、`unslop`、playbook `prototype` |
+| **grill**（閘門，非節點） | 一題一題、AskUserQuestion | ① 讀 explore.md 的待決段，空 → 回「沒有待決」停 ② 每題附推薦答案 ③ 碰到查 code / 跑一次能答的題 → 退回 explore 補，不問人也不自己查 ④ 輸出 D1…Dn 進 grill.md ⑤ 總結過 technical-writing → unslop | Non-negotiables 的分類規則、grill-with-docs、`technical-writing`、`unslop` |
 | **propose** | proposal / specs / design / tasks（殼在「收」時已建） | ① 檢查 explore.md 待決段，沒答完 → 停，指向 /grill ② 把 kind 寫進 `.openspec.yaml`（七種） ③ D1…Dn 原樣進 design.md ④ proposal.md、design.md 過 technical-writing → unslop | `technical-writing`、`unslop` |
 | **apply** | workplan 選目標、task 迴圈、self-check 四 grep、test agent、一 change 一 commit | ① 依 kind `Read skills/apply/references/playbooks/<kind>.md`，步驟逐字進 todo，skip 留原因 ② 先命名 data shape ③ 跨 function 邊界 → `architect`（單候選） ④ 要問人 → 寫 gate（建議·證據·風險·沒回預設），繼續做能做的 ⑤ task 外的問題 → 寫 inbox 卡不修 ⑥ 量到數字 → `benchmark-checklist` ⑦ 對真產物驗，不接受 it compiles ⑧ 收尾寫 decisions.tsv 一行、report.md 給 Stop gate | pstack playbooks、`principle-model-the-domain`、`architect`、never-block-on-the-human、ketchup action item、show-me-your-work、prove-it-works |
 | **review** | 雙 agent（spec conformance + code quality）、證據不足自動降級 | ① 合併用四桶 lead judgment（Act on / Consider / Noted / Dismissed） ② 兩 agent 不約而同標高訊號 ③ 設計有爭議 → `Read skills/interrogate/references/reviewer-prompt.md` 再跑一輪 | `interrogate` |
@@ -689,14 +689,15 @@ opsx-workflow/
 
 | 步 | 做的條件 | Read | 產出到 explore.md 的哪段 |
 |---|---|---|---|
-| 1 | 永遠 | inbox.md、attachments/ | — |
+| 1 讀卡 | 永遠 | inbox.md、attachments/ | — |
 | 2 how | 跨 2 檔以上，或本 session 沒讀過該子系統 | `how`（簡單路徑：一個 explainer；複雜：2–4 explorer + explainer，subagent 用 general-purpose） | 「怎麼運作」五段 |
-| 3 blast-radius | 動到的符號有別人用（export、DB 欄、API、config、env） | `blast-radius`（步 6 arena 刪） | 「影響範圍」：安全的那個事實 + 證據級、風險、已排除 |
+| 3 影響範圍 | 動到的符號有別人用（export、DB 欄、API、config、env） | `blast-radius`（步 6 arena 刪） | 「影響範圍」：安全的那個事實 + 證據級、風險、已排除 |
 | 4 why | 要改結構 / ownership，或要刪看起來刻意的東西 | `why`（只跑 git + code-archaeology + incident-postmortem 三個 investigator） | 「為什麼現在這樣」+ Preserve / Change / Avoid / Risk |
 | 5 prototype | 有「跑了才知道」的題，且一小時內草得出 | `explore/references/prototype.md` | 「實驗結果」：方案、觀察到的、建議；scratch 路徑 |
-| 6 跟 code 對照 | inbox.md 裡有「系統會 X」的陳述 | — | 「陳述 vs code」不一致清單 |
-| 7 寫待決 | 永遠 | — | 「待決」：只有人能答的題，每題附推薦答案；空就寫「無」 |
-| 8 | 永遠 | `explore/references/investigation.md` 的輸出格式、`unslop` | explore.md 完成 |
+| 6 查資料 | kind 是 dev 或 refactoring，且要加介面或設計 | —（搜外部做法：類似工具、開源專案、文件） | 「已知」附來源連結 |
+| 7 對照 code | inbox.md 裡有「系統會 X」的陳述 | — | 「陳述 vs code」不一致清單 |
+| 8 待決 | 永遠 | — | 「待決」：只有人能答的題，每題附推薦答案；空就寫「無」 |
+| 9 unslop | 永遠 | `explore/references/investigation.md` 的輸出格式、`unslop` | explore.md 完成 |
 
 產出：`explore.md`（已知 / 待決 / 不做 / 步驟 四段；步驟段每步一行，含 §3 的「查資料」共九行，格式與條件見 `skills/explore/SKILL.md` 的 Steps）。hook：inbox.md 有、explore.md 沒 → 注入。
 
@@ -715,7 +716,7 @@ opsx-workflow/
 | 2 一題一題 AskUserQuestion，2–4 選項，附推薦；對照 CONTEXT.md 詞彙（有的話） | opsx `skills/grill/SKILL.md`、`references/CONTEXT-FORMAT.md` | — |
 | 3 碰到查 code / 跑一次能答的 → 退回 explore 補 | — | explore.md 補段 |
 | 4 全部答完 → 寫 D1…Dn：決定 / 理由 / 否決 | — | `grill.md` |
-| 5 總結過 unslop | `unslop` | — |
+| 5 總結過 technical-writing → unslop | `technical-writing`、`unslop` | — |
 
 hook：explore.md 待決非空、grill.md 沒 → 注入；propose 開頭檢查，沒答完就停。看板上答 gate 也走同一條，寫同一個 grill.md。
 

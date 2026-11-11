@@ -14,9 +14,17 @@ argument-hint: "[change slug]"
 
 # /grill
 
-**Steps in TodoWrite.** First action after loading: put this skill's steps into TodoWrite verbatim; a step you will not do stays in the list as `skip: <reason>`, never deleted.
+**Steps in TodoWrite.** First action after loading: put the numbered steps in `## Steps` into TodoWrite verbatim; a step you will not do stays in the list as `skip: <reason>`, never deleted.
 
 The change has questions that explore could not close. Close them, cheaply, in the right order, and leave a record propose can build on without renumbering.
+
+## Steps
+
+1. Read explore.md's `## 待決`. Empty: reply「<slug> 沒有待決，直接 /opsx-workflow:propose」and stop.
+2. Ask one question at a time with AskUserQuestion, 2 to 4 options, the recommended one first, in the words `CONTEXT.md` uses (`references/CONTEXT-FORMAT.md`). In autopilot do not call AskUserQuestion; follow `## In autopilot`.
+3. An item the code or one run can answer is yours: look it up or run it, write the answer into explore.md's `## 已知` and remove it from 待決. Only an item nobody but the user can answer is asked.
+4. When every item is answered, write D1 to Dn into `grill.md` (decision, reason, rejected alternative). In autopilot with a gate still open, write the Ds you have.
+5. Before the summary goes out, `Read ../technical-writing/SKILL.md` and apply it, then `Read ../unslop/SKILL.md` and apply that.
 
 ## Where you are
 
@@ -97,7 +105,7 @@ Rules that keep this file useful downstream:
 - **未決 is not a parking lot.** Only things that genuinely need a run to settle, each with its verification plan. If you can settle it now with bucket 1 or 2, do that instead.
 - **Write an ADR too** when a decision meets all three of: hard to reverse, surprising without context, the result of a real trade-off. Use `references/ADR-FORMAT.md`; most decisions will not qualify, and that is fine.
 
-Then tell the user in a few lines what got decided and what is still open. If 待決 is now fully answered, continue to `/opsx-workflow:propose <slug>` per `../../references/continue.md` in this turn; if anything went back into 待決, stop there. Call `opsx status grill <n>/<total> <label>` as you move through the items so the board shows progress.
+Do step 5 of `## Steps` on the summary. Then tell the user in a few lines what got decided and what is still open. If 待決 is now fully answered, continue to `/opsx-workflow:propose <slug>` per `../../references/continue.md` in this turn; if anything went back into 待決, stop there. Call `opsx status grill <n>/<total> <label>` as you move through the items so the board shows progress.
 
 ## What this skill does not do
 
