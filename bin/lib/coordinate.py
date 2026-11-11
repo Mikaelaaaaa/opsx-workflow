@@ -74,6 +74,7 @@ class Round:
         self.woken_cards = set()
         self.max_working = None
         self.woken = 0
+        self.worktrees = {}
 
     def log(self, msg):
         line = "%s %s" % (self.now.strftime("%Y-%m-%d %H:%M:%S"), msg)
@@ -650,6 +651,16 @@ class Round:
             if not AGENT_NAME.match(c["slug"]):
                 self.log("-- %s 不是合法的 agent 名，跳過" % key)
                 continue
+            # 排在等級與額度之前：已經有 pane 在做的卡不該吃掉這輪的額度
+            holder = self.branch_holder(top, c["slug"])
+            if holder:
+                live = self.live_entry(holder)
+                if live:
+                    self.log("-- %s 的分支已經 checkout 在 %s，%s（pane %s）在做，不派" % (key, holder, live[0], live[1].get("pane")))
+                else:
+                    self.notify(c, "held", holder, "分支被 %s 佔著，沒有活的 pane" % holder, "收掉那棵 worktree，或手動派進去")
+                    self.log("-- %s 的分支已經 checkout 在 %s，那棵 worktree 沒有活的 pane，不派，等人處理" % (key, holder))
+                continue
             got = self.level(top, c["slug"])
             if "error" in got:
                 self.log("?? %s 等級算不出來：%s" % (key, got["error"]))
@@ -682,6 +693,31 @@ class Round:
                 continue
             self.memo["_parked"].pop(key, None)
         return n
+
+    def branch_holder(self, top, slug):
+        """workplan 裡這張卡的 PR 分支被別的 worktree checkout 時，回那棵 worktree 的路徑。
+        卡自己的 .claude/worktrees/<slug> 不算；不在 workplan 或 PR 沒寫 branch 不查（分支名要 dispatch.sh 才推得出來，它自己會擋）。"""
+        pr = pr_of(self.workplan(top), slug)
+        if pr is None or not pr.get("branch"):
+            return None
+        if top not in self.worktrees:
+            rc, out, err = self.run(["git", "-C", top, "worktree", "list", "--porcelain"])
+            if rc != 0:
+                # 這輪不擋；真的被佔時 dispatch.sh 開 worktree 前的檢查會擋下
+                self.log("?? %s 的 git worktree list 失敗，這輪不查分支被誰佔：%s" % (top, err[:200]))
+            self.worktrees[top] = worktree_branches(out) if rc == 0 else {}
+        wt = self.worktrees[top].get(pr["branch"])
+        if wt is None or os.path.realpath(wt) == os.path.realpath(os.path.join(top, ".claude", "worktrees", slug)):
+            return None
+        return wt
+
+    def live_entry(self, wt):
+        """dispatch.json 裡 worktree 指向 wt、pane 還活著的條目 (key, entry)；沒有就是 None。路徑兩邊都 realpath。"""
+        real = os.path.realpath(wt)
+        for k, v in self.dispatch_file.items():
+            if v.get("worktree") and os.path.realpath(v["worktree"]) == real and chain.session_alive(v):
+                return k, v
+        return None
 
     def session_feature_of(self, top, slug):
         pr = pr_of(self.workplan(top), slug)
@@ -853,6 +889,17 @@ def plan_order(path):
         for pr in f.get("prs") or []:
             for c in pr.get("changes") or []:
                 out.setdefault(c.get("name"), (ms, len(out)))
+    return out
+
+
+def worktree_branches(porcelain):
+    """git worktree list --porcelain 的輸出轉成 {分支名: worktree 路徑}；detached 的 worktree 沒有分支，不列。"""
+    out, wt = {}, None
+    for line in porcelain.splitlines():
+        if line.startswith("worktree "):
+            wt = line[len("worktree "):]
+        elif line.startswith("branch refs/heads/"):
+            out[line[len("branch refs/heads/"):]] = wt
     return out
 
 

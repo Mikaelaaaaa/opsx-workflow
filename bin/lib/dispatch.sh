@@ -132,6 +132,8 @@ PY
   # worktree：一卡一棵
   local wt="$top/.claude/worktrees/$slug"
   if [ ! -d "$wt" ]; then
+    local used; used="$(git -C "$top" worktree list --porcelain | awk -v b="branch refs/heads/$branch" '/^worktree /{w=substr($0, 10)} $0 == b {print w}')"
+    [ -z "$used" ] || die "dispatch: 分支 $branch 已經 checkout 在 ${used}$(held_by "$used")，不另開 worktree。那張卡在做就不用派；沒人在做就先收掉那棵 worktree"
     ensure_dir "$top/.claude/worktrees"
     if git -C "$top" show-ref --verify --quiet "refs/heads/$branch"; then git -C "$top" worktree add -q "$wt" "$branch"
     else
@@ -326,6 +328,17 @@ PY
 }
 
 workplan_branch() { wp_pr_field "$1" "$2" branch; } # <top> <slug>：印 workplan 裡這張卡所屬 PR 的 branch，沒有就空
+held_by() { # <worktree>：印 dispatch.json 裡 worktree 指向它的條目（「（key · pane …）」），沒有就空。兩邊路徑先 realpath 再比
+  [ -f "$OPSX_STATE_DIR/dispatch.json" ] || return 0
+  OPSX_WT="$1" OPSX_LIB="$OPSX_ROOT/bin/lib" "$OPSX_PY" -I - "$OPSX_STATE_DIR/dispatch.json" <<'PY'
+import os, sys
+sys.path.insert(0, os.environ["OPSX_LIB"]); import jsonfile
+wt = os.path.realpath(os.environ["OPSX_WT"])
+hits = ["%s · pane %s" % (k, v.get("pane")) for k, v in jsonfile.load(sys.argv[1]).items() if v.get("worktree") and os.path.realpath(v["worktree"]) == wt]
+if hits:
+    print("（%s）" % "；".join(hits))
+PY
+}
 workspace_for() { # <repo>：印 workspaces.toml 記的 label（或 id），沒有就空
   [ -f "$OPSX_STATE_DIR/workspaces.toml" ] || return 0
   OPSX_REPO="$1" "$OPSX_PY" -I - "$OPSX_STATE_DIR/workspaces.toml" <<'PY'

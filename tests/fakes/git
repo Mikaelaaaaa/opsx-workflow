@@ -2,7 +2,9 @@
 # 假 git（coordinate 測試用）：記一行「git <參數>」到 $OPSX_FAKE_LOG，不碰任何 repo。
 # rev-parse --abbrev-ref HEAD 印 $OPSX_TEST_GIT_BRANCH（預設 main）；status --porcelain 印 $OPSX_TEST_GIT_DIRTY（預設空）。
 # 參數含 $OPSX_TEST_GIT_FAIL 的子字串時退出 $OPSX_TEST_GIT_FAIL_RC（預設 1）。
+# 設了 $OPSX_TEST_REAL_GIT 時 worktree list 交給真 git，測試才能用真的 git worktree add 佔住分支。
 printf 'git %s\n' "$*" >> "${OPSX_FAKE_LOG:?}"
+case " $* " in *" worktree list "*) [ -n "${OPSX_TEST_REAL_GIT:-}" ] && exec "$OPSX_TEST_REAL_GIT" "$@" ;; esac
 if [ -n "${OPSX_TEST_GIT_FAIL:-}" ]; then
   case " $* " in *" $OPSX_TEST_GIT_FAIL "*) echo "fatal: fake 失敗：$OPSX_TEST_GIT_FAIL" >&2; exit "${OPSX_TEST_GIT_FAIL_RC:-1}" ;; esac
 fi
