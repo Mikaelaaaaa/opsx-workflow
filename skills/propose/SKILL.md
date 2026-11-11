@@ -48,6 +48,8 @@ Do NOT proceed without understanding what the user wants to build.
 
 ### 2. Create the change directory (if it does not exist yet)
 
+A dispatch worktree has no `openspec/` (it is not in git). Run every `openspec` command here from the 主 checkout, and read and write the card's files at the 主 checkout's `openspec/changes/<name>/`. Run tests only as `bash tests/run.sh <file-name filter>`, with no `VAR=…` or `export` in front of the command.
+
 ```bash
 openspec new change "<name>" --schema opsx
 ```

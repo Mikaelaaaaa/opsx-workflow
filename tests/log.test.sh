@@ -77,4 +77,18 @@ assert_rc 2 opsx log --sync gitlab many "x"
 assert_rc 2 opsx log --sync gitlab -1 "x"
 assert_rc 2 opsx log --sync "" 1 "x"
 cmp -s "$OPSX_STATE_DIR/sync.log" "$FX/sync-before" || fail "sync.log 不該變"
+
+# --- me-20261111-1326：<主>--<子> 寫進 subs/<子>/decisions.tsv，一般卡名照舊 ---
+cd "$R"
+mkdir -p "$R/openspec/changes/m/subs/s"
+opsx log m--s claude 已決定 "子殼的決定" "e.txt" || fail "log 子殼 rc"
+assert_eq "$(tail -1 "$R/openspec/changes/m/subs/s/decisions.tsv" | cut -f2-5)" $'claude\t已決定\t子殼的決定\te.txt'
+assert_no_file "$R/openspec/changes/m/decisions.tsv"
+assert_no_file "$R/openspec/changes/m--s"
+opsx log m claude 已決定 "主殼的決定" || fail "log 主殼 rc"
+assert_eq "$(tail -1 "$R/openspec/changes/m/decisions.tsv" | cut -f4)" "主殼的決定"
+assert_eq "$(wc -l < "$R/openspec/changes/m/subs/s/decisions.tsv" | tr -d ' ')" 1 "主殼的列不能進子殼"
+# 子殼不存在：退出 2，不建目錄
+assert_rc 2 opsx log m--nope claude 已決定 "x"
+assert_no_file "$R/openspec/changes/m/subs/nope"
 echo ok

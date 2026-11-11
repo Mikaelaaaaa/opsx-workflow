@@ -25,6 +25,12 @@ has 'opsx status apply <total>/<total>' "$SUBS"
 has '--sub <子> --worker session' "$SUBS"
 has 'anything that is not `NEEDS-USER`' "$SUBS"
 
+# --- me-20261111-1326：subagent 不勾子殼 tasks.md（commit 閘門只要求檔案存在），session 疊上 PR branch 時勾 ---
+has 'does not check off the sub-shell' "$SUBS"
+has 'only requires' "$SUBS"
+has 'the session checks off' "$SUBS"
+! grep -qF 'the commit gate reads the sub-shell' "$SUBS" || fail "apply 子 change 一節不能再說 commit 閘門讀子殼的勾"
+
 # --- grant-action：授權 gate 要寫 action:，值取自 hook 的 deny 訊息 ---
 has 'action: <value>' "$SK"
 has "grant hook's deny message" "$SK"
@@ -63,4 +69,12 @@ has 'before you know whether it merges' "$FX/row6"
 has 'opsx split-out' "$FX/row6"
 has 'only when it was not merged' "$FX/row6"
 ! grep -qF "Put longer evidence under \`## 證據\` in that slug's" "$FX/row6" || fail "第 6 列不能叫被併入的 agent 把證據寫進目標卡的 ## 證據"
+
+# --- me-20261111-1326：開卡步驟不教 agent 帶 --source（第 6 列）---
+has '不要帶 `--source`' "$FX/row6"
+
+# --- me-20261111-1326：worktree 沒有 openspec/，openspec 指令走主 checkout；測試一律 bash tests/run.sh，不帶前綴環境變數 ---
+has '主 checkout' "$SK"
+has 'bash tests/run.sh' "$SK"
+! grep -qE '^[[:space:]]*(`)?OPSX_ROOT=' "$SK" || fail "apply SKILL.md 不能有 OPSX_ROOT= 開頭的測試指令範例"
 echo ok

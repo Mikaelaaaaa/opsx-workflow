@@ -173,6 +173,19 @@ done
 git -C "$R" worktree add -q -b feat/no-such-card/mikaela "$FX/wt2"
 out="$(cg "git -C $FX/wt2 commit -m x")"; assert_eq "$(decision "$out")" deny "commit: 目標目錄的 branch 對不到卡要擋"
 reason "$out" | grep -q 'feat/no-such-card/mikaela' || fail "commit: deny 要帶目標目錄的 branch: $(reason "$out")"
+# me-20261111-1326：子殼 branch 只要求 tasks.md 存在，不要求有勾；主殼與一般卡照舊
+mkdir -p "$R/openspec/changes/m/subs/s"
+printf 'schema: opsx\ncreated: 2026-11-11\n' > "$R/openspec/changes/m/.openspec.yaml"
+printf '## 1. x\n\n- [ ] 1.1 a\n' > "$R/openspec/changes/m/tasks.md"
+git -C "$R" worktree add -q -b 'fix/m--s/u' "$FX/wt-sub"
+git -C "$R" worktree add -q -b 'fix/m/u' "$FX/wt-main"
+printf '## 1. x\n\n- [ ] 1.1 a\n' > "$R/openspec/changes/m/subs/s/tasks.md"
+out="$(cg "git -C $FX/wt-sub commit -m x")"; assert_eq "$(decision "$out")" allow "commit: 子殼 branch、tasks.md 全未勾要放行: $(reason "$out")"
+rm "$R/openspec/changes/m/subs/s/tasks.md"
+out="$(cg "git -C $FX/wt-sub commit -m x")"; assert_eq "$(decision "$out")" deny "commit: 子殼沒有 tasks.md 要擋"
+reason "$out" | grep -q '沒有 tasks.md' || fail "commit: 子殼 deny 要指出沒有 tasks.md: $(reason "$out")"
+out="$(cg "git -C $FX/wt-main commit -m x")"; assert_eq "$(decision "$out")" deny "commit: 主殼 branch、tasks 全未勾仍擋"
+reason "$out" | grep -q '還沒有任何勾' || fail "commit: 主殼 deny 要帶「還沒有任何勾」: $(reason "$out")"
 reason "$out" | grep -q "'main'" && fail "commit: deny 不能帶 session cwd 的 branch: $(reason "$out")"
 rm -f "$OPSX_STATE_DIR/bypass.log"
 cg "git -C $FX/wt2 commit -m 'x [no-change] y'" >/dev/null
@@ -192,9 +205,11 @@ EOF')"; assert_eq "$out" "" "commit: 寫檔 heredoc 內提到 git commit 不觸�
 mkdir -p "$C/subs/s1"; printf '## 1. x\n\n- [ ] 1.1 a\n' > "$C/subs/s1/tasks.md"
 printf '## 1. x\n\n- [ ] 1.1 s1\n' > "$C/tasks.md"
 git -C "$R" checkout -q -b feat/eval-core--s1/mikaela
-out="$(cg 'git commit -m "feat: x"')"; assert_eq "$(decision "$out")" deny "commit: 子殼全未勾要擋"
+out="$(cg 'git commit -m "feat: x"')"; assert_eq "$(decision "$out")" allow "commit: 子殼全未勾放行（只要求 tasks.md 存在）"
+printf '## 1. x\n\n- [x] 1.1 s1\n' > "$C/tasks.md"; rm "$C/subs/s1/tasks.md"
+out="$(cg 'git commit -m "feat: x"')"; assert_eq "$(decision "$out")" deny "commit: 子殼沒有 tasks.md 要擋（主殼有勾也不算）"
 reason "$out" | grep -q 'subs/s1' || fail "commit: 子殼的 deny 要寫子殼路徑: $(reason "$out")"
-printf '## 1. x\n\n- [x] 1.1 a\n' > "$C/subs/s1/tasks.md"
+printf '## 1. x\n\n- [x] 1.1 a\n' > "$C/subs/s1/tasks.md"; printf '## 1. x\n\n- [ ] 1.1 s1\n' > "$C/tasks.md"
 out="$(cg 'git commit -m "feat: x"')"; assert_eq "$(decision "$out")" allow "commit: 子殼有勾放行（主殼全未勾）"
 printf '## 1. x\n\n- [x] 1.1 a\n- [ ] 1.2 b\n' > "$C/tasks.md"; rm -rf "$C/subs"
 git -C "$R" checkout -q feat/eval-core/mikaela

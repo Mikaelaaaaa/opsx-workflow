@@ -182,7 +182,7 @@ def build_args(action: str, body: dict) -> list[str]:
     for k in (("slug",) if spec["slug"] else ()) + spec["required"]:
         if not isinstance(body.get(k), str) or not body[k].strip():
             raise ValueError("缺 %s" % k)
-    args = [action, "--source", "me"] if action == "new" else [action]   # 看板是使用者按的，不因 server 從 agent worktree 啟動就變 agent
+    args = [action, "--source", "me"] if action == "new" else [action]   # 看板是使用者按的；opsx new 在 agent worktree 裡拒絕 --source me，所以呼叫端用 state 目錄當 cwd
     if spec["slug"]:
         if not SLUG_RE.match(body["slug"]):
             raise ValueError("slug 不合格：%r" % body["slug"])
@@ -276,10 +276,10 @@ def priority_args(body: dict) -> list[str]:
     return ["priority", slug, "--set", level, "--reason", reason, "--repo", repo]
 
 
-def run(argv: list[str], timeout: int, env: dict) -> dict:
+def run(argv: list[str], timeout: int, env: dict, cwd: pathlib.Path | None = None) -> dict:
     """跑一個子行程；逾時殺整個 process group（collect 底下掛著幾百支 stage_of / python，只殺 bash 會留孤兒）。"""
     try:
-        p = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, errors="replace", env=env, start_new_session=True)
+        p = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, errors="replace", env=env, cwd=cwd, start_new_session=True)
     except FileNotFoundError:
         return {"ok": False, "stdout": "", "stderr": "%s 不存在" % argv[0], "rc": 127}
     try:
@@ -455,10 +455,10 @@ class Handler(BaseHTTPRequestHandler):
         if action == "paste":
             with tempfile.TemporaryDirectory(prefix="opsx-paste.") as d:
                 attach = write_attachments(pathlib.Path(d), files)
-                r = run(["bash", str(OPSX), "new", "--source", "me", *repo_args, *attach, "--", one_liner], ACTION_TIMEOUT, self.opsx_env())
+                r = run(["bash", str(OPSX), "new", "--source", "me", *repo_args, *attach, "--", one_liner], ACTION_TIMEOUT, self.opsx_env(), self.cfg.state)
             self.invalidate()
             self.send_json(200, r); return
-        r = run(["bash", str(OPSX), *args], ACTION_TIMEOUT, self.opsx_env())
+        r = run(["bash", str(OPSX), *args], ACTION_TIMEOUT, self.opsx_env(), self.cfg.state if action == "new" else None)
         self.invalidate()
         # sync 的退出碼 3 是已有一支在跑；reap 的退出碼 2 是指定的 pane 不是孤兒
         self.send_json(409 if action == "sync" and r["rc"] == 3 else 422 if action == "reap" and r["rc"] == 2 else 200, r)

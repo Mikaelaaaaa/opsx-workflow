@@ -53,6 +53,8 @@ assert_fixed '確認: <sha>' "$STEP5"
 grep -F -- '- **範圍外.**' "$STEP4" > "$FX/oos"; [ -s "$FX/oos" ] || fail "Step 4 找不到範圍外段"
 for k in 'opsx new' '--area' 'openspec/areas.txt' 'existing card'; do assert_fixed "$k" "$FX/oos"; done
 assert_not_fixed 'openspec new change' "$FX/oos"
+# me-20261111-1326：開卡步驟不教 agent 帶 --source
+assert_fixed '不要帶 `--source`' "$FX/oos"
 assert_fixed '併進' "$FX/oos"; assert_fixed '--evidence' "$FX/oos"
 assert_fixed 'before you know whether it merges' "$FX/oos"; assert_fixed 'opsx split-out' "$FX/oos"
 grep -q '^| `area` |' "$OPSX_ROOT/references/priority.md" || fail "references/priority.md 事實欄位表缺 area 列"

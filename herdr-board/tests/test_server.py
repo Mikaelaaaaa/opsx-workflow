@@ -58,6 +58,7 @@ class ServerTest(unittest.TestCase):
         shim_dir = cls.tmp / "bin"
         shim_dir.mkdir()
         cls.env_log = cls.tmp / "env.log"
+        cls.cwd_log = cls.tmp / "cwd.log"
         cls.herdr_log = cls.tmp / "herdr.log"
         cls.attached = cls.tmp / "attached"   # shim 執行當下把 --attach 的檔複製到這裡，server 回應後暫存檔已刪
         cls.attached.mkdir()
@@ -69,6 +70,7 @@ class ServerTest(unittest.TestCase):
             f'printf "%s\\n" "$*" >> "{cls.log}"\n'
             f'prev=; for a in "$@"; do if [ "$prev" = --attach ]; then cp "$a" "{cls.attached}/"; base64 < "$a" | tr -d "\\n" >> "{cls.contents}"; echo >> "{cls.contents}"; fi; prev="$a"; done\n'
             f'printf "OPSX_STATE_DIR=%s\\n" "${{OPSX_STATE_DIR:-}}" >> "{cls.env_log}"\n'
+            f'pwd -P >> "{cls.cwd_log}"\n'
             f'if [ -f "{cls.fail_flag}" ]; then echo "opsx: 假的失敗" >&2; exit 2; fi\n'
             f'if [ -f "{cls.rc_file}" ]; then echo "opsx: 假的退出碼" >&2; exit "$(cat "{cls.rc_file}")"; fi\n'
             'if [ "$1" = timeline ]; then echo \'{"generated_at": "g", "last_seen": null, "events": [], "errors": []}\'; exit 0; fi\n'
@@ -117,6 +119,7 @@ class ServerTest(unittest.TestCase):
 
     def setUp(self):
         self.log.write_text("")
+        self.cwd_log.write_text("")
         if self.fail_flag.exists():
             self.fail_flag.unlink()
         if self.rc_file.exists():
@@ -309,6 +312,15 @@ class ServerTest(unittest.TestCase):
         status, _, body = self.req("/api/new", {"text": "試試看", "repo": r}, token=self.token)
         self.assertEqual(status, 200, body)
         self.assertEqual(self.log.read_text().strip().split("\n"), ["new --source me -- 試試看", "new --source me --repo %s -- 試試看" % r])
+
+    def test_new_and_paste_run_outside_any_worktree(self):
+        # server 可能從 agent worktree 啟動；opsx new 在 dispatch 的 worktree 裡會拒絕 --source me，所以看板的 new 與 paste 要在 state 目錄跑
+        status, _, body = self.req("/api/new", {"text": "試試看"}, token=self.token)
+        self.assertEqual(status, 200, body)
+        status, _, body = self.req("/api/paste", {"text": "貼上", "files": []}, token=self.token)
+        self.assertEqual(status, 200, body)
+        want = str(self.state.resolve())
+        self.assertEqual(self.cwd_log.read_text().split("\n")[:-1], [want, want])
 
     def test_new_rejects_empty_or_multiline_text(self):
         for text in ("", "a\nb"):
