@@ -20,7 +20,7 @@ git init . && git add -A && git commit -m "feat: opsx-workflow rewrite (pstack +
 claude plugin uninstall opsx-workflow
 claude plugin install ~/code/sandbox/opsx-workflow        # 或 marketplace add 本機路徑再 install
 
-# 裝 CLI、建全域設定（會問 obsidian 資料夾、customer 平台；不填就 Enter）
+# 裝 CLI、建全域設定（會問 obsidian 資料夾；不填就 Enter）
 bash ~/code/sandbox/opsx-workflow/bin/opsx init --global
 # 每個要用的 repo 根目錄各跑一次（Agentory-AI、Agentory-CS、Agentory-Infrastructure、agentory-evals、gmtc-rag、scam-guard）
 cd ~/code/Agentory-AI && opsx init

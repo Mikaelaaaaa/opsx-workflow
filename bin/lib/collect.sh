@@ -17,28 +17,12 @@
 #   ## <gate id>
 #   type: approval | decision      action: push|mr|migrate|…（approval 才有）      status: open | answered      opened_at: <ISO>
 #   needs: run（可選：建議欄是要人在終端機跑的指令；看板不給照建議）      type 沒寫或不在同義詞表內 → waiting.type 為 type 不明
+#   waits-on: <卡名>（可選：這題要等那張卡合進 main 才能做；coordinate 只憑這個欄位停 pane，不從問題與建議的文字猜）
 #   問題: …   建議: …   選項: a | b (Recommended) | c（decision 才有）   證據: …   風險: …   預設: …
 #   已確認: …（可多行，到下一個欄位為止）   answer: …（answered 時）
 
 # shellcheck source=/dev/null
 source "$OPSX_ROOT/bin/lib/mr.sh"
-
-# 舊 spec-driven 的 change：.openspec.yaml 沒有 schema: opsx，inbox.md 不存在或只有空白。只計數，不當卡。
-# 只用 builtin：真 repo 裡有幾百張舊卡，每張 fork 一次 stage 判斷就是十幾秒。
-collect_is_legacy() { # <change dir>
-  local line inbox
-  if [ -f "$1/.openspec.yaml" ]; then
-    while IFS= read -r line || [ -n "$line" ]; do
-      [[ $line =~ ^schema:[[:space:]]*opsx[[:space:]]*$ ]] && return 1
-    done < "$1/.openspec.yaml"
-  fi
-  if [ -f "$1/inbox.md" ]; then
-    # [:space:] 依 locale：先刪掉全形空白 U+3000 與 NBSP 的位元組，沒有 LANG 的啟動方式（launchd、nohup）下也算空白
-    inbox=$(<"$1/inbox.md"); inbox=${inbox//$'\xe3\x80\x80'/}; inbox=${inbox//$'\xc2\xa0'/}
-    [[ $inbox =~ [^[:space:]] ]] && return 1
-  fi
-  return 0
-}
 
 opsx_collect() {
   local root="$HOME/code" state="$OPSX_STATE_DIR"
@@ -87,7 +71,7 @@ opsx_collect() {
            archived=false; stage="$(stage_name "${repo_dir%/}" "$slug")" ;;
       esac
       mrfile=""
-      if [ "$archived" = false ] && st_mr_in_report "$d"; then n=$((n+1)); mrfile="$work/mr/$n.json"; mr_json "$d" > "$mrfile"; fi
+      if [ "$archived" = false ] && st_mr_in_report "$d"; then n=$((n+1)); mrfile="$work/mr/$n.json"; OPSX_MR_STALE_OK=1 mr_json "$d" > "$mrfile"; fi
       printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$repo" "$slug" "$d" "$archived" "$stage" "$mrfile" >> "$work/cards.tsv"
     done
   done
@@ -190,7 +174,7 @@ if os.path.exists(agents_path) and not os.environ["OPSX_C_HERDR_ERR"]:
         agents = None
         errors.append({"source": "herdr", "message": "agent list 讀不懂（要 result.agents）：%s" % e})
 
-FIELD = re.compile(r"^(type|needs|action|status|opened_at|問題|建議|選項|證據|風險|預設|已確認|answer):\s*(.*)$")
+FIELD = re.compile(r"^(type|needs|waits-on|action|status|opened_at|問題|建議|選項|證據|風險|預設|已確認|answer):\s*(.*)$")
 
 def parse_gates(text):
     gates, cur, key = [], None, None
@@ -253,7 +237,8 @@ def waiting_of(card, gates, agent_status):
         if g.get("status", "").strip() != "open": continue
         base = {"gate_id": g["id"], "question": g.get("問題"), "recommended": g.get("建議"), "evidence": g.get("證據"),
                 "risk": g.get("風險"), "default_if_unanswered": g.get("預設"), "confirmed": g.get("已確認"),
-                "needs": "run" if g.get("needs") == "run" else None}
+                "needs": "run" if g.get("needs") == "run" else None,
+                "waits_on": g.get("waits-on") or None}
         gtype = gatetype.normalize(g.get("type", ""))
         if gtype is None:
             return {"type": "type 不明", "action": None, "options": [], **base}

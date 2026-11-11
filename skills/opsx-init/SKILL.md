@@ -23,7 +23,7 @@ One script does the work: `${CLAUDE_PLUGIN_ROOT}/bin/opsx`. This skill is only t
    bash "${CLAUDE_PLUGIN_ROOT}/bin/opsx" init --global
    ```
 
-   It is interactive when run from a terminal (asks for the obsidian folder and customer platform). From here it runs non-interactively and skips those two; tell the user they can fill `~/.local/state/opsx/sources.toml` later.
+   It is interactive when run from a terminal (asks for the obsidian folder). From here it runs non-interactively and skips that; tell the user they can fill `~/.local/state/opsx/sources.toml` later.
 
 2. Unless the user asked for `--global` only, run the repo-level init from the repo root:
 
