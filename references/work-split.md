@@ -17,7 +17,7 @@
 
 ## 殼的位置
 
-- 主殼：`openspec/changes/<主>/`。inbox / explore / grill / proposal / design 涵蓋整件事；tasks.md 一個子 change 一項，勾起來代表那個子 change 已經疊進 PR 分支；specs/ 是各子殼 spec 的合集（openspec archive 只併主殼的 specs）。
+- 主殼：`openspec/changes/<主>/`。inbox / explore / grill / proposal / design 涵蓋整件事；tasks.md 一個子 change 一項，格式 ``- [ ] 1.1 `<子 change 名>`：<說明>``，子名一定要用反引號包住，`opsx stack` 靠它對項目；勾起來代表那個子 change 已經疊進 PR 分支；specs/ 是各子殼 spec 的合集（openspec archive 只併主殼的 specs）。
 - 子殼：`openspec/changes/<主>/subs/<子>/`。各自完整的 inbox / proposal / specs / design / tasks，`.openspec.yaml` 寫 `parent: <主>`，design 引用主殼的 D-id。
 - openspec CLI 只認 `changes/<name>/` 一層，`openspec validate` / `status` 只管主殼。子殼齊不齊由 `opsx check <主>` 檢查：四個檔、每個 Requirement 有 Scenario、每個 task 有 `驗收：` 與 `測試：`、D-id 對得到主殼、`parent` 對。
 - 讀主殼就讀得到全部子殼；archive 整包一起搬。
