@@ -145,7 +145,11 @@ def build_index(repos: dict[str, pathlib.Path], state: pathlib.Path) -> dict[str
     files += [(p, True) for p in (state / "unfiled" / "dropped").glob("*.md")]
     index = {}
     for path, frozen in files:
-        src = fm_get(path.read_text(encoding="utf-8"), "source")
+        try:
+            text = path.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            continue
+        src = fm_get(text, "source")
         if src:
             index.setdefault(src, {"path": path, "frozen": frozen})
     return index
@@ -301,7 +305,10 @@ def mark_closed(opsx_root: pathlib.Path, kind: str, index: dict, seen: set[str],
         repo, _, n = src[len(kind) + 1:].rpartition("#")
         if repo not in listed:
             continue
-        text = entry["path"].read_text(encoding="utf-8")
+        try:
+            text = entry["path"].read_text(encoding="utf-8")
+        except FileNotFoundError:
+            continue
         if fm_get(text, "upstream") == "closed":
             continue
         p = subprocess.run(["bash", str(opsx_root / "herdr-board" / "sync" / ("%s.sh" % kind)), "state", listed[repo], n], capture_output=True, text=True)
@@ -319,7 +326,10 @@ def mark_stale(index: dict, seen: set[str], scanned: set[str], tally: Tally) -> 
             continue
         if src.split(":", 2)[1] not in scanned:
             continue
-        text = entry["path"].read_text(encoding="utf-8")
+        try:
+            text = entry["path"].read_text(encoding="utf-8")
+        except FileNotFoundError:
+            continue
         if fm_get(text, "stale") == "true":
             continue
         safefile.write_atomic(str(entry["path"]), fm_set(text, "stale", "true"))
@@ -387,6 +397,9 @@ def main() -> int:
             continue
         try:
             changed = update_debt(entry, item) if src.startswith("shortcut:") else update_issue(entry, item)
+        except FileNotFoundError:
+            tally.unchanged += 1
+            continue
         except ValueError as e:
             tally.error(src, str(e)); continue
         if changed:

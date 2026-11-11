@@ -453,4 +453,96 @@ assert_eq "$(awk -F'\t' '$2=="sync"' "$LOG" | tail -1 | cut -f4 | grep -c custom
 assert_rc 2 opsx sync --root "$ROOT" --source customer
 cp "$FX/sources.bak" "$OPSX_STATE_DIR/sources.toml"
 
+# --- 卡在同步中途被歸檔 ---
+# 去重索引建好之後、處理那張卡之前，卡目錄被搬進 archive/（specs/board-sync「卡在同步中途被搬走不中斷同步」）。
+# 在隔離的 state / repo 目錄裡跑 sync.main，build_index 換成「回手造的索引，再搬走指定的卡」，不靠 sleep
+python3 -I -c '
+import os, pathlib, shutil, sys
+
+sys.path.insert(0, sys.argv[1] + "/bin/lib")
+import sync
+
+OPSX_ROOT, WORK, STATE = sys.argv[1], pathlib.Path(sys.argv[2]), pathlib.Path(sys.argv[3])
+CARDS, ARCHIVE = WORK / "changes", WORK / "changes" / "archive"
+for d in (CARDS, ARCHIVE, WORK / "root"):
+    d.mkdir(parents=True)
+PLAN = {"index": {}, "items": [], "listed": {}, "scanned": set(), "move": None}
+real_build_index = sync.build_index
+CARD = "---\ntype: 功能\nsource: %s\nline: 1\nupstream_updated: 2026-11-05T10:00:00Z\n---\n\n## 一句話\n\n舊\n\n## 內文\n\n舊內文\n\n## 證據\n\n- x\n"
+
+
+def make_card(slug, source):
+    d = CARDS / slug
+    d.mkdir()
+    (d / "inbox.md").write_text(CARD % source, encoding="utf-8")
+    return {"path": d / "inbox.md", "frozen": False}
+
+
+def index_then_move(repos, state):
+    if PLAN["move"]:
+        shutil.move(str(CARDS / PLAN["move"]), str(ARCHIVE / PLAN["move"]))
+    return PLAN["index"]
+
+
+def items_of_plan(*_):
+    return PLAN["items"], PLAN["scanned"]
+
+
+def issues_of_plan(*_):
+    return PLAN["items"], PLAN["listed"]
+
+
+def run_sync(source, index, items, move, listed=None, scanned=None):
+    PLAN.update(index=index, items=items, move=move, listed=listed or {}, scanned=scanned or set())
+    sys.argv = ["opsx sync", "--state", str(STATE), "--opsx-root", OPSX_ROOT, "--root", str(WORK / "root"), "--source", source]
+    rc = sync.main()
+    rows = [l.split("\t") for l in (STATE / "sync.log").read_text(encoding="utf-8").splitlines() if l.split("\t")[1] == "sync"]
+    return rc, rows[-1][3]
+
+
+sync.build_index = index_then_move
+sync.debt_items = items_of_plan
+sync.issue_items = issues_of_plan
+
+# 更新 shortcut 卡時卡已被歸檔：計沒變，其餘照常
+a, b = make_card("debt-a", "shortcut:r:f.py:aaaa1111"), make_card("debt-b", "shortcut:r:g.py:bbbb2222")
+before = a["path"].read_text(encoding="utf-8")
+items = [{"source": "shortcut:r:f.py:aaaa1111", "path": WORK, "extra": {"line": "5"}},
+         {"source": "shortcut:r:g.py:bbbb2222", "path": WORK, "extra": {"line": "1"}}]
+rc, row = run_sync("debt", {"shortcut:r:f.py:aaaa1111": a, "shortcut:r:g.py:bbbb2222": b}, items, "debt-a")
+assert rc == 0 and row == "新建 0 · 更新 0 · 沒變 2 · 錯誤 0", (rc, row)
+assert (ARCHIVE / "debt-a" / "inbox.md").read_text(encoding="utf-8") == before
+
+# 更新 issue 時卡已被歸檔：計沒變，歸檔的卡內容不變
+c = make_card("gl-a-1", "gitlab:a#1")
+before = c["path"].read_text(encoding="utf-8")
+items = [{"source": "gitlab:a#1", "path": WORK, "updated_at": "2026-11-06T08:00:00Z", "title": "新", "body": "新內文"}]
+rc, row = run_sync("gitlab", {"gitlab:a#1": c}, items, "gl-a-1")
+assert rc == 0 and row == "新建 0 · 更新 0 · 沒變 1 · 錯誤 0", (rc, row)
+assert (ARCHIVE / "gl-a-1" / "inbox.md").read_text(encoding="utf-8") == before
+
+# 標 issue 關閉時卡已被歸檔：其他 issue 卡的 closed 標記照寫
+d, e = make_card("gl-a-2", "gitlab:a#2"), make_card("gl-a-3", "gitlab:a#3")
+views = pathlib.Path(os.environ["OPSX_TEST_ISSUES"])
+for n in (2, 3):
+    (views / ("view-%d.json" % n)).write_text("{\"iid\":%d,\"state\":\"closed\"}" % n, encoding="utf-8")
+rc, row = run_sync("gitlab", {"gitlab:a#2": d, "gitlab:a#3": e}, [], "gl-a-2", listed={"a": "g/a"})
+assert rc == 0 and row == "新建 0 · 更新 1 · 沒變 0 · 錯誤 0", (rc, row)
+assert "\nupstream: closed\n" in e["path"].read_text(encoding="utf-8")
+
+# 標 stale 時卡已被歸檔：其他 shortcut 卡的 stale 標記照寫
+f, g = make_card("debt-c", "shortcut:r:h.py:cccc3333"), make_card("debt-d", "shortcut:r:i.py:dddd4444")
+rc, row = run_sync("debt", {"shortcut:r:h.py:cccc3333": f, "shortcut:r:i.py:dddd4444": g}, [], "debt-c", scanned={"r"})
+assert rc == 0 and row == "新建 0 · 更新 1 · 沒變 0 · 錯誤 0", (rc, row)
+assert "\nstale: true\n" in g["path"].read_text(encoding="utf-8")
+
+# 建索引時檔案讀不到（待分類裡指向已不存在的檔）：略過，其餘照進索引
+unfiled = WORK / "state5" / "unfiled"
+unfiled.mkdir(parents=True)
+(unfiled / "gone.md").symlink_to(WORK / "nowhere.md")
+(unfiled / "ok.md").write_text(CARD % "x:1", encoding="utf-8")
+index = real_build_index({}, WORK / "state5")
+assert list(index) == ["x:1"], index
+' "$OPSX_ROOT" "$FX/mid" "$OPSX_STATE_DIR" || fail "卡在同步中途被歸檔"
+
 echo ok
