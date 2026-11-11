@@ -60,7 +60,7 @@ When the router line carries `autopilot：`, nobody is watching the pane. AskUse
   風險: <what goes wrong with the recommendation>
   預設: <what happens if nobody answers>
   ```
-  The options follow the same rules as an AskUserQuestion: 2–4 real alternatives, recommended first. `type` is `approval` (a permission) or `decision` (a choice) and nothing else; when 建議 is a command the user must run themselves, add a `needs: run` line.
+  The options follow the same rules as an AskUserQuestion: 2–4 real alternatives, recommended first. `type` is `approval` (a permission) or `decision` (a choice) and nothing else; when 建議 is a command the user must run themselves, add a `needs: run` line; when a `decision` can only be answered after another card merges into main, add `waits-on: <that card's name>`.
 - **Anything else.** Take the option you would have marked Recommended. Write it as a D like any other, add a `  - 自動採用：autopilot，沒問使用者` line under it, and log one line in decisions.tsv. The user can overturn it at review or on the MR.
 
 If you wrote any gate, still write grill.md with the Ds you have, say which items wait on which gate, and stop. The answer comes back as a prompt. Turn it into its D, remove the item from 待決, and carry on. Once 待決 is empty, propose comes next as usual.
