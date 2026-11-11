@@ -17,6 +17,9 @@ section "Inputs" > "$INPUTS"; section "Steps" > "$STEPS"
 awk 'index($0,"## Output template")==1{on=1} on' "$SK" > "$TPL"
 for f in "$INPUTS" "$STEPS" "$TPL"; do [ -s "$f" ] || fail "section missing: $f"; done
 
+# --- 輸入只有三樣，少一樣就停並說哪一樣 ---
+assert_fixed 'If any of the three is missing, stop and say which one' "$INPUTS"
+
 # --- 禁讀清單四項與理由（只讀程式碼）---
 for k in '`openspec/`' '`report.md`' 'PR descriptions' 'commit messages'; do assert_fixed "$k" "$INPUTS"; done
 assert_fixed 'Reading intent first makes you describe the intent' "$INPUTS"

@@ -43,6 +43,10 @@ base" "$name 只有 head、base 兩個 commit"
   git -C "$dest" ls-tree -r --name-only HEAD^ > "$FX/$name.base-files"
   ! grep -Ev '(\.test\.|_test\.|(^|/)tests?/)' "$FX/$name.base-files" | grep -Eiq 'eval|test|judge|experiment|rubric|score|compare|benchmark|candidate|arena' || fail "$name 的 base 留著含評測字眼的路徑"
   assert_file "$dest/bin/opsx"
+  # tests/ 底下描述評測工具的檔不算題目自己的測試；只有這個 commit 改到的測試檔留著
+  assert_no_file "$dest/tests/run-candidate.test.sh"
+  assert_no_file "$dest/tests/scenarios.test.sh"
+  assert_no_file "$dest/tests/eval-playbook.test.sh"
   assert_eq "$(ls "$dest/.git")" "$(ls "$FX/plain/.git")" "$name 的 .git 不該多出檔案（例如刪掉的路徑清單）"
   assert_eq "$(git -C "$dest" rev-parse --abbrev-ref HEAD)" "fix/$name/dev" "$name 停在卡的分支上"
 }

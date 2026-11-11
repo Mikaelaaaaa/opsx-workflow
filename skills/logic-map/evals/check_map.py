@@ -4,7 +4,8 @@ Usage: python3 -I check_map.py <repo> <head> <logic-map.md>
 
 Exits 1 and prints one line per problem on stderr when a position line does not
 exist at <head>, a position line in code is not a judgment line (a Markdown
-skill file is prose an agent executes, so only its line's existence is checked), a feature's flowchart
+file under skills/ is prose an agent executes, so only its line's existence is
+checked), a feature has no D node, a feature's flowchart
 and condition table do not name the same D nodes, or a flowchart is Mermaid.
 Exits 2 on bad arguments. Whether a condition is faithful is left to the grader.
 """
@@ -15,7 +16,10 @@ import subprocess
 import sys
 
 JUDGMENT_PREFIXES = ("if ", "elif ", "case ", "[[", "while ", "until ")
-JUDGMENT_PARTS = ("grep -q", "jq -e", "&&", "||")
+JUDGMENT_PARTS = ("grep -q", "jq -e")
+TEST_LEFT = ("[", "test ", "! ")
+OPERANDS = re.compile(r";|&&|\|\|")
+QUOTED = re.compile(r'"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'')
 TERNARY = re.compile(r"\sif\s.+\selse\s")
 COMPREHENSION_FILTER = re.compile(r"\bfor\s.+\sin\s.+\sif\s")
 AWK_PATTERN = re.compile(r"^/.+/\s*\{")
@@ -27,10 +31,16 @@ SUBSECTION = re.compile(r"^### (.+)$", re.M)
 
 
 def is_judgment(line):
+    """Keywords inside comments and quoted strings do not count, and `&&` / `||` count only when one operand is a test."""
     s = line.strip()
+    if s.startswith("#"):
+        return False
+    s = QUOTED.sub('""', s)
     if s.startswith(JUDGMENT_PREFIXES):
         return True
     if any(p in s for p in JUDGMENT_PARTS):
+        return True
+    if ("&&" in s or "||" in s) and any(seg.strip().startswith(TEST_LEFT) for seg in OPERANDS.split(s)):
         return True
     return any(p.search(s) for p in (TERNARY, COMPREHENSION_FILTER, AWK_PATTERN))
 
@@ -91,7 +101,7 @@ def check_positions(src, label, node, cell):
             problems.append("%s:%d 不存在（head 沒有這個檔）" % (path, n))
         elif n < 1 or n > len(lines):
             problems.append("%s:%d 不存在（檔案只有 %d 行）" % (path, n, len(lines)))
-        elif not path.endswith(".md") and not is_judgment(lines[n - 1]):
+        elif not (path.startswith("skills/") and path.endswith(".md")) and not is_judgment(lines[n - 1]):
             problems.append("%s:%d 不是判斷行：%s" % (path, n, lines[n - 1].strip()))
     return problems
 
@@ -104,7 +114,9 @@ def check_feature(src, label, feature):
     flow = {"D" + d for d in NODE.findall(parts["流程圖"])}
     rows = table_rows(parts["條件表"])
     table = {node for node, _ in rows}
-    problems = ["%s %s 在流程圖、不在條件表" % (label, d) for d in sorted(flow - table)]
+    if not flow and not table:
+        return ["%s 沒有任何 D 節點" % label]
+    problems =["%s %s 在流程圖、不在條件表" % (label, d) for d in sorted(flow - table)]
     problems += ["%s %s 在條件表、不在流程圖" % (label, d) for d in sorted(table - flow)]
     for node, cell in rows:
         problems += check_positions(src, label, node, cell)

@@ -51,19 +51,48 @@ judged() { # judged <行號> <期望 0|1>
   if run_check "$FX/j.md"; then got=0; else got=1; fi
   assert_eq "$got" "$2" "more.sh:$1 $(sed -n "$1p" "$repo/more.sh") — $(cat "$FX/err")"
 }
-# skill 檔的文字是給 agent 執行的指示（SKILL.md Steps 1）：.md 的位置只要行存在，不要求是判斷行
-printf '# x\n\n1. When the report is not NEEDS-USER, mark it done.\n' > "$repo/SKILL.md"
-git -C "$repo" add SKILL.md
-git -C "$repo" commit -q -m skill
-write_map "$FX/md.md" SKILL.md:3 "" ""
-run_check "$FX/md.md" || fail "skill 檔的指示行被拒：$(cat "$FX/err")"
-write_map "$FX/md-missing.md" SKILL.md:30 "" ""
-expect_bad "$FX/md-missing.md" "SKILL.md:30 不存在"
 judged 2 0
 judged 3 0
 judged 4 0
 judged 5 1
 judged 6 1
+
+# 收緊：命令串接、註解、字串裡的關鍵字都不算判斷；&& / || 左邊是測試才算
+printf '%s\n' 'mkdir -p "$d" && cd "$d"' '# retry later || give up' 'echo "use a && b"' 'msg = "skip if empty else run"' 'log("for x in y if z")' '[ -d "$t" ] && export X="$t"' '! grep -q x f || exit 0' 'test -f a && rm a' 's="${s%/}"; [ -f "$s/status.json" ] || continue' 'is_open "$d" || [ "$g" = gated ] || write "$d"' > "$repo/tight.sh"
+git -C "$repo" add tight.sh
+git -C "$repo" commit -q -m tight
+tight() { # tight <行號> <期望 0|1>
+  write_map "$FX/t.md" "tight.sh:$1" "" ""
+  if run_check "$FX/t.md"; then got=0; else got=1; fi
+  assert_eq "$got" "$2" "tight.sh:$1 $(sed -n "$1p" "$repo/tight.sh") — $(cat "$FX/err")"
+}
+tight 1 1
+tight 2 1
+tight 3 1
+tight 4 1
+tight 5 1
+tight 6 0
+tight 7 0
+tight 8 0
+tight 9 0
+tight 10 0
+
+# 一個 D 都沒有的功能：流程圖與條件表都空也不能通過
+printf '# 邏輯表：fix/x/dev\n\n## 功能 1：空\n\n### 做了什麼\n1. 無。\n\n### 流程圖\n```\n輸入 → 結束\n```\n\n### 條件表\n| 節點 | 決策 | 條件（FEEL） | 結果 | 位置 |\n|---|---|---|---|---|\n\n### ⚠ 要看的地方\n- 無\n' > "$FX/empty.md"
+expect_bad "$FX/empty.md" "沒有任何 D 節點"
+
+# .md 例外只限 skills/ 底下的 skill 檔
+mkdir -p "$repo/skills/x"
+printf '# x\n\n1. When the report is not NEEDS-USER, mark it done.\n' > "$repo/skills/x/SKILL.md"
+printf '# Title\n' > "$repo/README.md"
+git -C "$repo" add skills/x/SKILL.md README.md
+git -C "$repo" commit -q -m docs
+write_map "$FX/skillmd.md" skills/x/SKILL.md:3 "" ""
+run_check "$FX/skillmd.md" || fail "skills/ 底下的 SKILL.md 指示行被拒：$(cat "$FX/err")"
+write_map "$FX/md-missing.md" skills/x/SKILL.md:30 "" ""
+expect_bad "$FX/md-missing.md" "skills/x/SKILL.md:30 不存在"
+write_map "$FX/readme.md" README.md:1 "" ""
+expect_bad "$FX/readme.md" "README.md:1 不是判斷行"
 
 # --- 校正：examples.md 的範例 1、2 對它們的 commit 要通過 ---
 EX="$OPSX_ROOT/skills/logic-map/references/examples.md"
