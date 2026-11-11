@@ -21,7 +21,7 @@ opsx <command> [args]
   status <phase> <n>/<total> <label…>  寫 changes/<slug>/status.json（--tests green|red · --change <slug> · --sub <子> · --worker <誰> · --show）
   check <主 change>                   檢查 subs/ 底下每個子殼齊不齊，有缺項逐條印、退出 1
   dispatch <slug> [--agent --model --mode --kind --repo --note <指示>]   派工：worktree + herdr tab + agent start + 第一句 + dispatch.json；--note 在第一句前寫進 inbox.md ## 派工指示
-  dispatch --feature <feature> [--agent --model --mode --repo]   一個 session 代管 feature 現在能開工的主 change（不起 drive）
+  dispatch --feature <feature> [--only <卡,…> --agent --model --mode --repo]   一個 session 代管 feature 現在能開工的主 change（不起 drive）；--only 只交出列出的卡，照列出的順序
   note <slug> [--repo] <指示…>          派工指示寫進 inbox.md ## 派工指示（追加一行）；卡已派出就送進 agent
   next                                 feature session 的主 change 等合併時，印同 feature 下一個主 change 的 /<stage> <主>，沒有印 none
   stack <主> <子> <sha>               在 PR 分支上 cherry-pick 子 change 的 commit、勾主殼 tasks.md；衝突 abort 退出 3

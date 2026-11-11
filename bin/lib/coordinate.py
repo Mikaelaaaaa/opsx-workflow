@@ -288,9 +288,13 @@ class Round:
             pr = pr_of(prs, k.split("/", 1)[1])
             if pr is None or pr.get("status") != "merged":
                 continue
-            # 上一次關同名 session 時刪過的成員分支，條目還留著
-            if self.run(["git", "-C", top, "rev-parse", "--verify", "--quiet", "refs/heads/" + v["branch"]])[0] != 0:
+            # 上一次關同名 session 時刪過的成員分支，條目還留著；--quiet 下退出 1 才是分支不在，其他是 git 自己出錯
+            rc, _, err = self.run(["git", "-C", top, "rev-parse", "--verify", "--quiet", "refs/heads/" + v["branch"]])
+            if rc == 1:
                 continue
+            if rc != 0:
+                self.log("?? %s 查不了分支 %s，session 條目留給人：%s" % (session_key, v["branch"], err[:200]))
+                return
             rc, _, err = self.act(["git", "-C", top, "branch", "-D", v["branch"]])
             if rc != 0:
                 self.log("?? %s 分支 %s 刪不掉，session 條目留給人：%s" % (session_key, v["branch"], err[:200]))
@@ -609,31 +613,39 @@ class Round:
                 except SystemExit as e:
                     self.log("-- %s 的 feature %s 不開 session：%s" % (repo, name, e))
                     continue
-                # 單卡派著的卡（上線前派的、人手動派的）佔著它的分支，dispatch --feature 會在 worktree add 撞上
-                single = [p[0] for p in plan if self.live_single(repo, p[0], name)]
+                # 單卡派過的卡（上線前派的、人手動派的）只要 worktree 還在就佔著它的分支，dispatch --feature 會在 worktree add 撞上
+                single = [p[0] for p in plan if self.holds_branch(repo, p[0], name)]
                 if single:
-                    self.log("-- %s 的 feature %s 不開 session：%s 已經單卡派著" % (repo, name, "、".join(single)))
+                    self.log("-- %s 的 feature %s 不開 session：%s 已經單卡派著（或停了但 worktree 還在）" % (repo, name, "、".join(single)))
                     continue
-                levels = [(p[0], self.level(top, p[0])) for p in plan]
+                # 人停的成員 dispatch --feature 會跳過，等級也不算它
+                slugs = [p[0] for p in plan if not chain.human_stopped(self.dispatch_file.get("%s/%s" % (repo, p[0])), name)]
+                levels = [(s, self.level(top, s)) for s in slugs]
                 held = ["%s %s" % (s, got["error"] if "error" in got else got["reason"]) for s, got in levels if "error" in got or got["level"] == "P2"]
-                if len(held) == len(levels):
-                    self.log("-- %s 的 feature %s 能開工的卡都是 P2 或等級算不出來，不自動開 session：%s" % (repo, name, "；".join(held)))
+                ready = [(priority.LEVELS.index(got["level"]), i, s) for i, (s, got) in enumerate(levels) if "error" not in got and got["level"] != "P2"]
+                if not ready:
+                    self.log("-- %s 的 feature %s 能開工的卡都是 P2、等級算不出來或人停的，不自動開 session：%s" % (repo, name, "；".join(held) or "全部人停"))
                     continue
-                p0 = any("level" in got and got["level"] == "P0" for _, got in levels)
+                # 照等級排、同等級保留 workplan 順序：第一句給排第一的，P0 不會排在 P1 後面
+                ranked = sorted(ready)
+                only = [s for _, _, s in ranked]
+                p0 = ranked[0][0] == priority.LEVELS.index("P0")
                 if not p0 and n >= MAX_DISPATCH:
                     self.log("-- 這輪派滿 %d 個，feature %s 下輪" % (MAX_DISPATCH, name))
                     continue
-                rc, _, err = self.act(["opsx", "dispatch", "--feature", name, "--agent", "claude", "--mode", "autopilot", "--repo", top])
+                rc, _, err = self.act(["opsx", "dispatch", "--feature", name, "--only", ",".join(only), "--agent", "claude", "--mode", "autopilot", "--repo", top])
                 if rc != 0:
                     self.log("?? %s 的 feature %s 開不了 session：%s" % (repo, name, err[:200]))
                     continue
                 if not p0:
                     n += 1
 
-    def live_single(self, repo, slug, feature):
-        """<slug> 有沒停的條目，而且不是這個 feature 的 session 成員。"""
+    def holds_branch(self, repo, slug, feature):
+        """<slug> 有條目、不是這個 feature 的 session 成員，而且沒停、或停了但 worktree 還在（opsx stop 不收 worktree）。"""
         entry = self.dispatch_file.get("%s/%s" % (repo, slug))
-        return bool(entry) and entry.get("mode") != "stopped" and entry.get("via") != "@" + feature
+        if not entry or entry.get("via") == "@" + feature:
+            return False
+        return entry.get("mode") != "stopped" or ("worktree" in entry and os.path.isdir(entry["worktree"]))
 
 
 def mark_stopped(d, key, at):
