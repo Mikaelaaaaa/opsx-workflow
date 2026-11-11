@@ -1,0 +1,67 @@
+  - id: specs
+    generates: specs/**/*.md
+    description: Detailed specifications for the change
+    template: spec.md
+    instruction: |
+      Create specification files that define WHAT the system should do, written in Gherkin form.
+      完整寫法、原文範例與進階技巧在 opsx 插件的 skills/propose/references/gherkin.md；這裡是每次寫 spec 都要用的部分，範本是一份能直接 validate 的範例。
+
+      Create one spec file per capability listed in the proposal's Capabilities section.
+      - New capabilities: use the exact kebab-case name from the proposal (specs/<capability>/spec.md).
+      - Modified capabilities: use the existing spec folder name from openspec/specs/<capability>/ when creating the delta spec at specs/<capability>/spec.md.
+
+      關鍵字：
+      | 關鍵字 | 用途 | 在 openspec spec.md 寫成 |
+      |---|---|---|
+      | Feature | 功能模組 | 一份 specs/<capability>/spec.md，不另寫 Feature: |
+      | Rule | 原子化業務規則 | `### Requirement: <名>`，標題下第一個非空行是含 SHALL 或 MUST 的規則句 |
+      | Scenario / Example | 單一情境 | `#### Scenario: <名>（正例）` 或 `#### Scenario: <名>（反例）`，必須 4 個 # |
+      | Scenario Outline + Examples | 用表格覆蓋多組測資 | `#### Scenario Outline: <名>（正例）`，其下一行 `Examples:` 再接表，一列一組測資 |
+      | Given / When / Then / And | 前置、動作、預期、連接同類步驟 | `- **GIVEN**` / `- **WHEN**` / `- **THEN**` / `- **AND**`，參數用雙引號 |
+      | Background | 共用前置 | 放在規則句之後、第一個 Scenario 之前，只有 GIVEN |
+      | Docstring | 傳 JSON / XML 等多行文字 | 步驟下縮排的 """ 區塊 |
+      | Data Table | 一個步驟帶多筆結構化資料 | 步驟下縮排的表 |
+      | * | 並列步驟，取代連續的 And | `- **AND**` |
+
+      三層，各一個最短範例：
+      - 基礎層（單一行為，正例加反例）：一個 Requirement，`#### Scenario: 查詢已上架商品的價格（正例）` 配 `#### Scenario: 查詢不存在的商品（反例）`。
+      - 中階層（多條業務規則）：每條規則一個 Requirement，例如 `### Requirement: 滿額折價`，各自帶正例與反例。
+      - 進階層（同規則多組測資）：`#### Scenario Outline: 查詢商品價格並套用會員折扣（正例）`，步驟裡寫 <會員等級>，下面 `Examples:` 表一列一個等級，邊界值也是表裡的列。
+
+      選層，依序問：
+      1. 這個功能有多條業務規則嗎？否：基礎層。是：中階層，每條規則一個 Requirement。
+      2. 同一條規則需要驗證多組測資嗎？否：維持 Scenario。是：進階層，Scenario Outline + Examples。
+      3. 多個場景有相同的前置步驟嗎？是：加 Background。
+      需要批次資料用 Data Table；需要傳遞複雜結構（JSON / XML）用 Docstring。
+
+      原子化：每條 Rule 是不可分割的業務邏輯單元；每個 Feature 對應一個要實作的邏輯模組；Rule 把複雜功能拆成獨立規則。
+
+      撰寫原則：
+      1. 使用業務語言，不寫資料表、欄位、函式名。
+      2. 每個 Scenario 保持獨立，不依賴其他場景的結果，可以任意順序執行。
+      3. 一個 Scenario 只驗證一件事。
+      4. 相似場景用參數化（Scenario Outline），不複製貼上。
+      5. 保持 Step 的原子性，每個步驟做一件事。
+      6. 每個 Requirement 至少一個正例、一個反例；反例沒有前置條件時可省略 GIVEN。
+      禁用模糊詞：正確的、適當的、合理的、正常、良好、妥善、等等、相關的、appropriate、properly、correctly、reasonable、etc.
+
+      Delta operations (use ## headers):
+      - **ADDED Requirements**: New capabilities
+      - **MODIFIED Requirements**: Changed behavior - MUST include full updated content
+      - **REMOVED Requirements**: Deprecated features - MUST include **Reason** and **Migration**
+      - **RENAMED Requirements**: Name changes only - use FROM:/TO: format
+      - Use SHALL/MUST for normative requirements (avoid should/may).
+      - Every requirement MUST have at least one scenario.
+
+      MODIFIED requirements workflow:
+      1. Locate the existing requirement in openspec/specs/<capability>/spec.md
+      2. Copy the ENTIRE requirement block (from `### Requirement:` through all scenarios)
+      3. Paste under `## MODIFIED Requirements` and edit to reflect new behavior
+      4. Ensure header text matches exactly (whitespace-insensitive)
+
+      Common pitfall: Using MODIFIED with partial content loses detail at archive time.
+      If adding new concerns without changing existing behavior, use ADDED instead.
+
+      Specs should be testable - each scenario is a potential test case, and each Examples row is one test case.
+    requires:
+      - proposal
