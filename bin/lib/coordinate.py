@@ -35,6 +35,8 @@ HUMAN_QUESTION = ("只有你能做", "誰來跑")
 MERGE_WORDS = ("合併", "merge")
 # explore 寫的拆法確認 gate 的 id：要人決定，永遠不代答
 SPLIT_GATE = "split"
+# drive 與 Stop hook 卡住時寫的 gate 標題（drive-<站>-<n>、卡在接 /<站> [#<n>]）：建議欄是給人看的提示，不是答案，永遠不代答
+STUCK_GATE = re.compile(r"drive-[a-z]+-[0-9]+|卡在接 /[a-z]+( #[0-9]+)?")
 VERIFY_ANSWER = "這個要真機跑的驗證使用者之後自己做：把它標成「等使用者驗」寫進 report.md 的 Consider，不要再開 gate，繼續做完剩下的 task 到 /opsx-workflow:review、/opsx-workflow:pr。"
 GRANT_ANSWER = "允許。長期授權在 grants.toml，直接做。"
 
@@ -287,6 +289,10 @@ class Round:
     def handle_gate(self, c, top):
         """派出去的卡的第一個 open gate，照固定規則答、停、或留給人。"""
         w, key = c["waiting"], card_key(c)
+        if w["gate_id"] and STUCK_GATE.fullmatch(w["gate_id"]):
+            self.log("?? %s gate %s 是 drive 或 Stop hook 卡住時寫的，建議欄是給人看的提示，不代答：%s" % (key, w["gate_id"], (w.get("question") or "")[:100]))
+            self.notify_gate(c, w, "卡住了，要你看")
+            return
         if w.get("needs") == "run":
             self.log("?? %s gate %s 要人在終端機跑指令再貼結果，不代答：%s" % (key, w["gate_id"], (w.get("recommended") or "")[:100]))
             self.notify_gate(c, w, "要你在終端機跑指令")
