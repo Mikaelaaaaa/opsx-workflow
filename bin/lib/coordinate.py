@@ -578,7 +578,31 @@ class Round:
         self.memo["_redispatched"][key] = self.now.isoformat(timespec="seconds")
         self.redispatched_now.add(key)
 
+    def relaunching(self, c):
+        """opsx relaunch 正在重開這張卡的 pane：回 (條目 key, relaunching_at)，否則 None。
+        標記寫在代管 pane 的根條目上，所以沿 via 往上看每一筆，加上 session 條目；過了 RELAUNCH_MINUTES 的是被 kill 的 relaunch 留下的，不算。"""
+        keys, k = [], card_key(c)
+        while k in self.dispatch_file and k not in keys:
+            keys.append(k)
+            via = self.dispatch_file[k].get("via")
+            if not via:
+                break
+            k = "%s/%s" % (c["repo"], via)
+        scope = session_scope(c)
+        if scope and scope not in keys:
+            keys.append(scope)
+        for k in keys:
+            at = (self.dispatch_file.get(k) or {}).get("relaunching_at")
+            if at and self.now - datetime.datetime.fromisoformat(at) < datetime.timedelta(minutes=RELAUNCH_MINUTES):
+                return k, at
+        return None
+
     def redispatch(self, c, top, why):
+        # relaunch 的空窗裡 claude 已經 /exit，看起來就是 agent 不在、或代答送不到；這時收掉 pane 會打斷 relaunch
+        busy = self.relaunching(c)
+        if busy:
+            self.log("-- %s %s，但 %s 從 %s 起在 relaunch，不重派" % (card_key(c), why, busy[0], busy[1]))
+            return
         if c["dispatch"].get("feature"):
             self.redispatch_feature(c, top, why)
             return
@@ -610,7 +634,9 @@ class Round:
         if key in self.args_checked:
             return
         self.args_checked.add(key)
-        settings = os.path.join(self.state, "settings", "%s-%s-%s.json" % (c["repo"], d.get("feature") or c["slug"], d["mode"]))
+        if self.relaunching(c):
+            return
+        settings =os.path.join(self.state, "settings", "%s-%s-%s.json" % (c["repo"], d.get("feature") or c["slug"], d["mode"]))
         if not os.path.isfile(settings):
             return
         last = self.memo["_relaunched"].get(key)
