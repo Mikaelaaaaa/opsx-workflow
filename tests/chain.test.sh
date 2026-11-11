@@ -457,5 +457,32 @@ assert_eq "$got" "$(printf 'child\tm1\tfix/m1/mikaela\tdev')" "list 寫法"
 printf '{"split/c":{"mode":"autopilot","pane":"w5:pC","worktree":"%s"},"split/m1":{"mode":"autopilot"},"split/m2":{"mode":"autopilot"}}' "$R6" > "$J"
 out="$(python3 -I "$OPSX_ROOT/bin/lib/chain.py" children "$R6" split c "$J")"
 echo "$out" | grep -q $'^skip\t' || fail "主 change 都在做要 skip: $out"
+
+# split_into 指到有 depends-on 的 feature 底下的主 change：交給 coordinate 照 feature 依賴開 session，不接
+cat > "$R6/openspec/workplan.yaml" <<'EOF'
+features:
+  - name: f1
+    prs:
+      - name: a
+        branch: fix/a/mikaela
+        status: pending
+        depends-on: []
+        changes:
+          - name: a
+            status: pending
+  - name: f2
+    depends-on: [a]
+    prs:
+      - name: m1
+        branch: fix/m1/mikaela
+        status: pending
+        depends-on: []
+        changes:
+          - name: m1
+            status: pending
+EOF
+printf -- '---\nsplit_into: m1\n---\n' > "$R6/openspec/changes/c/inbox.md"; split_entry
+out="$(python3 -I "$OPSX_ROOT/bin/lib/chain.py" children "$R6" split c "$J")"
+echo "$out" | grep -q $'^skip\t' || fail "feature 有 depends-on 的主 change 要 skip: $out"
 cd "$R"
 echo ok

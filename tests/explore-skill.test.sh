@@ -13,6 +13,11 @@ for f in "$ENDING" "$SPLIT" "$ENGAGE"; do [ -s "$f" ] || fail "section missing: 
 # --- new-auto-merge：拆卡前先處理原卡的 ## 併入 段（拆出或帶進主 change），不留在 split 的卡上 ---
 has '## 併入' "$SPLIT"; has 'opsx split-out' "$SPLIT"
 
+# --- held-branch-guard：opsx chain 沒續接時寫 gate 請人派。coordinate 只派有 tasks.md 的卡，剛拆的主 change 不會被它派到 ---
+has 'opsx chain <original>' "$SPLIT"
+! grep -qF 'left for the coordinator to dispatch' "$SPLIT" || fail "不能寫交給 coordinator 派：剛拆的主 change 沒有 tasks.md"
+has '## dispatch-<main>' "$SPLIT"; has 'needs: run' "$SPLIT"
+
 # --- Scenario：explore skill 有 D5 對照段 ---
 has 'D5 check' "$ENDING"
 has 'more than one subsystem' "$ENDING"

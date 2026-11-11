@@ -117,13 +117,13 @@ def children(top: str, repo: str, parent: str, dispatch_path: str) -> list:
     prs = [pr for f in features for pr in f.get("prs") or []]
     feature_of = {pr.get("name"): f.get("name") for f in features for pr in f.get("prs") or []}
     mine = find_pr(prs, parent)
+    gated = {f.get("name") for f in features if f.get("depends-on")}   # 有自己依賴的 feature，由 coordinate 照 feature 依賴派
     if mine is None:
         split = split_into(top, parent)
         if split:
-            return split_next(top, repo, prs, split, dispatch)
+            return split_next(top, repo, prs, split, dispatch, {n for n, f in feature_of.items() if f in gated})
         return [("skip", "workplan 裡沒有 %s" % parent)]
     session = me.get("feature")
-    gated = {f.get("name") for f in features if f.get("depends-on")}   # 有自己依賴的 feature，由 coordinate 照 feature 依賴派
     status = {pr.get("name"): pr.get("status") for pr in prs}
     out = []
     for pr in prs:
@@ -164,14 +164,14 @@ def split_into(top: str, card: str) -> list:
     return [s for s in (priority.unquote(x.strip()) for x in v.split(",")) if s]
 
 
-def split_next(top: str, repo: str, prs: list, split: list, dispatch: dict) -> list:
+def split_next(top: str, repo: str, prs: list, split: list, dispatch: dict, gated_prs: set) -> list:
     """被拆的原卡只接一張：split_into 順序裡第一個 PR 沒合、依賴都合了、沒有活的條目、不是 P2 的主 change。
-    剛拆出來的殼只有 inbox.md，所以不看 tasks.md。"""
+    剛拆出來的殼只有 inbox.md，所以不看 tasks.md。gated_prs 是所屬 feature 有 depends-on 的 PR，跟 children 一樣交給 coordinate。"""
     status = {pr.get("name"): pr.get("status") for pr in prs}
     rows = []
     for name in split:
         pr = next((p for p in prs if p.get("name") == name), None)
-        if pr is None or pr.get("status") == "merged":
+        if pr is None or pr.get("status") == "merged" or name in gated_prs:
             continue
         if any(status.get(dep) != "merged" for dep in pr.get("depends-on") or []):
             continue
