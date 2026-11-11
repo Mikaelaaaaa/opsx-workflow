@@ -341,7 +341,9 @@ class Handler(BaseHTTPRequestHandler):
         return bool(TOKEN_RE.match(token)) and secrets.compare_digest(token, self.cfg.token)
 
     def opsx_env(self) -> dict:
-        return dict(os.environ, OPSX_STATE_DIR=str(self.cfg.state))
+        # 看板從 dispatch 的 agent pane 啟動時繼承 OPSX_CARD；留著，使用者按的 opsx new 會被當成 agent 開的卡
+        env = {k: v for k, v in os.environ.items() if k != "OPSX_CARD"}
+        return dict(env, OPSX_STATE_DIR=str(self.cfg.state))
 
     def collect(self) -> tuple[int, dict]:
         cfg = self.cfg

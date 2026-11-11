@@ -18,6 +18,7 @@ assert_eq "${LAUNCH_ARGS[*]}" "--model claude-sonnet-5-5 --permission-mode dontA
 assert_eq "${LAUNCH_ARGS[7]}" "$TOP/openspec" "含空白的路徑要是同一個元素"
 assert_file "$S"
 python3 -I -c 'import json,sys;d=json.load(open(sys.argv[1]))["permissions"];assert "allow" in d and "deny" in d,d;assert d["additionalDirectories"]==[sys.argv[2],sys.argv[3]],d' "$S" "$TOP/openspec" "$SD" || fail "autopilot settings 內容不對"
+python3 -I -c 'import json,sys;d=json.load(open(sys.argv[1]));assert d["env"]=={"OPSX_CARD":"retry-backoff"},d' "$S" || fail "autopilot settings 要帶 env OPSX_CARD"
 # 同一組輸入呼叫兩次（dispatch 一次、relaunch 一次）：逐字相同
 first=("${LAUNCH_ARGS[@]}")
 launch_args claude claude-sonnet-5-5 autopilot Agentory-CS retry-backoff "$TOP"
@@ -30,6 +31,7 @@ SI="$SD/settings/Agentory-CS-retry-backoff-interactive.json"
 assert_eq "${LAUNCH_ARGS[*]}" "--model claude-opus-5-5 --settings $SI --add-dir $TOP/openspec --add-dir $SD"
 assert_file "$SI"
 python3 -I -c 'import json,sys;d=json.load(open(sys.argv[1]))["permissions"];assert d=={"additionalDirectories":[sys.argv[2],sys.argv[3]]},d' "$SI" "$TOP/openspec" "$SD" || fail "interactive settings 只該有可寫目錄"
+python3 -I -c 'import json,sys;d=json.load(open(sys.argv[1]));assert d["env"]=={"OPSX_CARD":"retry-backoff"},d' "$SI" || fail "interactive settings 要帶 env OPSX_CARD"
 assert_file "$S"   # 另一個模式那份不被蓋掉
 
 # --- codex：不寫 settings ---
