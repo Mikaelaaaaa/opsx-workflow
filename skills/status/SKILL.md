@@ -18,8 +18,8 @@ Read-only dashboard. Shows the full workplan state, never modifies anything.
 If `openspec/workplan.yaml` exists, silently verify it matches reality:
 
 1. For each PR where status ≠ `merged`:
-   - `gh pr list --head <branch> --json state --jq '.[0].state' 2>/dev/null` — is it merged on GitHub?
-   - If merged on GitHub but workplan says `pending`/`in-progress` → auto-update to `merged`
+   - Find the forge from `git remote get-url gitlab` (else `origin`). A GitLab host: `glab mr list --source-branch <branch> --merged -F json`. `github.com`: `gh pr list --head <branch> --state merged --json number`. Any other host: skip this check and say so.
+   - If the list is not empty (merged on the forge) but workplan says `pending`/`in-progress` → auto-update to `merged`
 2. For each change where status ≠ `done`:
    - Check if `openspec/changes/<name>/` still exists
    - If missing (archived or deleted) → auto-update to `done`

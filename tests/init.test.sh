@@ -227,7 +227,8 @@ assert_no_file "$FX/cc4/settings.json.opsx-bak"
 
 # --- init --check：比對機器 / repo 的設定與標準設定，只讀 ---
 cd "$FX"
-outc="$(opsx init --check 2>&1)"; assert_eq "$?" 0 "裝完的機器 --check 要過：$outc"
+PYH="$FX/pyhome"; mkdir -p "$PYH"   # --check 會看 $HOME/.pyenv；不讓真機器的鎖檔影響結果
+outc="$(HOME="$PYH" opsx init --check 2>&1)"; assert_eq "$?" 0 "裝完的機器 --check 要過：$outc"
 case "$outc" in *一致*) ;; *) fail "一致時要說一致：$outc" ;; esac
 mkdir -p "$FX/cc5"; printf '{"theme":"dark"}' > "$FX/cc5/settings.json"
 before="$(cat "$FX/cc5/settings.json")"
@@ -244,9 +245,19 @@ outc="$(CLAUDE_CONFIG_DIR="$FX/cc6" opsx init --check 2>&1)"; rc=$?
 assert_eq "$rc" 1 "repo 沒登記時 --check 要失敗：$outc"
 case "$outc" in *"$R"*) ;; *) fail "要印缺的 repo 路徑：$outc" ;; esac
 CLAUDE_CONFIG_DIR="$FX/cc6" opsx init >/dev/null 2>&1 || fail "init in cc6"
-outc="$(CLAUDE_CONFIG_DIR="$FX/cc6" opsx init --check 2>&1)"; assert_eq "$?" 0 "登記後 --check 要過：$outc"
+outc="$(HOME="$PYH" CLAUDE_CONFIG_DIR="$FX/cc6" opsx init --check 2>&1)"; assert_eq "$?" 0 "登記後 --check 要過：$outc"
 case "$outc" in *還沒信任*) ;; *) fail "cc6 沒有信任紀錄，--check 要警告：$outc" ;; esac
 cd "$FX"
+# pyenv rehash 鎖檔殘留：超過 5 分鐘才報（rc 1、印路徑與 rehash）；剛建立的與不存在的都不提
+case "$outc" in *pyenv*) fail "沒有鎖檔時不該提 pyenv：$outc" ;; esac
+LOCK="$PYH/.pyenv/shims/.pyenv-shim"; mkdir -p "${LOCK%/*}"; : > "$LOCK"
+python3 -I -c 'import os,sys,time;t=time.time()-60;os.utime(sys.argv[1],(t,t))' "$LOCK"
+outc="$(HOME="$PYH" opsx init --check 2>&1)"; assert_eq "$?" 0 "1 分鐘內的鎖檔不算問題：$outc"
+case "$outc" in *pyenv*) fail "剛建立的鎖檔不該提：$outc" ;; esac
+python3 -I -c 'import os,sys,time;t=time.time()-600;os.utime(sys.argv[1],(t,t))' "$LOCK"
+outc="$(HOME="$PYH" opsx init --check 2>&1)"; assert_eq "$?" 1 "10 分鐘前的鎖檔要失敗：$outc"
+case "$outc" in *"$LOCK"*rehash*|*rehash*"$LOCK"*) ;; *) fail "要印鎖檔路徑與 rehash：$outc" ;; esac
+rm "$LOCK"
 
 # --- 每日同步 launchd：第一次安裝 ---
 PL="$OPSX_LAUNCH_AGENTS_DIR/com.opsx.sync.plist"
@@ -343,7 +354,7 @@ assert_eq "$?" 0 "base 是 symlink 時 init --global: $outg"
 assert_eq "$(cat "$OPSX_STATE_DIR/python")" "$FX/baselink/python3" "base 要原樣記，不解 symlink"
 
 # --- --global 問 obsidian 收件夾：vault 與子資料夾分兩題，原樣寫入（sync-obsidian / obsidian-source）---
-# 互動模式要 tty，測試直接叫 ask_global_sources，stdin 依序答 vault、子資料夾、customer（Enter 跳過）
+# 互動模式要 tty，測試直接叫 ask_global_sources，stdin 依序答 vault、子資料夾
 ask() { ( source "$OPSX_ROOT/bin/lib/common.sh"; source "$OPSX_ROOT/bin/lib/init.sh"; ask_global_sources "$1" ); }
 obsidian_of() { python3 -I -c 'import sys,tomllib;o=tomllib.load(open(sys.argv[1],"rb"))["obsidian"];print(o["vault"]+"|"+o["folder"])' "$1"; }
 ST="$FX/sources-ask.toml"
@@ -373,4 +384,17 @@ printf '[obsidian]\nvault = "/v"\nfolder = "f"\n' > "$ST"; cp "$ST" "$FX/st-befo
 outa="$(printf '\n' | ask "$ST")"
 assert_eq "$(cat "$ST")" "$(cat "$FX/st-before")" "已登記不改"
 case "$outa" in *obsidian*) fail "已登記不再問 obsidian：$outa" ;; esac
+
+# --- --global 不引導人設定 customer（specs/opsx-init「--global 不引導人設定 customer」）---
+: > "$ST"; outa="$(printf '/Users/me/vault\ninbox\n' | ask "$ST" 2>&1)"
+case "$outa" in *customer*) fail "不該問 customer：$outa" ;; esac
+assert_not_grep '^\[customer\]' "$ST"
+printf '[customer]\nbase_url = "u"\n' > "$ST"; cp "$ST" "$FX/st-before"
+printf '\n\n' | ask "$ST" >/dev/null 2>&1
+assert_eq "$(cat "$ST")" "$(cat "$FX/st-before")" "既有 [customer] 不動"
+outt="$(OPSX_STATE_DIR="$FX/st-tpl" opsx init --global 2>&1)"; assert_eq "$?" 0 "fresh state init --global: $outt"
+assert_eq "$(printf '%s\n' "$outt" | grep '略過' | grep -c customer)" 0 "非互動訊息不提 customer"
+assert_eq "$(printf '%s\n' "$outt" | grep -c '略過.*obsidian\|obsidian.*略過')" 1 "非互動訊息提 obsidian"
+assert_not_grep '^# \[customer\]' "$FX/st-tpl/sources.toml"
+assert_grep 'customer.*on-hold' "$FX/st-tpl/sources.toml"
 echo ok

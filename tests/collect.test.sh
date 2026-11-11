@@ -527,6 +527,8 @@ gcard t-ish     '## g1\ntype: approval-ish\nstatus: open\n問題: 表外\n'
 gcard t-run     '## g1\ntype: decision\nneeds: run\nstatus: open\n問題: 跑一下\n建議: ls -la /tmp\n'
 gcard t-plain   '## g1\ntype: decision\nstatus: open\n問題: 選\n選項: A | B\n建議: A\n'
 gcard t-badneed '## g1\ntype: decision\nneeds: ssh\nstatus: open\n問題: 選\n'
+gcard t-waits   '## g1\ntype: decision\nwaits-on:  grant-gate-levels \nstatus: open\n問題: 等別張卡\n建議: 合併後再開\n'
+gcard t-waitsempty '## g1\ntype: decision\nwaits-on:\nstatus: open\n問題: 空值\n建議: 合併後再開\n'
 J="$(opsx collect --root "$R7")"; assert_eq "$?" 0 "gate-type collect rc"
 w() { q "$(card "$J" r6 "$1")" "waiting.$2"; }
 assert_eq "$(w t-auth type)" 等待授權 "authorization 是授權"
@@ -544,6 +546,12 @@ assert_eq "$(w t-run needs)" run; assert_eq "$(w t-run type)" 等待決定; asse
 assert_eq "$(w t-plain needs)" null "沒標 needs"
 assert_eq "$(w t-badneed needs)" null "needs 只認 run"
 assert_eq "$(w t-auth needs)" null; assert_eq "$(w t-notype needs)" null
+# waits-on：gate 明寫等哪張卡才有值，建議裡的「合併後」不算（coordinate-split-park）
+assert_eq "$(w t-waits waits_on)" grant-gate-levels "waits-on 帶進 waiting，去掉前後空白"
+assert_eq "$(w t-waits type)" 等待決定 "waits-on 不改 type"
+assert_eq "$(w t-plain waits_on)" null "沒寫 waits-on"
+assert_eq "$(w t-waitsempty waits_on)" null "空值當沒寫"
+assert_eq "$(w t-run waits_on)" null "建議含文字也不影響"
 
 # ---------- session：workplan 的 feature 收成 sessions[]（specs/board-collect「收成 session 的 feature」等四條） ----------
 R6="$FX/code6"; S6="$FX/state6"; mkdir -p "$R6/s/.git" "$R6/t/.git" "$R6/u/.git" "$R6/t/openspec/changes" "$R6/u/openspec/changes" "$S6"
