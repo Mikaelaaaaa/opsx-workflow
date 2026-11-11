@@ -449,6 +449,19 @@ class Round:
             for key in [k for k in self.memo["_notified"] if k.startswith(scope + "/blocked/") and k not in still]:
                 del self.memo["_notified"][key]
 
+    def notify_sub_gates(self, sessions):
+        """session 裡子 change 的 open gate。子 change 由主 change 的 session 轉給 subagent，協調者不代答；
+        記 ?? 並通知，人才看得到（卡本身的 waiting 只帶主 change 的 gate）。"""
+        for s in sessions:
+            for m in s.get("mains") or []:
+                for sub in m.get("subs") or []:
+                    w = sub.get("waiting")
+                    if not w:
+                        continue
+                    c = {"repo": s["repo"], "slug": "%s/%s" % (m["slug"], sub["slug"])}
+                    self.log("?? %s 子 change 的 gate %s 要人看：%s" % (card_key(c), w["gate_id"], one_line(w.get("question") or "")[:100]))
+                    self.notify_gate(c, w, "要人看（子 change）")
+
     def notify_gate(self, c, w, why):
         self.notify(c, "gate", w["gate_id"], "gate %s %s" % (w["gate_id"], why), "看板：" + one_line(w.get("question") or ""))
 
@@ -1065,6 +1078,8 @@ def one_round(state, dry):
         if c["mr"] and c["mr"]["state"] == "ready":
             # 推了新 commit 再全綠是新的一次可以合併，所以綁 head sha
             r.notify(c, "ready", c["mr"]["head_sha"], "可以合併", "看板按「合併」：" + c["mr"]["url"])
+    if not paused:
+        r.notify_sub_gates(data.get("sessions") or [])
     for c in live:
         if paused or not c["dispatch"] or card_key(c) in r.memo["_parked"]:
             continue
