@@ -33,7 +33,7 @@ for v in "$a" "$b" "$c" "$d"; do [ -n "$v" ] || fail "建殼四步缺一步: $a 
 [ "$a" -lt "$b" ] && [ "$b" -lt "$c" ] && [ "$c" -lt "$d" ] || fail "四步順序：主殼 $a < 子殼 $b < workplan $c < split_into $d"
 has 'parent:' "$SPLIT"
 
-# --- Scenario：explore skill 有步驟表（驗收：openspec/changes/node-steps-wired/specs/node-step-wiring/spec.md） ---
+# --- Scenario：explore skill 有步驟表（驗收：openspec/changes/node-steps-text/specs/node-step-text/spec.md「explore skill 有步驟表」） ---
 STEPS="$FX/steps"; section "Steps" > "$STEPS"
 [ -s "$STEPS" ] || fail "section missing: Steps"
 for k in '../how/SKILL.md' '../blast-radius/SKILL.md' '../why/SKILL.md' 'references/prototype.md' '../unslop/SKILL.md' '查資料' 'skip：' '## 步驟'; do has "$k" "$STEPS"; done
@@ -47,4 +47,18 @@ awk '/^## /{on=($0=="## 步驟");next} on && /^- [0-9]+ /{sub(/^- [0-9]+ /,""); 
 cmp -s "$FX/skill-names" "$FX/tpl-names" || fail "步驟名或順序不一致。SKILL.md 步驟表: $(tr '\n' ' ' < "$FX/skill-names")／模板 ## 步驟: $(tr '\n' ' ' < "$FX/tpl-names")"
 REQ="$OPSX_ROOT/docs/rewrite-requirements-pstack-grill.md"
 ! grep -qF '八段固定標題' "$REQ" || fail "需求文件 §8.3 不該再寫八段固定標題"
+# 驗收：「模板與 skill 步驟名一致」——§8.3 explore 子表的步驟名與順序也相同，摘要列也有查資料與 unslop
+awk '/^### /{on=($0 ~ /^### explore（主流程節點 1/);next} on' "$REQ" > "$FX/req-explore"
+awk -F'|' '/^\| [0-9]+ /{gsub(/^ *[0-9]+ *| +$/,"",$2); print $2}' "$FX/req-explore" > "$FX/req-names"
+cmp -s "$FX/skill-names" "$FX/req-names" || fail "§8.3 explore 子表與 SKILL.md 步驟名或順序不一致。SKILL.md: $(tr '\n' ' ' < "$FX/skill-names")／§8.3: $(tr '\n' ' ' < "$FX/req-names")"
+SUMMARY_ROW="$(grep -F '| **explore** | 讀檔' "$REQ")"
+for k in '查資料' 'unslop'; do printf '%s' "$SUMMARY_ROW" | grep -qF -- "$k" || fail "§8.3 主表 explore 摘要列沒有 $k"; done
+# 驗收：「explore skill 有步驟表」——步驟 bullet 不宣稱還不存在的強制機制
+! grep -qF 'Stop hook blocks' "$ENDING" || fail "步驟 bullet 還寫 Stop hook blocks，這個機制屬 node-steps-gates"
+! grep -qF 'opsx check' "$ENDING" || fail "步驟 bullet 還寫 opsx check 讀這一段，這個機制屬 node-steps-gates"
+# 步驟 1、8、9 沒有已知區塊可指，要有合法寫法與例子
+for k in '- 1 讀卡：done' '- 8 待決：待決' '- 9 unslop：done'; do
+  has "$k" "$ENDING"
+  has "$k" "$TPL"
+done
 echo ok

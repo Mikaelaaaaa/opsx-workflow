@@ -68,7 +68,7 @@ Count tasks marked with `- [ ]` (incomplete) vs `- [x]` (complete).
 
 ### 3b. Reflect on a long card
 
-A card is long when `tasks.md` has an `## R1.` review group, meaning review sent work back at least once. For a long card, `Read ../reflect/SKILL.md` and follow it: three reviewers and a synthesizer sort what went wrong into Accepted, Rejected and Backlog. Nothing in opsx's own skills changes until the user approves an Accepted item; each approved change goes through `/propose` as its own card. A card without an R group skips this step.
+A card is long when `tasks.md` has an `## R1.` review group, meaning review sent work back at least once. For a long card, `Read ../reflect/SKILL.md` and follow it: three reviewers and a synthesizer sort what went wrong into Accepted, Rejected and Backlog. Nothing in opsx's own skills changes until the user approves an Accepted item; each approved change goes through `/propose` as its own card. Do not wait for that approval here: file each Accepted item as an inbox card (`opsx new --kind-of-work planned -- "<item>"`) and go on to step 4, so a card with no one at the terminal still gets archived. A card without an R group skips this step.
 
 ### 4. Assess delta spec sync state
 

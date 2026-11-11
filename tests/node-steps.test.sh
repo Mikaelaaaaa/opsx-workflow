@@ -19,12 +19,30 @@ while IFS=: read -r node skills; do
   dir="$OPSX_ROOT/skills/$node"
   assert_file "$dir/SKILL.md"
   for s in $skills; do
-    case "$s" in */*) assert_file "$OPSX_ROOT/skills/$s/reviewer-prompt.md" ;; *) assert_file "$OPSX_ROOT/skills/$s/SKILL.md" ;; esac
-    case "$s" in */*) pat="$s/" ;; *) pat="$s/SKILL.md" ;; esac
-    grep -rqF -- "$pat" "$dir" || missing="$missing ${node}:${s}"
+    case "$s" in
+      */*)
+        assert_file "$OPSX_ROOT/skills/$s/reviewer-prompt.md"
+        grep -rqF -- "$s/" "$dir" || missing="$missing ${node}:${s}" ;;
+      *)
+        # 抽出完整的 (../)+<name>/SKILL.md，以寫它的那個檔所在目錄為基準解析，層數寫錯就失敗
+        assert_file "$OPSX_ROOT/skills/$s/SKILL.md"
+        found=""
+        for f in $(grep -rlF -- "$s/SKILL.md" "$dir"); do
+          for rel in $(grep -oE "(\.\./)+$s/SKILL\.md" "$f" | sort -u); do
+            assert_file "$(dirname "$f")/$rel"
+            found=1
+          done
+        done
+        [ -n "$found" ] || missing="$missing ${node}:${s}" ;;
+    esac
   done
 done <<< "$NODES"
-[ -z "$missing" ] || fail "節點沒有 Read 路徑：$missing"
+[ -z "$missing" ] || fail "節點沒有可解析的 Read 路徑：$missing"
+
+# 驗收：archive 的 3b（長任務 reflect）在 autopilot 下不等批准，不卡住歸檔
+awk '/^### /{on=($0 ~ /^### 3b\./);next} /^## /{on=0} on' "$OPSX_ROOT/skills/archive/SKILL.md" > "$FX/archive-3b"
+[ -s "$FX/archive-3b" ] || fail "archive 沒有 3b 一節"
+assert_grep 'not wait for that approval' "$FX/archive-3b"
 
 # playbooks 與 architect / teach 點名的 skill 要寫成相對於該檔的路徑，且路徑解析得到檔案
 # 驗收：「playbook 的 skill 都有路徑」
