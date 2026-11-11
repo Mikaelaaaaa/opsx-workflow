@@ -352,8 +352,9 @@ class Round:
                 return
             why = self.unpushed(top, v["branch"])
             if why:
-                self.log("?? %s 分支 %s %s，不刪，session 條目留給人" % (session_key, v["branch"], why))
-                return
+                # session 條目要拿掉：留著它會停在 stopped，dispatch_features 當成人停的，同 feature 剩下的 PR 不再開 session
+                self.log("?? %s 分支 %s %s，不刪，留給人" % (session_key, v["branch"], why))
+                continue
             rc, _, err = self.act(["git", "-C", top, "branch", "-D", v["branch"]])
             if rc != 0:
                 self.log("?? %s 分支 %s 刪不掉，session 條目留給人：%s" % (session_key, v["branch"], err[:200]))
