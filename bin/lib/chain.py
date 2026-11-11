@@ -104,16 +104,18 @@ def card_of(top: str, pr: dict, todo: list) -> str:
 
 
 def session_managed(feature: dict) -> bool:
-    """feature 由 session 代管：有 depends-on，或 prs 有 2 個以上且名稱能當 herdr agent 名。已合的 PR 也算，代管方式才不會做到一半切換。
-    名稱不合法的多 PR feature 開不了 session，照單卡派。"""
-    if feature.get("depends-on"):
-        return True
-    return len(feature.get("prs") or []) >= 2 and bool(AGENT_NAME.match(feature.get("name") or ""))
+    """feature 由 session 代管：名稱能當 herdr agent 名，且有 depends-on 或 prs 有 2 個以上。已合的 PR 也算，代管方式才不會做到一半切換。
+    名稱不合法的 feature 開不了 session，照單卡派（feature 的 depends-on 由 feature_waits 擋）。"""
+    if not AGENT_NAME.match(feature.get("name") or ""):
+        return False
+    return bool(feature.get("depends-on")) or len(feature.get("prs") or []) >= 2
 
 
-def children(top: str, repo: str, parent: str, dispatch_path: str) -> list:
+def children(top: str, repo: str, parent: str, dispatch_path: str, feature: str = None) -> list:
     """父卡的條目有 feature（一個 session 代管整個 feature）時，同 feature 的主 change 印 session 行，
-    別的 feature、以及由 session 代管的 feature（session_managed），由 coordinate 開 session 派，這裡不接。"""
+    別的 feature、以及由 session 代管的 feature（session_managed），由 coordinate 開 session 派，這裡不接。
+    feature 是 coordinate 替單卡（條目沒有 feature）收尾時給的：父卡所屬 feature 的 session 活著，當作父卡條目有這個 feature。
+    所屬 feature 的 depends-on 還沒合的 PR 不接。"""
     dispatch = jsonfile.load(dispatch_path)
     me = dispatch.get("%s/%s" % (repo, parent))
     if not me:
@@ -135,13 +137,14 @@ def children(top: str, repo: str, parent: str, dispatch_path: str) -> list:
             # coordinate 的 feature_plan 不派只有 inbox.md 的殼，所以只有 feature 依賴還沒合的才留給它
             return split_next(top, repo, prs, split, dispatch, feature_waits(features, prs))
         return [("skip", "workplan 裡沒有 %s" % parent)]
-    session = me.get("feature")
+    session = me.get("feature") or feature
     gated = {f.get("name") for f in features if session_managed(f)}
+    waits = feature_waits(features, prs)
     status = {pr.get("name"): pr.get("status") for pr in prs}
     out = []
     for pr in prs:
         deps = pr.get("depends-on") or []
-        if mine.get("name") not in deps or pr.get("status") == "merged":
+        if mine.get("name") not in deps or pr.get("status") == "merged" or pr.get("name") in waits:
             continue
         owner = feature_of.get(pr.get("name"))
         if (session or owner in gated) and owner != session:
