@@ -21,7 +21,7 @@ opsx_drive() {
   [ -d "$d" ] || die "drive: 沒有這張卡：$d"
   drive_register "$repo/$slug" || exit 2
   trap "drive_unregister $(printf '%q' "$repo/$slug")" EXIT   # 展開在設 trap 時：EXIT 跑時 local 已經沒了
-  local max="${OPSX_DRIVE_MAX:-200}" poll="${OPSX_DRIVE_POLL:-300}" i=0 last="" sent=0 settled=0
+  local max="${OPSX_DRIVE_MAX:-200}" poll="${OPSX_DRIVE_POLL:-300}" i=0 settled=0
 
   while [ "$i" -lt "$max" ]; do
     i=$((i+1))
@@ -41,7 +41,6 @@ opsx_drive() {
       herdr_step "$slug" agent wait "$slug" --until working --timeout $((poll * 1000)) || return 0
       [ "$HERDR_STEP_OK" = 1 ] || continue
       herdr_step "$slug" agent wait "$slug" || return 0
-      last=""; sent=0
       continue
     fi
     local stage; stage="$(stage_name "$top" "$slug")"
@@ -58,15 +57,14 @@ opsx_drive() {
           *)     say "drive: $slug MR 卡在 $mr → /opsx-workflow:babysit"; herdr_step "$slug" agent prompt "$slug" "/opsx-workflow:babysit $slug" --wait || return 0; sleep "$poll" ;;
         esac ;;
       explore|grill|propose|apply|review|pr)
-        if [ "$stage" = "$last" ] && [ "$sent" -ge 2 ]; then
-          write_stuck_gate "$d" "$stage" "$repo" "$slug"; say "drive: $slug 送了兩次 /opsx-workflow:$stage 階段都沒動，寫了 gate 等人"
-          coordinate_kick "$slug"   # shell 附加寫的 gate 不經過 gate-timestamp hook
-          continue
-        fi
         say "drive: $slug → /opsx-workflow:$stage"
+        local before; before="$(stage_fingerprint "$top" "$slug")"
         herdr_step "$slug" agent prompt "$slug" "/opsx-workflow:$stage $slug" --wait || return 0
-        [ "$HERDR_STEP_OK" = 1 ] || continue   # 沒送進去的不算一次
-        if [ "$stage" = "$last" ]; then sent=$((sent+1)); else last="$stage"; sent=1; fi ;;
+        [ "$HERDR_STEP_OK" = 1 ] || continue   # 沒送進去的不驗
+        if [ "$(stage_fingerprint "$top" "$slug")" = "$before" ]; then
+          write_stuck_gate "$d" "$stage" "$repo" "$slug"; say "drive: $slug 送了 /opsx-workflow:$stage 之後階段沒動，寫了 gate 等人"
+          coordinate_kick "$slug"   # shell 附加寫的 gate 不經過 gate-timestamp hook
+        fi ;;
       *) die "drive: 不認得的階段 $stage" ;;
     esac
   done
@@ -84,7 +82,7 @@ herdr_step() { # <slug> <herdr args…>
     timeout)
       return 0 ;;
     agent_prompt_stalled)
-      # herdr 收下了，只是 5 秒內沒看到 agent 動（指令馬上出錯、hook 擋掉）。算送過，卡住保護才數得到
+      # herdr 收下了，只是 5 秒內沒看到 agent 動（指令馬上出錯、hook 擋掉）。算送過，送出後的驗證才跑得到
       say "drive: $slug 的 prompt 送進去了但 agent 沒動（agent_prompt_stalled）"; HERDR_STEP_OK=1; return 0 ;;
     agent_not_found)
       say "drive: $slug 的 pane 沒了（herdr agent_not_found），結束"; coordinate_kick "$slug"; return 1 ;;
@@ -105,7 +103,7 @@ write_stuck_gate() { # <card dir> <stage> <repo> <slug>：gates.md 加一個 ope
   {
     printf '\n## drive-%s-%s\n' "$stage" "$n"
     printf 'type: decision\nstatus: open\n'
-    printf '問題: drive 卡在 /opsx-workflow:%s：連送兩次，卡的階段都沒動。agent 沒做完這一步，或做完了但沒寫出下一階段要的檔\n' "$stage"
+    printf '問題: drive 卡在 /opsx-workflow:%s：送出後階段沒動。可能跑到別的 skill（同名的內建指令），或 agent 沒做完這一步、做完了但沒寫出下一階段要的檔\n' "$stage"
     # 選項會變成看板的回覆按鈕，按下去的字直接送給 agent，所以寫成 agent 照著做得到的話
     printf '選項: 重做 /opsx-workflow:%s 一次，做不完就把卡在哪寫進 gates.md (Recommended) | 跳過這一步，在 decisions.tsv 寫下原因再往下走 | 停在這裡，把卡在哪寫進 gates.md 等人\n' "$stage"
     printf '建議: 先看 pane（板上開 pane）再回；要整張卡停掉用板上的「停止」\n'
