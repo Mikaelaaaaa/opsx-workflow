@@ -25,5 +25,6 @@ has 'opsx check <slug>' "$S0"
 # --- me-20261111-1326：worktree 沒有 openspec/，openspec 指令走主 checkout；測試一律 bash tests/run.sh，不帶前綴環境變數 ---
 has '主 checkout' "$P"
 has 'bash tests/run.sh' "$P"
+has 'cd <worktree root>' "$P"
 ! grep -qE '^[[:space:]]*(`)?OPSX_ROOT=' "$P" || fail "propose SKILL.md 不能有 OPSX_ROOT= 開頭的測試指令範例"
 echo ok

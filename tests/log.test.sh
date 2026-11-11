@@ -91,4 +91,10 @@ assert_eq "$(wc -l < "$R/openspec/changes/m/subs/s/decisions.tsv" | tr -d ' ')" 
 # 子殼不存在：退出 2，不建目錄
 assert_rc 2 opsx log m--nope claude 已決定 "x"
 assert_no_file "$R/openspec/changes/m/subs/nope"
+# 主名或子名是空的：退出 2，訊息點名 slug，不寫進 subs/ 目錄本身
+for bad in 'm--' '--s' '--'; do
+  opsx log "$bad" claude 已決定 "x" 2> "$FX/err"; assert_eq $? 2 "slug「${bad}」要退出 2"
+  assert_grep "$bad" "$FX/err"
+done
+assert_no_file "$R/openspec/changes/m/subs/decisions.tsv"
 echo ok

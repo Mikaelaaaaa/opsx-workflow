@@ -42,6 +42,7 @@ opsx_log() {
     case "$1" in --repo) top="$2"; shift 2 ;; *) args+=("$1"); shift ;; esac
   done
   [ "${#args[@]}" -ge 4 ] && [ "${#args[@]}" -le 5 ] || die "log: 用法 opsx log <slug> <who> <tag> <文字> [證據]"
+  case "${args[0]}" in --*|*--) die "log: slug「${args[0]}」的 -- 前後都要有名字（<主>--<子>）" ;; esac
   [ -n "$top" ] || top="$(git_toplevel)"
   [ -n "$top" ] || die "log: 不在 git repo 裡，或給 --repo"
   log_row "$(st_card_dir "$top" "${args[0]}")" "${args[1]}" "${args[2]}" "${args[3]}" "${args[4]:-}"

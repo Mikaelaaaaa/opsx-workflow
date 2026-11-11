@@ -94,7 +94,7 @@ LEVELS = ("P0", "P1", "P2")
 
 class Config:
     def __init__(self, state: pathlib.Path, collect_file: pathlib.Path | None):
-        self.state = state
+        self.state = state.absolute()   # 子行程的 cwd 是 state，相對路徑會在 state 底下再解析一次
         self.collect_file = collect_file
         self.token = load_token(state / "board-token")
         self.cond = threading.Condition()

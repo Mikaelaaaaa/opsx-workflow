@@ -37,7 +37,7 @@ Parse `$ARGUMENTS`: `--auto` → autopilot; a PR name → every pending change i
 
 - A PR whose `depends-on` is not all `merged`: interactive asks whether to proceed; autopilot skips it and says why.
 - Switch to the PR's branch (`git checkout <branch>` or create it from main). Never work on `main` / `master`.
-- A dispatch worktree has no `openspec/` (it is not in git): run every `openspec` command from the 主 checkout, and read and write the card's files (`tasks.md`, `decisions.tsv`, `gates.md`) at the 主 checkout's `openspec/changes/<name>/`.
+- A dispatch worktree has no `openspec/` (it is not in git): run every `openspec` command as `cd <主 checkout absolute path> && openspec …` and `cd <worktree root>` back in the next command (the `cd` stays for every later Bash call, and tests, `opsx`, git and the router all read the cwd), and read and write the card's files (`tasks.md`, `decisions.tsv`, `gates.md`) at the 主 checkout's `openspec/changes/<name>/`.
 - Per change: `openspec status --change <name> --json` and `openspec instructions apply --change <name> --json`; read every `contextFiles` entry. `blocked` → skip and report; `all_done` → mark `done` in the workplan and move on.
 - Read `kind` from `openspec/changes/<name>/.openspec.yaml` (set at dispatch, confirmed by propose). Missing → treat as `dev` and say so.
 

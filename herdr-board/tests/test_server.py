@@ -27,11 +27,11 @@ def b64(data: bytes) -> str:
     return base64.b64encode(data).decode("ascii")
 
 
-def start_server(env: dict, fixture: pathlib.Path | None) -> tuple[subprocess.Popen, str, int]:
+def start_server(env: dict, fixture: pathlib.Path | None, cwd: pathlib.Path | None = None) -> tuple[subprocess.Popen, str, int]:
     """起一支 server（--port 0），回 (proc, host, port)；等到 /healthz 回應。fixture 是 None 就不帶 --collect，collect 走 opsx。"""
     proc = subprocess.Popen(
         [sys.executable, "-I", str(SERVER), "--port", "0", *(["--collect", str(fixture)] if fixture else [])],
-        stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env, text=True,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env, text=True, cwd=cwd,
     )
     line = proc.stdout.readline()
     m = re.search(r"http://(127\.0\.0\.1):(\d+)/", line)
@@ -321,6 +321,24 @@ class ServerTest(unittest.TestCase):
         self.assertEqual(status, 200, body)
         want = str(self.state.resolve())
         self.assertEqual(self.cwd_log.read_text().split("\n")[:-1], [want, want])
+
+    def test_relative_state_dir_reaches_opsx_as_absolute_path(self):
+        # opsx new 的 cwd 是 state 目錄；state 給相對路徑時 OPSX_STATE_DIR 要先解成絕對路徑，不然 opsx 會在 state 底下再解析一次
+        base = self.tmp / "rel"
+        (base / "st").mkdir(parents=True)
+        env = dict(os.environ, HERDR_ENV="1", OPSX_STATE_DIR="st", OPSX_TEST_OPSX=str(self.tmp / "bin" / "opsx"), PATH=f"{self.tmp / 'bin'}:{os.environ['PATH']}")
+        proc, _, port = start_server(env, self.fixture, cwd=base)
+        try:
+            token = (base / "st" / "board-token").read_text().strip()
+            r = urllib.request.Request("http://127.0.0.1:%d/api/new" % port, data=json.dumps({"text": "相對 state"}).encode(), method="POST")
+            r.add_header("Content-Type", "application/json")
+            r.add_header("X-Opsx-Token", token)
+            with urllib.request.urlopen(r, timeout=5) as resp:
+                self.assertEqual(resp.status, 200)
+        finally:
+            proc.kill()
+            proc.wait()
+        self.assertEqual(self.env_log.read_text().split("\n")[-2], "OPSX_STATE_DIR=%s" % (base / "st").resolve())
 
     def test_new_rejects_empty_or_multiline_text(self):
         for text in ("", "a\nb"):

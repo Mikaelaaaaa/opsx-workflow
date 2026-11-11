@@ -11,10 +11,13 @@ r="$(rule_autopilot)"
 has "$r" '主 checkout'
 has "$r" 'openspec/changes/<slug>/'
 has "$r" 'worktree 裡沒有 `openspec/`'
+# cd 會留到後面每個 Bash 呼叫：跑完 openspec 要回 worktree 根，否則測試、opsx、router 都在主 checkout 上看 cwd
+has "$r" 'cd <主 checkout 絕對路徑> && openspec'
+has "$r" 'cd <worktree 根>'
 # Scenario：autopilot 規則含測試寫法
 has "$r" 'bash tests/run.sh'
 has "$r" '不加 `VAR=…` 或 `export`'
 gone "$r" 'OPSX_ROOT='
 # 新增的是 ' · ' 段，不是另一行
-case "$r" in *$'\n'*) fail "rule_interactive 之外的規則要維持單行" ;; esac
+case "$r" in *$'\n'*) fail "rule_autopilot 要維持單行" ;; esac
 echo ok

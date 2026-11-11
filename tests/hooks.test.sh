@@ -173,6 +173,12 @@ done
 git -C "$R" worktree add -q -b feat/no-such-card/mikaela "$FX/wt2"
 out="$(cg "git -C $FX/wt2 commit -m x")"; assert_eq "$(decision "$out")" deny "commit: 目標目錄的 branch 對不到卡要擋"
 reason "$out" | grep -q 'feat/no-such-card/mikaela' || fail "commit: deny 要帶目標目錄的 branch: $(reason "$out")"
+reason "$out" | grep -q "'main'" && fail "commit: deny 不能帶 session cwd 的 branch: $(reason "$out")"
+rm -f "$OPSX_STATE_DIR/bypass.log"
+cg "git -C $FX/wt2 commit -m 'x [no-change] y'" >/dev/null
+assert_grep 'feat/no-such-card/mikaela' "$OPSX_STATE_DIR/bypass.log"
+rm -f "$OPSX_STATE_DIR/bypass.log"
+git -C "$R" worktree remove --force "$FX/wt2"; git -C "$R" branch -q -D feat/no-such-card/mikaela
 # me-20261111-1326：子殼 branch 只要求 tasks.md 存在，不要求有勾；主殼與一般卡照舊
 mkdir -p "$R/openspec/changes/m/subs/s"
 printf 'schema: opsx\ncreated: 2026-11-11\n' > "$R/openspec/changes/m/.openspec.yaml"
@@ -186,12 +192,10 @@ out="$(cg "git -C $FX/wt-sub commit -m x")"; assert_eq "$(decision "$out")" deny
 reason "$out" | grep -q '沒有 tasks.md' || fail "commit: 子殼 deny 要指出沒有 tasks.md: $(reason "$out")"
 out="$(cg "git -C $FX/wt-main commit -m x")"; assert_eq "$(decision "$out")" deny "commit: 主殼 branch、tasks 全未勾仍擋"
 reason "$out" | grep -q '還沒有任何勾' || fail "commit: 主殼 deny 要帶「還沒有任何勾」: $(reason "$out")"
-reason "$out" | grep -q "'main'" && fail "commit: deny 不能帶 session cwd 的 branch: $(reason "$out")"
-rm -f "$OPSX_STATE_DIR/bypass.log"
-cg "git -C $FX/wt2 commit -m 'x [no-change] y'" >/dev/null
-assert_grep 'feat/no-such-card/mikaela' "$OPSX_STATE_DIR/bypass.log"
-rm -f "$OPSX_STATE_DIR/bypass.log"
-git -C "$R" worktree remove --force "$FX/wt2"; git -C "$R" branch -q -D feat/no-such-card/mikaela
+git -C "$R" worktree remove --force "$FX/wt-sub"; git -C "$R" branch -q -D 'fix/m--s/u'
+git -C "$R" worktree remove --force "$FX/wt-main"; git -C "$R" branch -q -D 'fix/m/u'
+# 子殼放寬的捷徑要留 shortcut: 註解，sync 的 debt 掃描才掃得到
+grep -q 'shortcut:' "$OPSX_ROOT/hooks/openspec-commit-gate.sh" || fail "commit 閘門的子殼分支要留 shortcut: 註解"
 git -C "$R" worktree remove --force "$FX/wt"
 out="$(cg 'ls -la')"; assert_eq "$out" "" "commit: 非 commit 指令不出聲"
 out="$(cg 'echo "之後再 git commit -m x"')"; assert_eq "$out" "" "commit: 引號內的 git commit 不出聲"
