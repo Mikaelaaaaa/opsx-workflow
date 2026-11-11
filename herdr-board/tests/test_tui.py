@@ -1,15 +1,22 @@
-"""herdr-board/tui_model.py：TUI 的純函式（排序、游標、Enter 要做什麼）。curses 不在這裡測。
-驗收：specs/board-plugin/spec.md「最小 TUI」三個 Scenario（herdr-board 5.2）。
+"""herdr-board/tui_model.py：TUI 的純函式（排序、游標、範圍、輸入框、各鍵的 argv）；MainLoopTest 用假的 curses 視窗跑 tui.main 的按鍵迴圈。畫面長相不在這裡測。
+驗收：specs/board-plugin/spec.md「最小 TUI」的 Scenario（herdr-board 5.2、tui-keys/tui-new-keys）。
 跑法：python3 -I herdr-board/tests/test_tui.py
 """
+import curses
 import importlib.util
 import pathlib
+import subprocess
+import threading
 import unittest
+from unittest import mock
 
 HERE = pathlib.Path(__file__).resolve().parent
 spec = importlib.util.spec_from_file_location("tui_model", HERE.parent / "tui_model.py")
 tm = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(tm)
+tui_spec = importlib.util.spec_from_file_location("tui", HERE.parent / "tui.py")
+tui = importlib.util.module_from_spec(tui_spec)
+tui_spec.loader.exec_module(tui)
 
 
 def card(slug, section, pane=None, waiting=None, status=None, repo="a"):
@@ -167,6 +174,276 @@ class CursorTest(unittest.TestCase):
         self.assertIsNone(cur.index)
         cur.move(1)
         self.assertIsNone(cur.index)
+
+
+def proc(argv, rc=0, out="", err=""):
+    return subprocess.CompletedProcess(argv, rc, out, err)
+
+
+class ZoomTest(unittest.TestCase):
+    def test_zoom_argv(self):
+        self.assertEqual(tm.ZOOM_ARGV, ["herdr", "pane", "zoom", "--current", "--toggle"])
+
+    def test_outcome_shows_ok_text_or_first_80_of_stderr(self):
+        self.assertEqual(tm.outcome(tm.ZOOM_ARGV, proc(tm.ZOOM_ARGV), "全屏切換了"), "全屏切換了")
+        note = tm.outcome(tm.ZOOM_ARGV, proc(tm.ZOOM_ARGV, rc=1, err="  " + "x" * 100 + "\n"), "全屏切換了")
+        self.assertEqual(note, "herdr pane zoom --current --toggle 失敗：" + "x" * 80)
+
+
+SCOPES = [{"workspace": "w1", "repos": ["a"]}, {"workspace": None, "repos": ["b"]}]
+WDATA = {"scopes": SCOPES, "repo_paths": {"a": "/r/a", "b": "/r/b"}, "unmatched_agents": [], "errors": [],
+         "cards": [card("ka", "待處理", repo="a"), card("kb", "待處理", repo="b")],
+         "sessions": [dict(SESSION, repo="b")]}
+
+
+class ScopeTest(unittest.TestCase):
+    def test_tab_cycles_all_then_workspaces_then_all(self):
+        seen, scope = [], None
+        for _ in range(3):
+            scope = tm.next_scope(WDATA, scope)
+            seen.append(tm.scope_label(scope))
+        self.assertEqual(seen, ["w1", "沒掛的", "全部"])
+
+    def test_tab_with_no_scopes_stays_all(self):
+        self.assertIsNone(tm.next_scope({"cards": []}, None))
+
+    def test_scope_filters_cards_and_sessions_but_not_pending_count(self):
+        rows = tm.rows(WDATA, done_open=False, scope="w1")
+        self.assertEqual([r["card"]["slug"] for r in rows if r["kind"] == "card"], ["ka"])
+        self.assertFalse(any(r["kind"] == "session" for r in rows), "repo b 的 session 不在 w1")
+        self.assertEqual(tm.top_line(WDATA, "w1"), " opsx  待處理 2  範圍 w1")
+        unmounted = tm.rows(WDATA, done_open=False, scope=tm.next_scope(WDATA, "w1"))
+        self.assertEqual([r["card"]["slug"] for r in unmounted if r["kind"] == "card"], ["kb"])
+        self.assertEqual([r["kind"] for r in unmounted].count("session"), 1)
+
+    def test_all_scope_keeps_everything(self):
+        rows = tm.rows(WDATA, done_open=False, scope=None)
+        self.assertEqual([r["card"]["slug"] for r in rows if r["kind"] == "card"], ["ka", "kb"])
+        self.assertEqual(tm.top_line(WDATA, None), " opsx  待處理 2  範圍 全部")
+
+    def test_vanished_workspace_falls_back_to_all(self):
+        gone = dict(WDATA, scopes=[{"workspace": "w2", "repos": ["a"]}])
+        self.assertIsNone(tm.keep_scope(gone, "w1"))
+        self.assertIsNone(tm.next_scope(gone, "w1"), "從消失的範圍按 Tab 也回全部")
+        self.assertEqual(tm.keep_scope(WDATA, "w1"), "w1")
+        self.assertEqual(tm.keep_scope(WDATA, tm.UNMOUNTED), tm.UNMOUNTED)
+
+
+def typed(*keys):
+    box = tm.LineInput()
+    results = [box.feed(k) for k in keys]
+    return box, results
+
+
+class LineInputTest(unittest.TestCase):
+    def test_edit_chinese_with_backspace(self):
+        box, results = typed("修", "正", curses.KEY_BACKSPACE, "好")
+        self.assertEqual(box.text, "修好")
+        self.assertEqual(results, [None, None, None, None])
+
+    def test_terminal_backspace_chars_and_empty_backspace(self):
+        box, _ = typed("\x7f", "a", "b", "\x7f", "c", "\x08")
+        self.assertEqual(box.text, "a")
+
+    def test_enter_submits_stripped_text(self):
+        self.assertEqual(typed(" ", "修", " ", "X", " ", "\n")[1][-1], ("submit", "修 X"))
+        self.assertEqual(typed("y", curses.KEY_ENTER)[1][-1], ("submit", "y"))
+        self.assertEqual(typed("y", "\r")[1][-1], ("submit", "y"))
+
+    def test_esc_cancels_and_blank_enter_is_not_sent(self):
+        self.assertEqual(typed("修", " ", "X", "\x1b")[1][-1], ("cancel",))
+        self.assertEqual(typed(" ", " ", "\n")[1][-1], ("cancel",))
+        self.assertEqual(typed("\n")[1][-1], ("cancel",))
+
+    def test_other_keys_and_control_chars_are_ignored(self):
+        box, results = typed("a", curses.KEY_LEFT, "\t", "b")
+        self.assertEqual(box.text, "ab")
+        self.assertEqual(results, [None, None, None, None])
+
+
+class NewArgvTest(unittest.TestCase):
+    def test_single_repo_scope_passes_repo_path(self):
+        self.assertEqual(tm.new_argv("/root", WDATA, "w1", "修 X"),
+                         ["bash", "/root/bin/opsx", "new", "--repo", "/r/a", "--", "修 X"])
+
+    def test_all_scope_goes_to_unfiled(self):
+        self.assertEqual(tm.new_argv("/root", WDATA, None, "修 X"), ["bash", "/root/bin/opsx", "new", "--", "修 X"])
+
+    def test_multi_repo_scope_goes_to_unfiled(self):
+        data = dict(WDATA, scopes=[{"workspace": "w1", "repos": ["a", "b"]}])
+        self.assertEqual(tm.new_argv("/root", data, "w1", "修 X"), ["bash", "/root/bin/opsx", "new", "--", "修 X"])
+
+    def test_unmounted_single_repo_uses_its_path(self):
+        self.assertEqual(tm.new_argv("/root", WDATA, tm.UNMOUNTED, "y"),
+                         ["bash", "/root/bin/opsx", "new", "--repo", "/r/b", "--", "y"])
+
+
+OPEN = ["bash", "/root/herdr-board/scripts/open-board.sh"]
+
+
+class OpenArgvTest(unittest.TestCase):
+    def test_card_row_opens_repo_slug(self):
+        row = next(r for r in tm.rows(DATA, done_open=False) if r["kind"] == "card" and r["card"]["slug"] == "ask1")
+        self.assertEqual(tm.open_argv("/root", row), OPEN + ["a/ask1"])
+
+    def test_session_row_opens_current_main(self):
+        row = next(r for r in tm.rows(SDATA, done_open=False) if r["kind"] == "session")
+        self.assertEqual(tm.open_argv("/root", row), OPEN + ["a/bt"])
+
+    def test_nothing_to_open(self):
+        self.assertIsNone(tm.open_argv("/root", {"kind": "session", "session": dict(SESSION, current=None)}), "session 已全部合併")
+        self.assertIsNone(tm.open_argv("/root", {"kind": "header", "section": "待處理"}))
+        self.assertIsNone(tm.open_argv("/root", None), "游標不在卡上")
+
+
+class KeysRunOut(Exception):
+    """FakeScr 的按鍵用完：main 還在迴圈裡（沒被某個鍵關掉）。"""
+
+
+class FakeScr:
+    """照順序吐按鍵的 curses 視窗。字串是按鍵，可呼叫的項目在輪到時執行一次（模擬兩次按鍵之間發生的事）。"""
+
+    def __init__(self, keys):
+        self.keys = list(keys)
+
+    def next(self):
+        if not self.keys:
+            raise KeysRunOut
+        return self.keys.pop(0)
+
+    def getch(self):
+        k = self.next()
+        if callable(k):
+            k()
+            return -1
+        return ord(k) if isinstance(k, str) else k
+
+    def get_wch(self):
+        k = self.next()
+        if callable(k):
+            k()
+            raise curses.error("no input")
+        return k
+
+    def flushinp(self):
+        self.keys.clear()
+
+    def getmaxyx(self):
+        return (24, 80)
+
+    def timeout(self, ms):
+        pass
+
+    def erase(self):
+        pass
+
+    def addstr(self, *args):
+        pass
+
+    def move(self, y, x):
+        pass
+
+    def refresh(self):
+        pass
+
+
+class FakeFeed:
+    def __init__(self, data):
+        self.latest, self.seq = data, 1
+        self.wake, self.stop = threading.Event(), threading.Event()
+
+    def start(self):
+        pass
+
+    def fail(self):
+        """下一份是 collect 失敗的結果（逾時）。"""
+        with mock.patch.object(tui.subprocess, "run", side_effect=subprocess.TimeoutExpired("opsx", 60)):
+            self.latest = tui.collect()
+        self.seq += 1
+
+
+class Runs:
+    """代替 subprocess.run，記下每個 argv。"""
+
+    def __init__(self):
+        self.argvs = []
+
+    def __call__(self, argv, **kw):
+        self.argvs.append(argv)
+        return proc(argv, out="me-1\n")
+
+
+def curs_set(n):
+    pass
+
+
+def drive(feed, scr):
+    """跑 tui.main 直到按鍵用完；回 main 跑過的外部指令。main 自己 return（被某個鍵關掉）時 assert 失敗。"""
+    runs = Runs()
+    with mock.patch.object(tui, "Feed", return_value=feed), mock.patch.object(tui.subprocess, "run", runs), \
+            mock.patch.object(tui.curses, "curs_set", curs_set), mock.patch.object(tui.curses, "flushinp", scr.flushinp):
+        try:
+            tui.main(scr)
+        except KeysRunOut:
+            return runs.argvs
+    raise AssertionError("main 在按鍵用完前就結束了（某個按鍵被當成 q／Esc）")
+
+
+class MainLoopTest(unittest.TestCase):
+    def test_pasted_lines_after_submit_are_not_hotkeys(self):
+        argvs = drive(FakeFeed(WDATA), FakeScr(["+", "a", "b", "\n", "o", "q"]))
+        self.assertEqual(argvs, [["bash", str(HERE.parent.parent / "bin" / "opsx"), "new", "--", "ab"]],
+                         "只送出第一行；換行後的 o 不開網頁、q 不關 TUI")
+
+    def test_queued_keys_after_cancel_are_not_hotkeys(self):
+        self.assertEqual(drive(FakeFeed(WDATA), FakeScr(["+", "a", "\x1b", "z", "\x1b"])), [], "Esc 取消後排隊的 z、Esc 不執行")
+
+    def test_failed_collect_keeps_scope_and_board(self):
+        feed = FakeFeed(WDATA)
+        argvs = drive(feed, FakeScr(["\t", feed.fail, "+", "x", "\n"]))
+        self.assertEqual(argvs[-1][-4:], ["--repo", "/r/a", "--", "x"], "collect 失敗一次，範圍仍是 w1")
+
+    def test_failed_collect_replaces_only_errors(self):
+        with mock.patch.object(tui.subprocess, "run", side_effect=subprocess.TimeoutExpired("opsx", 60)):
+            err = tui.collect()
+        kept = tm.refreshed(WDATA, err)
+        self.assertEqual(kept["cards"], WDATA["cards"])
+        self.assertEqual(kept["scopes"], WDATA["scopes"])
+        self.assertIn("超過", kept["errors"][0]["message"])
+        self.assertIs(tm.refreshed(WDATA, DATA), DATA, "collect 成功就整份換新")
+
+    def test_kept_board_says_so_on_top_line(self):
+        with mock.patch.object(tui.subprocess, "run", side_effect=subprocess.TimeoutExpired("opsx", 60)):
+            err = tui.collect()
+        self.assertIn("collect 失敗", tm.top_line(tm.refreshed(WDATA, err), "w1"), "底列有 note 時頂列仍看得出資料是舊的")
+        self.assertIn("collect 失敗", tm.top_line(tm.refreshed(dict(tui.EMPTY), err), None), "一開始就失敗也要說")
+        self.assertNotIn("collect 失敗", tm.top_line(tm.refreshed(tm.refreshed(WDATA, err), WDATA), "w1"), "下一次成功就拿掉")
+
+
+TOKEN = "T" * 43
+NO_OPENER = "opsx board: 沒有 open 或 xdg-open，自己開 http://127.0.0.1:8791/#token=%s&card=opsx-workflow/notification-toast-replays-on-load" % TOKEN
+
+
+class OpenOutcomeTest(unittest.TestCase):
+    def test_failure_starts_with_short_label_and_keeps_whole_message(self):
+        argv = tm.open_argv("/Users/someone/code/sandbox/opsx-workflow", {"kind": "card", "card": {"repo": "a", "slug": "x"}})
+        note = tm.open_outcome(argv, proc(argv, rc=1, err=NO_OPENER + "\n"))
+        self.assertTrue(note.startswith("open-board 失敗："), note)
+        self.assertIn("#token=%s&card=" % TOKEN, note)
+        lines = tm.wrap(note, 79, 3)
+        self.assertEqual("".join(lines), note, "80 欄寬三行內放得下整個網址")
+        self.assertTrue(all(tm.width(l) <= 79 for l in lines))
+
+    def test_multiline_stderr_becomes_one_line(self):
+        argv = tm.open_argv("/r", {"kind": "card", "card": {"repo": "a", "slug": "x"}})
+        note = tm.open_outcome(argv, proc(argv, rc=1, err="opsx board: server 起不來\nTraceback (most recent call last):\n  x\n"))
+        self.assertNotIn("\n", note)
+        self.assertEqual(tm.open_outcome(argv, proc(argv)), "網頁開了 a/x")
+
+    def test_wrap_keeps_at_most_n_rows_from_the_start(self):
+        self.assertEqual(tm.wrap("中文字ab", 4, 3), ["中文", "字ab"])
+        self.assertEqual(tm.wrap("abcdefg", 2, 2), ["ab", "cd"])
+        self.assertEqual(tm.wrap("", 5, 3), [""])
 
 
 if __name__ == "__main__":

@@ -2,6 +2,7 @@
 # Stop：branch 對到的卡，agent 要停時依 stage_name 看下一站。要擋就 block 並說原因：
 #   apply 站 tasks.md 仍有 - [ ]（有會擋的 open gate 時這一項放行）、status.json tests 不是 green、有 commit 但 review 沒跑
 #   （report.md 有「確認: <sha>」且 HEAD 等於該 sha 時不算）、report.md 的「待修（範圍內）」還有項目；
+#   explore 站（explore.md 已存在、卡建立日期晚於 2026-11-10）## 步驟 不齊；
 #   grill / propose / pr / babysit 站該 invoke 下一站而沒有會擋的 open gate；
 #   babysit 站若 forge 說 MR 已合併（workplan 還沒標 merged），下一站改成 /archive。
 # 同一站最多擋 MAX_BLOCKS 次，再停就由這支 hook 寫「卡在接 /<站>」gate 放行；不看 stop_hook_active。
@@ -27,6 +28,16 @@ $missing
 開卡用 opsx new --kind-of-work …（incident 加 --impact 與 --evidence）；手寫的卡補 inbox.md 的 kind_of_work、impact、evidence。補齊再停；事實查不到就用 Edit 或 Write 寫 gates.md 說缺哪一欄、為什麼，不要編 evidence。"
       return 0
     fi
+  fi
+  if [ "$stage" = explore ]; then
+    [ -f "$d/explore.md" ] || return 0
+    missing="$(check_explore "$d")"
+    [ -n "$missing" ] || return 0
+    [ "$(st_open_gates_blocking "$d")" -gt 0 ] && return 0
+    printf '%s' "explore|opsx：${slug} 的 explore.md ## 步驟 不齊（opsx check ${slug}）：
+$missing
+補齊再停。"
+    return 0
   fi
   if [ -f "$d/tasks.md" ]; then
     if [ -d "$d/subs" ] && [ "$(st_open_gates "$d")" -eq 0 ]; then
@@ -128,7 +139,7 @@ d="$(card_dir)"
 slug="$(card_slug)"
 stage="$(stage_name "$(repo_top)" "$slug")"
 case "$stage" in
-  grill|propose|apply|review|pr|babysit) ;;
+  explore|grill|propose|apply|review|pr|babysit) ;;
   *) exit 0 ;;
 esac
 

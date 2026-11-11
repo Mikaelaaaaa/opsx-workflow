@@ -53,9 +53,6 @@ awk -F'|' '/^\| [0-9]+ /{gsub(/^ *[0-9]+ *| +$/,"",$2); print $2}' "$FX/req-expl
 cmp -s "$FX/skill-names" "$FX/req-names" || fail "§8.3 explore 子表與 SKILL.md 步驟名或順序不一致。SKILL.md: $(tr '\n' ' ' < "$FX/skill-names")／§8.3: $(tr '\n' ' ' < "$FX/req-names")"
 SUMMARY_ROW="$(grep -F '| **explore** | 讀檔' "$REQ")"
 for k in '查資料' 'unslop'; do printf '%s' "$SUMMARY_ROW" | grep -qF -- "$k" || fail "§8.3 主表 explore 摘要列沒有 $k"; done
-# 驗收：「explore skill 有步驟表」——步驟 bullet 不宣稱還不存在的強制機制
-! grep -qF 'Stop hook blocks' "$ENDING" || fail "步驟 bullet 還寫 Stop hook blocks，這個機制屬 node-steps-gates"
-! grep -qF 'opsx check' "$ENDING" || fail "步驟 bullet 還寫 opsx check 讀這一段，這個機制屬 node-steps-gates"
 # 步驟 1、8、9 沒有已知區塊可指，要有合法寫法與例子
 for k in '- 1 讀卡：done' '- 8 待決：待決' '- 9 unslop：done'; do
   has "$k" "$ENDING"

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # opsx dispatch <slug> --agent claude|codex --model <id> --mode interactive|autopilot --kind <kind> [--repo <path>]
-# opsx dispatch --feature <feature> --agent … --mode …：一個 session 代管 workplan 一個 feature 現在能開工的主 change
+# opsx dispatch --feature <feature> [--only <卡,…>] --agent … --mode …：一個 session 代管 workplan 一個 feature 現在能開工的主 change；
+#   --only 只交出列出的卡，第一句照列出的順序給第一張（coordinate 用它濾掉 P2、把 P0 排前面）
 # 把一張卡派出去：開 worktree，在 repo 掛的 workspace 開 herdr tab，agent start，送第一句 prompt，記進 dispatch.json。
 # 要求檔 §3.6「派」、§3.6 自主程度表、§3.1。herdr 的每個呼叫都可以被 PATH 上的假 herdr 取代（tests/fakes）。
 
@@ -10,10 +11,11 @@ source "$OPSX_ROOT/bin/lib/note.sh"
 source "$OPSX_ROOT/bin/lib/agents-md.sh"
 
 opsx_dispatch() {
-  local slug="" agent=claude model="" mode=autopilot kind="" top="" feature="" plan="" note="" has_note=""
+  local slug="" agent=claude model="" mode=autopilot kind="" top="" feature="" plan="" note="" has_note="" only=""
   while [ $# -gt 0 ]; do
     case "$1" in
       --feature) feature="$2"; shift 2 ;;
+      --only) only="$2"; shift 2 ;;
       --note) has_note=1; note="$(note_oneline "$2")"; shift 2 ;;
       --agent) agent="$2"; shift 2 ;;
       --model) model="$2"; shift 2 ;;
@@ -28,6 +30,7 @@ opsx_dispatch() {
     [ -z "$slug" ] || die "dispatch: slug 與 --feature 只能給一個"
     slug="$feature"   # herdr agent 名、worktree、tab 都用 feature 名
   fi
+  [ -z "$only" ] || [ -n "$feature" ] || die "dispatch: --only 只能跟 --feature 一起用"
   [ -n "$slug" ] || die "dispatch: 要給 slug"
   [ -z "$has_note" ] || [ -n "$note" ] || die "dispatch: --note 壓成一行後是空的"
   [ -n "$top" ] || top="$(git_toplevel)"
@@ -63,12 +66,21 @@ PY
   if [ -n "$feature" ]; then
     plan="$("$OPSX_PY" -I "$OPSX_ROOT/bin/lib/chain.py" feature "$top" "$feature")" || exit 2
     # 這個 session 的成員條目（via @<feature>）是 stopped 就是人停的：不寫它的條目、不給它第一句。feature_plan 只管 workplan 上能不能開工
-    plan="$(OPSX_PLAN="$plan" OPSX_REPO="$repo" OPSX_FEATURE="$feature" OPSX_LIB="$OPSX_ROOT/bin/lib" "$OPSX_PY" -I - "$OPSX_STATE_DIR/dispatch.json" <<'PY'
+    plan="$(OPSX_PLAN="$plan" OPSX_ONLY="$only" OPSX_REPO="$repo" OPSX_FEATURE="$feature" OPSX_LIB="$OPSX_ROOT/bin/lib" "$OPSX_PY" -I - "$OPSX_STATE_DIR/dispatch.json" <<'PY'
 import os, sys
 sys.path.insert(0, os.environ["OPSX_LIB"]); import chain, jsonfile
 d = jsonfile.load(sys.argv[1]); e = os.environ
+lines = e["OPSX_PLAN"].splitlines()
+if e["OPSX_ONLY"]:
+    by_slug = {line.split("\t")[0]: line for line in lines}
+    want = e["OPSX_ONLY"].split(",")
+    missing = [s for s in want if s not in by_slug]
+    if missing:
+        sys.exit("dispatch: --only 的 %s 不在 feature「%s」現在能開工的主 change（%s）裡"
+                 % ("、".join(missing), e["OPSX_FEATURE"], "、".join(by_slug)))
+    lines = [by_slug[s] for s in want]
 keep, held = [], []
-for line in e["OPSX_PLAN"].splitlines():
+for line in lines:
     entry = d.get("%s/%s" % (e["OPSX_REPO"], line.split("\t")[0]))
     (held if chain.human_stopped(entry, e["OPSX_FEATURE"]) else keep).append(line)
 if not keep:
@@ -285,7 +297,7 @@ PY
     local drivelog="$OPSX_STATE_DIR/drive-$repo-$slug.log"
     # shortcut: 檢查到開檔之間有空窗，沙盒內要在毫秒內換成 symlink 才打得中，且只能附加 drive 的輸出；要補就改成 O_NOFOLLOW 的 wrapper
     [ ! -L "$drivelog" ] || die "dispatch: refuse to write through symlink: ${drivelog}（卡已派出，drive 沒起）"
-    nohup bash "$OPSX_ROOT/bin/opsx" drive "$slug" --repo "$top" >> "$drivelog" 2>&1 &
+    ( trap '' HUP; exec bash "$OPSX_ROOT/bin/opsx" drive "$slug" --repo "$top" ) < /dev/null >> "$drivelog" 2>&1 &
     say "dispatch: drive 跑起來了（pid $!），log 在 $drivelog"
   fi
 }
@@ -346,7 +358,7 @@ deny=["Bash(git push --force:*)","Bash(git push -f:*)","Bash(deploy.sh:*)","Bash
 try:
     g=tomllib.load(open(os.path.join(sd,"grants.toml"),"rb")).get("repos",{}).get(repo,{})
     if g.get("push"): allow.append("Bash(git push:*)")
-    if g.get("mr"): allow+=["Bash(glab mr create:*)","Bash(glab mr update:*)","Bash(gh pr create:*)","Bash(gh pr edit:*)"]
+    if g.get("mr"): allow+=["Bash(glab mr create:*)","Bash(glab mr update:*)","Bash(gh pr create:*)","Bash(gh pr edit:*)","Bash(glab issue note:*)","Bash(glab issue comment:*)","Bash(gh issue comment:*)"]
     if g.get("migrate"): allow+=["Bash(pnpm db:migrate:*)","Bash(alembic upgrade:*)"]
 except FileNotFoundError: pass
 safefile.write_atomic(sys.argv[1], json.dumps({"permissions":{"allow":allow,"deny":deny,"additionalDirectories":dirs}},indent=2))

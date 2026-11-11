@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # opsx check <slug>：檢查 openspec/changes/<slug>/subs/ 底下每個子殼齊不齊（openspec CLI 只管主殼，子殼靠這支），
-# 以及 agent 開的卡的事實欄位（本卡是 agent 開的，或本卡開出去的卡）。
-# 一個缺項一行「subs/<子>/<檔>: <缺什麼>」，有缺項退出 1。只用 bash 與 awk：Stop hook 直接 source 它，不能依賴 python。
+# explore.md 的 ## 步驟 九行齊不齊，以及 agent 開的卡的事實欄位（本卡是 agent 開的，或本卡開出去的卡）。
+# 一個缺項一行「subs/<子>/<檔>: <缺什麼>」或「explore.md 步驟 <號> <名>: <缺什麼>」，有缺項退出 1。只用 bash 與 awk：Stop hook 直接 source 它，不能依賴 python。
 # 驗收：openspec/changes/split-plan/specs/subchange-propose/spec.md「opsx check 檢查子殼」；board-actions「agent 開的卡要帶事實欄位」。
 
 opsx_check() {
@@ -10,10 +10,55 @@ opsx_check() {
   [ -n "$top" ] || die "check: 不在 git repo 裡"
   local dir="$top/openspec/changes/$1"
   [ -d "$dir" ] || die "check: 沒有這張卡：$dir"
-  local out; out="$(check_subs "$dir"; check_facts "$dir")"
+  local out cand; out="$(check_explore "$dir"; check_subs "$dir"; check_facts "$dir")"; cand="$(check_blast "$top" "$dir")"
+  [ -z "$cand" ] || printf '%s\n' "$cand"
   [ -z "$out" ] && return 0
   printf '%s\n' "$out"
   exit 1
+}
+
+# 步驟名與順序要跟 skills/explore/SKILL.md 的 Steps 表、schemas/opsx/templates/explore.md 一致
+# 新卡（created: 晚於 2026-11-10）才查；舊卡與沒有 created: 的卡不印。stage、Stop hook、opsx check 都走這裡。
+# shortcut: 日期門檻，進行中的舊卡都歸檔後拿掉
+check_explore() { # <卡目錄>：explore.md 不存在什麼都不印；存在就逐步檢查 ## 步驟，缺行、留白、skip 沒原因各印一行
+  [ -f "$1/explore.md" ] && [ -f "$1/.openspec.yaml" ] || return 0
+  local line created=""
+  while IFS= read -r line; do
+    case "$line" in created:*) created="${line#created:}"; created="${created# }"; break ;; esac
+  done < "$1/.openspec.yaml"
+  [[ "$created" > "2026-11-10" ]] || return 0
+  awk '
+    BEGIN { n = split("讀卡|how|影響範圍|why|prototype|查資料|對照 code|待決|unslop", names, "|") }
+    /^## / { on = ($0 == "## 步驟"); next }
+    on && /^- [0-9] / {
+      num = substr($0, 3, 1); prefix = "- " num " " names[num]
+      if (index($0, prefix) != 1) next
+      rest = substr($0, length(prefix) + 1)
+      if (!sub(/^：/, "", rest) && !sub(/^:/, "", rest)) next
+      gsub(/^[ \t]+|[ \t]+$/, "", rest)
+      seen[num] = (rest == "") ? "blank" : (rest ~ /^skip[：:][ \t]*$/ ? "noreason" : "ok")
+    }
+    END {
+      for (i = 1; i <= n; i++) {
+        if (seen[i] == "ok") continue
+        why = (seen[i] == "blank") ? "該行沒有內容" : (seen[i] == "noreason") ? "skip 沒有原因" : "缺紀錄"
+        printf "explore.md 步驟 %d %s: %s\n", i, names[i], why
+      }
+    }
+  ' "$1/explore.md"
+}
+
+# 步驟 3 寫 skip，而 main...HEAD 動到的檔案被別的檔案引用時，印 Must-fix 候選。grep 檔名只是線索：漏 shell 變數與 config key，
+# 也會對只被自己測試引用的檔誤報，成不成立由 review 判斷。只在 opsx check 跑，stage 與 hook 不跑。
+check_blast() { # <top> <卡目錄>
+  grep -qE '^- 3 影響範圍[：:][ 	]*skip[：:]' "$2/explore.md" 2>/dev/null || return 0
+  local changed f hits
+  changed="$(git -C "$1" diff --name-only main...HEAD)" || die "check: git diff main...HEAD 失敗，無法對照影響範圍"
+  while IFS= read -r f; do
+    [ -n "$f" ] && [ -f "$1/$f" ] || continue
+    hits="$(git -C "$1" grep -lF -- "$(basename "$f")" -- . ":!$f" ":!openspec" | paste -sd, -)"
+    [ -z "$hits" ] || printf 'explore.md 步驟 3 影響範圍: skip 但 %s 被 %s 引用（Must-fix 候選，由 review 判斷）\n' "$f" "$hits"
+  done <<< "$changed"
 }
 
 check_subs() { # <主殼目錄>：印缺項，一行一個；沒有 subs/ 或全齊什麼都不印

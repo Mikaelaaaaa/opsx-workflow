@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # 主流程狀態判斷，純函式，參數明示（top、slug）。hook 的 router 和 drive.sh 都用這一份，
 # 所以「下一步是什麼」只有一個答案。要求檔 §8.3 Router 表。
+source "$(dirname "${BASH_SOURCE[0]}")/check.sh"
 
 # slug 含 `--` 是子殼：<主>--<子> 對到 changes/<主>/subs/<子>。只印路徑，不檢查存在
 st_card_dir() { # <top> <slug>
@@ -111,7 +112,13 @@ stage_of() { # <top> <slug>
   local top="$1" slug="$2" d="$1/openspec/changes/$2" kind
   if [ -z "$slug" ] || [ ! -d "$d" ]; then printf 'explore · （沒有對到卡，先建殼）· — · skills/explore/SKILL.md\n'; return; fi
   kind="$(st_card_kind "$d")"; kind="${kind:-dev}"
-  local reads="skills/apply/SKILL.md · skills/apply/references/playbooks/${kind}.md · skills/tdd/SKILL.md" split
+  local pb="skills/apply/references/playbooks" reads split
+  case "$kind" in
+    chore|ops) pb="" ;;
+    experiment) pb="$pb/hillclimb.md · $pb/eval.md · " ;;
+    *) pb="$pb/${kind}.md · " ;;
+  esac
+  reads="skills/apply/SKILL.md · ${pb}skills/tdd/SKILL.md"
   split="$(st_split_into "$d")"
   if [ -n "$split" ]; then printf 'split · %s · %s · 已拆成 %s，這張不再往下做\n' "$slug" "$kind" "$split"; return; fi
   if st_workplan_merged "$top" "$slug"; then printf 'archive · %s · %s · skills/archive/SKILL.md\n' "$slug" "$kind"; return; fi
@@ -126,12 +133,22 @@ stage_of() { # <top> <slug>
     printf 'review · %s · %s · skills/review/SKILL.md · skills/review/references/ponytail-review.md\n' "$slug" "$kind"; return
   fi
   if [ -f "$d/explore.md" ]; then
+    if [ -n "$(check_explore "$d")" ]; then printf 'explore · %s · %s · skills/explore/SKILL.md（explore.md 的 ## 步驟 不齊，opsx check %s）\n' "$slug" "$kind" "$slug"; return; fi
     if st_pending_nonempty "$d" && [ ! -f "$d/grill.md" ] && [ "$kind" != chore ] && [ "$kind" != bug-fix ]; then printf 'grill · %s · %s · skills/grill/SKILL.md\n' "$slug" "$kind"; return; fi
     printf 'propose · %s · %s · skills/propose/SKILL.md\n' "$slug" "$kind"; return
   fi
   printf 'explore · %s · %s · skills/explore/SKILL.md\n' "$slug" "$kind"
 }
 stage_name() { local s; s="$(stage_of "$1" "$2")"; printf '%s\n' "${s%% *}"; }
+
+st_gates_total() { [ -f "$1/gates.md" ] || { printf 0; return; }; grep -c '^## ' "$1/gates.md" || true; }
+# drive 送出階段指令前後各取一次，不同就算「有動」：階段、status.json 的 at、tasks 勾數、gate 數。
+# shortcut: 不做每站專屬判斷，漏判只多開一個 gate 給人；status.json 被別的流程刷新時誤判有動，退回照階段繼續送
+stage_fingerprint() { # <top> <slug>
+  local d="$1/openspec/changes/$2" at=""
+  [ ! -f "$d/status.json" ] || at="$(jq -r '.at // ""' "$d/status.json")"
+  printf '%s|%s|%s|%s\n' "$(stage_name "$1" "$2")" "$at" "$(st_tasks_done "$d")" "$(st_gates_total "$d")"
+}
 
 # 舊 spec-driven 的 change：.openspec.yaml 沒有 schema: opsx，inbox.md 不存在或只有空白。看板只計數、router 清單不列。
 # 只用 builtin：真 repo 裡有幾百張舊卡，每張 fork 一次 stage 判斷就是十幾秒。

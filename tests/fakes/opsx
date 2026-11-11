@@ -6,6 +6,10 @@ printf 'opsx %s\n' "$*" >> "${OPSX_FAKE_LOG:?}"
 case "$1" in
   collect) [ -n "${OPSX_TEST_ON_COLLECT:-}" ] && bash "$OPSX_TEST_ON_COLLECT"
            cat "${OPSX_TEST_COLLECT_JSON:?}" ;;
+  # late：印 $OPSX_TEST_LATE_OUT（預設 none）、stderr 印 $OPSX_TEST_LATE_ERR，以 $OPSX_TEST_LATE_RC（預設 0）結束
+  late) printf '%s\n' "${OPSX_TEST_LATE_OUT:-none}"
+        [ -z "${OPSX_TEST_LATE_ERR:-}" ] || printf '%s\n' "$OPSX_TEST_LATE_ERR" >&2
+        exit "${OPSX_TEST_LATE_RC:-0}" ;;
   *) var="OPSX_TEST_FAIL_$1"
      if [ -n "${!var:-}" ]; then printf '%s\n' "${!var}" >&2; exit 1; fi ;;
 esac

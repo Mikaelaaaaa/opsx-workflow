@@ -10,7 +10,7 @@
     "additionalDirectories": ["${OPSX_STATE_DIR}"]
   },
   "sandbox": {
-    "excludedCommands": ["gh pr *"],
+    "excludedCommands": ["gh pr *", "gh issue comment *"],
     "filesystem": {
       "denyWrite": [
         "${OPSX_STATE_DIR}/grants.toml",
