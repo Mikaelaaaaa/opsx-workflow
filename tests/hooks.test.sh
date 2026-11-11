@@ -795,7 +795,7 @@ out="$(sg true)"; assert_eq "$(decision "$out")" block "stop: stop_hook_active �
 printf '## real-herdr\nstatus: open\n' > "$C/gates.md"
 out="$(sg)"; assert_eq "$out" "" "stop: 有未勾但有 open gate 放行"
 out="$(sgc)"; assert_eq "$out" "" "stop: open gate 放行（回報版）"
-assert_grep '^agent prompt opsx-coordinator \[eval-core\] 停住' "$CL"
+assert_grep '^agent prompt opsx-coordinator \[eval-core\] 停住：等人答 gate（apply 站）' "$CL"
 printf '## real-herdr\nstatus: answered\n' > "$C/gates.md"
 out="$(sg)"; assert_eq "$(decision "$out")" block "stop: gate 都 answered 仍擋未勾"; reason "$out" | grep -q '1 個 task 沒勾' || fail "stop: answered gate 要說幾個 task 沒勾"
 printf '## real-herdr\nstatus: open (等 push 授權)\n' > "$C/gates.md"
@@ -817,10 +817,27 @@ assert_grep '^agent prompt opsx-coordinator \[eval-core\] 停住：babysit 一�
 assert_not_grep '完成 → 下一站' "$CL"
 # 同一行不重送；內容變了才再送
 out="$(KEEP_SAID=1 sgc)"; assert_eq "$out" "" "stop: 同一行放行（去重）"; assert_eq "$(cat "$CL")" "" "stop: 同一行不重送"
-# 協調者不在：hook 照常放行，只在 coordinator.log 記一行
+printf '## real-herdr\nstatus: open\n' > "$C/gates.md"
+out="$(KEEP_SAID=1 sgc)"; assert_eq "$out" "" "stop: 原因變了放行"
+assert_grep '^agent prompt opsx-coordinator \[eval-core\] 停住：等人答 gate' "$CL"
+# 放行、被擋、再放行同一原因：被擋代表卡又動過，要再送
+rm -f "$C/gates.md"; printf '## 1. x\n\n- [x] 1.1 a\n- [ ] 1.2 b\n' > "$C/tasks.md"
+out="$(sg)"; assert_eq "$(decision "$out")" block "stop: 夾在兩次放行之間的擋"
+printf '## 1. x\n\n- [x] 1.1 a\n- [x] 1.2 b\n' > "$C/tasks.md"; printf '## real-herdr\nstatus: open\n' > "$C/gates.md"
+out="$(KEEP_SAID=1 sgc)"; assert_eq "$out" "" "stop: 擋過之後同一原因放行"
+assert_grep '^agent prompt opsx-coordinator \[eval-core\] 停住：等人答 gate' "$CL"
+rm -f "$C/gates.md"
+# 協調者不在：hook 照常放行，只在 coordinator.log 記一行；送失敗不記，下一次 Stop 會再試
 rm -rf "$OPSX_STATE_DIR/stop-said"; : > "$OPSX_STATE_DIR/coordinator.log"
 out="$(PATH="$FX/cbin:$PATH" OPSX_FAKE_LOG="$CL" sg)"; assert_eq "$out" "" "stop: 協調者不在照常放行"
 assert_grep 'opsx-coordinator' "$OPSX_STATE_DIR/coordinator.log"
+out="$(KEEP_SAID=1 sgc)"; assert_eq "$out" "" "stop: 協調者回來後放行"
+assert_grep '^agent prompt opsx-coordinator \[eval-core\] 停住：babysit 一輪做完' "$CL"
+# 記去重的檔寫不進去（symlink）：回報照送，hook 仍以 0 放行
+rm -rf "$OPSX_STATE_DIR/stop-said"; mkdir -p "$OPSX_STATE_DIR/stop-said"; ln -s "$FX/nowhere" "$OPSX_STATE_DIR/stop-said/Agentory-AI-eval-core"
+printf '{"cwd":"%s"}' "$R" | PATH="$FX/cbin:$PATH" OPSX_FAKE_LOG="$CL" OPSX_TEST_COORDINATOR_UP=1 bash "$H/openspec-stop-gate.sh" > /dev/null 2>&1
+assert_eq "$?" 0 "stop: 去重檔寫不進去不能讓 hook 以非 0 結束"
+rm -rf "$OPSX_STATE_DIR/stop-said"
 git -C "$R" commit -q --allow-empty -m "feat: later"   # report 之後又 commit
 out="$(sg)"; assert_eq "$(decision "$out")" block "stop: report 後有新 commit"
 # report 在、卡的階段是 babysit，但 hook 要的是 /review：擋滿後的 gate 要指 /review，不指 /babysit

@@ -133,13 +133,13 @@ wait_reason() { # <dir> <站>
   fi
 }
 
-# 回報協調者：同一張卡同一行不重送，送出成功才記
+# 回報協調者：同一張卡連續兩次放行送同一行只送一次（中間被擋過就算卡又動了），送出成功才記
 say_once() { # <一行>
   local f="$OPSX_STATE_DIR/stop-said/$(repo_name)-$slug"
   [ "$(cat "$f" 2>/dev/null)" = "$1" ] && return 0
   coordinator_say "$1" || return 0
   mkdir -p "$(dirname "$f")"
-  printf '%s' "$1" | opsx_replace "$f"
+  printf '%s' "$1" | opsx_replace "$f" || return 0   # 記不下來只會多送一次，不能讓 hook 以非 0 結束
 }
 
 d="$(card_dir)"
@@ -182,4 +182,5 @@ fi
 
 mkdir -p "$(dirname "$state")"
 printf '%s %s - %s\n' "$want" "$((n + 1))" "$fp" | opsx_replace "$state"
+rm -f "$OPSX_STATE_DIR/stop-said/$(repo_name)-$slug"
 stop_block "$reason"
