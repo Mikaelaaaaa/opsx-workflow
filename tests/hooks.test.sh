@@ -526,7 +526,11 @@ out="$(gg Bash "$(cmdj 'glab api --method PUT "projects/:id/merge_requests/12/no
 for bad in 'glab api --method PUT projects/1/merge_requests/999/merge' \
            'glab api --method PUT projects/1/merge_requests/999/merge && glab api --method POST "projects/:id/merge_requests/12/notes" --field body=@/x/m.md' \
            'glab api --method POST "projects/:id/merge_requests/12/notes" --field body=@/x/m.md && glab api --method PUT projects/1/merge_requests/999/merge' \
-           'glab api --method PUT projects/1/merge_requests/999/merge # "projects/:id/merge_requests/12/notes"'; do
+           'glab api --method PUT projects/1/merge_requests/999/merge # "projects/:id/merge_requests/12/notes"' \
+           'gh pr comment 12 --body-file /x/m.md; glab api --method PUT projects/1/merge_requests/999/merge' \
+           'gh pr comment 12 -R evil/repo --body-file /x/m.md' \
+           'gh pr comment 12 --body-file ../../x.md' \
+           'glab api --method POST "projects/:id/merge_requests/12/notes" --field body=@../../x.md'; do
   out="$(gg Bash "$(cmdj "$bad")")"; assert_eq "$out" "" "grant: 形狀之外的 glab api 不放行：$bad"
 done
 out="$(gg Bash "$(cmdj 'git push gitlab feat/eval-core/mikaela')")"; assert_eq "$(decision "$out")" deny "grant: once 第二次 deny"
