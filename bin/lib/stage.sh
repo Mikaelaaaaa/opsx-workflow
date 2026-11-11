@@ -141,6 +141,15 @@ stage_of() { # <top> <slug>
 }
 stage_name() { local s; s="$(stage_of "$1" "$2")"; printf '%s\n' "${s%% *}"; }
 
+st_gates_total() { [ -f "$1/gates.md" ] || { printf 0; return; }; grep -c '^## ' "$1/gates.md" || true; }
+# drive 送出階段指令前後各取一次，不同就算「有動」：階段、status.json 的 at、tasks 勾數、gate 數。
+# shortcut: 不做每站專屬判斷，漏判只多開一個 gate 給人；status.json 被別的流程刷新時誤判有動，退回照階段繼續送
+stage_fingerprint() { # <top> <slug>
+  local d="$1/openspec/changes/$2" at=""
+  [ ! -f "$d/status.json" ] || at="$(jq -r '.at // ""' "$d/status.json")"
+  printf '%s|%s|%s|%s\n' "$(stage_name "$1" "$2")" "$at" "$(st_tasks_done "$d")" "$(st_gates_total "$d")"
+}
+
 # 舊 spec-driven 的 change：.openspec.yaml 沒有 schema: opsx，inbox.md 不存在或只有空白。看板只計數、router 清單不列。
 # 只用 builtin：真 repo 裡有幾百張舊卡，每張 fork 一次 stage 判斷就是十幾秒。
 collect_is_legacy() { # <change dir>

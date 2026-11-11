@@ -427,6 +427,25 @@ round || fail "approval + needs run rc: $(cat "$FX/out")"
 assert_eq "$(count '^opsx answer')" 0 "approval + needs: run 也不代答（指令沒人跑，不能回允許）：$(cat "$OPSX_FAKE_LOG")"
 grep '??' "$LOG" | grep -q 'ga' || fail "approval + needs: run 要記 ?? 給人看：$(cat "$LOG")"
 
+# --- 答 gate：drive 與 Stop hook 寫的卡住 gate 只通知，不把「建議」或選項送進 pane ---
+for gid in "drive-review-1" "卡在接 /apply #1" "卡在接 /review"; do
+  : > "$OPSX_FAKE_LOG"; : > "$LOG"
+  cards '[{"slug":"a1","section":"待處理","dispatch":'"$D"',"agent_status":"idle","waiting":{"type":"等待決定","needs":null,"gate_id":"'"$gid"'","question":"卡住了","recommended":"先看 pane 再回","options":["重做一次 (Recommended)","停在這裡"]}}]'
+  round || fail "${gid} rc: $(cat "$FX/out")"
+  assert_eq "$(count '^opsx answer')" 0 "${gid} 不代答：$(cat "$OPSX_FAKE_LOG")"
+  assert_eq "$(count '^agent prompt')" 0 "${gid} 沒有任何字送進 pane：$(cat "$OPSX_FAKE_LOG")"
+  assert_eq "$(count '^notification show')" 1 "${gid} 通知一次：$(cat "$OPSX_FAKE_LOG")"
+  round || fail "${gid} 第二輪 rc: $(cat "$FX/out")"
+  assert_eq "$(count '^notification show')" 0 "${gid} 第二輪不重送：$(cat "$OPSX_FAKE_LOG")"
+done
+# 其他 decision gate 照原規則答（標題只是長得像也一樣）
+for gid in "g-drive-review-1" "drive-review"; do
+  : > "$OPSX_FAKE_LOG"; : > "$LOG"
+  cards '[{"slug":"a1","section":"待處理","dispatch":'"$D"',"agent_status":"idle","waiting":{"type":"等待決定","needs":null,"gate_id":"'"$gid"'","question":"選哪個","recommended":"甲","options":["甲","乙"]}}]'
+  round || fail "${gid} rc: $(cat "$FX/out")"
+  assert_grep "^opsx answer a1 --gate ${gid} --repo $R -- 甲\$" "$OPSX_FAKE_LOG"
+done
+
 # --- 答 gate：沒有建議就答第一個選項；answer 失敗不換參數重送 ---
 cards '[{"slug":"a1","section":"待處理","dispatch":'"$D"',"agent_status":"idle","waiting":{"type":"等待決定","gate_id":"g3","question":"選哪個","recommended":null,"options":["甲","乙"]}}]'
 round || fail "rc: $(cat "$FX/out")"
