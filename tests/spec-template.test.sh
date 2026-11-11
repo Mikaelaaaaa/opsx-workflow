@@ -6,6 +6,21 @@ T="$OPSX_ROOT/schemas/opsx/templates/spec.md"
 B="$OPSX_ROOT/schemas/opsx/artifacts-specs.yaml"
 G="$OPSX_ROOT/skills/propose/references/gherkin.md"
 assert_file "$T"; assert_file "$B"; assert_file "$G"
+# specs 區塊一律用 init 安裝時的同一個 specs_block 讀寫：只給 schema.yaml 印出區塊，多給一個檔就換成它
+block_of() { ( OPSX_PY=python3; source "$OPSX_ROOT/bin/lib/common.sh"; source "$OPSX_ROOT/bin/lib/init.sh"; specs_block "$@" ); }
+
+# 測試不另寫 specs 區塊的 regex（樣式拆成兩段，免得這行自己命中）
+copy_pat='id: specs''\n('
+! grep -lF -- "$copy_pat" "$OPSX_ROOT"/tests/*.test.sh || fail "測試裡有 specs 區塊 regex 的副本，改呼叫 specs_block：$(grep -lF -- "$copy_pat" "$OPSX_ROOT"/tests/*.test.sh)"
+
+# 每個 Examples: 之後的第二行是 markdown 表的分隔列
+examples_have_delimiter() { # <檔>
+  awk '/^Examples:/{n=NR} n && NR==n+2 && !/^\|( *-+ *\|)+$/{print FILENAME ":" NR ": " $0; bad=1} END{exit bad}' "$1"
+}
+# Scenario Outline 的標題一律是 #### Scenario: <名>（Scenario Outline，正例|反例）
+outline_headings_ok() { # <檔>
+  awk '/^#### Scenario.*Scenario Outline/ && !/^#### Scenario: .+（Scenario Outline，(正例|反例)）$/{print FILENAME ":" NR ": " $0; bad=1} END{exit bad}' "$1"
+}
 
 # 一張 change，specs/demo/spec.md 放指定內容，跑真的 openspec validate --strict
 validate_spec() { # <repo> <change> <spec 檔>
@@ -30,6 +45,8 @@ grep -q '^#### Scenario: .*（正例）$' "$T" || fail "範本要有正例骨架
 grep -q '^#### Scenario: .*（反例）$' "$T" || fail "範本要有反例骨架"
 grep -q '^#### Scenario: .*（Scenario Outline，' "$T" || fail "範本要有 Scenario Outline 骨架（#### Scenario: <行為>（Scenario Outline，…））"
 ! grep -q '^#### Scenario Outline:' "$T" || fail "Outline 標題照定案用 #### Scenario:，不用 #### Scenario Outline:"
+outline_headings_ok "$T" || fail "範本的 Outline 標題不是（Scenario Outline，正例|反例）"
+examples_have_delimiter "$T" || fail "範本的 Examples 表少分隔列"
 grep -qx 'Examples: 一般場景' "$T" || fail "範本少 Examples: 一般場景"
 grep -qx 'Examples: 邊界場景' "$T" || fail "範本少 Examples: 邊界場景"
 awk '/^Examples: 邊界場景$/{on=1;next} on && /^\|/{print;exit}' "$T" | grep -qF '備註' || fail "邊界場景表頭要多一欄 備註"
@@ -51,14 +68,7 @@ done
 grep -q '^  - id: specs$' "$B" || fail "artifacts-specs.yaml 要是 '  - id: specs' 區塊"
 ( cd "$R" && openspec schema fork spec-driven opsx >/dev/null 2>&1 ) || fail "schema fork 失敗"
 S="$R/openspec/schemas/opsx/schema.yaml"
-python3 -I - "$S" "$B" <<'PY' || fail "specs 區塊換不進 schema.yaml"
-import re, sys
-p, b = sys.argv[1], sys.argv[2]
-s = open(p, encoding="utf-8").read()
-m = re.search(r"^  - id: specs\n(?:(?!  - id: ).*\n)*", s, re.M)
-if not m: sys.exit("fork 的 schema.yaml 找不到 specs 區塊")
-open(p, "w", encoding="utf-8").write(s[:m.start()] + open(b, encoding="utf-8").read() + s[m.end():])
-PY
+block_of "$S" "$B" || fail "specs 區塊換不進 schema.yaml"
 cp "$T" "$R/openspec/schemas/opsx/templates/spec.md"
 out="$(cd "$R" && openspec schema validate opsx 2>&1)" || fail "schema validate: $out"
 I="$FX/instruction.txt"
@@ -67,12 +77,60 @@ I="$FX/instruction.txt"
 python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1]))["instruction"])' "$FX/instr.json" > "$I" || fail "instructions 沒有 instruction 欄：$(cat "$FX/instr.json")"
 
 # --- Scenario：instruction 帶齊寫 spec 的規則（正例）---
-for w in "| Feature |" "| Rule |" "| Scenario |" "| Scenario Outline |" "| Given |" "| When |" "| Then |" "| And / But |" "| Background |" "| Examples |" \
-         雙引號 可省略 不可分割的業務邏輯單元 邏輯模組 多條業務規則 多組測資 前置步驟 "Data Table" Docstring 不放測試邏輯 保持原始格式 \
-         業務語言 保持獨立 只驗證一件事 參數化 原子性 過度技術化 步驟耦合 缺乏具體性 "過度使用 Background" \
-         SHALL MUST ADDED MODIFIED REMOVED RENAMED 驗收： references/gherkin.md; do
+# 每一句只會出現在它那一條規則裡：刪掉那條規則，這裡就紅
+while IFS= read -r w; do
   grep -qF -- "$w" "$I" || fail "instruction 少 '$w'：$(cat "$I")"
-done
+done <<'RULES'
+結構層次：Feature → Rule → Scenario / Example → Given / When / Then / And
+| Feature | 功能特性 |
+| Rule | 業務規則 |
+| Scenario | 具體場景 |
+| Scenario Outline | 參數化場景 |
+| Given | 前置條件 |
+| When | 執行動作 |
+| Then | 預期結果 |
+| And / But | 連接步驟 |
+| Background | 共用前置 |
+| Examples | 測試數據表 |
+Rule 是 `### Requirement: <名>`
+標題下第一個非空行是規則句，必須含 SHALL 或 MUST
+（Scenario Outline，正例）
+Examples 表放在 Scenario Outline 之下
+Background 放在規則句之後、第一個 Scenario 之前
+參數用雙引號標記
+數字直接寫，不加引號
+反例沒有前置條件時，GIVEN 可省略
+每個 Requirement 都要有正例與反例
+每條 Rule 是一個不可分割的業務邏輯單元
+每個 Feature 對應開發中要實作的一個邏輯模組
+用 Rule 把複雜功能拆成獨立規則
+這個功能有多條業務規則需要處理嗎
+同一條規則需要驗證多組測資嗎
+多個場景有相同的前置步驟嗎
+需要批次資料嗎？是：用 Data Table
+需要傳遞複雜結構（JSON / XML）嗎？是：用 Docstring
+只放共用的前置條件，不放測試邏輯
+保持原始格式（縮排和換行）
+Data Table 在單一步驟中傳遞多筆資料
+Examples 定義多組完整的場景參數
+`*` 用在多個連續的 And 步驟
+使用業務語言，避免技術細節
+每個 Scenario 保持獨立
+一個 Scenario 只驗證一件事
+善用參數化
+保持 Step 的原子性
+過度技術化：
+步驟耦合：
+缺乏具體性：
+過度使用 Background：
+「驗收：」指到 Scenario 名稱
+Examples 表的每一列都要有測試
+**ADDED Requirements**
+**MODIFIED Requirements**
+**REMOVED Requirements**
+**RENAMED Requirements**
+skills/propose/references/gherkin.md
+RULES
 grep -qx '禁用模糊詞：正確的、適當的、合理的、正常、良好、妥善、等等、相關的、appropriate、properly、correctly、reasonable、etc.' "$I" \
   || fail "instruction 要有單獨一行的禁用模糊詞清單"
 
@@ -99,6 +157,22 @@ EX="$FX/ref-example.md"
 awk '/^## .*對應到 openspec/{sec=1;next} sec && /^```markdown$/{on=1;next} on && /^```$/{exit} on' "$G" > "$EX"
 [ -s "$EX" ] || fail "「對應到 openspec」一節沒有 \`\`\`markdown 範例"
 validate_spec "$R" refex "$EX"
+# 範例本身照 instruction 的規則：Outline 標題、Examples 分組與分隔列
+outline_headings_ok "$EX" || fail "reference 範例的 Outline 標題不是（Scenario Outline，正例|反例）"
+examples_have_delimiter "$EX" || fail "reference 範例的 Examples 表少分隔列"
+grep -qx 'Examples: 一般場景' "$EX" || fail "reference 範例少 Examples: 一般場景"
+grep -qx 'Examples: 邊界場景' "$EX" || fail "reference 範例少 Examples: 邊界場景"
+! grep -qx 'Examples:' "$EX" || fail "reference 範例有沒分組名的 Examples:"
+# 範例斷言的 opsx 輸出字句，init.sh 真的會印
+grep -o '輸出含 "[^"]*"\( 與 "[^"]*"\)*' "$EX" | grep -o '"[^"]*"' | tr -d '"' > "$FX/ref-outputs"
+[ -s "$FX/ref-outputs" ] || fail "reference 範例沒有斷言輸出字句"
+while IFS= read -r o; do
+  grep -qF -- "$o" "$OPSX_ROOT/bin/lib/init.sh" || fail "reference 範例斷言的輸出 '$o' 在 bin/lib/init.sh 裡找不到"
+done < "$FX/ref-outputs"
+
+# 重跑 init 不是 no-op，說明不能再這樣寫
+! grep -qF '重跑一律 no-op' "$OPSX_ROOT/bin/lib/init.sh" || fail "init.sh 還說重跑一律 no-op"
+! grep -qF 'no-op when rerun' "$OPSX_ROOT/skills/opsx-init/SKILL.md" || fail "opsx-init SKILL.md 還說 no-op when rerun"
 
 # --- Scenario：reference 不自編原文以外的範例（反例）---
 # 原文（openspec/changes/spec-gherkin/attachments/bdd-gherkin-source.md）裡全部 Feature / Rule / Scenario / Example 名稱
@@ -127,8 +201,6 @@ done <<< "$names"
 
 # --- Scenario：evals fixtures 的 schema 快照是插件版（正例）---
 # --- Scenario：fixtures 裡沒有 fork 來的 WHEN/THEN 範本（反例）---
-# specs 區塊用 init 安裝時的同一個 specs_block 抽出來比
-block_of() { ( OPSX_PY=python3; source "$OPSX_ROOT/bin/lib/common.sh"; source "$OPSX_ROOT/bin/lib/init.sh"; specs_block "$1" ); }
 n=0
 for d in "$OPSX_ROOT"/skills/*/evals/fixtures/*/repo/openspec/schemas/opsx; do
   [ -d "$d" ] || continue

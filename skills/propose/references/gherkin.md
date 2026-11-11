@@ -237,14 +237,21 @@ Background:
 - **WHEN** 執行 `opsx init --check`
 - **THEN** exit code 為 <exit>
 
-Examples:
+Examples: 一般場景
 | 檔案 | 狀態 | exit |
+|---|---|---|
 | spec 範本 | 與插件相同 | 0 |
 | specs instruction | 與插件相同 | 0 |
+
+Examples: 邊界場景
+| 檔案 | 狀態 | exit | 備註 |
+|---|---|---|---|
+| spec 範本 | 與插件不同 | 1 | 手改過或插件更新了 |
+| specs instruction | 與插件不同 | 1 | schema.yaml 還是 fork 來的版本 |
 
 #### Scenario: spec 範本被手改過（反例）
 - **GIVEN** repo 的 spec 範本被手改過
 - **WHEN** 執行 `opsx init --check`
 - **THEN** exit code 1
-- **AND** 輸出含 "spec 範本與插件版不同" 與 "跑 opsx init 更新"
+- **AND** 輸出含 "spec 範本與插件版不同" 與 "跑 opsx init 換成插件版"
 ```

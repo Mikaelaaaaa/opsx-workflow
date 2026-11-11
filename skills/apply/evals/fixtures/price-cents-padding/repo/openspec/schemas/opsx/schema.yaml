@@ -108,9 +108,9 @@ artifacts:
       對應 openspec 標題：
       - Feature 是這份 specs/<capability>/spec.md，不寫 `Feature:`。
       - Rule 是 `### Requirement: <名>`；標題下第一個非空行是規則句，必須含 SHALL 或 MUST。
-      - Scenario 是 `#### Scenario: <名>（正例）` 或 `#### Scenario: <名>（反例）`；Scenario Outline 也用 `#### Scenario:`，名稱後標 `（Scenario Outline）`；都必須 4 個 #。
+      - Scenario 是 `#### Scenario: <名>（正例）` 或 `#### Scenario: <名>（反例）`；Scenario Outline 也用 `#### Scenario:`，名稱後標 `（Scenario Outline，正例）` 或 `（Scenario Outline，反例）`；都必須 4 個 #。
       - 步驟寫在 Scenario 之下：`- **GIVEN**`、`- **WHEN**`、`- **THEN**`、`- **AND**`。
-      - Examples 表放在 Scenario Outline 之下：一行 `Examples: <分組名>`，下一行起是 markdown 表；一般場景與邊界場景分成兩個表，邊界場景多一欄備註。
+      - Examples 表放在 Scenario Outline 之下：一行 `Examples: <分組名>`，下一行起是 markdown 表（表頭、`|---|` 分隔列、資料列）；一般場景與邊界場景分成兩個表，邊界場景多一欄備註。
       - Background 放在規則句之後、第一個 Scenario 之前，只有 GIVEN / AND；放在規則句前面，openspec validate 會報缺 SHALL / MUST。
       - Docstring 是步驟下縮排的 `"""` 區塊；Data Table 是步驟下縮排的表；`*` 寫成 `- **AND**`。
 

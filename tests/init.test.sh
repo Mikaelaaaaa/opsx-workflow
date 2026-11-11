@@ -134,14 +134,10 @@ case "$outo" in *"opsx 程式碼"*"$RO"*) ;; *) fail "要警告 opsx 程式碼�
 case "$(cj "$CR" permissions.additionalDirectories)" in *"\"$RO\""*) ;; *) fail "警告之後仍要登記 $RO" ;; esac
 
 # --- 重跑 init 用插件版覆寫 spec 範本與 specs instruction；--check 比對兩者（specs/opsx-init）---
-# 把 <dst> 的 specs 區塊換成 <src> 的；區塊是 "  - id: specs" 到下一個 artifact 前，不含中間的空行
-swap_specs() { python3 -I -c '
-import re, sys
-pat = re.compile(r"^  - id: specs\n(?:(?!  - id: ).*\n)*?(?=\n*  - id: |\Z)", re.M)
-new = pat.search(open(sys.argv[2], encoding="utf-8").read()).group(0)
-s = open(sys.argv[1], encoding="utf-8").read()
-m = pat.search(s)
-open(sys.argv[1], "w", encoding="utf-8").write(s[:m.start()] + new + s[m.end():])' "$1" "$2"; }
+# init.sh 的 specs_block：只給 schema.yaml 印出區塊，多給一個檔就換成那個檔的內容
+specs_block_of() { ( OPSX_PY=python3; source "$OPSX_ROOT/bin/lib/common.sh"; source "$OPSX_ROOT/bin/lib/init.sh"; specs_block "$@" ); }
+# 把 <dst> 的 specs 區塊換成 <src> 的
+swap_specs() { specs_block_of "$2" > "$FX/swap-block" && specs_block_of "$1" "$FX/swap-block"; }
 RF="$(mk_repo forkref)"; ( cd "$RF" && openspec schema fork spec-driven opsx >/dev/null 2>&1 ) || fail "fork spec-driven 失敗"
 FS="$RF/openspec/schemas/opsx"; OS="$R/openspec/schemas/opsx"
 assert_grep "with WHEN/THEN format" "$FS/schema.yaml"
@@ -159,7 +155,7 @@ outc="$(opsx init --check 2>&1)"; rc=$?
 assert_eq "$rc" 1 "舊版 spec 範本時 --check 要失敗：$outc"
 case "$outc" in *"spec 範本"*) ;; *) fail "要說 spec 範本不同：$outc" ;; esac
 case "$outc" in *"specs instruction"*) ;; *) fail "要說 specs instruction 不同：$outc" ;; esac
-case "$outc" in *"opsx init"*) ;; *) fail "要建議跑 opsx init：$outc" ;; esac
+case "$outc" in *"跑 opsx init 換成插件版"*) ;; *) fail "要建議跑 opsx init 換成插件版：$outc" ;; esac
 # 重跑 init 更新舊範本（正例）
 outr="$(opsx init 2>&1)" || fail "已裝的 repo 重跑 init 失敗：$outr"
 cmp -s "$OS/templates/spec.md" "$OPSX_ROOT/schemas/opsx/templates/spec.md" || fail "重跑後 spec.md 不是插件版"
@@ -181,7 +177,38 @@ assert_eq "$rc" 0 "插件版、settings 一致時 --check 要過：$outc"
 python3 -I -c 'import sys; p=sys.argv[1]; s=open(p).read(); open(p,"w").write(s.replace("  - id: specs\n", "  - id: specz\n"))' "$OS/schema.yaml"
 oute="$(opsx init 2>&1)" && fail "沒有 specs artifact 時 init 要失敗：$oute"
 case "$oute" in *"$OS/schema.yaml"*) ;; *) fail "訊息要點名 schema.yaml 路徑：$oute" ;; esac
+# --check 遇到沒有 specs artifact：逐項回報、exit 1，不 die
+outc="$(opsx init --check 2>&1)"; rc=$?
+assert_eq "$rc" 1 "沒有 specs artifact 時 --check 要 exit 1：$outc"
+case "$outc" in *"$OS/schema.yaml"*"跑 opsx init"*) ;; *) fail "要點名 schema.yaml 並建議跑 opsx init：$outc" ;; esac
+case "$outc" in *Traceback*) fail "--check 不該丟 traceback：$outc" ;; esac
+# --check 遇到 schema.yaml 不在：同上
+mv "$OS/schema.yaml" "$FX/schema-moved"
+outc="$(opsx init --check 2>&1)"; rc=$?
+assert_eq "$rc" 1 "schema.yaml 不在時 --check 要 exit 1：$outc"
+case "$outc" in *"$OS/schema.yaml"*"跑 opsx init"*) ;; *) fail "要點名 schema.yaml 並建議跑 opsx init：$outc" ;; esac
+case "$outc" in *Traceback*) fail "--check 不該丟 traceback：$outc" ;; esac
 cp "$FX/schema-1st" "$OS/schema.yaml"
+
+# 邊界：specs 是最後一個 artifact、後面接頂層 apply: → 換區塊時 apply: 逐字保留，讀出的區塊不含 apply:
+printf 'artifacts:\n  - id: proposal\n    generates: proposal.md\n  - id: specs\n    generates: old\n\napply:\n  requires: [tasks]\n  tracks: tasks.md\n' > "$FX/last.yaml"
+specs_block_of "$FX/last.yaml" > "$FX/last-block"
+assert_not_grep 'apply:' "$FX/last-block"
+specs_block_of "$FX/last.yaml" "$OPSX_ROOT/schemas/opsx/artifacts-specs.yaml" || fail "specs 排最後時換不了區塊"
+assert_grep '^apply:$' "$FX/last.yaml"
+assert_grep '^  tracks: tasks.md$' "$FX/last.yaml"
+assert_grep '^  - id: proposal$' "$FX/last.yaml"
+assert_not_grep 'generates: old' "$FX/last.yaml"
+
+# 驗證失敗要還原：插件的 specs 區塊讓 validate 失敗時，init 非 0、點名 specs 區塊與 schema.yaml，schema.yaml 與 templates/ 跟跑之前逐位元相同
+PB="$FX/plug-bad"; mkdir -p "$PB"; cp -R "$OPSX_ROOT/bin" "$OPSX_ROOT/templates" "$OPSX_ROOT/schemas" "$PB/"
+printf 'proposal.md：插件改過\n' > "$PB/schemas/opsx/templates/proposal.md"
+python3 -I -c 'import sys; p=sys.argv[1]; s=open(p).read(); open(p,"w").write(s.replace("      - proposal\n", "      - no-such-artifact\n"))' "$PB/schemas/opsx/artifacts-specs.yaml"
+assert_grep 'no-such-artifact' "$PB/schemas/opsx/artifacts-specs.yaml"
+cp -R "$OS" "$FX/opsx-before"
+outb="$(OPSX_ROOT="$PB" bash "$PB/bin/opsx" init 2>&1)" && fail "specs 區塊驗證不過時 init 要失敗：$outb"
+case "$outb" in *specs*"$OS/schema.yaml"*) ;; *) fail "訊息要點名 specs 區塊與 schema.yaml：$outb" ;; esac
+diff -r "$FX/opsx-before" "$OS" >/dev/null || fail "驗證失敗後 schema 目錄沒還原：$(diff -r "$FX/opsx-before" "$OS")"
 export OPSX_STATE_DIR="$FX/state"
 
 # --- --global ---

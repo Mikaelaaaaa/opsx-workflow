@@ -1,4 +1,4 @@
-<!-- 用哪一層、怎麼寫，看 specs instruction 的規則；完整範例看 opsx 插件的 skills/propose/references/gherkin.md。用不到的區塊整段刪掉。 -->
+<!-- 用哪一層、怎麼寫，看 specs instruction 的規則；完整範例看 opsx 插件的 skills/propose/references/gherkin.md。用不到的區塊整段刪掉；Scenario Outline 需要多組測資才用，步驟裡 "<參數一>" 這種是 Examples 表的欄名，照樣留著。 -->
 ## ADDED Requirements
 
 ### Requirement: <Rule：一條不可分割的業務規則>
@@ -16,15 +16,17 @@ Background:
 - **WHEN** <動作>
 - **THEN** <可驗證的結果>
 
-#### Scenario: <行為>（Scenario Outline，需要多組測資才用）
+#### Scenario: <行為>（Scenario Outline，正例）
 - **GIVEN** <前置條件> "<參數一>"
 - **WHEN** <動作> "<參數一>"
 - **THEN** <可驗證的結果> <參數二>
 
 Examples: 一般場景
 | 參數一 | 參數二 |
+|---|---|
 | <值> | <值> |
 
 Examples: 邊界場景
 | 參數一 | 參數二 | 備註 |
+|---|---|---|
 | <值> | <值> | <為什麼是邊界> |
