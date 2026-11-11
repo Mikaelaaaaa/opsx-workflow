@@ -216,6 +216,14 @@ out="$(gg Bash "$(cmdj 'glab mr create -F desc.md')")"; assert_eq "$(decision "$
 reason "$out" | grep -q 'gates.md' || fail "grant: deny 要叫它寫 gate"
 reason "$out" | grep -qF 'approval | decision' || fail "grant: deny 要寫合法 type：$(reason "$out")"
 reason "$out" | grep -qF 'needs: run' || fail "grant: deny 要寫 needs: run：$(reason "$out")"
+# 回 issue 留 MR 連結歸在 mr 底下，不另開 action
+out="$(gg Bash "$(cmdj 'glab issue note 12 -m x')")"; assert_eq "$(decision "$out")" deny "grant: glab issue note 沒 mr 授權"
+reason "$out" | grep -qF 'action: mr' || fail "grant: issue note 的 deny 要帶 action: mr：$(reason "$out")"
+out="$(gg Bash "$(cmdj 'gh issue comment https://github.com/o/r/issues/3 --body x')")"; assert_eq "$(decision "$out")" deny "grant: gh issue comment 沒 mr 授權"
+reason "$out" | grep -qF 'action: mr' || fail "grant: issue comment 的 deny 要帶 action: mr：$(reason "$out")"
+out="$(gg Bash "$(cmdj 'glab issue comment 12 -m x')")"; assert_eq "$(decision "$out")" deny "grant: glab issue comment 是 note 的別名，沒 mr 授權"
+out="$(gg Bash "$(cmdj 'glab issue view 12')")"; assert_eq "$out" "" "grant: glab issue view 不是第二級"
+out="$(gg Bash "$(cmdj 'gh issue list')")"; assert_eq "$out" "" "grant: gh issue list 不是第二級"
 out="$(gg Bash "$(cmdj 'pnpm db:migrate')")"; assert_eq "$(decision "$out")" allow "grant: 這張卡的 migrate"
 # dontAsk 下不明說 allow 就會被 Claude 拒：有授權的動作要回 permissionDecision allow，不是空輸出
 assert_eq "$(printf '%s' "$out" | jq -r '.hookSpecificOutput.permissionDecision')" allow "grant: 有授權要明說 allow"
@@ -464,7 +472,15 @@ out="$(gg Bash "$(cmdj 'git push gitlab feat/eval-core/mikaela')")"; assert_eq "
 assert_eq "$(jq -c '."Agentory-AI/eval-core".once' "$PD/authz.json")" '[]' "once 用掉就刪"
 printf '{"Agentory-AI/eval-core":{"grants":["mr"]}}' > "$PD/authz.json"
 out="$(gg Bash "$(cmdj 'glab mr create -F desc.md')")"; assert_eq "$(decision "$out")" allow "grant: 受保護位置的卡授權放行"
+out="$(gg Bash "$(cmdj 'glab issue note 12 -m x')")"; assert_eq "$(decision "$out")" allow "grant: mr 授權放行 glab issue note"
+out="$(gg Bash "$(cmdj 'gh issue comment https://github.com/o/r/issues/3 --body x')")"; assert_eq "$(decision "$out")" allow "grant: mr 授權放行 gh issue comment"
+out="$(gg Bash "$(cmdj 'glab issue comment 12 -m x')")"; assert_eq "$(decision "$out")" allow "grant: mr 授權放行 glab issue comment"
 out="$(gg Bash "$(cmdj 'git push gitlab feat/eval-core/mikaela')")"; assert_eq "$(decision "$out")" deny "grant: once 第二次 deny"
+# once mr 只放行一次：開 MR 用掉後，回寫 issue 會被擋，deny 訊息帶 action: mr（/pr 5b 靠它分辨原因）
+printf '{"Agentory-AI/eval-core":{"once":["mr"]}}' > "$PD/authz.json"
+out="$(gg Bash "$(cmdj 'glab mr create -F desc.md')")"; assert_eq "$(decision "$out")" allow "grant: once mr 開 MR"
+out="$(gg Bash "$(cmdj 'glab issue note 12 -m x')")"; assert_eq "$(decision "$out")" deny "grant: once mr 用掉後 issue note deny"
+reason "$out" | grep -qF 'action: mr' || fail "grant: once mr 用掉後的 deny 要帶 action: mr：$(reason "$out")"
 # grants.toml 壞掉：當成沒授權，不是放行
 printf 'this is not toml ===\n' > "$OPSX_STATE_DIR/grants.toml"
 out="$(gg Bash "$(cmdj 'git push gitlab feat/eval-core/mikaela')")"; assert_eq "$(decision "$out")" deny "grant: 壞 toml deny"
@@ -1178,6 +1194,18 @@ sleep 1
 assert_eq "$(cat "$FX/victim")" "keep me" "queue: drive log 不能附加到 symlink 的目標"
 assert_file "$QD/Agentory-AI-qc.tsv.failed"
 rm -f "$DL" "$QD/Agentory-AI-qc.tsv.failed"
+# drive 成功起來：dispatch.json 的 drive_pid 是被起的那支程序本身（假 opsx drive 把自己的 $$ 寫進檔），不是等它的子 shell
+mkdir -p "$FX/fake-root/bin"; ln -s "$OPSX_ROOT/hooks" "$FX/fake-root/hooks"; ln -s "$OPSX_ROOT/bin/lib" "$FX/fake-root/bin/lib"
+printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$$" > "%s/drive-self.pid"\nsleep 2\n' "$FX" > "$FX/fake-root/bin/opsx"
+printf '{"Agentory-AI/qc":{"mode":"autopilot","drive_pid":null}}\n' > "$OPSX_STATE_DIR/dispatch.json"
+printf 'drive\tqc\t%s\n' "$R" > "$QD/Agentory-AI-qc.tsv"
+out="$(CLAUDE_PLUGIN_ROOT="$FX/fake-root" post "opsx chain p")"
+n=0; until [ -s "$FX/drive-self.pid" ]; do n=$((n+1)); [ $n -lt 30 ] || fail "假 drive 沒在背景起來"; sleep 0.1; done
+assert_eq "$(jq -r '."Agentory-AI/qc".drive_pid' "$OPSX_STATE_DIR/dispatch.json")" "$(cat "$FX/drive-self.pid")" "queue: drive_pid 要是起出來的程序本身"
+# pane 關掉時 process group 收到 SIGHUP：背景起的 drive 要活著
+kill -HUP "$(cat "$FX/drive-self.pid")"; sleep 0.3
+kill -0 "$(cat "$FX/drive-self.pid")" 2>/dev/null || fail "queue: drive 收到 SIGHUP 死了"
+assert_no_file "$QD/Agentory-AI-qc.tsv.failed"
 
 # ---------- 當前卡：dispatch worktree 根優先，否則 branch 第二段 ----------
 K="$(mk_repo Cards)"

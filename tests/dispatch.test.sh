@@ -47,7 +47,7 @@ assert_grep '^agent prompt retry-backoff /opsx-workflow:propose retry-backoff$' 
 assert_not_grep '^workspace create' "$OPSX_FAKE_LOG"
 # settings：repo 永遠 push 進 allow；merge 在 allow 不在 deny（deny 會蓋過 grant-gate 的放行，merge 由 gate 單獨把關）
 S="$OPSX_STATE_DIR/settings/Agentory-CS-retry-backoff-autopilot.json"; assert_file "$S"
-python3 -I -c 'import json,sys;d=json.load(open(sys.argv[1]))["permissions"];assert "Bash(git push:*)" in d["allow"],d;assert "Bash(glab mr merge:*)" in d["allow"] and "Bash(gh pr merge:*)" in d["allow"],d;assert not any("merge" in x for x in d["deny"]),d;assert not any("glab mr create" in a for a in d["allow"]),d' "$S"
+python3 -I -c 'import json,sys;d=json.load(open(sys.argv[1]))["permissions"];assert "Bash(git push:*)" in d["allow"],d;assert "Bash(glab mr merge:*)" in d["allow"] and "Bash(gh pr merge:*)" in d["allow"],d;assert not any("merge" in x for x in d["deny"]),d;assert not any("glab mr create" in a for a in d["allow"]),d;assert "Bash(glab issue note:*)" not in d["allow"] and "Bash(gh issue comment:*)" not in d["allow"],d' "$S"
 # dontAsk 下不在 allow 的指令直接被拒：常用唯讀與測試指令要在 allow 裡，不然 agent 連跑測試都不行
 python3 -I -c 'import json,sys;a=json.load(open(sys.argv[1]))["permissions"]["allow"];miss=[x for x in ["Bash(jq:*)","Bash(head:*)","Bash(tail:*)","Bash(wc:*)","Bash(sed -n:*)","Bash(bash tests/:*)","Bash(herdr agent:*)","Bash(glab mr view:*)","Bash(glab ci:*)","Bash(gh pr view:*)","Bash(git merge-base:*)","Bash(git remote:*)"] if x not in a];assert not miss,miss' "$S" || fail "allow 少了常用指令"
 # 重啟 / resume 後旗標不在，可寫目錄還要由 settings 供應
@@ -187,7 +187,9 @@ out="$(opsx dispatch rdap-timeout --agent claude --mode autopilot --kind dev 2>&
 case "$out" in *workspaces.toml*) ;; *) fail "訊息要含 workspaces.toml：$out" ;; esac
 assert_eq "$(cat "$FX/victim")" "[repos]" "workspaces.toml 不能附加到 symlink 的目標"
 rm "$OPSX_STATE_DIR/workspaces.toml"; cp "$FX/ws.real" "$OPSX_STATE_DIR/workspaces.toml"; : > "$OPSX_FAKE_LOG"
+printf '[repos."scam-guard"]\nmr = true\n' >> "$OPSX_STATE_DIR/grants.toml"
 opsx dispatch rdap-timeout --agent claude --mode autopilot --kind dev >/dev/null 2>&1 || fail "dispatch unmapped repo"
+python3 -I -c 'import json,sys;a=json.load(open(sys.argv[1]))["permissions"]["allow"];miss=[x for x in ["Bash(glab mr create:*)","Bash(gh pr create:*)","Bash(glab issue note:*)","Bash(glab issue comment:*)","Bash(gh issue comment:*)"] if x not in a];assert not miss,miss' "$OPSX_STATE_DIR/settings/scam-guard-rdap-timeout-autopilot.json" || fail "mr 授權的 allow 要含 issue 留言"
 assert_grep '^workspace create --label scam-guard' "$OPSX_FAKE_LOG"
 assert_grep '^"scam-guard" = "scam-guard"$' "$OPSX_STATE_DIR/workspaces.toml"   # 記 label，id 在 dispatch.json
 assert_grep '^tab create --workspace w9 ' "$OPSX_FAKE_LOG"
@@ -422,6 +424,23 @@ out="$(opsx dispatch m2 --agent claude --mode autopilot 2>&1)"; [ $? -eq 2 ] || 
 echo "$out" | grep -q split || fail "訊息要寫出 stage: $out"
 assert_eq "$(cat "$OPSX_FAKE_LOG")" "" "拒絕時不碰 herdr"
 rm "$RF/openspec/changes/m2/inbox.md"
+
+# --feature --only：只寫列出的卡，第一句照列出的順序給第一張；列了不能開工的卡就拒絕
+cp "$J" "$FX/j-before-only.json"
+printf '{}' > "$J"; : > "$OPSX_FAKE_LOG"
+out="$(opsx dispatch --feature fs --only m2 --agent claude --mode autopilot 2>&1)"; assert_eq "$?" 0 "--only m2: $out"
+assert_grep '^agent prompt fs /opsx-workflow:apply m2$' "$OPSX_FAKE_LOG"
+assert_eq "$(jq -r 'keys | join(" ")' "$J")" "Feat-Repo/@fs Feat-Repo/m2" "只寫 session 與 m2"
+printf '{}' > "$J"; : > "$OPSX_FAKE_LOG"
+out="$(opsx dispatch --feature fs --only m2,m1 --agent claude --mode autopilot 2>&1)"; assert_eq "$?" 0 "--only m2,m1: $out"
+assert_grep '^agent prompt fs /opsx-workflow:apply m2$' "$OPSX_FAKE_LOG"
+assert_eq "$(jq -r 'keys | join(" ")' "$J")" "Feat-Repo/@fs Feat-Repo/m1 Feat-Repo/m2" "m1、m2 都寫"
+printf '{}' > "$J"; : > "$OPSX_FAKE_LOG"
+out="$(opsx dispatch --feature fs --only m3 --agent claude --mode autopilot 2>&1)"; [ $? -eq 2 ] || fail "--only 列了不能開工的卡要拒絕: $out"
+echo "$out" | grep -q m3 || fail "訊息要說 m3: $out"
+assert_eq "$(cat "$OPSX_FAKE_LOG")" "" "拒絕時不碰 herdr"
+assert_rc 2 opsx dispatch m2 --only m2 --agent claude
+cp "$FX/j-before-only.json" "$J"
 
 # --- dispatch --note：送第一句之前寫進 inbox.md 的 ## 派工指示（specs/dispatch-note「opsx dispatch --note 在第一句之前寫入」） ---
 cd "$R"

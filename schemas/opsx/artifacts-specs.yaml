@@ -1,0 +1,93 @@
+  - id: specs
+    generates: specs/**/*.md
+    description: Detailed specifications for the change
+    template: spec.md
+    instruction: |
+      Create specification files that define WHAT the system should do, written in Gherkin form on openspec headings.
+      這裡只放寫 spec 的規則；範本是要填的骨架；完整範例與解說看 opsx 插件的 skills/propose/references/gherkin.md。
+
+      Create one spec file per capability listed in the proposal's Capabilities section.
+      - New capabilities: use the exact kebab-case name from the proposal (specs/<capability>/spec.md).
+      - Modified capabilities: use the existing spec folder name from openspec/specs/<capability>/ when creating the delta spec at specs/<capability>/spec.md.
+
+      結構層次：Feature → Rule → Scenario / Example → Given / When / Then / And。
+
+      核心關鍵字：
+      | 關鍵字 | 用途 | 說明 |
+      |---|---|---|
+      | Feature | 功能特性 | 描述要實現的功能模組 |
+      | Rule | 業務規則 | 原子化的業務邏輯單元 |
+      | Scenario | 具體場景 | 描述單一測試情境 |
+      | Scenario Outline | 參數化場景 | 用表格覆蓋多組測資 |
+      | Given | 前置條件 | 設定初始狀態 |
+      | When | 執行動作 | 觸發的事件或操作 |
+      | Then | 預期結果 | 驗證的輸出 |
+      | And / But | 連接步驟 | 連接多個同類步驟 |
+      | Background | 共用前置 | 所有場景共享的前置條件 |
+      | Examples | 測試數據表 | 提供多組參數化數據 |
+
+      對應 openspec 標題：
+      - Feature 是這份 specs/<capability>/spec.md，不寫 `Feature:`。
+      - Rule 是 `### Requirement: <名>`；標題下第一個非空行是規則句，必須含 SHALL 或 MUST。
+      - Scenario 是 `#### Scenario: <名>（正例）` 或 `#### Scenario: <名>（反例）`；Scenario Outline 也用 `#### Scenario:`，名稱後標 `（Scenario Outline，正例）`、`（Scenario Outline，反例）`，或在同一張 Examples 表同時有通過與失敗的列時標 `（Scenario Outline，正例＋反例）`；都必須 4 個 #。
+      - 步驟寫在 Scenario 之下：`- **GIVEN**`、`- **WHEN**`、`- **THEN**`、`- **AND**`。
+      - Examples 表放在 Scenario Outline 之下：一行 `Examples: <分組名>`，下一行起是 markdown 表（表頭、`|---|` 分隔列、資料列）；一般場景與邊界場景分成兩個表，邊界場景多一欄備註。
+      - Background 放在規則句之後、第一個 Scenario 之前，只有 GIVEN / AND；放在規則句前面，openspec validate 會報缺 SHALL / MUST。
+      - Docstring 是步驟下縮排的 `"""` 區塊；Data Table 是步驟下縮排的表；`*` 寫成 `- **AND**`。
+
+      基礎層撰寫要點：
+      - 參數用雙引號標記；數字直接寫，不加引號。
+      - 反例沒有前置條件時，GIVEN 可省略。
+      - 每個 Requirement 都要有正例與反例。
+
+      原子化原則：
+      - 每條 Rule 是一個不可分割的業務邏輯單元。
+      - 每個 Feature 對應開發中要實作的一個邏輯模組。
+      - 用 Rule 把複雜功能拆成獨立規則。
+
+      選擇架構，依序問：
+      1. 這個功能有多條業務規則需要處理嗎？否：基礎層 Feature + Scenario，一個 Requirement。是：中階層 Feature + Rule + Scenario，每條規則一個 Requirement。
+      2. 同一條規則需要驗證多組測資嗎？否：維持 Scenario。是：進階層 Scenario Outline + Examples。
+      3. 多個場景有相同的前置步驟嗎？是：加入 Background。
+      需要批次資料嗎？是：用 Data Table。需要傳遞複雜結構（JSON / XML）嗎？是：用 Docstring。
+
+      進階技巧的規則：
+      - Background 在每個 Scenario 前執行；只放共用的前置條件，不放測試邏輯。
+      - Docstring 用三個雙引號 `"""` 包裹，保持原始格式（縮排和換行）。
+      - Data Table 在單一步驟中傳遞多筆資料；Examples 定義多組完整的場景參數。
+      - `*` 用在多個連續的 And 步驟、列舉類型的步驟、要強調步驟並列關係的時候。
+
+      撰寫原則：
+      1. 使用業務語言，避免技術細節。
+      2. 每個 Scenario 保持獨立，不依賴其他場景的執行結果，可以任意順序執行。
+      3. 一個 Scenario 只驗證一件事；複雜邏輯拆成多個 Rule。
+      4. 善用參數化：相似場景用 Scenario Outline。
+      5. 保持 Step 的原子性：每個步驟做一件事。
+      禁用模糊詞：正確的、適當的、合理的、正常、良好、妥善、等等、相關的、appropriate、properly、correctly、reasonable、etc.
+
+      寫完用常見陷阱自檢：
+      - 過度技術化：非技術人員看不懂。
+      - 步驟耦合：Given / When / Then 步驟互相依賴內部狀態。
+      - 缺乏具體性：用了模糊的詞彙。
+      - 過度使用 Background：場景難以獨立理解。
+
+      與 tasks 的關係：tasks.md 每個 task 的「驗收：」指到 Scenario 名稱；Examples 表的每一列都要有測試。
+
+      Delta operations (use ## headers):
+      - **ADDED Requirements**: New capabilities
+      - **MODIFIED Requirements**: Changed behavior - MUST include full updated content
+      - **REMOVED Requirements**: Deprecated features - MUST include **Reason** and **Migration**
+      - **RENAMED Requirements**: Name changes only - use FROM:/TO: format
+      - Use SHALL/MUST for normative requirements (avoid should/may).
+      - Every requirement MUST have at least one scenario.
+
+      MODIFIED requirements workflow:
+      1. Locate the existing requirement in openspec/specs/<capability>/spec.md
+      2. Copy the ENTIRE requirement block (from `### Requirement:` through all scenarios)
+      3. Paste under `## MODIFIED Requirements` and edit to reflect new behavior
+      4. Ensure header text matches exactly (whitespace-insensitive)
+
+      Common pitfall: Using MODIFIED with partial content loses detail at archive time.
+      If adding new concerns without changing existing behavior, use ADDED instead.
+    requires:
+      - proposal
