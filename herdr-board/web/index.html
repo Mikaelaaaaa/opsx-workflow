@@ -535,6 +535,12 @@ function mergeCtl(c,cards){
   const opts=cands.map(t=>`<option value="${esc(t.slug)}"${t.slug===ui.mergeInto?' selected':''}>${esc(t.slug)} · ${esc(t.title)}</option>`).join('');
   return `<select class="merge-into" aria-label="併進的目標"><option value="">選目標…</option>${opts}</select><button class="primary sm" data-act="merge-go"${ok?'':' disabled'}>送出</button>`;
 }
+function submitMerge(c){
+  const into=ui.mergeInto;
+  if(!mergeCandidates(data.cards,c).some(t=>t.slug===into))return;
+  ui.merge=null;ui.mergeInto='';
+  act(`opsx merge-card ${c.slug} --into ${into} --repo ${repoTop(c)}`,()=>api.post('merge-card',mergeBody(c,into)));
+}
 /* 併進 end */
 /* 改等級就地選等級、填理由；理由空白時送出鈕不能按（server 也會回 400）。打到一半的字存在 ui.prioText，重畫不丟 */
 function prioCtl(c){
@@ -663,6 +669,12 @@ async function loadLog(){
 }
 function showTab(t){ui.tab=t;ui.sel=null;history.replaceState(null,'','#'+t);render();if(t==='log')loadLog();}
 
+/* 5 秒重拉會重畫：打到一半的捨棄理由、改等級理由與正在選的併進目標把焦點還回去。tests/merge-card-web.test.sh 從 start 切到 end 執行 */
+/* 重畫保焦點 start */
+const TYPING=['drop-reason','prio-reason','merge-into'];
+const typingClass=el=>el?TYPING.find(k=>el.classList.contains(k)):undefined;
+function refocus(i){i.focus();if(i.tagName!=='SELECT')i.setSelectionRange(i.value.length,i.value.length);}
+/* 重畫保焦點 end */
 function render(){
   const A=homeSect(data.cards.filter(inScope),data.sessions.filter(inScope),'待處理');
   $('#counter').innerHTML=counterHtml(data.cards,data.sessions,inScope);
@@ -671,11 +683,10 @@ function render(){
   for(const t of ['home','inbox','log'])$('#tab-'+t).setAttribute('aria-selected',ui.tab===t);
   $('#stamp').textContent=data.generated_at?'collect '+ago(data.generated_at):'';
   $('#milestones').innerHTML=milestoneLine(data.milestones,Object.keys(data.repo_paths||{}).filter(r=>inScope({repo:r})));
-  const y=window.scrollY;const typing=['drop-reason','prio-reason'].find(k=>document.activeElement&&document.activeElement.classList.contains(k));
+  const y=window.scrollY;const typing=typingClass(document.activeElement);
   setView($('#view'),ui.tab==='inbox'?renderInbox():ui.tab==='log'?renderLog():renderHome(),ui.tab==='log');
   window.scrollTo(0,y);
-  /* 5 秒重拉會重畫：打到一半的捨棄理由、改等級理由把焦點還回去 */
-  if(typing){const i=$('.'+typing);if(i){i.focus();i.setSelectionRange(i.value.length,i.value.length);}}
+  if(typing){const i=$('.'+typing);if(i)refocus(i);}
   const er0=data.worktrees_skipped&&data.worktrees_skipped.length?[{source:'collect',message:'跳過 worktree 目錄：'+data.worktrees_skipped.join('、')}]:[];
   data.errors=(data.errors||[]).filter(e=>e.source!=='collect').concat(er0);
   $('#scope-all').setAttribute('aria-selected',ui.scope==='all');
@@ -846,12 +857,6 @@ function submitDrop(id,text){
   if(id.startsWith('unfiled:')){const slug=id.slice(8);act(`opsx drop ${slug} -- ${text}`,()=>api.post('drop',{slug,text}));return;}
   const c=byKey(id);if(!c){render();return;}
   act(`opsx drop ${c.slug} --repo ${repoTop(c)} -- ${text}`,()=>api.post('drop',{slug:c.slug,repo:repoTop(c),text}));
-}
-function submitMerge(c){
-  const into=ui.mergeInto;
-  if(!mergeCandidates(data.cards,c).some(t=>t.slug===into))return;
-  ui.merge=null;ui.mergeInto='';
-  act(`opsx merge-card ${c.slug} --into ${into} --repo ${repoTop(c)}`,()=>api.post('merge-card',mergeBody(c,into)));
 }
 const closeMerge=()=>{ui.merge=null;ui.mergeInto='';render();};
 function submitPriority(c){

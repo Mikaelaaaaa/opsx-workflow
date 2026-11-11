@@ -15,8 +15,12 @@ const esc = x => String(x == null ? '' : x).replace(/[&<>"]/g, c => ({'&': '&amp
 const key = c => c.repo + '/' + c.slug;
 const repoTop = c => c.path.split('/openspec/changes/')[0];
 const ui = {merge: null, mergeInto: ''};
-const {mergeCandidates, mergeBody, mergeCtl} = new Function('esc', 'key', 'repoTop', 'ui',
-  html.slice(s, e) + ';return {mergeCandidates, mergeBody, mergeCtl};')(esc, key, repoTop, ui);
+const data = {cards: []};
+const posts = [], acts = [];
+const api = {post: (action, body) => { posts.push([action, body]); return Promise.resolve({ok: true}); }};
+const act = (label, fn) => { acts.push(label); return fn(); };
+const {mergeCandidates, mergeBody, mergeCtl, submitMerge} = new Function('esc', 'key', 'repoTop', 'ui', 'data', 'api', 'act',
+  html.slice(s, e) + ';return {mergeCandidates, mergeBody, mergeCtl, submitMerge};')(esc, key, repoTop, ui, data, api, act);
 
 const card = (repo, slug, section, title) => ({repo, slug, section, title: title || slug, path: `/code/${repo}/openspec/changes/${slug}`});
 const x = card('a', 'x', '收件匣'), y = card('a', 'y', '進行中', '<b>同一件事</b>'), z = card('a', 'z', '已完成'), w = card('b', 'w', '收件匣');
@@ -26,8 +30,21 @@ const cards = [x, y, z, w];
 assert.deepStrictEqual(mergeCandidates(cards, x).map(c => c.slug), ['y'], '只有同 repo、不在已完成、不是自己的卡');
 assert.deepStrictEqual(mergeCandidates([x, z, w], x), [], '沒有候選');
 
-// 送出併進
+// 送出併進：實際送出的是 POST /api/merge-card 與這個 body，送出後選單關掉
 assert.deepStrictEqual(mergeBody(x, 'y'), {slug: 'x', into: 'y', repo: '/code/a'}, 'POST body');
+data.cards = cards;
+ui.merge = 'a/x'; ui.mergeInto = 'y';
+submitMerge(x);
+assert.deepStrictEqual(posts, [['merge-card', {slug: 'x', into: 'y', repo: '/code/a'}]], '送出的請求');
+assert.ok(acts.length === 1 && acts[0] === 'opsx merge-card x --into y --repo /code/a', '動作標籤：' + acts);
+assert.ok(ui.merge === null && ui.mergeInto === '', '送出後選單關掉');
+// 沒選目標、或已選的目標不在候選裡：不送
+ui.merge = 'a/x'; ui.mergeInto = '';
+submitMerge(x);
+ui.mergeInto = 'z';
+submitMerge(x);
+assert.strictEqual(posts.length, 1, '沒選或選了非候選都不送：' + JSON.stringify(posts));
+ui.merge = null; ui.mergeInto = '';
 
 // 選單關著：一顆併進按鈕
 assert.ok(mergeCtl(x, cards).includes('data-act="merge-open"') && mergeCtl(x, cards).includes('併進'), '關著時是併進按鈕');
@@ -63,5 +80,24 @@ const fn = name => { const a = html.indexOf(`function ${name}(`), b = html.index
   if (a < 0) throw new Error(`index.html 找不到 function ${name}(`); return html.slice(a, b); };
 assert.ok(fn('rowInbox').includes('mergeCtl(c,data.cards)'), '收件卡列有併進');
 assert.ok(!fn('rowUnfiled').includes('mergeCtl') && !fn('rowUnfiled').includes('併進'), '待分類列沒有併進');
+
+// 重畫保焦點：併進的目標下拉在重畫後拿回焦點，<select> 不呼叫 setSelectionRange
+const F0 = '/* 重畫保焦點 start */', F1 = '/* 重畫保焦點 end */';
+const f0 = html.indexOf(F0), f1 = html.indexOf(F1);
+if (f0 < 0 || f1 < f0) throw new Error(`index.html 找不到標記 ${F0} / ${F1}`);
+const {typingClass, refocus} = new Function(html.slice(f0, f1) + ';return {typingClass, refocus};')();
+const el = (cls, tagName) => ({tagName, value: 'abc', focused: false, range: null,
+  classList: {contains: k => k === cls}, focus() { this.focused = true; },
+  setSelectionRange(a, b) { if (tagName === 'SELECT') throw new Error('select 沒有 setSelectionRange'); this.range = [a, b]; }});
+assert.strictEqual(typingClass(el('merge-into', 'SELECT')), 'merge-into', '併進下拉要保焦點');
+assert.strictEqual(typingClass(el('drop-reason', 'INPUT')), 'drop-reason', '捨棄理由照舊');
+assert.strictEqual(typingClass(el('prio-reason', 'INPUT')), 'prio-reason', '改等級理由照舊');
+assert.strictEqual(typingClass(el('other', 'INPUT')), undefined, '其他元素不保');
+assert.strictEqual(typingClass(null), undefined, '沒有焦點元素');
+const sel = el('merge-into', 'SELECT'); refocus(sel);
+assert.ok(sel.focused, '下拉拿回焦點');
+const inp = el('drop-reason', 'INPUT'); refocus(inp);
+assert.ok(inp.focused && inp.range[0] === 3 && inp.range[1] === 3, '輸入框游標放回尾端');
+assert.ok(html.includes('const typing=typingClass(document.activeElement);') && html.includes('if(i)refocus(i);'), 'render 用 typingClass/refocus');
 JS
 echo ok
