@@ -800,6 +800,14 @@ assert_eq "$(notes)" 0 "協調者在第二輪也不發桌面通知"
 [ -n "$(memo_get _notified demo/a1/gate/g1)" ] || fail "協調者收到要記 _notified：$(cat "$MEMO")"
 rm -f "$MEMO"
 
+# --- 協調者 pane 卡住（agent_blocked）：退回桌面通知，人才收得到 ---
+printf 'agent_blocked\n' > "$FX/berr"
+cards "$HUMAN"
+OPSX_TEST_COORDINATOR_UP=1 OPSX_TEST_COORD_ERR="$FX/berr" round || fail "rc: $(cat "$FX/out")"
+assert_eq "$(notes)" 1 "協調者卡住要退回桌面通知：$(cat "$OPSX_FAKE_LOG")"
+[ -n "$(memo_get _notified demo/a1/gate/g1)" ] || fail "退回通知成功要記 _notified：$(cat "$MEMO")"
+rm -f "$MEMO"
+
 # --- 協調者那邊出別的錯：不退回桌面通知、不記，下一輪補送 ---
 printf 'boom\nok\n' > "$FX/cerr"
 cards "$HUMAN"
