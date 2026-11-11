@@ -33,6 +33,9 @@ has 'references/gherkin.md' "$SPEC"
 has 'openspec instructions specs' "$SPEC"
 has 'Examples table' "$SPEC"
 has 'review can match each row to a test' "$SPEC"
+# Examples 表只是 instruction 決策樹「多組測資」那一支的理由，不另立無條件規則（artifacts-specs.yaml 單組測資維持 Scenario）
+has 'Scenario Outline' "$SPEC"
+hasnt 'rather than into prose' "$SPEC"
 
 # --- Scenario：段落不放範例也不留 WHEN/THEN 規則（反例）---
 hasnt 'WHEN / THEN' "$RULES"
