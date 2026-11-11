@@ -28,10 +28,10 @@ printf '{"state":"opened","draft":false,"has_conflicts":false,"head_pipeline":{"
 # 假 agent：收到 /apply → 勾完 tasks + tests green；/review → report.md；/pr → report 加 MR URL；/babysit → 把 pipeline 修綠、threads 清掉
 cat > "$FX/on_prompt.sh" <<EOF
 case "\$1" in
-  "/apply retry-backoff") printf '## 1\n\n- [x] 1.1 a\n' > "$C/tasks.md"; printf '{"phase":"apply","step":8,"total":8,"label":"x","tests":"green","at":"2026-11-05T15:00:00+08:00"}' > "$C/status.json" ;;
-  "/review retry-backoff") printf '# report\n' > "$C/report.md" ;;
-  "/pr retry-backoff") printf '# report\n\n## MR\nhttps://gitlab.tsg-navigator.com/agentory/Agentory-CS/-/merge_requests/431\n' > "$C/report.md" ;;
-  "/babysit retry-backoff") printf '{"state":"opened","draft":false,"has_conflicts":false,"head_pipeline":{"status":"success"},"unresolved_discussions_count":0}' > "$OPSX_TEST_GLAB_JSON" ;;
+  "/opsx-workflow:apply retry-backoff") printf '## 1\n\n- [x] 1.1 a\n' > "$C/tasks.md"; printf '{"phase":"apply","step":8,"total":8,"label":"x","tests":"green","at":"2026-11-05T15:00:00+08:00"}' > "$C/status.json" ;;
+  "/opsx-workflow:review retry-backoff") printf '# report\n' > "$C/report.md" ;;
+  "/opsx-workflow:pr retry-backoff") printf '# report\n\n## MR\nhttps://gitlab.tsg-navigator.com/agentory/Agentory-CS/-/merge_requests/431\n' > "$C/report.md" ;;
+  "/opsx-workflow:babysit retry-backoff") printf '{"state":"opened","draft":false,"has_conflicts":false,"head_pipeline":{"status":"success"},"unresolved_discussions_count":0}' > "$OPSX_TEST_GLAB_JSON" ;;
 esac
 EOF
 export OPSX_TEST_ON_PROMPT="$FX/on_prompt.sh"
@@ -39,7 +39,7 @@ export OPSX_TEST_ON_PROMPT="$FX/on_prompt.sh"
 cd "$R"; out="$(opsx drive retry-backoff 2>&1)"; rc=$?
 assert_eq "$rc" 0 "drive rc: $out"
 seq="$(grep '^agent prompt' "$OPSX_FAKE_LOG" | sed 's/ --wait$//' | cut -d' ' -f4- | tr '\n' '|')"
-assert_eq "$seq" "/apply retry-backoff|/review retry-backoff|/pr retry-backoff|/babysit retry-backoff|" "prompt 順序"
+assert_eq "$seq" "/opsx-workflow:apply retry-backoff|/opsx-workflow:review retry-backoff|/opsx-workflow:pr retry-backoff|/opsx-workflow:babysit retry-backoff|" "prompt 順序"
 echo "$out" | grep -q "可以合併" || fail "要停在可以合併: $out"
 assert_grep '"phase": "pr"' "$C/status.json"
 # 起來先等 agent 把 dispatch 送的第一句做完，之後沒 gate 就不再 wait
@@ -67,7 +67,7 @@ EOF
 export OPSX_TEST_ON_WAIT="$FX/on_wait.sh"
 out="$(opsx drive retry-backoff 2>&1)"; assert_eq "$?" 0 "drive w/ gate: $out"
 assert_eq "$(sed -n 2p "$OPSX_FAKE_LOG")" "agent wait retry-backoff --until working --timeout 0" "gate 時先 wait working，不 prompt"
-assert_grep '^agent prompt retry-backoff /apply retry-backoff --wait$' "$OPSX_FAKE_LOG"
+assert_grep '^agent prompt retry-backoff /opsx-workflow:apply retry-backoff --wait$' "$OPSX_FAKE_LOG"
 # 回完 gate 時 opsx answer 已經 prompt 過 agent：drive 要等它做完（不帶 --until 的 wait）才送下一句
 assert_eq "$(sed -n 3p "$OPSX_FAKE_LOG")" "agent wait retry-backoff" "gate 回完要先等 agent settle 再送 prompt"
 unset OPSX_TEST_ON_WAIT
@@ -103,7 +103,7 @@ reset_apply; printf 'boom\n' > "$FX/perr"
 mkdir -p "$FX/sleepbin"; printf '#!/usr/bin/env bash\necho "sleep $*" >> "$OPSX_FAKE_LOG"\n' > "$FX/sleepbin/sleep"; chmod +x "$FX/sleepbin/sleep"
 out="$(PATH="$FX/sleepbin:$PATH" OPSX_DRIVE_POLL=1 opsx drive retry-backoff 2>&1)"; assert_eq "$?" 0 "drive generic err: $out"
 echo "$out" | grep -q "回 boom，等 1 秒" || fail "一般錯誤要說碼與退避: $out"
-assert_eq "$(sed -n 2,4p "$OPSX_FAKE_LOG" | tr '\n' '|')" "agent prompt retry-backoff /apply retry-backoff --wait|sleep 1|agent prompt retry-backoff /apply retry-backoff --wait|" "失敗後先 sleep poll 才再送"
+assert_eq "$(sed -n 2,4p "$OPSX_FAKE_LOG" | tr '\n' '|')" "agent prompt retry-backoff /opsx-workflow:apply retry-backoff --wait|sleep 1|agent prompt retry-backoff /opsx-workflow:apply retry-backoff --wait|" "失敗後先 sleep poll 才再送"
 echo "$out" | grep -q "可以合併" || fail "退避後要照常推進到可以合併: $out"
 
 # --- agent_prompt_stalled：herdr 收下了，算送過；連兩次階段沒動照樣寫 gate ---
@@ -127,7 +127,7 @@ case "\$*" in *"--until working"*) printf '## gate 1\nstatus: answered\n' > "$C/
 EOF
 out="$(OPSX_TEST_WAIT_ERR="$FX/werr" OPSX_TEST_ON_WAIT="$FX/on_wait_answer.sh" opsx drive retry-backoff 2>&1)"; assert_eq "$?" 0 "drive gate timeout: $out"
 assert_eq "$(sed -n 2,3p "$OPSX_FAKE_LOG" | tr '\n' '|')" "agent wait retry-backoff --until working --timeout 0|agent wait retry-backoff --until working --timeout 0|" "逾時後重讀 gates.md 再等: $(cat "$OPSX_FAKE_LOG")"
-assert_grep '^agent prompt retry-backoff /apply retry-backoff --wait$' "$OPSX_FAKE_LOG"
+assert_grep '^agent prompt retry-backoff /opsx-workflow:apply retry-backoff --wait$' "$OPSX_FAKE_LOG"
 unset OPSX_TEST_PROMPT_ERR
 
 # --- 同一個 /stage 連送兩次階段都沒動 → 寫 gate（附 pane 最後幾行），照 gate 等；不送第三次 ---
@@ -144,7 +144,9 @@ out="$(opsx drive retry-backoff 2>&1)"; assert_eq "$?" 0 "drive stuck: $out"
 assert_eq "$(grep -c '^agent prompt' "$OPSX_FAKE_LOG")" 2 "卡住時只送兩次: $(cat "$OPSX_FAKE_LOG")"
 assert_grep '^## drive-apply-1$' "$C/gates.md"
 assert_eq "$(cat "$KL")" "$(printf 'drive gates=1\nopsx coordinate --kick')" "寫完 stuck gate 之後才 kick"
-assert_grep 'drive 卡在 /apply' "$C/gates.md"
+assert_grep 'drive 卡在 /opsx-workflow:apply' "$C/gates.md"
+assert_grep '^選項: 重做 /opsx-workflow:apply 一次' "$C/gates.md"
+assert_grep '不再送 /opsx-workflow:apply' "$C/gates.md"
 assert_grep '^type: decision$' "$C/gates.md"
 assert_grep '^status: open$' "$C/gates.md"
 assert_grep '卡住了' "$C/gates.md"
