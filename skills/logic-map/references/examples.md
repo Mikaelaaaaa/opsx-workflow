@@ -39,7 +39,7 @@ D3 有 workplan.yaml?（既有） ─否→ 放行，提示未啟用
 | 節點 | 決策 | 條件（FEEL） | 結果 | 位置 |
 |---|---|---|---|---|
 | D1 | 是 git commit? | `matches(骨架, "(^|\s|&&|\|\||;)git\s+(-C\s+\S+\s+)?commit(\s|$)")` | 否 → 放行 | hooks/openspec-commit-gate.sh:9 |
-| D2 | 目錄讀得出? | `every d in [cd目錄, C目錄] satisfies not(d in ["\"\"", "''"]) and not(matches(d, "[\"'$`~\\*?\[{]"))` | 否 → 記 bad_dirs | hooks/openspec-commit-gate.sh:22 |
+| D2 | 目錄讀得出? | `every d in [cd目錄, C目錄] satisfies not(d in ["\"\"", "''"]) and not(matches(d, "[\"'$`~\\*?\[{]"))` | 否 → 記 bad_dirs | hooks/openspec-commit-gate.sh:23 |
 | D3 | 有 workplan.yaml?（既有） | `exists(file 目標repo + "/openspec/workplan.yaml")` | 否 → 放行並提示 | hooks/openspec-commit-gate.sh:38 |
 | D4 | 有 bad_dirs? | `bad_dirs != ""` | 是 → 擋 | hooks/openspec-commit-gate.sh:42 |
 | D5 | 有 no-change?（既有） | `contains(指令全文, "[no-change]")` | 是 → 放行並記 log | hooks/openspec-commit-gate.sh:46 |
