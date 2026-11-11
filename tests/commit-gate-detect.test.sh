@@ -17,7 +17,7 @@ printf '## 1. x\n\n- [ ] 1.1 a\n' > "$C/tasks.md"
 cg() { run_hook openspec-commit-gate.sh "$(j "$R" "{\"command\":$(printf '%s' "$1" | jq -Rs .)}")"; }
 
 # tasks 全未勾、branch 對到卡：每一種 git 全域選項寫法都要擋
-for c in 'git -c user.name=x commit -m fix' 'git --no-pager commit -m fix' "git --git-dir=$R/.git commit -m fix" "git --git-dir $R/.git commit -m fix" 'git -c a=b -c c=d commit -m fix' 'git -c "k=v w" commit -m fix'; do
+for c in 'git -c user.name=x commit -m fix' 'git --no-pager commit -m fix' "git --git-dir=$R/.git commit -m fix" "git --git-dir $R/.git commit -m fix" 'git -c a=b -c c=d commit -m fix' 'git -c "k=v w" commit -m fix' 'git -P commit -m fix' 'git -p commit -m fix' 'git --super-prefix x/ commit -m fix' 'git -c k=v -P commit -m fix'; do
   out="$(cg "$c")"; assert_eq "$(decision "$out")" deny "commit 閘門要認得：${c}｜${out}｜$(head -c 300 "$FX/hook.err")"
   reason "$out" | grep -q '還沒有任何勾' || fail "deny 要說 tasks 沒勾（${c}）: $(reason "$out")"
 done

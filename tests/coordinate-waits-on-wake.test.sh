@@ -68,6 +68,11 @@ round || fail "rc: $(cat "$FX/out")"
 assert_grep '^opsx answer card-a --gate g9 ' "$OPSX_FAKE_LOG"
 assert_grep '^opsx dispatch card-a ' "$OPSX_FAKE_LOG"
 
+# 等的那張在停下前就已合併（parked 記錄的 merged 已含它）：waits-on 的條件已滿足，要喚醒
+wp merged pending; parked ',"waits_on":"x-pr"'; printf '{"_parked":{"demo/card-a":{"at":"2026-11-10T10:00:00+08:00","gate":"g9","merged":["x-pr"],"waits_on":"x-pr"}},"_redispatched":{}}' > "$MEMO"; waiting '"x-pr"'
+round || fail "rc: $(cat "$FX/out")"
+assert_grep '^opsx dispatch card-a ' "$OPSX_FAKE_LOG"
+
 # waits-on 對不到任何 PR：照任何新合併的 PR 喚醒，記 ??
 wp pending merged; parked ',"waits_on":"nope"'; waiting '"nope"'
 round || fail "rc: $(cat "$FX/out")"

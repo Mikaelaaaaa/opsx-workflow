@@ -9,7 +9,8 @@ sk="$(cmd_skeleton "$cmd")" || deny "opsx commit 閘門：perl 執行失敗，�
 # git 與 commit 之間可以夾全域選項：-c k=v、-C <dir>（可重複）、--git-dir[=]<d>、--work-tree[=]<d>、--namespace[=]<n>、--no-pager 這類不帶值的長選項。
 # 值可以含反斜線跳脫的字元（\ 加任一字元算同一個字），這樣跳脫空白的路徑也讀得到、交給 unreadable_dir 擋。
 tok='(\\.|[^[:space:]\\])+'
-opt="(-C|-c|--git-dir|--work-tree|--namespace)[[:space:]]+${tok}|--[a-z][a-z-]*(=${tok})?"
+valued='-C|-c|--git-dir|--work-tree|--namespace|--super-prefix|--config-env|--exec-path'
+opt="(${valued})[[:space:]]+${tok}|--[a-z][a-z-]*(=${tok})?|-[A-Za-z]"
 commit_re="(^|[[:space:];&|(])git(([[:space:]]+(${opt}))*)[[:space:]]+commit([[:space:]]|\$)"
 [[ "$sk" =~ $commit_re ]] || exit 0
 m0="${BASH_REMATCH[0]}"; opts="${BASH_REMATCH[2]}"
@@ -38,8 +39,9 @@ while [ -n "${rest//[[:space:]]/}" ]; do
     check_dir "${BASH_REMATCH[1]}"; c_dirs+=("${BASH_REMATCH[1]}")
   elif [[ "$rest" =~ ^[[:space:]]+--git-dir(=|[[:space:]]+)(${tok}) ]]; then
     check_dir "${BASH_REMATCH[2]}"
-  elif [[ "$rest" =~ ^[[:space:]]+(-c|--work-tree|--namespace)[[:space:]]+${tok} ]]; then :
+  elif [[ "$rest" =~ ^[[:space:]]+(${valued})[[:space:]]+${tok} ]]; then :
   elif [[ "$rest" =~ ^[[:space:]]+--[a-z][a-z-]*(=${tok})? ]]; then :
+  elif [[ "$rest" =~ ^[[:space:]]+-[A-Za-z] ]]; then :
   else break; fi
   rest="${rest:${#BASH_REMATCH[0]}}"
 done

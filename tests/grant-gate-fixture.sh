@@ -18,7 +18,7 @@ printf '{"Agentory-AI/eval-core":{"mode":"autopilot","grants":[]}}' > "$OPSX_STA
 printf '[repos."Agentory-AI"]\npush = true\nmr = false\nmigrate = false\n' > "$OPSX_STATE_DIR/grants.toml"
 # dispatch 給這個 agent 的 settings：autopilot 直接做的那一級（bin/lib/launch.sh write_settings 的子集）
 SETTINGS="$OPSX_STATE_DIR/settings/Agentory-AI-eval-core-autopilot.json"
-printf '{"permissions":{"allow":["Read","Bash(git add:*)","Bash(git commit:*)","Bash(git merge:*)","Bash(git status:*)","Bash(git push:*)","Bash(cat:*)"]}}' > "$SETTINGS"
+printf '{"permissions":{"allow":["Read","Bash(git add:*)","Bash(git commit:*)","Bash(git merge:*)","Bash(git status:*)","Bash(git push:*)","Bash(cat:*)","Bash(git branch:*)"]}}' > "$SETTINGS"
 card_grants() { printf '{"Agentory-AI/eval-core":{"grants":%s}}' "$1" > "$PD/authz.json"; }
 card_grants '[]'
 gg() { run_hook opsx-grant-gate.sh "$(j "${2:-$R}" Bash "$(cmdj "$1")")"; }
