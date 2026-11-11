@@ -59,6 +59,7 @@ class ServerTest(unittest.TestCase):
         shim_dir.mkdir()
         cls.env_log = cls.tmp / "env.log"
         cls.cwd_log = cls.tmp / "cwd.log"
+        cls.card_log = cls.tmp / "card.log"
         cls.herdr_log = cls.tmp / "herdr.log"
         cls.attached = cls.tmp / "attached"   # shim 執行當下把 --attach 的檔複製到這裡，server 回應後暫存檔已刪
         cls.attached.mkdir()
@@ -71,6 +72,7 @@ class ServerTest(unittest.TestCase):
             f'prev=; for a in "$@"; do if [ "$prev" = --attach ]; then cp "$a" "{cls.attached}/"; base64 < "$a" | tr -d "\\n" >> "{cls.contents}"; echo >> "{cls.contents}"; fi; prev="$a"; done\n'
             f'printf "OPSX_STATE_DIR=%s\\n" "${{OPSX_STATE_DIR:-}}" >> "{cls.env_log}"\n'
             f'pwd -P >> "{cls.cwd_log}"\n'
+            f'printf "OPSX_CARD=%s\\n" "${{OPSX_CARD-unset}}" >> "{cls.card_log}"\n'
             f'if [ -f "{cls.fail_flag}" ]; then echo "opsx: 假的失敗" >&2; exit 2; fi\n'
             f'if [ -f "{cls.rc_file}" ]; then echo "opsx: 假的退出碼 $*" >&2; exit "$(cat "{cls.rc_file}")"; fi\n'
             'if [ "$1" = timeline ]; then echo \'{"generated_at": "g", "last_seen": null, "events": [], "errors": []}\'; exit 0; fi\n'
@@ -94,7 +96,8 @@ class ServerTest(unittest.TestCase):
         (cls.repo / "openspec" / "changes").mkdir(parents=True)   # --repo 只收真的 opsx repo 根
         cls.fixture = cls.tmp / "collect.json"
         cls.fixture.write_text(json.dumps({"generated_at": "t", "scopes": [], "cards": [{"slug": "x"}], "unmatched_agents": [], "errors": []}))
-        env = dict(os.environ, HERDR_ENV="1", OPSX_STATE_DIR=str(cls.state), OPSX_TEST_OPSX=str(shim), PATH=f"{shim_dir}:{os.environ['PATH']}")
+        # server 從 dispatch 的 agent pane 啟動時會繼承 OPSX_CARD；看板按的卡是使用者開的，子行程不能看到它
+        env = dict(os.environ, HERDR_ENV="1", OPSX_CARD="foo", OPSX_STATE_DIR=str(cls.state), OPSX_TEST_OPSX=str(shim), PATH=f"{shim_dir}:{os.environ['PATH']}")
         cls.proc, cls.host, cls.port = start_server(env, cls.fixture)
         cls.base = "http://127.0.0.1:%d" % cls.port
         cls.token = (cls.state / "board-token").read_text().strip()
@@ -321,6 +324,14 @@ class ServerTest(unittest.TestCase):
         self.assertEqual(status, 200, body)
         want = str(self.state.resolve())
         self.assertEqual(self.cwd_log.read_text().split("\n")[:-1], [want, want])
+
+    def test_server_env_opsx_card_is_not_passed_to_opsx(self):
+        self.card_log.write_text("")
+        status, _, body = self.req("/api/new", {"text": "試試看"}, token=self.token)
+        self.assertEqual(status, 200, body)
+        status, _, body = self.req("/api/paste", {"text": "貼上", "files": []}, token=self.token)
+        self.assertEqual(status, 200, body)
+        self.assertEqual(self.card_log.read_text().split("\n")[:-1], ["OPSX_CARD=unset", "OPSX_CARD=unset"])
 
     def test_relative_state_dir_reaches_opsx_as_absolute_path(self):
         # opsx new 的 cwd 是 state 目錄；state 給相對路徑時 OPSX_STATE_DIR 要先解成絕對路徑，不然 opsx 會在 state 底下再解析一次
