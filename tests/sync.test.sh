@@ -437,4 +437,20 @@ sync_ob >/dev/null 2>&1
 assert_eq "$(logcols | cut -f1,4)" "$(printf '0\t1')"; assert_no_file "$(ob ../outside/o.md)"
 cp "$FX/sources.bak" "$OPSX_STATE_DIR/sources.toml"
 
+# --- [customer] 還沒有同步：要說出來，不能靜默（specs/board-sync「customer 來源尚未支援時明說」）---
+NOTICE='customer 來源尚未支援（on-hold），不會同步'
+customer_rows() { awk -F'\t' '$2=="customer"' "$LOG"; }
+out="$(sync_debt 2>&1)"; assert_eq "$?" 0 "沒有 [customer]: $out"
+case "$out" in *customer*) fail "沒有 [customer] 不該提 customer：$out" ;; esac
+assert_eq "$(customer_rows)" "" "沒有 [customer] 不寫 customer 列"
+printf '\n[customer]\nbase_url = "https://x.example"\ntoken_env = "T"\nlist_endpoint = "/api/reports"\n' >> "$OPSX_STATE_DIR/sources.toml"
+out="$(sync_debt 2>&1)"; assert_eq "$?" 0 "有 [customer] 退出碼照舊: $out"
+case "$out" in *"$NOTICE"*) ;; *) fail "有 [customer] 要印提示（--source debt 也要）：$out" ;; esac
+assert_eq "$(customer_rows | wc -l | tr -d ' ')" 1 "customer 一列"
+assert_eq "$(customer_rows | cut -f3,4)" "$(printf '0\t%s' "$NOTICE")" "customer 列：新卡數 0、文字是提示"
+assert_eq "$(logcols | cut -f4)" 0 "提示不算錯誤"
+assert_eq "$(awk -F'\t' '$2=="sync"' "$LOG" | tail -1 | cut -f4 | grep -c customer)" 0 "sync 列文字不含 customer"
+assert_rc 2 opsx sync --root "$ROOT" --source customer
+cp "$FX/sources.bak" "$OPSX_STATE_DIR/sources.toml"
+
 echo ok

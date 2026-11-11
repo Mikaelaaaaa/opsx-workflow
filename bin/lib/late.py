@@ -113,9 +113,9 @@ def open_gate(gates_path, gate_id, commits, branch, head_sha):
         "## %s\ntype: decision\nstatus: open\nopened_at: %s\n問題: %s\n"
         "已確認: MR 合併當下分支的 head 是 %s，remote 的 %s 現在多了：\n%s\n"
         "選項: 開後續 PR 帶進來 (Recommended) | 不要了\n建議: 不開 PR 這些 commit 不會進 main，分支一刪就沒了；不需要的才選不要了。\n"
-        "證據: git log %s..<remote>/%s\n風險: 選不要了的話這些 commit 之後只存在 remote 分支上。\n預設: 不回答就不收尾、不歸檔這張卡。\n"
+        "證據: git log %s..%s\n風險: 選不要了的話這些 commit 之後只存在 remote 分支上。\n預設: 不回答就不收尾、不歸檔這張卡。\n"
     ) % (gate_id, datetime.datetime.now().astimezone().isoformat(timespec="seconds"), GATE_QUESTION % len(commits),
-         head_sha[:7], branch, lines, head_sha[:7], branch)
+         head_sha[:7], branch, lines, head_sha[:7], "<remote>/" + branch)
     prefix = "\n" if os.path.exists(gates_path) and os.path.getsize(gates_path) else ""
     with safefile.open_append(gates_path) as f:
         f.write(prefix + text)

@@ -7,7 +7,7 @@ description: "Diagnose a runtime symptom (leak, idle-CPU spin, glitch) from live
 
 (Upstream: pstack playbooks `runtime-forensics.md` and `trace-forensics.md`, two modes in one skill.)
 
-Pick the mode from what you have. A live process you can instrument is **runtime**. A capture that already exists is **trace**. Both end in a diagnosis, not a fix. The conclusion becomes an inbox card (`source: agent`) or the `explore.md` of a `perf` or `bug-fix` change. A new card gets the facts in its frontmatter (`kind_of_work`, plus `impact` and `evidence` for an incident; the cited diagnosis is the evidence), then `opsx priority <slug>`; if it prints P0 without a user override, write the `p0-review` gate per `references/priority.md`.
+Pick the mode from what you have. A live process you can instrument is **runtime**. A capture that already exists is **trace**. Both end in a diagnosis, not a fix. The conclusion becomes an inbox card (`source: agent:<卡名>`) or the `explore.md` of a `perf` or `bug-fix` change. A new card gets the facts in its frontmatter (`kind_of_work`, plus `impact` and `evidence` for an incident; the cited diagnosis is the evidence), then `opsx priority <slug>`; if it prints P0 without a user override, write the `p0-review` gate per `references/priority.md`.
 
 ## Runtime mode
 

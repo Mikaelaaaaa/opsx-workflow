@@ -441,16 +441,41 @@ round || fail "rc: $(cat "$FX/out")"
 assert_eq "$(count '^opsx answer')" 0; grep '??' "$LOG" | grep -q a1 || fail "終端機等輸入記 ??"
 rm -f "$MEMO"
 
-# --- 等別張卡：停下並記 parked ---
+# --- 沒有 waits-on：建議寫了「合併後」也不當等別張卡，不停 pane、通知使用者（coordinate-split-park） ---
 mkcard p1
-cards '[{"slug":"p1","section":"待處理","dispatch":'"$D"',"agent_status":"idle","waiting":{"type":"等待決定","gate_id":"g7","question":"等 a 合進 main 之後再做","recommended":null,"options":["等"]}}]'
+: > "$OPSX_FAKE_LOG"; : > "$LOG"
+cards '[{"slug":"p1","section":"待處理","dispatch":'"$D"',"agent_status":"idle","waiting":{"type":"等待決定","needs":null,"waits_on":null,"gate_id":"split","question":"照這個拆法建殼、寫 workplan？","recommended":"照這個拆法，forge session 等 grant-gate-levels 合併後再開","options":["照這個拆法","不拆"]}}]'
+round || fail "split rc: $(cat "$FX/out")"
+assert_eq "$(count '^opsx stop')" 0 "沒有 waits-on 不停 pane：$(cat "$OPSX_FAKE_LOG")"
+assert_eq "$(count '^opsx answer')" 0 "split gate 不代答：$(cat "$OPSX_FAKE_LOG")"
+assert_grep '^notification show \[demo/p1\] gate split ' "$OPSX_FAKE_LOG"
+assert_eq "$(memo_get _parked demo/p1)" "" "split gate 不記 parked：$(cat "$MEMO")"
+rm -f "$MEMO"; : > "$OPSX_FAKE_LOG"; : > "$LOG"
+
+# --- split gate 一律要人答：建議不含合併 / merge 也不代答（要人答不能靠建議剛好有哪個字） ---
+cards '[{"slug":"p1","section":"待處理","dispatch":'"$D"',"agent_status":"idle","waiting":{"type":"等待決定","needs":null,"waits_on":null,"gate_id":"split","question":"照這個拆法建殼、寫 workplan？","recommended":"照這個拆法，forge session 等 grant-gate-levels 進 main 再開","options":["照這個拆法","不拆"]}}]'
+round || fail "split 無合併字 rc: $(cat "$FX/out")"
+assert_eq "$(count '^opsx answer')" 0 "split gate 建議不含合併也不代答：$(cat "$OPSX_FAKE_LOG")"
+assert_eq "$(count '^opsx stop')" 0 "split gate 不停 pane：$(cat "$OPSX_FAKE_LOG")"
+assert_grep '^notification show \[demo/p1\] gate split ' "$OPSX_FAKE_LOG"
+rm -f "$MEMO"; : > "$OPSX_FAKE_LOG"; : > "$LOG"
+
+# --- waits-on 排在合併類規則之前：建議含「合併後」也照停 pane ---
+cards '[{"slug":"p1","section":"待處理","dispatch":'"$D"',"agent_status":"idle","waiting":{"type":"等待決定","needs":null,"waits_on":"a","gate_id":"g8","question":"等 a 做完","recommended":"a 合併後再開","options":["等"]}}]'
+round || fail "waits-on 先於合併類 rc: $(cat "$FX/out")"
+assert_grep "^opsx stop p1 --repo $R\$" "$OPSX_FAKE_LOG"
+assert_eq "$(count '^notification show')" 0 "waits-on 的 gate 不通知：$(cat "$OPSX_FAKE_LOG")"
+rm -f "$MEMO"; : > "$OPSX_FAKE_LOG"; : > "$LOG"
+
+# --- 等別張卡：停下並記 parked ---
+cards '[{"slug":"p1","section":"待處理","dispatch":'"$D"',"agent_status":"idle","waiting":{"type":"等待決定","needs":null,"waits_on":"a","gate_id":"g7","question":"等 a 合進 main 之後再做","recommended":null,"options":["等"]}}]'
 round || fail "rc: $(cat "$FX/out")"
 assert_grep "^opsx stop p1 --repo $R\$" "$OPSX_FAKE_LOG"; assert_eq "$(count '^opsx answer')" 0
 [ -n "$(memo_get _parked demo/p1)" ] || fail "memo 要記 parked：$(cat "$MEMO")"
 grep '⏳' "$LOG" | grep -q p1 || fail "要記 ⏳"
 
 # parked 之後 collect 真的會給的形狀：gate 還開著所以在「待處理」，stop 過所以 dispatch 是 null
-P1='{"slug":"p1","section":"待處理","dispatch":null,"open_gates":[{"id":"g7","opened_at":null}],"waiting":{"type":"等待決定","gate_id":"g7","question":"等 a 合進 main 之後再做","recommended":null,"options":["等"]}}'
+P1='{"slug":"p1","section":"待處理","dispatch":null,"open_gates":[{"id":"g7","opened_at":null}],"waiting":{"type":"等待決定","waits_on":"a","gate_id":"g7","question":"等 a 合進 main 之後再做","recommended":null,"options":["等"]}}'
 cp "$MEMO" "$FX/memo.parked"
 
 # --- parked：沒有東西合就不重派、也不答 ---
@@ -642,7 +667,7 @@ cat "$WP1" > "$R/openspec/workplan.yaml"
 printf '  - name: other\n    prs:\n      - name: done-pr\n        branch: feat/done-pr/m\n        status: merged\n        depends-on: []\n        changes:\n          - name: done-pr\n            status: done\n' >> "$R/openspec/workplan.yaml"
 printf '{"_parked":{"demo/card-p2":{"at":"2026-11-10T10:00:00+08:00","gate":"g9","merged":[]}},"_redispatched":{}}' > "$MEMO"
 printf '{"demo/card-p2":{"mode":"stopped","agent":"claude","pane":"w1:p9","drive_pid":null}}' > "$DISP"
-cards '[{"slug":"card-p2","section":"待處理","open_gates":[{"id":"g9","opened_at":null}],"waiting":{"type":"等待決定","gate_id":"g9","question":"等 done-pr 合進 main 之後再做","recommended":null,"options":["等"]}}]'
+cards '[{"slug":"card-p2","section":"待處理","open_gates":[{"id":"g9","opened_at":null}],"waiting":{"type":"等待決定","waits_on":"done-pr","gate_id":"g9","question":"等 done-pr 合進 main 之後再做","recommended":null,"options":["等"]}}]'
 round || fail "rc: $(cat "$FX/out")"
 assert_grep '^opsx answer card-p2 --gate g9 ' "$OPSX_FAKE_LOG"
 assert_grep '^opsx dispatch card-p2 ' "$OPSX_FAKE_LOG"

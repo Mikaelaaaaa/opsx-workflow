@@ -17,7 +17,7 @@ opsx_next() {
   for c in $cards; do
     stage="$(stage_name "$top" "$c")"
     case "$stage" in babysit|archive|split) continue ;; esac
-    say "/$stage $c"
+    say "/opsx-workflow:$stage $c"
     return 0
   done
   say none
