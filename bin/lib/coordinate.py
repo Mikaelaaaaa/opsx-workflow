@@ -26,8 +26,8 @@ MAX_DISPATCH = 6
 # 同時 working 的卡數上限預設值；<state>/max-working 可改
 DEFAULT_MAX_WORKING = 6
 REDISPATCH_MINUTES = 10
-# 訊息獨占一行、前面最多是符號與空白（⎿ 之類）；程式碼或對話裡引用這句話不算
-USAGE_LIMIT_LINE = re.compile(r"\W*Usage limit reached")
+# 真實訊息是 `Usage limit reached[ again] · …`，前面只有 Claude Code 畫的 ⎿ │ 與空白；引用、清單、diff 行都不算
+USAGE_LIMIT_LINE = re.compile(r"[\s⎿│]*Usage limit reached(?: again)?\s*·")
 USAGE_LIMIT_STALE_MINUTES = 30
 USAGE_LIMIT_WARNING = "grace allowance"   # 「還有一小段寬限」是警告，agent 還在跑，不算停下
 USAGE_LIMIT_RESET = re.compile(r"(?:limit resets|continuing automatically at)\s+(\d{1,2})(?::(\d{2}))?\s*([ap]m)", re.IGNORECASE)
@@ -329,15 +329,16 @@ class Round:
                                                 "resets_at": resets_at.isoformat(timespec="seconds") if resets_at else None}
             if resets_at:
                 self.log("!! 用量上限到了，預計 %s 恢復，暫停派卡、重派與代答" % resets_at.strftime("%m-%d %H:%M"))
-                body = "預計 %s 恢復；Claude Code 到時間會自己續跑" % resets_at.strftime("%H:%M")
+                body = "預計 %s 恢復；Claude Code 到時間會自己續跑" % resets_at.strftime("%m-%d %H:%M")
             else:
                 self.log("?? 看得到用量上限訊息但讀不出重置時刻，不猜：暫停到畫面不再出現")
                 body = "讀不出重置時刻，畫面不再顯示上限訊息才恢復派卡"
             self.send_notification("usage-limit/paused/" + held["seen_at"], "[usage-limit] 用量上限，暫停派卡", body)
         if panes:
             # 過了重置時刻還有 pane 顯示訊息（停在等人的 gate、parked、按過 esc 的 pane）：沒人會替它續跑，要人看
-            if held["resets_at"] and self.now > datetime.datetime.fromisoformat(held["resets_at"]) + datetime.timedelta(minutes=USAGE_LIMIT_STALE_MINUTES):
-                self.log("?? 重置時刻已過 %d 分鐘，pane %s 還顯示上限訊息，繼續暫停" % (USAGE_LIMIT_STALE_MINUTES, "、".join(panes)))
+            stale_from = datetime.datetime.fromisoformat(held["resets_at"] or held["seen_at"])
+            if self.now > stale_from + datetime.timedelta(minutes=USAGE_LIMIT_STALE_MINUTES):
+                self.log("?? 重置時刻已過 %d 分鐘（讀不出時刻就從進入暫停起算），pane %s 還顯示上限訊息，繼續暫停" % (USAGE_LIMIT_STALE_MINUTES, "、".join(panes)))
                 self.send_notification("usage-limit/stale/" + held["seen_at"], "[usage-limit] 重置時刻過了仍暫停",
                                        "pane %s 還顯示上限訊息；看過它再回板上" % "、".join(panes))
             return True

@@ -632,6 +632,7 @@ round || fail "rc: $(cat "$FX/out")"
 for w in '^opsx dispatch' '^opsx answer' '^opsx stop'; do assert_eq "$(count "$w")" 0 "暫停不動 ${w}：$(cat "$OPSX_FAKE_LOG")"; done
 assert_eq "$(count '^notification show')" 1 "進入暫停通知一次：$(cat "$OPSX_FAKE_LOG")"
 [ -n "$(memo_get _usage_limit resets_at)" ] || fail "memo 要記 resets_at：$(cat "$MEMO")"
+assert_grep "預計 $(memo_get _usage_limit resets_at | cut -c6-10) 19:00 恢復" "$OPSX_FAKE_LOG"
 round || fail "rc: $(cat "$FX/out")"
 assert_eq "$(count '^opsx dispatch')" 0 "第二輪仍暫停"
 assert_eq "$(count '^notification show')" 0 "第二輪不再通知：$(cat "$OPSX_FAKE_LOG")"
@@ -699,6 +700,13 @@ cases = [
     ("LIMIT_MSG='Usage limit reached · continuing automatically at 7pm'", at(10, 18), (False, None)),
     ("+USAGE_LIMIT = \"Usage limit reached\"", at(10, 18), (False, None)),
     ("Usage limit reached; a short grace allowance remains, then this turn is cut off", at(10, 18), (False, None)),
+    ("Usage limit reached again · continuing automatically at 7pm · esc to cancel", at(10, 18), (True, at(10, 19))),
+    ("- Usage limit reached · limit resets 7pm", at(10, 18), (False, None)),
+    ("> Usage limit reached · limit resets 7pm", at(10, 18), (False, None)),
+    ("+Usage limit reached · limit resets 7pm", at(10, 18), (False, None)),
+    ("`Usage limit reached · limit resets 7pm`", at(10, 18), (False, None)),
+    ("⏺ Usage limit reached 的偵測", at(10, 18), (False, None)),
+    ("Usage limit reached 的偵測", at(10, 18), (False, None)),
 ]
 for text, now, want in cases:
     got = coordinate.parse_usage_limit(text, now)
@@ -716,6 +724,26 @@ assert_grep '^notification show \[usage-limit\] 重置時刻過了' "$OPSX_FAKE_
 assert_grep 'w1:p1' "$OPSX_FAKE_LOG"
 round || fail "rc: $(cat "$FX/out")"
 assert_eq "$(count '^notification show')" 0 "仍暫停的通知只送一次"
+# 過期那輪的 log 要有 ??
+printf '{"_usage_limit":{"seen_at":"%s","resets_at":"%s"}}' "$(ago 100)" "$(ago 40)" > "$MEMO"
+round || fail "rc: $(cat "$FX/out")"
+grep '??' "$LOG" | grep -q '重置時刻已過' || fail "過期要記 ??：$(cat "$LOG")"
+# 還沒過 30 分鐘（10 分鐘前重置）pane 還顯示：不通知
+printf '{"_usage_limit":{"seen_at":"%s","resets_at":"%s"}}' "$(ago 70)" "$(ago 10)" > "$MEMO"
+round || fail "rc: $(cat "$FX/out")"
+assert_eq "$(count '^notification show')" 0 "未過 30 分鐘不通知：$(cat "$OPSX_FAKE_LOG")"
+assert_eq "$(count '^opsx dispatch')" 0 "未過 30 分鐘仍暫停"
+# 重置時刻讀不出（null）：從進入暫停起算，40 分鐘仍顯示就通知一次，之後不再通知
+printf 'Usage limit reached · something new\n' > "$AR"
+printf '{"_usage_limit":{"seen_at":"%s","resets_at":null}}' "$(ago 40)" > "$MEMO"
+round || fail "rc: $(cat "$FX/out")"
+assert_eq "$(count '^opsx dispatch')" 0 "null 時刻仍暫停"
+assert_grep '^notification show \[usage-limit\] 重置時刻過了' "$OPSX_FAKE_LOG"
+round || fail "rc: $(cat "$FX/out")"
+assert_eq "$(count '^notification show')" 0 "null 的過期通知只送一次"
+printf '{"_usage_limit":{"seen_at":"%s","resets_at":null}}' "$(ago 10)" > "$MEMO"
+round || fail "rc: $(cat "$FX/out")"
+assert_eq "$(count '^notification show')" 0 "null 且未滿 30 分鐘不通知"
 rm -f "$MEMO"; printf 'ok\n' > "$AR"
 
 # --- 同時在跑上限（<state>/max-working，沒有這個檔是 6）---
@@ -744,6 +772,10 @@ printf 'abc\n' > "$MW"
 round && fail "上限設錯要拒跑"
 grep 'max-working' "$LOG" | grep -q abc || fail "log 要含檔名 max-working 與 abc：$(cat "$LOG")"
 assert_eq "$(count '^opsx dispatch')" 0 "設錯不動任何卡"
+printf '0\n' > "$MW"
+round && fail "上限 0 要拒跑"
+grep 'max-working' "$LOG" | grep -q "'0'" || fail "log 要含檔名 max-working 與 0：$(cat "$LOG")"
+assert_eq "$(count '^opsx dispatch')" 0 "上限 0 不動任何卡"
 rm -f "$MW"
 unset OPSX_TEST_AGENT_READ
 
