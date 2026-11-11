@@ -40,6 +40,10 @@ opsx_drop() {
   local f="$OPSX_STATE_DIR/dispatch.json" mode=""
   [ -f "$f" ] && mode="$(OPSX_KEY="$repo/$slug" "$OPSX_PY" -I -c 'import json,os,sys;e=json.load(open(sys.argv[1])).get(os.environ["OPSX_KEY"]);print("" if e is None else e.get("mode") or "running")' "$f")"
   [ -z "$mode" ] || [ "$mode" = stopped ] || die "drop: $repo/$slug 還派著（${mode}），先在板上按停止或 opsx stop $slug"
+  # 併入的項目只活在這張卡的 inbox.md：歸檔之後 split-out 找不到，等於跟著一起丟掉。舊卡可能沒有 inbox.md。
+  local ids=""
+  [ ! -f "$d/inbox.md" ] || ids="$("$OPSX_PY" -I "$OPSX_ROOT/bin/lib/inboxmerge.py" ids "$d")" || die "drop: 讀不了 $d/inbox.md 的併入段（上面是原因）"
+  [ -z "$ids" ] || die "drop: $repo/$slug 還有併入的項目（${ids//$'\n'/ }），先用 opsx split-out $slug <id> 拆出來再捨棄"
 
   printf 'outcome: declined\n' >> "$d/.openspec.yaml"
   printf '\n## 捨棄理由\n\n%s\n' "$reason" >> "$d/inbox.md"

@@ -16,9 +16,10 @@ OUT="$FX/out"; ERR="$FX/err"
 ID=agent-20261111-1040
 
 reset() { chmod -R u+w "$C" 2>/dev/null; rm -rf "$C"/*; }
-card() { # card <slug> <area>：只有 inbox.md 的卡（stage explore）
-  mkdir -p "$C/$1"; printf 'schema: opsx\n' > "$C/$1/.openspec.yaml"
-  printf -- '---\ntype: 功能\nsource: me\nfound: 2026-11-10\nrelated:\nkind_of_work: planned\narea: %s\n---\n\n## 一句話\n\n%s\n\n## 證據\n\n- 原本的證據\n' "$2" "$1" > "$C/$1/inbox.md"
+card() { # card <slug> <area> [frontmatter 行…]：只有 inbox.md 的卡（stage explore）
+  local s="$1" a="$2"; shift 2
+  mkdir -p "$C/$s"; printf 'schema: opsx\n' > "$C/$s/.openspec.yaml"
+  { printf -- '---\ntype: 功能\nsource: me\nfound: 2026-11-10\nrelated:\nkind_of_work: planned\narea: %s\n' "$a"; [ $# -eq 0 ] || printf '%s\n' "$@"; printf -- '---\n\n## 一句話\n\n%s\n\n## 證據\n\n- 原本的證據\n' "$s"; } > "$C/$s/inbox.md"
 }
 merge() { (cd "$W" && opsx new --area hooks --repo "$E" "$@") > /dev/null 2> "$ERR" || fail "併入失敗：$(cat "$ERR")"; }
 split() { opsx split-out --repo "$E" "$@" > "$OUT" 2> "$ERR"; }
@@ -26,7 +27,8 @@ dirs() { find "$C" -mindepth 1 -maxdepth 1 -type d | sed 's#.*/##' | LC_ALL=C so
 
 # --- 拆回獨立的卡 ---
 # 併入時在段前補的空行不屬於那一段，拆完留著：x 是併入前的內容加一個空行
-reset; card x hooks; cp "$C/x/inbox.md" "$FX/orig.md"; printf '\n' >> "$FX/orig.md"
+# P1 incident 只能併進 P1 以上的卡，所以目標用使用者覆寫成 P1
+reset; card x hooks "priority: P1" "priority_reason: 測試"; cp "$C/x/inbox.md" "$FX/orig.md"; printf '\n' >> "$FX/orig.md"
 merge --kind-of-work incident --impact workaround_exists --evidence "tests/a.test.sh 紅" -- 鉤子漏擋
 assert_grep "^- id: $ID\$" "$C/x/inbox.md"
 split x "$ID"; assert_eq "$?" 0 "拆出要退出 0：$(cat "$ERR")"
@@ -64,6 +66,16 @@ assert_grep '^第一段$' "$C/$ID/inbox.md"
 split x "$ID-2"; assert_eq "$?" 0 "$(cat "$ERR")"
 assert_eq "$(cat "$OUT")" "$ID-2"
 cmp -s "$C/x/inbox.md" "$FX/orig.md" || fail "拆完兩段要回到原樣：$(diff "$FX/orig.md" "$C/x/inbox.md")"
+
+# --- 併入後 note 在檔尾長出 ## 派工指示：拆出併入段，派工指示一字不變 ---
+reset; card x hooks
+merge --kind-of-work planned -- 先併入
+opsx note x --repo "$E" 先跑 lint > /dev/null 2> "$ERR" || fail "note 失敗：$(cat "$ERR")"
+assert_grep '^## 派工指示$' "$C/x/inbox.md"
+awk '/^## / { skip = ($0 ~ /^## 併入：/) } !skip' "$C/x/inbox.md" > "$FX/want.md"
+split x "$ID"; assert_eq "$?" 0 "$(cat "$ERR")"
+cmp -s "$C/x/inbox.md" "$FX/want.md" || fail "派工指示要一字不變：$(diff "$FX/want.md" "$C/x/inbox.md")"
+assert_grep '先跑 lint$' "$C/x/inbox.md"
 
 # --- 不會被併回去 ---
 reset; card x hooks

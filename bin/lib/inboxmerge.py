@@ -7,6 +7,8 @@
         印那一段拆回獨立卡時的 inbox.md（跟 opsx new 寫的同形）。找不到退出 2。
     $OPSX_PY -I inboxmerge.py remove <卡目錄> <id>
         刪掉那一段，其餘位元組不動。找不到退出 2。
+    $OPSX_PY -I inboxmerge.py ids <卡目錄>
+        一行印一個這張卡現有的併入 id（opsx drop 用來拒絕還有併入項目的卡）。
 兩個 agent 可能同時併進同一張卡：鎖在卡目錄上（inbox.md 會被原子替換換掉 inode，鎖它本身擋不住），鎖內重讀再改。
 一段併入從標題到下一個 `## ` 或檔尾為止。specs/card-auto-merge「同 area 併入」「拆出來」。
 """
@@ -161,14 +163,18 @@ def remove(card_dir: str, mid: str) -> None:
 def main() -> None:
     args = sys.argv[1:]
     cmd = args[0] if args else ""
-    want = {"append": 10, "card": 3, "remove": 3}
+    want = {"append": 10, "card": 3, "remove": 3, "ids": 2}
     if cmd not in want or len(args) != want[cmd]:
-        sys.exit("用法：inboxmerge.py append <卡目錄> <基本 id> <ISO 時間> <來源> <kind_of_work> <impact> <evidence> <area> <一句話> | card <卡目錄> <id> | remove <卡目錄> <id>")
+        sys.exit("用法：inboxmerge.py append <卡目錄> <基本 id> <ISO 時間> <來源> <kind_of_work> <impact> <evidence> <area> <一句話> | card <卡目錄> <id> | remove <卡目錄> <id> | ids <卡目錄>")
     try:
         if cmd == "append":
             print(append(*args[1:]))
         elif cmd == "card":
             sys.stdout.write(card(*args[1:]))
+        elif cmd == "ids":
+            with open(os.path.join(args[1], "inbox.md"), encoding="utf-8") as f:
+                for mid in sorted(merged_ids(f.read())):
+                    print(mid)
         else:
             remove(*args[1:])
     except FileNotFoundError as e:

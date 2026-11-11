@@ -65,4 +65,14 @@ P2="$(opsx new --attach "$FX/shot.png" -- 又一個)"; assert_eq "$P2" "$P"
 assert_rc 0 opsx drop "$P2" -- 也不要
 assert_file "$OPSX_STATE_DIR/unfiled/dropped/$P-2.md"; assert_file "$OPSX_STATE_DIR/unfiled/dropped/$P-2/attachments/shot.png"
 assert_no_file "$OPSX_STATE_DIR/unfiled/dropped/$P.md"
+
+# --- 還有 ## 併入 段的卡：拒絕，列出 id、提示先 opsx split-out，什麼都不動（併入項目不能跟著歸檔）---
+export OPSX_TEST_NOW="2026-11-06 16:00"
+M="$(opsx new --repo "$A" -- 有併入的)"
+printf '\n## 併入：2026-11-06T16:00:00+08:00 agent:foo\n\n- id: agent-20261106-1600\n- kind_of_work: planned\n- area: hooks\n\n別人的問題\n' >> "$CH/$M/inbox.md"
+before="$(snap)"
+err="$(opsx drop "$M" --repo "$A" -- 不要了 2>&1 >/dev/null)"; rc=$?
+[ $rc -ne 0 ] || fail "還有併入段的卡不能捨棄"
+case "$err" in *agent-20261106-1600*split-out*|*split-out*agent-20261106-1600*) ;; *) fail "stderr 要列出 id 並提示 split-out：$err" ;; esac
+assert_eq "$(snap)" "$before"; assert_dir "$CH/$M"
 echo ok

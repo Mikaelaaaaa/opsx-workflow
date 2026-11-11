@@ -98,6 +98,7 @@ a. **For each artifact that is `ready` (dependencies satisfied)**:
      ```
      A task with no verifiable behavior (moving files, pure config, docs) writes `測試：無 · <reason>`, and you must be able to say why. Apply writes that test before the code and review refuses a task whose test is missing, so a vague 驗收 here becomes a blocked review later.
    - Specs stay testable: one `#### Scenario:` per behavior, WHEN / THEN; those scenario names are what 驗收 points at.
+   - **Merged items in inbox.md.** Each `## 併入：<time> <source>` section in inbox.md is a problem another agent's card was merged into this one. Before writing tasks.md, every such section either becomes a task (name its `- id:` in the task line) or is split out with `opsx split-out <name> <id>` when it does not belong in this change. One left in place with no task is lost once the card archives.
    - **Cut tasks as tracer bullets, not layers.** Each task is a thin vertical slice through every layer it touches (schema, API, UI, test), demoable or verifiable on its own, in the order a user would hit it. "All the schema, then all the API, then all the UI" is the shape that leaves nothing testable until the end and nothing shippable if the card stops halfway. Mark a task that needs a human decision mid-way (design review, product call) as such so apply writes a gate instead of guessing; prefer tasks that do not.
    - proposal.md and design.md go through `../technical-writing/SKILL.md` then `../unslop/SKILL.md` before you move on.
 

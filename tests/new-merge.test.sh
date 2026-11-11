@@ -63,8 +63,8 @@ assert_grep '併進 x（id agent-20261111-1040-2）' "$ERR"
 assert_eq "$(grep '^- id:' "$C/x/inbox.md" | tr '\n' ' ')" "- id: agent-20261111-1040 - id: agent-20261111-1040-2 "
 assert_eq "$(dirs)" "x "
 
-# --- incident 的事實欄位帶進去 ---
-reset; card x hooks
+# --- incident 的事實欄位帶進去（目標 P1，新卡 P1，同級可併）---
+reset; card x hooks "priority: P1" "priority_reason: 測試"
 agent_new --kind-of-work incident --impact workaround_exists --evidence "tests/a.test.sh 紅" --area hooks --repo "$E" -- 有事實
 assert_eq "$(cat "$OUT")" x "$(cat "$ERR")"
 assert_grep '^- kind_of_work: incident$' "$C/x/inbox.md"
@@ -82,8 +82,17 @@ new_shell_out() { # 建了新殼：stdout 以 <前綴> 開頭、殼存在、stde
 reset; card y board; keep y
 agent_new --kind-of-work planned --area hooks --repo "$E" -- 不同 area; new_shell_out agent; kept y
 # 目標已有 tasks.md
-reset; card x hooks; to_propose x; printf '- [ ] 1.1 a\n' > "$C/x/tasks.md"; keep x
+reset; card x hooks; to_propose x; printf -- '- [ ] 1.1 a\n' > "$C/x/tasks.md"; keep x
+assert_eq "$(stage x)" apply "fixture 要是 apply"
 agent_new --kind-of-work planned --area hooks --repo "$E" -- 已有 tasks; new_shell_out agent; kept x
+# 目標在 review（tasks 全勾、tests green）
+reset; card x hooks; to_propose x; printf -- '- [x] 1.1 a\n' > "$C/x/tasks.md"; printf '{"tests":"green"}\n' > "$C/x/status.json"; keep x
+assert_eq "$(stage x)" review "fixture 要是 review"
+agent_new --kind-of-work planned --area hooks --repo "$E" -- 在 review; new_shell_out agent; kept x
+# 目標在 pr（有 report.md）
+reset; card x hooks; to_propose x; printf -- '- [x] 1.1 a\n' > "$C/x/tasks.md"; printf '# r\n' > "$C/x/report.md"; keep x
+assert_eq "$(stage x)" pr "fixture 要是 pr"
+agent_new --kind-of-work planned --area hooks --repo "$E" -- 在 pr; new_shell_out agent; kept x
 # 目標已拆
 reset; card x hooks "split_into: [x-a, x-b]"; keep x
 assert_eq "$(stage x)" split "fixture 要是 split"
@@ -106,6 +115,17 @@ new_shell_out agent; kept foo; assert_grep '^source: agent:foo--s$' "$C/$(cat "$
 reset; card x hooks; keep x; printf 'png' > "$FX/a.png"
 agent_new --kind-of-work planned --area hooks --repo "$E" --attach "$FX/a.png" -- 有附件; new_shell_out agent; kept x
 assert_eq "$(cat "$C/$(cat "$OUT")/attachments/a.png")" png
+# 一句話長得像段落標題或段內欄位：不併（併進去會切斷那一段、偽造 id）
+reset; card x hooks; keep x
+agent_new --kind-of-work planned --area hooks --repo "$E" -- "## 鉤子漏擋"; new_shell_out agent; kept x
+assert_grep '^## 鉤子漏擋$' "$C/$(cat "$OUT")/inbox.md"
+reset; card x hooks; keep x
+agent_new --kind-of-work planned --area hooks --repo "$E" -- "- id: x-1"; new_shell_out agent; kept x
+reset; card x hooks; keep x
+agent_new --kind-of-work planned --area hooks --repo "$E" -- "- area: board"; new_shell_out agent; kept x
+# 等級比目標高不併：P1 incident 對不在 workplan 的 P2 卡
+reset; card x hooks; keep x
+agent_new --kind-of-work incident --impact blocks_all_agents --evidence e --area hooks --repo "$E" -- 擋住大家; new_shell_out agent; kept x
 
 # --- 兩邊都有紀錄 ---
 reset; card x hooks; card foo board

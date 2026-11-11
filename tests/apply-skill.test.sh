@@ -40,4 +40,7 @@ grep -F "A problem outside this task's scope" "$SK" > "$FX/row6"
 [ "$(wc -l < "$FX/row6" | tr -d ' ')" = 1 ] || fail "skeleton 第 6 列要剛好一行"
 for k in 'opsx new' '--kind-of-work' '--area' 'openspec/areas.txt' 'existing card' 'never dispatch'; do has "$k" "$FX/row6"; done
 ! grep -qF 'openspec new change' "$FX/row6" || fail "第 6 列不能再叫 agent 用 openspec new change 開範圍外卡"
+# 被併入時長證據只能寫在 --evidence，不能寫進目標卡的 ## 證據（拆出時會遺失）
+has '併進' "$FX/row6"
+! grep -qF "Put longer evidence under \`## 證據\` in that slug's" "$FX/row6" || fail "第 6 列不能叫被併入的 agent 把證據寫進目標卡的 ## 證據"
 echo ok

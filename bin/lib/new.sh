@@ -71,6 +71,19 @@ merge_target() { # <top> <area> <開卡 agent 的主殼名>
   ' "${f[@]}" | sed -E 's#/inbox\.md$##; s#.*/##' | LC_ALL=C sort)
 }
 
+# 一句話會原樣成為併入段的最後一行：長得像段落標題或段內欄位，就會切斷那一段或多出一個假 id，之後拆不出來。
+merge_text_ok() { # <一句話>
+  local re='^(## |- (id|kind_of_work|impact|evidence|area):)'
+  [[ ! "$1" =~ $re ]]
+}
+
+# 新卡等級比目標高就不併：併進去之後是照目標的等級排隊。目標的事實不合格、算不出等級時也不併，照樣建殼。
+merge_level_ok() { # <top> <目標> <新卡等級>
+  local got
+  got="$("$OPSX_PY" -I "$OPSX_ROOT/bin/lib/priority.py" get "$1" "$2" 2>&1)" || { warn "new: 算不出 $2 的等級，不併入：$got"; return 1; }
+  [[ ! "$3" < "${got%%$'\t'*}" ]]
+}
+
 # 併進 <目標>：追加 ## 併入 段（id 在鎖內算）、兩邊記 decisions.tsv、在 herdr 裡才通知。stdout 印目標 slug，stderr 印併進哪裡。
 # 通知失敗只警告：併入已經寫好，退出非零會讓 agent 以為沒開成、再開一次。
 merge_into() { # <top> <目標> <基本 id> <source> <kind> <impact> <evidence> <area> <一句話>
@@ -135,13 +148,18 @@ opsx_new() {
     agent:*) prefix=agent ;;
     *) source=me; [ ${#names[@]} -eq 0 ] || source=paste ;;
   esac
-  local slug body lv tgt; slug="$prefix-$(date '+%Y%m%d-%H%M')"
-  # agent 開、有 repo 與 area、沒附件、不是 P0 的卡才找目標；等級由 priority.py 算
-  if [ "$prefix" = agent ] && [ -n "$top" ] && [ -n "$area" ] && [ ${#names[@]} -eq 0 ]; then
+  local slug body lv tgt own; slug="$prefix-$(date '+%Y%m%d-%H%M')"
+  # agent 開、有 repo 與 area、沒附件、一句話不像段落結構、不是 P0 的卡才找目標；等級由 priority.py 算
+  if [ "$prefix" = agent ] && [ -n "$top" ] && [ -n "$area" ] && [ ${#names[@]} -eq 0 ] && merge_text_ok "$text"; then
     lv="$("$OPSX_PY" -I "$OPSX_ROOT/bin/lib/priority.py" level "${kind:-planned}" "$impact")" || die "new: 算不出新卡的等級（上面是原因）"
-    if [ "${lv%%$'\t'*}" != P0 ]; then
-      tgt="$(merge_target "$top" "$area" "$(b="${source#agent:}"; printf '%s' "${b%%--*}")")"
-      if [ -n "$tgt" ]; then merge_into "$top" "$tgt" "$slug" "$source" "${kind:-planned}" "$impact" "$evidence" "$area" "$text"; return; fi
+    lv="${lv%%$'\t'*}"
+    if [ "$lv" != P0 ]; then
+      # 子殼的 subagent 是 agent:<主>--<子>，它自己的卡是主殼
+      own="${source#agent:}"; own="${own%%--*}"
+      tgt="$(merge_target "$top" "$area" "$own")"
+      if [ -n "$tgt" ] && merge_level_ok "$top" "$tgt" "$lv"; then
+        merge_into "$top" "$tgt" "$slug" "$source" "${kind:-planned}" "$impact" "$evidence" "$area" "$text"; return
+      fi
     fi
   fi
   body="$(mktemp "${TMPDIR:-/tmp}/opsx-new.XXXXXX")"
