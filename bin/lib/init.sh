@@ -95,6 +95,7 @@ $term_line
     say "init --global: 沒有 herdr，看板 plugin 略過（裝了 herdr 再跑一次）"
   fi
   merge_claude_settings "$py" --template "$OPSX_ROOT/templates/settings.opsx.json"
+  warn_skill_clashes
   write_coordinator_settings "$py" "$state"
   install_launch_jobs "$state" "$bindir"
   say "init --global: 設定在 $state"
@@ -103,6 +104,51 @@ $term_line
 # 使用者層 Claude Code settings：CLAUDE_CONFIG_DIR 優先，沒設才用 ~/.claude。
 # 沙盒不讓沒登記的目錄可寫，裝完 opsx 的 session 才不用人手動開權限（herdr socket 只給主控 session，見 write_coordinator_settings）。
 claude_settings_file() { printf '%s/settings.json' "${CLAUDE_CONFIG_DIR:-$HOME/.claude}"; }
+
+# 插件 skill 名 → 撞到的 Claude Code 內建指令；沒撞印空。
+# shortcut: 手維護的已知表，內建指令改名或新增時更新；Claude Code 沒有可查的清單
+builtin_command_for() { # <skill 名>
+  case "$1" in
+    review) printf 'code-review' ;;
+  esac
+}
+
+# 使用者層、專案層（在 repo 裡時）的 skills 目錄名跟插件 skills/ 同名就警告。只警告：可能是刻意留的個人版本，opsx 不動使用者的檔案。
+# 另外列出插件 skill 名撞內建指令的：手打短名會跑到內建。
+warn_skill_clashes() {
+  local top plugin_skills dirs=() dir skill name real builtin advice paths seen=$'\n' hit=$'\n' found=""
+  top="$(git_toplevel)"
+  plugin_skills="$(cd "$OPSX_ROOT/skills" && pwd -P)"
+  dirs+=("$(dirname "$(claude_settings_file)")/skills")
+  [ -z "$top" ] || dirs+=("$top/.claude/skills")
+  for dir in "${dirs[@]}"; do
+    for skill in "$dir"/*/; do
+      [ -f "$skill/SKILL.md" ] || continue
+      name="$(basename "$skill")"
+      [ -d "$OPSX_ROOT/skills/$name" ] || continue
+      real="$(cd "$skill" && pwd -P)"
+      case "$real/" in "$plugin_skills"/*) continue ;; esac
+      case "$seen" in *$'\n'"$real"$'\n'*) continue ;; esac
+      seen="$seen$real"$'\n'
+      case "$hit" in *$'\n'"$name"$'\n'*) ;; *) hit="$hit$name"$'\n' ;; esac
+      found="$found$name"$'\t'"${skill%/}"$'\n'
+    done
+  done
+  # 同一個名字兩層各有一份時只警告一次、列出全部路徑；Claude Code 的同名優先順序沒有查證，不說哪份會贏
+  for name in $hit; do
+    builtin="$(builtin_command_for "$name")"
+    advice="要用插件的就把它們搬走或改名"
+    [ -z "$builtin" ] || advice="把這些都搬走後手打斜線加短名「${name}」會跑到內建指令「${builtin}」，一律打 /opsx-workflow:${name}"
+    paths="$(awk -F'\t' -v n="$name" '$1 == n { printf "%s%s", sep, $2; sep = "、" }' <<< "$found")"
+    warn "skill 同名：${paths} 跟 opsx 插件的 skills/${name} 同名，手打斜線加短名「${name}」可能跑到其中一份，模型也可能選錯。${advice}；刻意留的就忽略這行"
+  done
+  for skill in "$OPSX_ROOT"/skills/*/; do
+    name="$(basename "$skill")"
+    case "$hit" in *$'\n'"$name"$'\n'*) continue ;; esac
+    builtin="$(builtin_command_for "$name")"
+    [ -z "$builtin" ] || warn "插件 skill ${name} 與內建指令「${builtin}」撞名：手打斜線加短名「${name}」會跑到內建指令，要用 /opsx-workflow:${name}"
+  done
+}
 
 merge_claude_settings() { # <python> <claude-settings.py 的參數…>
   local py="$1" file out; shift
@@ -157,6 +203,7 @@ init_check() {
     3) printf '%s\n' "$out"; say "init --check: ${file} 和標準設定不一致，上面是缺的項目。全域的跑 opsx init --global，repo 的在那個 repo 根目錄跑 opsx init" ;;
     *) die "init --check: 比對失敗（上面是原因）" ;;
   esac
+  warn_skill_clashes
   # rehash 正常只持續數秒；5 分鐘內的可能還在跑，不報
   local lock="$HOME/.pyenv/shims/.pyenv-shim"
   if [ -n "$(find "$lock" -mmin +5 2>/dev/null)" ]; then
