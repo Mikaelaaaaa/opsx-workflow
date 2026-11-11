@@ -20,7 +20,7 @@ The change has questions that explore could not close. Close them, cheaply, in t
 
 ## Steps
 
-1. Read explore.md's `## 待決`. Empty: reply「<slug> 沒有待決，直接 /propose」and stop.
+1. Read explore.md's `## 待決`. Empty: reply「<slug> 沒有待決，直接 /opsx-workflow:propose」and stop.
 2. Ask one question at a time with AskUserQuestion, 2 to 4 options, the recommended one first, in the words `CONTEXT.md` uses (`references/CONTEXT-FORMAT.md`). In autopilot do not call AskUserQuestion; follow `## In autopilot`.
 3. An item the code or one run can answer is yours: look it up or run it, write the answer into explore.md's `## 已知` and remove it from 待決. Only an item nobody but the user can answer is asked.
 4. When every item is answered, write D1 to Dn into `grill.md` (decision, reason, rejected alternative). In autopilot with a gate still open, write the Ds you have.
@@ -70,7 +70,7 @@ When the router line carries `autopilot：`, nobody is watching the pane. AskUse
   風險: <what goes wrong with the recommendation>
   預設: <what happens if nobody answers>
   ```
-  The options follow the same rules as an AskUserQuestion: 2–4 real alternatives, recommended first. `type` is `approval` (a permission) or `decision` (a choice) and nothing else; when 建議 is a command the user must run themselves, add a `needs: run` line.
+  The options follow the same rules as an AskUserQuestion: 2–4 real alternatives, recommended first. `type` is `approval` (a permission) or `decision` (a choice) and nothing else; when 建議 is a command the user must run themselves, add a `needs: run` line; when a `decision` can only be answered after another card merges into main, add `waits-on: <that card's name>`.
 - **Anything else.** Take the option you would have marked Recommended. Write it as a D like any other, add a `  - 自動採用：autopilot，沒問使用者` line under it, and log one line in decisions.tsv. The user can overturn it at review or on the MR.
 
 If you wrote any gate, still write grill.md with the Ds you have, say which items wait on which gate, and stop. The answer comes back as a prompt. Turn it into its D, remove the item from 待決, and carry on. Once 待決 is empty, propose comes next as usual.
@@ -105,7 +105,7 @@ Rules that keep this file useful downstream:
 - **未決 is not a parking lot.** Only things that genuinely need a run to settle, each with its verification plan. If you can settle it now with bucket 1 or 2, do that instead.
 - **Write an ADR too** when a decision meets all three of: hard to reverse, surprising without context, the result of a real trade-off. Use `references/ADR-FORMAT.md`; most decisions will not qualify, and that is fine.
 
-Do step 5 of `## Steps` on the summary. Then tell the user in a few lines what got decided and what is still open. If 待決 is now fully answered, continue to `/propose <slug>` per `../../references/continue.md` in this turn; if anything went back into 待決, stop there. Call `opsx status grill <n>/<total> <label>` as you move through the items so the board shows progress.
+Do step 5 of `## Steps` on the summary. Then tell the user in a few lines what got decided and what is still open. If 待決 is now fully answered, continue to `/opsx-workflow:propose <slug>` per `../../references/continue.md` in this turn; if anything went back into 待決, stop there. Call `opsx status grill <n>/<total> <label>` as you move through the items so the board shows progress.
 
 ## What this skill does not do
 

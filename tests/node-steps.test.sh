@@ -43,9 +43,10 @@ done <<< "$NODES"
 awk '/^### /{on=($0 ~ /^### 3b\./);next} /^## /{on=0} on' "$OPSX_ROOT/skills/archive/SKILL.md" > "$FX/archive-3b"
 [ -s "$FX/archive-3b" ] || fail "archive 沒有 3b 一節"
 assert_grep 'not wait for that approval' "$FX/archive-3b"
-# 開卡指令只能用 opsx new 認得的形狀（bin/lib/new.sh 只收 --repo、--attach、--），而且 reflect 步驟 5 的等批准在這裡不適用
-assert_grep 'opsx new -- ' "$FX/archive-3b"
-assert_not_grep '--kind-of-work' "$FX/archive-3b"
+# 開卡指令要是 opsx new 認得的形狀：agent 開的卡一定要帶 --kind-of-work（bin/lib/new.sh 的 check_fact_flags），Accepted 項目不是 incident 所以是 planned；
+# 下一站用 /opsx-workflow:<stage> 的全名；reflect 步驟 5 的等批准在這裡不適用
+assert_grep 'opsx new --kind-of-work planned -- ' "$FX/archive-3b"
+assert_grep '/opsx-workflow:propose' "$FX/archive-3b"
 assert_grep 'step 5' "$FX/archive-3b"
 assert_not_grep 'no one at the terminal' "$FX/archive-3b"
 

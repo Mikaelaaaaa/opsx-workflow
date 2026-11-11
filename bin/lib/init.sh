@@ -157,6 +157,12 @@ init_check() {
     3) printf '%s\n' "$out"; say "init --check: ${file} 和標準設定不一致，上面是缺的項目。全域的跑 opsx init --global，repo 的在那個 repo 根目錄跑 opsx init" ;;
     *) die "init --check: 比對失敗（上面是原因）" ;;
   esac
+  # rehash 正常只持續數秒；5 分鐘內的可能還在跑，不報
+  local lock="$HOME/.pyenv/shims/.pyenv-shim"
+  if [ -n "$(find "$lock" -mmin +5 2>/dev/null)" ]; then
+    say "init --check: ${lock} 是 pyenv rehash 的鎖檔，已存在超過 5 分鐘，多半是 rehash 被中斷後殘留；它會讓每個新 shell 卡在等鎖（dispatch 的新 pane 起不來）。確認沒有 rehash 在跑再刪掉它"
+    rc=1
+  fi
   [ -z "$top" ] || warn_untrusted "$top"
   [ "$rc" = 0 ]
 }

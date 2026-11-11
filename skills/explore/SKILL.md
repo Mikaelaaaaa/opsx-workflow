@@ -67,8 +67,8 @@ Run this automatically whenever `openspec/workplan.yaml` exists. Don't narrate u
 
 1. For each PR where status ≠ `merged`:
    - `git branch --list <branch>` — does the branch exist locally?
-   - `gh pr list --head <branch> --json state --jq '.[0].state' 2>/dev/null` — is it merged on GitHub?
-   - If merged on GitHub but workplan says `pending`/`in-progress` → auto-update to `merged`
+   - Find the forge from `git remote get-url gitlab` (else `origin`). A GitLab host: `glab mr list --source-branch <branch> --merged -F json`. `github.com`: `gh pr list --head <branch> --state merged --json number`. Any other host: skip this check and say so.
+   - If the list is not empty (merged on the forge) but workplan says `pending`/`in-progress` → auto-update to `merged`
 2. For each change where status ≠ `done`:
    - Check if `openspec/changes/<name>/` still exists
    - If missing (archived or deleted) → auto-update to `done`
@@ -86,7 +86,7 @@ Throughout the conversation, watch for:
 
 ## Breaking Down Work + Workplan
 
-When an idea is clear enough to act on, break it into a two-level hierarchy: **PRs** (for human review) and **commits/changes** (AI execution units). Then persist the plan to `openspec/workplan.yaml` so `/apply` can execute it without losing context.
+When an idea is clear enough to act on, break it into a two-level hierarchy: **PRs** (for human review) and **commits/changes** (AI execution units). Then persist the plan to `openspec/workplan.yaml` so `/opsx-workflow:apply` can execute it without losing context.
 
 > **Workplan is an advisory planning artifact, not authoritative state.** Git branches and GitHub PR status are the source of truth for progress. Workplan caches the last-known status and is reconciled by the health check on each skill invocation. If workplan says "pending" but GitHub says "merged", GitHub wins.
 
@@ -158,7 +158,7 @@ features:
             description: "Queue infrastructure and worker scaffold"
 ```
 
-Workplan supports multiple features. Each feature groups PRs; each PR groups changes. Features and changes take `depends-on` too (a feature lists PR names, a change lists sibling changes in the same PR); see "Splitting a big card". `/apply` can target a feature (`/apply --auto eval-service`), a PR (`/apply eval-infra`), or individual changes.
+Workplan supports multiple features. Each feature groups PRs; each PR groups changes. Features and changes take `depends-on` too (a feature lists PR names, a change lists sibling changes in the same PR); see "Splitting a big card". `/opsx-workflow:apply` can target a feature (`/opsx-workflow:apply --auto eval-service`), a PR (`/opsx-workflow:apply eval-infra`), or individual changes.
 
 This file is the **planning artifact** (not authoritative state) for:
 - Which changes belong to which PR, which PRs belong to which feature
@@ -166,7 +166,7 @@ This file is the **planning artifact** (not authoritative state) for:
 - PR dependency order
 - Last-known status (reconciled by health check against git/GitHub)
 
-`/apply` reads this to know what to do. `/explore` writes and updates it.
+`/opsx-workflow:apply` reads this to know what to do. `/opsx-workflow:explore` writes and updates it.
 
 ## Milestones
 
@@ -196,7 +196,7 @@ status: open
 預設: 不建殼，等回覆
 ```
 
-A gate's `type` is `approval` (a permission) or `decision` (a choice) and nothing else; add a `needs: run` line when 建議 is a command the user must run themselves. Until the gate is answered, create no shell and do not touch the workplan. Interactive mode asks the same thing with AskUserQuestion instead of the gate. Once confirmed, in this order:
+A gate's `type` is `approval` (a permission) or `decision` (a choice) and nothing else; add a `needs: run` line when 建議 is a command the user must run themselves, and a `waits-on: <card name>` line on a `decision` that can only be answered after that card merges into main. The split gate above never takes `waits-on`: the coordinator never answers it. Until the gate is answered, create no shell and do not touch the workplan. Interactive mode asks the same thing with AskUserQuestion instead of the gate. Once confirmed, in this order:
 
 1. Each main change: `openspec new change <pr> --schema opsx`, with an inbox.md that says what the whole main change does and lists its sub-changes.
 2. Each sub-change: `openspec/changes/<main>/subs/<sub>/` with `inbox.md` (frontmatter `parent: <main>`, `depends-on: [<sibling>]`) and `.openspec.yaml` (`schema: opsx`, `kind:`, `parent: <main>`). The openspec CLI does not know about these; `opsx check <main>` does.
@@ -266,11 +266,11 @@ When the change has a shell (`openspec/changes/<slug>/`), end by writing `explor
 - **不做**: directions ruled out, with the reason.
 - **步驟**: one line for each of the nine steps, shaped `- <n> <step name>：<where its output went>` when you did it, or `- <n> <step name>：skip：<which condition did not hold>` when you did not. Steps 2 to 7 name the 已知 block that holds their output, step 8 writes `待決`, and steps 1 and 9 have no block of their own and always run, so they write `done`. For example `- 1 讀卡：done`, `- 8 待決：待決`, `- 9 unslop：done`. A `skip：` needs a reason.
 
-Call `opsx status explore <n>/<total> "<label>"` as you go. Then continue per `../../references/continue.md`: invoke `/grill <slug>` when 待決 is non-empty, `/propose <slug>` when it is empty, in this turn.
+Call `opsx status explore <n>/<total> "<label>"` as you go. Then continue per `../../references/continue.md`: invoke `/opsx-workflow:grill <slug>` when 待決 is non-empty, `/opsx-workflow:propose <slug>` when it is empty, in this turn.
 
 No shell yet (the user is thinking out loud, not working a card)? Then the conversation might:
 
-- Flow into work breakdown: "Here's 2 PRs with 5 changes — workplan written, run `/propose` to create them"
+- Flow into work breakdown: "Here's 2 PRs with 5 changes — workplan written, run `/opsx-workflow:propose` to create them"
 - Result in glossary/ADR updates: artifacts captured inline
 - Just provide clarity: the thinking was the value
 - Continue later

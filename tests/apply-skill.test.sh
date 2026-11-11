@@ -16,7 +16,7 @@ for k in '先 propose 沒有 tasks.md 的子殼' 'depends-on' 'subagent' '<主>-
 done
 
 # --- Scenario：apply skill 寫明疊回規則（openspec/changes/apply-fanout/specs/subchange-stack/spec.md）---
-for k in 'opsx stack' 'workplan 順序' '退出 3' 'session 自己重做' '/review' '/pr' '不在衝突標記上手解'; do
+for k in 'opsx stack' 'workplan 順序' '退出 3' 'session 自己重做' '/opsx-workflow:review' '/opsx-workflow:pr' '不在衝突標記上手解'; do
   has "$k" "$SUBS"
 done
 
@@ -29,9 +29,16 @@ has 'anything that is not `NEEDS-USER`' "$SUBS"
 has 'action: <value>' "$SK"
 has "grant hook's deny message" "$SK"
 
+# --- grant-outbound-speech：Two modes 寫明對外發話是第三級、hook 不擋、發話前寫 gate；第二級列有 test-path ---
+MODES="$FX/modes"
+section "Two modes" > "$MODES"
+for k in 'customer or anyone outside the team' 'level three' 'the grant hook cannot see it' 'write a `type: approval` gate' 'test file in a directory with no tracked tests'; do
+  has "$k" "$MODES"
+done
+
 # --- review-fix-in-scope：apply 接 review 退回的 task；pr 在有待修時拒絕 ---
 has '## R<N>. review 退回' "$SK"
 has '測試先紅再修' "$SK"
 has '待修（範圍內）' "$OPSX_ROOT/skills/pr/SKILL.md"
-has '/apply <slug>' "$OPSX_ROOT/skills/pr/SKILL.md"
+has '/opsx-workflow:apply <slug>' "$OPSX_ROOT/skills/pr/SKILL.md"
 echo ok

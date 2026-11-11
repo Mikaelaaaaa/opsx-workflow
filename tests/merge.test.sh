@@ -20,7 +20,7 @@ jq -e '."Agentory-AI/x".merge_approved_at | startswith("20")' "$PD/authz.json" >
 assert_eq "$(jq -r '."Agentory-AI/x" | has("merge_approved")' "$OPSX_STATE_DIR/dispatch.json")" false "dispatch.json 不再寫核准"
 assert_eq "$(tail -1 "$C/decisions.tsv" | cut -f2-4)" $'你\t已允許\t核准合併 abc123'
 tail -1 "$C/decisions.tsv" | cut -f5 | grep -q '^abc123 · ' || fail "證據要是 sha · MR URL" 
-assert_grep '^agent prompt x /babysit merge abc123$' "$OPSX_FAKE_LOG"
+assert_grep '^agent prompt x /opsx-workflow:babysit merge abc123$' "$OPSX_FAKE_LOG"
 # 互動模式的卡：沒有閘門，拒絕並說去 pane
 printf '{"Agentory-AI/x":{"mode":"interactive","pane":"p4","agent":"x","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"
 out="$(opsx merge x 2>&1)"; [ $? -ne 0 ] || fail "互動模式要拒絕"; echo "$out" | grep -q 'pane' || fail "要說去 pane: $out"
@@ -50,7 +50,7 @@ out="$(opsx merge x 2>&1)"; [ $? -ne 0 ] || fail "沒派出要拒絕"; echo "$ou
 printf '{"state":"opened","draft":false,"has_conflicts":false,"sha":"abc123","head_pipeline":{"status":"success"},"unresolved_discussions_count":0}' > "$OPSX_TEST_GLAB_JSON"
 printf '{"Agentory-AI/x":{"mode":"autopilot","pane":"p4","agent":"claude","grants":[],"via":"p","herdr_name":"p"}}' > "$OPSX_STATE_DIR/dispatch.json"; : > "$OPSX_FAKE_LOG"
 out="$(opsx merge x 2>&1)"; assert_eq "$?" 0 "代管卡 merge: $out"
-assert_grep '^agent prompt p /babysit merge abc123 x$' "$OPSX_FAKE_LOG"
+assert_grep '^agent prompt p /opsx-workflow:babysit merge abc123 x$' "$OPSX_FAKE_LOG"
 assert_eq "$(jq -r '."Agentory-AI/x".merge_approved' "$PD/authz.json")" abc123
 
 # --- 受保護位置寫不進去（沙盒內）：非零退出、訊息含路徑，什麼都不改、不送 prompt ---

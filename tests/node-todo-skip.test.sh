@@ -22,4 +22,6 @@ grep -F 'TodoWrite' "$GRILL" | grep -qF '## Steps' || fail "grill 的 TodoWrite 
 assert_grep 'remove it from 待決' "$FX/grill-steps"
 assert_grep 'autopilot' "$FX/grill-steps"
 assert_not_grep 'goes back to explore' "$FX/grill-steps"
+# 階段指令用 /opsx-workflow:<stage> 的全名（main 的 stage-cmd-prefix）
+assert_grep '/opsx-workflow:propose' "$FX/grill-steps"
 echo ok

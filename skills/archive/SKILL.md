@@ -23,8 +23,8 @@ Archive a completed change.
 If `openspec/workplan.yaml` exists, silently verify it matches reality before proceeding:
 
 1. For each PR where status ≠ `merged`:
-   - `gh pr list --head <branch> --json state --jq '.[0].state' 2>/dev/null` — is it merged on GitHub?
-   - If merged on GitHub but workplan says `pending`/`in-progress` → auto-update to `merged`
+   - Find the forge from `git remote get-url gitlab` (else `origin`). A GitLab host: `glab mr list --source-branch <branch> --merged -F json`. `github.com`: `gh pr list --head <branch> --state merged --json number`. Any other host: skip this check and say so.
+   - If the list is not empty (merged on the forge) but workplan says `pending`/`in-progress` → auto-update to `merged`
 2. For each change where status ≠ `done`:
    - Check if `openspec/changes/<name>/` still exists
    - If missing (archived or deleted) → auto-update to `done`
@@ -68,7 +68,7 @@ Count tasks marked with `- [ ]` (incomplete) vs `- [x]` (complete).
 
 ### 3b. Reflect on a long card
 
-A card is long when `tasks.md` has an `## R1.` review group, meaning review sent work back at least once. For a long card, `Read ../reflect/SKILL.md` and follow it: three reviewers and a synthesizer sort what went wrong into Accepted, Rejected and Backlog. Nothing in opsx's own skills changes until the user approves an Accepted item; each approved change goes through `/propose` as its own card. Do not wait for that approval here, so skip step 5 of that skill: file each Accepted item as an inbox card (`opsx new -- "<item>"`), change no skill, and go on to step 4. A card without an R group skips this step.
+A card is long when `tasks.md` has an `## R1.` review group, meaning review sent work back at least once. For a long card, `Read ../reflect/SKILL.md` and follow it: three reviewers and a synthesizer sort what went wrong into Accepted, Rejected and Backlog. Nothing in opsx's own skills changes until the user approves an Accepted item; each approved change goes through `/opsx-workflow:propose` as its own card. Do not wait for that approval here, so skip step 5 of that skill: file each Accepted item as an inbox card (`opsx new --kind-of-work planned -- "<item>"`; a card an agent opens has to carry its kind), change no skill, and go on to step 4. A card without an R group skips this step.
 
 ### 4. Assess delta spec sync state
 
