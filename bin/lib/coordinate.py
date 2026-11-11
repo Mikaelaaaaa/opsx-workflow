@@ -73,6 +73,7 @@ class Round:
         self.orders = {}
         self.redispatched_now = set()
         self.args_checked = set()
+        self.answered = set()
         self.stages = {}
         self.woken_cards = set()
         self.max_working = None
@@ -414,6 +415,7 @@ class Round:
         rc, out, err = self.act(args)
         if rc == 0:
             self.woken += 1   # 代答會喚醒 idle 的 agent，同時上限要算它
+            self.answered.add(card_key(c))
         if "agent_not_found" in out + err:
             self.redispatch(c, top, "answer 送不到")
         elif rc != 0:
@@ -578,9 +580,9 @@ class Round:
         self.memo["_redispatched"][key] = self.now.isoformat(timespec="seconds")
         self.redispatched_now.add(key)
 
-    def relaunching(self, c):
-        """opsx relaunch 正在重開這張卡的 pane：回 (條目 key, relaunching_at)，否則 None。
-        標記寫在代管 pane 的根條目上，所以沿 via 往上看每一筆，加上 session 條目；過了 RELAUNCH_MINUTES 的是被 kill 的 relaunch 留下的，不算。"""
+    def pane_chain(self, c):
+        """從卡自己的條目沿 via 往上到代管 pane 的根條目，加上 session 條目；最後一筆是根。
+        fan-out 子卡 via 父卡、成員卡 via @<feature>，pane 與它的 settings 檔、relaunch 標記都屬於根。"""
         keys, k = [], card_key(c)
         while k in self.dispatch_file and k not in keys:
             keys.append(k)
@@ -591,7 +593,12 @@ class Round:
         scope = session_scope(c)
         if scope and scope not in keys:
             keys.append(scope)
-        for k in keys:
+        return keys or [card_key(c)]
+
+    def relaunching(self, c):
+        """opsx relaunch 正在重開這張卡的 pane：回 (條目 key, relaunching_at)，否則 None。
+        過了 RELAUNCH_MINUTES 的是被 kill 的 relaunch 留下的，不算。"""
+        for k in self.pane_chain(c):
             at = (self.dispatch_file.get(k) or {}).get("relaunching_at")
             if at and self.now - datetime.datetime.fromisoformat(at) < datetime.timedelta(minutes=RELAUNCH_MINUTES):
                 return k, at
@@ -630,18 +637,24 @@ class Round:
         d = c["dispatch"]
         if d.get("mode") not in ("autopilot", "drive") or d.get("agent") != "claude" or c["agent_status"] not in ("idle", "blocked"):
             return
-        key = session_scope(c) or card_key(c)
+        # collect 的 agent_status 是這輪動手前讀的：剛代答或重派過的卡已經不是 idle
+        if card_key(c) in self.answered or {card_key(c), session_scope(c)} & self.redispatched_now:
+            return
+        key = self.pane_chain(c)[-1]
         if key in self.args_checked:
             return
         self.args_checked.add(key)
         if self.relaunching(c):
             return
-        settings =os.path.join(self.state, "settings", "%s-%s-%s.json" % (c["repo"], d.get("feature") or c["slug"], d["mode"]))
+        # launch_args 用 herdr 名（根條目的 slug，session 是 feature 名）命名 settings 檔
+        name = key.split("/", 1)[1].lstrip("@")
+        settings = os.path.join(self.state, "settings", "%s-%s-%s.json" % (c["repo"], name, d["mode"]))
         if not os.path.isfile(settings):
             return
         last = self.memo["_relaunched"].get(key)
-        if last and self.now - datetime.datetime.fromisoformat(last) < datetime.timedelta(minutes=RELAUNCH_MINUTES):
-            self.log("-- %s relaunch %s 失敗過，%d 分鐘內不再試" % (key, last, RELAUNCH_MINUTES))
+        recent = last and self.now - datetime.datetime.fromisoformat(last["at"]) < datetime.timedelta(minutes=RELAUNCH_MINUTES)
+        if recent and not last["ok"]:
+            self.log("-- %s relaunch %s 失敗過，%d 分鐘內不再試" % (key, last["at"], RELAUNCH_MINUTES))
             return
         pane = d["pane"]
         rc, out, err = self.run(["herdr", "pane", "process-info", "--pane", pane])
@@ -654,19 +667,25 @@ class Round:
             self.args_unknown(c, key, pane, str(e))
             return
         if not lost:
+            for k in [k for k in self.memo["_notified"] if k.startswith(key + "/args/")]:
+                del self.memo["_notified"][k]
+            return
+        if recent:
+            # 上一次 relaunch 回 0 卻沒把參數帶回來：再 relaunch 只會每輪對 pane 送 Esc、/exit
+            self.args_unknown(c, key, pane, "relaunch 後仍沒帶 --settings %s（上次 relaunch %s）" % (settings, last["at"]))
             return
         self.log("!! %s pane %s 的 claude 沒帶 --settings %s，relaunch" % (key, pane, settings))
         rc, out, err = self.act(["opsx", "relaunch", c["slug"], "--repo", top])
+        at = self.now.isoformat(timespec="seconds")
+        self.memo["_relaunched"][key] = {"at": at, "ok": rc == 0}
         if rc != 0:
-            at = self.now.isoformat(timespec="seconds")
-            self.memo["_relaunched"][key] = at
             self.log("?? %s opsx relaunch 失敗，%d 分鐘內不再試：%s" % (key, RELAUNCH_MINUTES, (err or out).replace("\n", " ")[:200]))
             self.notify(c, "relaunch", at, "relaunch 失敗", "pane %s 留著沒關，到 pane 看；%d 分鐘後 coordinator 再試" % (pane, RELAUNCH_MINUTES),
-                        scope=session_scope(c))
+                        scope=key)
 
     def args_unknown(self, c, key, pane, why):
         self.log("?? %s pane %s 的啟動參數判不了，不 relaunch：%s" % (key, pane, why))
-        self.notify(c, "args", pane, "啟動參數判不了", "pane %s：%s" % (pane, one_line(why)), scope=session_scope(c))
+        self.notify(c, "args", pane, "啟動參數判不了", "pane %s：%s" % (pane, one_line(why)), scope=key)
 
     def settle_parked(self, cards):
         """人手動重派了的 parked 卡不再由這裡管。人在板上把那個 gate 答掉了，記成已答，
