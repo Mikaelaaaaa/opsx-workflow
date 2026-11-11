@@ -3,7 +3,7 @@
 # 給了 repo 就在那裡建殼；沒給就寫 <state>/unfiled/<slug>.md，等 opsx file 選 repo（board-inbox D6）。
 # slug 是 me-<YYYYMMDD-HHMM>，同名依序加 -2（D2）。specs/board-actions「新增到收件匣」「新增時附檔」「agent 開的卡標明來源」。
 # --attach 的檔複製進卡的 attachments/（待分類是 unfiled/<slug>/attachments/），有附件時 source: paste。
-# 在 dispatch 的 worktree（<top>/.claude/worktrees/<slug>）裡呼叫是 agent 開的：source: agent:<slug>、slug 前綴 agent-；在那裡帶 --source me 報錯，--source agent:<slug> 照收。
+# 環境變數 OPSX_CARD 有值（dispatch 啟動的 claude agent 都帶），或在 dispatch 的 worktree（<top>/.claude/worktrees/<slug>）裡呼叫，是 agent 開的：source: agent:<slug>、slug 前綴 agent-；這時帶 --source me 報錯，--source agent:<slug> 照收。
 # agent 開的卡必帶 --kind-of-work；incident 還要 --impact 與 --evidence（references/priority.md 的事實欄位）。使用者開的卡不強制，沒帶是 planned。
 # --area 寫進 frontmatter 的 area:，值要在 repo 的 openspec/areas.txt 裡；有清單時 agent 開的卡必帶。沒有清單的 repo 不收 --area，其餘照舊（new-auto-merge D2、D3）。
 # agent 開的卡遇到同 area、還沒有 tasks.md 的卡就併進那張的 inbox.md，不建殼，印的是那張的 slug（new-auto-merge D1、D4）。
@@ -109,17 +109,26 @@ opsx_new() {
   done
   single_line "$text"
   wt="$(git_worktree_top)"
+  # dispatch 的 claude 帶 OPSX_CARD（launch.sh 寫進 settings 的 env），agent cd 到哪都在。
+  # shortcut: codex 沒有 env 通道，沿用 worktree 路徑判斷；codex 能注入環境變數時刪掉路徑判斷
   case "$wt" in
-    */.claude/worktrees/*/*) ;;
-    */.claude/worktrees/*)
-      [ "$source" != me ] || die "new: dispatch 的 worktree 裡不要帶 --source me：worktree 裡開的卡由系統標成 agent 來源，--source me 會讓卡不被自動併"
-      if [ -z "$source" ]; then
+    */.claude/worktrees/*/*) wt="" ;;
+    */.claude/worktrees/*) ;;
+    *) wt="" ;;
+  esac
+  if [ -n "$wt" ] || [ -n "${OPSX_CARD:-}" ]; then
+    [ "$source" != me ] || die "new: dispatch 的 agent 不要帶 --source me：agent 開的卡由系統標成 agent 來源，--source me 會讓卡不被自動併"
+    if [ -z "$source" ]; then
+      if [ -n "$wt" ]; then
         # 卡名比照 hooks/_lib.sh 的 card_slug：branch 對得到卡（含子殼 <主>--<子>）就用卡名，對不到才用資料夾名（Claude Code 自己開的 worktree 叫 agent-a<hex>）
         b="$(slug_from_branch "$(git_branch)")"; mt="$(git_toplevel)"
         [ -n "$b" ] && [ -d "$(st_card_dir "$mt" "$b")" ] || b="${wt##*/}"
-        source="agent:$b"
-      fi ;;
-  esac
+      else
+        b="$OPSX_CARD"
+      fi
+      source="agent:$b"
+    fi
+  fi
   [ -z "$source" ] || [[ "$source" =~ ^(me|agent:[A-Za-z0-9][A-Za-z0-9._-]*)$ ]] || die "new: --source 要是 me 或 agent:<slug>，拿到：$source"
   check_fact_flags "$source" "$kind" "$impact" "$evidence"
   [ -z "$top" ] || top="$(opsx_repo_top "$top")"
