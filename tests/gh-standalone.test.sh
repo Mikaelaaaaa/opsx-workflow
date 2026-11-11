@@ -18,3 +18,4 @@ PY
 done
 # 掃描要真的掃到 gh issue 範例，不是空集合
 assert_grep "\`gh issue comment " "$OPSX_ROOT/skills/pr/SKILL.md"
+assert_grep "\`gh pr comment " "$OPSX_ROOT/skills/pr/SKILL.md"

@@ -83,3 +83,10 @@ assert_not_fixed 'gh api' "$STEP"
 
 # --- 每個 gh 呼叫單獨一個 Bash 指令 ---
 assert_fixed 'its own Bash command' "$STEP"
+
+# --- pr 與 babysit 用同一個段名與輸出路徑（Scenario「段名與路徑一致」）---
+BS="$OPSX_ROOT/skills/babysit/SKILL.md"
+for f in "$SK" "$BS"; do
+  assert_fixed '## 邏輯表' "$f"
+  assert_fixed 'openspec/changes/<slug>/logic-map.md' "$f"
+done
