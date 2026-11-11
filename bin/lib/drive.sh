@@ -105,12 +105,12 @@ write_stuck_gate() { # <card dir> <stage> <repo> <slug>：gates.md 加一個 ope
   {
     printf '\n## drive-%s-%s\n' "$stage" "$n"
     printf 'type: decision\nstatus: open\n'
-    printf '問題: drive 卡在 /%s：連送兩次，卡的階段都沒動。agent 沒做完這一步，或做完了但沒寫出下一階段要的檔\n' "$stage"
+    printf '問題: drive 卡在 /opsx-workflow:%s：連送兩次，卡的階段都沒動。agent 沒做完這一步，或做完了但沒寫出下一階段要的檔\n' "$stage"
     # 選項會變成看板的回覆按鈕，按下去的字直接送給 agent，所以寫成 agent 照著做得到的話
-    printf '選項: 重做 /%s 一次，做不完就把卡在哪寫進 gates.md (Recommended) | 跳過這一步，在 decisions.tsv 寫下原因再往下走 | 停在這裡，把卡在哪寫進 gates.md 等人\n' "$stage"
+    printf '選項: 重做 /opsx-workflow:%s 一次，做不完就把卡在哪寫進 gates.md (Recommended) | 跳過這一步，在 decisions.tsv 寫下原因再往下走 | 停在這裡，把卡在哪寫進 gates.md 等人\n' "$stage"
     printf '建議: 先看 pane（板上開 pane）再回；要整張卡停掉用板上的「停止」\n'
     printf '證據: pane 最後 20 行：%s\n' "$tail_text"
-    printf '預設: drive 停在這裡等，不再送 /%s\n' "$stage"
+    printf '預設: drive 停在這裡等，不再送 /opsx-workflow:%s\n' "$stage"
   } >> "$d/gates.md"
 }
 

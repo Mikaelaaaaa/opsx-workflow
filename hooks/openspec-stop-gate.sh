@@ -90,7 +90,7 @@ titled_gate_open() { # <dir> <站>
 # 標題帶流水號：答完的舊 gate 跟新 gate 同名的話，opsx answer 只找得到第一個。
 # 取現有 #N 的最大值加一（gates.md 少了較早的 gate 時數量會小於最大號）；沒有數字的舊標題算 1。
 write_auto_gate() { # <dir> <slug> <站>
-  local f="$1/gates.md" n=0 redo="重做 /$3 一次，做不完就把卡在哪寫進 gates.md"
+  local f="$1/gates.md" n=0 redo="重做 /opsx-workflow:$3 一次，做不完就把卡在哪寫進 gates.md"
   [ -f "$f" ] && n="$(awk -v t="## 卡在接 /$3" '
     index($0, t) == 1 { rest = substr($0, length(t) + 1)
       if (rest ~ /^[ \t]*$/) k = 1
@@ -101,7 +101,7 @@ write_auto_gate() { # <dir> <slug> <站>
   {
     [ -s "$f" ] && printf '\n'
     printf '## 卡在接 /%s #%s\ntype: decision\nstatus: open\nopened_at: %s\n' "$3" "$((n + 1))" "$(now_iso)"
-    printf '問題: opsx：%s 連續 %s 次停在 /%s 之前沒有 invoke，卡在哪？\n' "$2" "$MAX_BLOCKS" "$3"
+    printf '問題: opsx：%s 連續 %s 次停在 /opsx-workflow:%s 之前沒有 invoke，卡在哪？\n' "$2" "$MAX_BLOCKS" "$3"
     printf '選項: %s (Recommended) | 停在這裡，把卡在哪寫進 gates.md 等人\n' "$redo"
     printf '建議: %s\n' "$redo"
     printf '預設: hook 不再擋這一站\n'

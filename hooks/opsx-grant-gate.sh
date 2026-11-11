@@ -70,7 +70,7 @@ sys.path.insert(0, os.environ["OPSX_LIB"]); import authz
 print(authz.load(os.environ["OPSX_SD"]).get(os.environ["OPSX_KEY"], {}).get("merge_approved") or "")
 PY
 )" || deny "$PY_FAIL"
-  [ -n "$approved" ] || deny "opsx 授權閘門：merge 是永遠要人的動作（第三級）。要人在看板上按「合併」（opsx merge ${slug}）才會放行；在這之前把 MR 弄到五條件全綠（/babysit），不要自己合"
+  [ -n "$approved" ] || deny "opsx 授權閘門：merge 是永遠要人的動作（第三級）。要人在看板上按「合併」（opsx merge ${slug}）才會放行；在這之前把 MR 弄到五條件全綠（/opsx-workflow:babysit），不要自己合"
   want_iid="$(st_mr_url "$d" | grep -oE '[0-9]+$' || true)"
   if [ -n "$cmd_iid" ] && [ "$cmd_iid" != "$want_iid" ]; then
     deny "opsx 授權閘門：核准的是這張卡的 MR ${want_iid:-（report.md 沒有）}，指令要合併的是 ${cmd_iid}"
