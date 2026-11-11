@@ -152,4 +152,67 @@ case "$(tail -1 "$C/$ID/decisions.tsv")" in *x*) ;; *) fail "新殼 decisions.ts
 
 # --- 用法錯 ---
 opsx split-out --repo "$E" x > "$OUT" 2> "$ERR"; assert_eq "$?" 2 "少參數要退出 2"
+
+# ========== split-out-card-lock：讀段、建殼、刪段在目標卡同一個鎖內 ==========
+PYBIN="$(cat "$OPSX_STATE_DIR/python")"; LIBDIR="$OPSX_ROOT/bin/lib"
+hold_lock() { # hold_lock <卡目錄> [要在放鎖前刪掉的併入段 id]：持卡鎖，等 $FX/go 出現才（刪段後）放鎖
+  rm -f "$FX/held" "$FX/go"
+  "$PYBIN" -I -c '
+import os, sys, time
+sys.path.insert(0, sys.argv[1]); import safefile, inboxmerge
+card = sys.argv[2]
+with safefile.CardLock(card):
+    open(sys.argv[3], "w").close()
+    while not os.path.exists(sys.argv[4]):
+        time.sleep(0.02)
+    if len(sys.argv) > 5:
+        p = os.path.join(card, "inbox.md")
+        with open(p, encoding="utf-8") as f:
+            cur = f.read()
+        a, b = inboxmerge.find(cur, sys.argv[5])
+        lines = cur.splitlines(keepends=True)
+        safefile.write_atomic(p, "".join(lines[:a] + lines[b:]))
+' "$LIBDIR" "$1" "$FX/held" "$FX/go" ${2:+"$2"} &
+  HOLDER=$!
+  for _ in $(seq 100); do [ -e "$FX/held" ] && break; sleep 0.05; done
+  [ -e "$FX/held" ] || fail "持鎖的 process 沒有拿到鎖"
+}
+
+# --- 兩處同時拆同一個 id：恰好一個成功，只多一張殼 ---
+reset; card x hooks
+merge --kind-of-work planned -- 同時拆
+hold_lock "$C/x"
+opsx split-out --repo "$E" x "$ID" > "$FX/s1.out" 2> "$FX/s1.err" &
+S1=$!
+opsx split-out --repo "$E" x "$ID" > "$FX/s2.out" 2> "$FX/s2.err" &
+S2=$!
+sleep 1; : > "$FX/go"
+wait "$HOLDER"; wait "$S1"; rc1=$?; wait "$S2"; rc2=$?
+assert_eq "$(( (rc1 == 0) + (rc2 == 0) ))" 1 "恰好一個成功：rc $rc1 $rc2"
+assert_eq "$(dirs)" "$ID x " "只多一張殼：$(cat "$FX/s1.err" "$FX/s2.err")"
+if [ "$rc1" -eq 0 ]; then bad="$FX/s2.err"; else bad="$FX/s1.err"; fi
+assert_grep "$ID" "$bad"
+
+# --- 取得鎖時那一段已被刪：非 0 退出、沒有建殼、目標卡不變 ---
+reset; card x hooks
+merge --kind-of-work planned -- 被先刪掉
+hold_lock "$C/x" "$ID"
+opsx split-out --repo "$E" x "$ID" > "$OUT" 2> "$ERR" &
+S1=$!
+sleep 1; : > "$FX/go"
+wait "$HOLDER"; wait "$S1"; rc=$?
+assert_eq "$rc" 2 "段被刪掉要退出 2：$(cat "$ERR")"
+assert_grep "$ID" "$ERR"; assert_eq "$(dirs)" "x " "沒有新殼"
+assert_not_grep "$ID" "$C/x/inbox.md"
+
+# --- 鎖內建殼失敗：非 0 退出，併入段仍在，沒有殼 ---
+reset; card x hooks
+merge --kind-of-work planned -- 建不起來
+mkdir -p "$FX/failopenspec"; printf '#!/usr/bin/env bash\necho "openspec: 壞了" >&2\nexit 1\n' > "$FX/failopenspec/openspec"; chmod +x "$FX/failopenspec/openspec"
+cp "$C/x/inbox.md" "$FX/keep.md"
+PATH="$FX/failopenspec:$PATH" split x "$ID"; rc=$?
+[ "$rc" -ne 0 ] || fail "建殼失敗要退出非零"
+cmp -s "$C/x/inbox.md" "$FX/keep.md" || fail "建殼失敗不能刪段：$(diff "$FX/keep.md" "$C/x/inbox.md")"
+assert_eq "$(dirs)" "x " "沒有新殼"
+assert_eq "$(find "$E/openspec" -maxdepth 1 -name '.reserve-*' | wc -l | tr -d ' ')" 0 "不留保留目錄"
 echo ok
