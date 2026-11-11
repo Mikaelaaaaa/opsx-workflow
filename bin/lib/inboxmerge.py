@@ -9,6 +9,8 @@
         刪掉那一段，其餘位元組不動。找不到退出 2。
     $OPSX_PY -I inboxmerge.py ids <卡目錄>
         一行印一個這張卡現有的併入 id（opsx drop 用來拒絕還有併入項目的卡）。
+    $OPSX_PY -I inboxmerge.py split-out <卡目錄> <id> <repo 根>
+        同一個卡鎖內讀那一段、用 common.sh 的 new_shell 建殼、刪那一段；印新殼 slug。找不到那段退出 2，不建殼。
     $OPSX_PY -I inboxmerge.py evidence <卡目錄> <行>
         卡鎖內把一行插進 `## 證據` 段最後一行非空內容之後（opsx merge-card）。沒有證據段退出 1。
     $OPSX_PY -I inboxmerge.py drop <卡目錄> <理由> -- <歸檔指令…>
@@ -22,6 +24,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import safefile  # noqa: E402
@@ -143,22 +146,45 @@ def card_body(fields: dict) -> str:
     return "\n".join(lines)
 
 
-def card(card_dir: str, mid: str) -> str:
-    with safefile.CardLock(card_dir):
-        with open(os.path.join(card_dir, "inbox.md"), encoding="utf-8") as f:
-            cur = f.read()
+def _card_unlocked(card_dir: str, mid: str) -> str:
+    with open(os.path.join(card_dir, "inbox.md"), encoding="utf-8") as f:
+        cur = f.read()
     start, end = find(cur, mid)
     return card_body(parse([x.rstrip("\n") for x in cur.splitlines(keepends=True)[start:end]]))
 
 
-def remove(card_dir: str, mid: str) -> None:
-    inbox = os.path.join(card_dir, "inbox.md")
+def card(card_dir: str, mid: str) -> str:
     with safefile.CardLock(card_dir):
-        with open(inbox, encoding="utf-8") as f:
-            cur = f.read()
-        start, end = find(cur, mid)
-        lines = cur.splitlines(keepends=True)
-        safefile.write_atomic(inbox, "".join(lines[:start] + lines[end:]))
+        return _card_unlocked(card_dir, mid)
+
+
+def _remove_unlocked(card_dir: str, mid: str) -> None:
+    inbox = os.path.join(card_dir, "inbox.md")
+    with open(inbox, encoding="utf-8") as f:
+        cur = f.read()
+    start, end = find(cur, mid)
+    lines = cur.splitlines(keepends=True)
+    safefile.write_atomic(inbox, "".join(lines[:start] + lines[end:]))
+
+
+def remove(card_dir: str, mid: str) -> None:
+    with safefile.CardLock(card_dir):
+        _remove_unlocked(card_dir, mid)
+
+
+def split_out(card_dir: str, mid: str, top: str) -> None:
+    """同一個卡鎖內讀併入段、建新殼、刪併入段。新殼建好就先印它的 slug：刪段失敗時 split-out.sh 要告訴人哪張殼已建。"""
+    common = os.path.join(os.path.dirname(os.path.abspath(__file__)), "common.sh")
+    with safefile.CardLock(card_dir):
+        with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".md") as body:
+            body.write(_card_unlocked(card_dir, mid))
+            body.flush()
+            p = subprocess.run(["bash", "-c", 'source "$1"; new_shell "$2" "$3" "$4"', "opsx-split-out", common, top, mid, body.name],
+                               stdout=subprocess.PIPE, text=True)
+        if p.returncode != 0:
+            raise ValueError("建殼失敗：new_shell 退出 %d（上面是原因）" % p.returncode)
+        print(p.stdout.strip(), flush=True)
+        _remove_unlocked(card_dir, mid)
 
 
 def evidence(card_dir: str, line: str) -> None:
@@ -202,13 +228,15 @@ def drop(card_dir: str, reason: str, argv: list) -> int:
 def main() -> None:
     args = sys.argv[1:]
     cmd = args[0] if args else ""
-    want = {"append": 9, "card": 3, "remove": 3, "ids": 2, "evidence": 3}
+    want = {"append": 9, "card": 3, "remove": 3, "ids": 2, "evidence": 3, "split-out": 4}
     ok = len(args) >= 5 and args[3] == "--" if cmd == "drop" else cmd in want and len(args) == want[cmd]
     if not ok:
-        sys.exit("用法：inboxmerge.py append <卡目錄> <基本 id> <ISO 時間> <來源> <kind_of_work> <evidence> <area> <一句話> | card <卡目錄> <id> | remove <卡目錄> <id> | ids <卡目錄> | evidence <卡目錄> <行> | drop <卡目錄> <理由> -- <歸檔指令…>")
+        sys.exit("用法：inboxmerge.py append <卡目錄> <基本 id> <ISO 時間> <來源> <kind_of_work> <evidence> <area> <一句話> | card <卡目錄> <id> | remove <卡目錄> <id> | ids <卡目錄> | evidence <卡目錄> <行> | split-out <卡目錄> <id> <repo 根> | drop <卡目錄> <理由> -- <歸檔指令…>")
     try:
         if cmd == "append":
             print(append(*args[1:]))
+        elif cmd == "split-out":
+            split_out(*args[1:])
         elif cmd == "evidence":
             evidence(*args[1:])
         elif cmd == "drop":
