@@ -2,7 +2,8 @@
 # 測試共用：fixture repo、斷言。source 它。
 set -u
 : "${OPSX_ROOT:?OPSX_ROOT 未設}"
-FX="$(mktemp -d "${TMPDIR:-/tmp}/opsx-test.XXXXXX")"
+TMP_BASE="${TMPDIR:-/tmp}"
+FX="$(mktemp -d "${TMP_BASE%/}/opsx-test.XXXXXX")"
 export OPSX_STATE_DIR="$FX/state"
 export OPSX_BIN_DIR="$FX/bin"
 export HERDR_ENV=""          # status.sh 的 pane metadata 鏡像認它；collect 不看它
