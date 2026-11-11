@@ -45,7 +45,10 @@ def lift_substitutions(text: str, repl: str) -> tuple[str, list[str]]:
     $((…)) 以 )) 結尾才是算術：本體裡的命令替換照拆，算術本身換成 repl；不以 )) 結尾的（$((cmd) )）是 $( 加子 shell，整個當命令替換。"""
     outer, inner, i = [], [], 0
     while i < len(text):
-        if text.startswith("$((", i):
+        if text[i] == "\\":
+            outer.append(text[i:i + 2])   # 跳脫：下一個字元是字面字元，不是命令替換的開頭
+            i += 2
+        elif text.startswith("$((", i):
             end = matching_paren(text, i + 1)
             if end - 1 > i + 2 and text[end - 1] == ")":
                 _, found = lift_substitutions(text[i + 3:end - 1], repl)
@@ -60,11 +63,18 @@ def lift_substitutions(text: str, repl: str) -> tuple[str, list[str]]:
             outer.append(repl)
             i = end + 1
         elif text[i] == "`":
-            end = text.find("`", i + 1)
-            end = len(text) if end < 0 else end
-            inner.append(text[i + 1:end])
+            # 本體裡的 \`、\\、\$ 是跳脫，要還原才是內層真正的文字（內層的反引號再由遞迴拆）
+            body, j = [], i + 1
+            while j < len(text) and text[j] != "`":
+                if text[j] == "\\" and text[j + 1:j + 2] in ("`", "\\", "$"):
+                    body.append(text[j + 1])
+                    j += 2
+                else:
+                    body.append(text[j])
+                    j += 1
+            inner.append("".join(body))
             outer.append(repl)
-            i = end + 1
+            i = j + 1
         else:
             outer.append(text[i])
             i += 1

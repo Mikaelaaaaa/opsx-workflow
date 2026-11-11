@@ -26,10 +26,10 @@ for c in 'git push && git add $(rm -rf important)' 'git push && git add `rm -r i
   out="$(gg "$c")"; assert_eq "$(decision "$out")" deny "命令替換裡沒涵蓋的指令要擋（${c}）: $(reason "$out")"
 done
 # heredoc、算術、小指令帶重導向、分行、前綴子串：後面的指令仍逐段查（骨架已移掉 heredoc，這一層不能再移一次）
-for c in $'git push\ncat <<EOF\nx\nEOF\n./evil' $'git push && cat <<EOF > notes.txt\nhello\nEOF\ngit status; ./evil' $'git push\ncat <<<foo\n./evil\nfoo' $'git push\necho $((1<<2))\n./evil\necho 2' $'git push && cd /tmp && bash <<EOF\n./evil\nEOF' 'git push && echo $((1+$(./evil)))' 'git push && echo $((./evil) )' 'git push && echo $(( $(./evil) ))' 'git push && echo x > .husky/pre-commit' 'git push && cd . > src/important.ts' $'git push\n./evil' 'git push && git status `./evil`' 'git push && echo "`./evil`"' 'git push && git addx'; do
+for c in $'git push\ncat <<EOF\nx\nEOF\n./evil' $'git push && cat <<EOF > notes.txt\nhello\nEOF\ngit status; ./evil' $'git push\ncat <<<foo\n./evil\nfoo' $'git push\necho $((1<<2))\n./evil\necho 2' $'git push && cd /tmp && bash <<EOF\n./evil\nEOF' 'git push && echo $((1+$(./evil)))' 'git push && echo $((./evil) )' 'git push && echo $(( $(./evil) ))' 'git push && echo x > .husky/pre-commit' 'git push && cd . > src/important.ts' $'git push\n./evil' 'git push && git status `./evil`' 'git push && echo "`./evil`"' 'git push && git addx' 'git push && echo `echo \`./evil\``' 'git push && echo `echo \`echo \\\`./evil\\\`\``'; do
   out="$(gg "$c")"; assert_eq "$(decision "$out")" deny "要擋（${c}）: $(reason "$out")"
 done
-for c in $'git push && cat <<EOF > notes.txt\nhello\nEOF\ngit status' 'git push && echo $((1+2))'; do
+for c in $'git push && cat <<EOF > notes.txt\nhello\nEOF\ngit status' 'git push && echo $((1+2))' 'git push && echo \`literal\` ./evil'; do
   out="$(gg "$c")"; assert_eq "$(decision "$out")" allow "涵蓋的要放行（${c}）: $(reason "$out")"
 done
 # 命令替換裡是涵蓋的指令、子 shell 裡是涵蓋的指令：放行
