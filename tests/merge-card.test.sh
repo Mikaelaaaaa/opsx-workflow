@@ -129,4 +129,60 @@ before="$(shasum "$CH/$Y/inbox.md")"
 err="$("$PYBIN" -I "$LIBDIR/inboxmerge.py" evidence "$CH/$Y" '- 併進：x' 2>&1)" && fail "沒有證據段要退出非零"
 case "$err" in *"$CH/$Y/inbox.md"*) ;; *) fail "stderr 要含檔案路徑：$err" ;; esac
 assert_eq "$(shasum "$CH/$Y/inbox.md")" "$before"
+
+# ========== 併卡帶事實欄位（merge-card-priority-carry）==========
+# mk_card <slug> <kind_of_work> <impact（空字串 = 不寫）> <evidence（空字串 = 不寫）>
+mk_card() {
+  local d="$CH/$1"; mkdir -p "$d"; printf 'schema: opsx\n' > "$d/.openspec.yaml"
+  { printf -- '---\ntype: bug\nsource: agent:t\nfound: 2026-11-10\nrelated:\n'
+    [ -z "$2" ] || printf 'kind_of_work: %s\n' "$2"
+    [ -z "$3" ] || printf 'impact: %s\n' "$3"
+    [ -z "$4" ] || printf 'evidence: %s\n' "$4"
+    printf -- '---\n\n## 一句話\n\n%s\n\n## 證據\n\n- 原有\n' "$1"; } > "$d/inbox.md"
+}
+level_of() { opsx priority "$1" --repo "$A" | cut -f1; }
+fm_value() { awk -v k="$2" 'NR>1 && /^---/{exit} index($0,k":")==1{sub(/^[^:]*: */,"");print;exit}' "$CH/$1/inbox.md"; }
+
+# --- P0 incident 併進 P2 planned 卡：目標變 P0 ---
+mk_card carry-src incident data "資料遺失的 log"; mk_card carry-dst planned "" ""
+assert_eq "$(level_of carry-dst)" P2 "fixture 目標要是 P2"
+assert_rc 0 opsx merge-card carry-src --into carry-dst --repo "$A"
+assert_eq "$(fm_value carry-dst kind_of_work)" incident
+assert_eq "$(fm_value carry-dst impact)" data
+assert_eq "$(fm_value carry-dst evidence)" "資料遺失的 log"
+assert_eq "$(level_of carry-dst)" P0 "併卡後等級掉了"
+
+# --- planned 來源併進 incident 目標：不降級 ---
+mk_card carry-src2 planned "" ""; mk_card carry-dst2 incident security "洩漏的 log"
+assert_rc 0 opsx merge-card carry-src2 --into carry-dst2 --repo "$A"
+assert_eq "$(fm_value carry-dst2 kind_of_work)" incident
+assert_eq "$(fm_value carry-dst2 impact)" security
+assert_eq "$(level_of carry-dst2)" P0
+
+# --- impact 取聯集（四列）---
+carry_row() { # <名> <來源 impact> <目標 impact> <結果>
+  local ev=""; [ -z "$2" ] || ev="來源證據"
+  local tev=""; [ -z "$3" ] || tev="目標證據"
+  mk_card "$1-s" incident "$2" "$ev"; mk_card "$1-d" incident "$3" "$tev"
+  [ -n "$2$3" ] || return 0
+  assert_rc 0 opsx merge-card "$1-s" --into "$1-d" --repo "$A"
+  assert_eq "$(fm_value "$1-d" impact)" "$4" "$1 的 impact"
+}
+carry_row u1 data "" data
+carry_row u2 "" security security
+carry_row u3 data security "security, data"
+carry_row u4 data data data
+
+# --- 來源沒有事實欄位：目標 frontmatter 位元組不變 ---
+mk_card carry-src5 "" "" ""; mk_card carry-dst5 planned "" ""
+fm_before="$(awk 'NR>1 && /^---/{exit} {print}' "$CH/carry-dst5/inbox.md" | shasum)"
+assert_rc 0 opsx merge-card carry-src5 --into carry-dst5 --repo "$A"
+assert_eq "$(awk 'NR>1 && /^---/{exit} {print}' "$CH/carry-dst5/inbox.md" | shasum)" "$fm_before" "frontmatter 不變"
+
+# --- 來源的事實欄位不合格：退出非零，兩張卡都不動 ---
+mk_card carry-src6 incident data ""; mk_card carry-dst6 planned "" ""
+before="$(snap)"
+err="$(opsx merge-card carry-src6 --into carry-dst6 --repo "$A" 2>&1)" && fail "impact 沒有 evidence 要退出非零"
+case "$err" in *evidence*) ;; *) fail "stderr 要指名 evidence：$err" ;; esac
+assert_eq "$(snap)" "$before"
 echo ok

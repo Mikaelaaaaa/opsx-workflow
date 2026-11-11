@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # opsx merge-card <來源> --into <目標> --repo <path>：把同 repo 的收件卡併進另一張卡。
-# 先驗目標與來源，再用 opsx_drop 捨棄來源（理由「併入 <repo>/<目標>」），最後在目標 inbox.md 的 ## 證據 段尾端
-# 追加一行、decisions.tsv 記一列。捨棄會歸檔、退不回來，所以能驗的都在捨棄之前驗完。
+# 先驗目標與來源，把來源的 kind_of_work / impact / evidence 併進目標 frontmatter（等級不低於兩張卡各自的），再用 opsx_drop
+# 捨棄來源（理由「併入 <repo>/<目標>」），最後在目標 inbox.md 的 ## 證據 段尾端追加一行、decisions.tsv 記一列。捨棄會歸檔、退不回來，所以能驗的都在捨棄之前驗完。
 # specs/board-actions「併進既有的卡」。
 
 # shellcheck source=/dev/null
@@ -38,6 +38,9 @@ opsx_merge-card() {
   source="$(frontmatter_field "$s_inbox" source)"
   [ -n "$source" ] || die "merge-card: 來源 $src 的 inbox.md frontmatter 沒有 source:：$s_inbox"
   url="$(frontmatter_field "$s_inbox" upstream_url)"
+
+  # 事實欄位先併：來源的 impact 沒有 evidence 這類不合格會在這裡失敗，來源還沒被捨棄
+  "$OPSX_PY" -I "$OPSX_ROOT/bin/lib/inboxmerge.py" carry "$ch/$into" "$ch/$src" || die "merge-card: 來源 $src 的 kind_of_work / impact / evidence 併不進 $into，兩張卡都沒動"
 
   opsx_drop "$src" --repo "$top" -- "併入 $repo/$into"
 
