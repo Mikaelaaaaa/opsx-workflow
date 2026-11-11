@@ -67,3 +67,9 @@ assert_fixed 'Must-fix 候選' "$STEP3"
 assert_fixed 'sends it back to explore' "$STEP3"
 assert_fixed 'A `Must-fix 候選` line is not an incomplete shell: leave it for Step 3.' "$SK"
 assert_fixed 'A line starting `explore.md 步驟` goes back to `/opsx-workflow:explore <slug>`, not to `/opsx-workflow:apply`.' "$SK"
+
+# --- gherkin-check / check-wiring：前置對每張卡跑 opsx check，spec 的行退回 apply（specs/spec-gherkin-check）---
+STEP0="$FX/step0"; section "Step 0" > "$STEP0"; [ -s "$STEP0" ] || fail "section missing: Step 0"
+assert_fixed 'Every card: also run `opsx check <slug>`.' "$STEP0"
+assert_not_fixed 'A main change with `subs/`: also run `opsx check' "$STEP0"
+assert_fixed 'A line pointing at a `spec.md` is a spec that breaks the Gherkin rules: stop the same way, list those lines, and send it back to `/opsx-workflow:apply <slug>`.' "$STEP0"

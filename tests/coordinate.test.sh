@@ -1775,4 +1775,16 @@ assert_grep "^opsx dispatch m " "$OPSX_FAKE_LOG"
 "$REAL_GIT" -C "$R" worktree remove "$R/.claude/worktrees/m"
 unset OPSX_TEST_REAL_GIT
 rm -f "$MEMO"; cp "$WP0" "$R/openspec/workplan.yaml"; printf '{}' > "$DISP"
+
+# --- 子 change 的 gate：卡的 waiting 只帶主 change 的，session 裡子 change 的 open gate 也要記 ?? 並通知一次，不代答 ---
+SUBW='{"type":"等待決定","needs":"run","gate_id":"eval-run-r1","question":"要在 sandbox 外跑 eval","recommended":"跑","options":["跑"]}'
+printf '%s' '{"repo_paths":{"demo":"'"$R"'"},"cards":[],"errors":[],"sessions":[{"repo":"demo","feature":"f","mains":[{"slug":"m1","subs":[{"slug":"s1","waiting":'"$SUBW"'},{"slug":"s2","waiting":null}]}]}]}' > "$OPSX_TEST_COLLECT_JSON"
+round || fail "子 change gate rc: $(cat "$FX/out")"
+grep '??' "$LOG" | grep -q 'demo/m1/s1 子 change 的 gate eval-run-r1' || fail "子 change 的 gate 要記 ??：$(cat "$LOG")"
+assert_eq "$(count '^notification show')" 1 "子 change 的 gate 通知一次：$(cat "$OPSX_FAKE_LOG")"
+assert_eq "$(count '^opsx answer')" 0 "子 change 的 gate 不代答"
+grep -q 'demo/m1/s2' "$LOG" && fail "沒有 gate 的子 change 不記：$(cat "$LOG")"
+round || fail "子 change gate 第二輪 rc: $(cat "$FX/out")"
+assert_eq "$(count '^notification show')" 0 "同一個子 change gate 第二輪不再通知"
+rm -f "$MEMO"
 echo "coordinate: ok"

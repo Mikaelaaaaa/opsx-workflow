@@ -9,6 +9,8 @@
 source "$OPSX_ROOT/bin/lib/note.sh"
 # shellcheck source=/dev/null
 source "$OPSX_ROOT/bin/lib/agents-md.sh"
+# shellcheck source=/dev/null
+source "$OPSX_ROOT/bin/lib/launch.sh"
 
 opsx_dispatch() {
   local slug="" agent=claude model="" mode=autopilot kind="" top="" feature="" plan="" note="" has_note="" only=""
@@ -185,25 +187,9 @@ PY
   tab="$(printf '%s' "$tabjson" | jq -r '.result.tab.tab_id // empty' 2>/dev/null || true)"
   [ -n "$pane" ] || die "dispatch: herdr tab create 沒回 root_pane：$tabjson"
 
-  # agent 啟動參數：claude 兩種模式都帶 --settings；--permission-mode 與 allow / deny 只有 autopilot 才有。
-  # settings 檔按模式分名，重派不會蓋掉 pane 還沒關的另一個模式那份
-  local -a aargs=()
-  if [ "$agent" = claude ]; then
-    aargs+=(--model "$model")
-    local settings="$OPSX_STATE_DIR/settings/$repo-$slug-$mode.json"; ensure_dir "$(dirname "$settings")"
-    write_settings "$settings" "$repo" "$top/openspec" "$mode"
-    if [ "$mode" != interactive ]; then aargs+=(--permission-mode dontAsk); fi   # dontAsk：不在 allow 的直接拒絕不跳框；跳框會讓 herdr 判 blocked，drive 送不進下一句
-    aargs+=(--settings "$settings")
-    # Claude Code 的沙盒只准寫 working directories；卡的檔在主 repo 的 openspec/（worktree 裡沒有），hook 消耗 once 與 status 鏡像寫 state dir。
-    # 旗標只活在這個行程；重啟後 --settings 有沒有被帶回、additionalDirectories 還在不在，尚未實測（add-dir-lost 1.1）
-    aargs+=(--add-dir "$top/openspec" --add-dir "$OPSX_STATE_DIR")
-  else
-    if [ "$mode" = interactive ]; then aargs+=(-a on-request -s workspace-write); else aargs+=(-a never -s workspace-write); fi
-    # 卡的檔在主 repo 的 openspec/，不在 worktree；沒有這兩個，規則叫它寫的 gates.md / status.json 寫不進
-    aargs+=(--add-dir "$top/openspec" --add-dir "$OPSX_STATE_DIR")
-  fi
+  launch_args "$agent" "$model" "$mode" "$repo" "$slug" "$top"
   # 名字被占用：dispatch.json 沒記著（手動開的、或 stop 時 pane 沒關成）但 herdr 還有同名 agent，指出它在哪
-  herdr_start_agent dispatch "$slug" "$agent" "$pane" "$tab" "${aargs[@]}" \
+  herdr_start_agent dispatch "$slug" "$agent" "$pane" "$tab" "${LAUNCH_ARGS[@]}" \
     || die "dispatch: herdr agent start 失敗：herdr 已經有叫 ${slug} 的 agent，dispatch.json 沒記：${HERDR_TAKEN_AT}。關掉那個 pane 再派"
 
   # dispatch.json
@@ -318,33 +304,5 @@ try:
     print(tomllib.load(open(sys.argv[1], "rb")).get("repos", {}).get(os.environ["OPSX_REPO"], ""))
 except tomllib.TOMLDecodeError as e:
     sys.exit("dispatch: workspaces.toml 壞了：%s" % e)
-PY
-}
-write_settings() { # <file> <repo> <主 repo openspec 目錄> <mode>：autopilot 直接做那級 allow，永遠要人那級 deny；repo 永遠的授權也進 allow。interactive 只寫可寫目錄
-  OPSX_REPO="$2" OPSX_SD="$OPSX_STATE_DIR" OPSX_MODE="$4" "$OPSX_PY" -I - "$1" "$3" <<'PY'
-import json,os,sys,tomllib
-sys.path.insert(0, os.path.join(os.environ["OPSX_ROOT"], "bin", "lib")); import safefile
-sd=os.environ["OPSX_SD"]; repo=os.environ["OPSX_REPO"]
-dirs=[sys.argv[2],sd]
-if os.environ["OPSX_MODE"]=="interactive":
-    safefile.write_atomic(sys.argv[1], json.dumps({"permissions":{"additionalDirectories":dirs}},indent=2))
-    sys.exit(0)
-allow=["Read","Edit","Write","Glob","Grep","Bash(git status:*)","Bash(git diff:*)","Bash(git log:*)","Bash(git add:*)","Bash(git commit:*)","Bash(git checkout:*)","Bash(git worktree:*)",
-       "Bash(pnpm test:*)","Bash(pnpm vitest:*)","Bash(pnpm build:*)","Bash(pnpm lint:*)","Bash(pnpm typecheck:*)","Bash(npx vitest:*)","Bash(pytest:*)","Bash(uv run:*)","Bash(ruff:*)","Bash(go test:*)",
-       "Bash(openspec:*)","Bash(opsx:*)","Bash(ls:*)","Bash(cat:*)","Bash(grep:*)","Bash(rg:*)","Bash(find:*)","Bash(node:*)","Bash(python3:*)",
-       "Bash(jq:*)","Bash(head:*)","Bash(tail:*)","Bash(wc:*)","Bash(sed -n:*)","Bash(diff:*)","Bash(sort:*)","Bash(bash tests/:*)","Bash(herdr agent:*)","Bash(herdr pane read:*)",
-       "Bash(git show:*)","Bash(git branch:*)","Bash(git rev-parse:*)","Bash(git fetch:*)","Bash(git merge-base:*)","Bash(git merge:*)","Bash(git remote:*)","Bash(mkdir:*)",
-       "Bash(glab mr view:*)","Bash(glab mr list:*)","Bash(glab mr diff:*)","Bash(glab ci:*)","Bash(gh pr view:*)","Bash(gh pr checks:*)","Bash(gh pr list:*)"]
-# merge 不在 deny：settings 的 deny 蓋得過 hook 的放行，所以 merge 交給 opsx-grant-gate.sh 的 merge_gate 單獨把關；
-# 放進 allow 是為了閘門放行那一次不再跳 Claude Code 自己的權限框。
-allow += ["Bash(glab mr merge:*)", "Bash(gh pr merge:*)"]
-deny=["Bash(git push --force:*)","Bash(git push -f:*)","Bash(deploy.sh:*)","Bash(sops:*)","Bash(rm -rf /:*)"]
-try:
-    g=tomllib.load(open(os.path.join(sd,"grants.toml"),"rb")).get("repos",{}).get(repo,{})
-    if g.get("push"): allow.append("Bash(git push:*)")
-    if g.get("mr"): allow+=["Bash(glab mr create:*)","Bash(glab mr update:*)","Bash(gh pr create:*)","Bash(gh pr edit:*)","Bash(glab issue note:*)","Bash(glab issue comment:*)","Bash(gh issue comment:*)"]
-    if g.get("migrate"): allow+=["Bash(pnpm db:migrate:*)","Bash(alembic upgrade:*)"]
-except FileNotFoundError: pass
-safefile.write_atomic(sys.argv[1], json.dumps({"permissions":{"allow":allow,"deny":deny,"additionalDirectories":dirs}},indent=2))
 PY
 }

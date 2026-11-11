@@ -50,7 +50,8 @@ case "$1 $2" in
     [ -z "${OPSX_TEST_PANE_READ_FAIL:-}" ] || herdr_err pane_not_found read
     if [ -n "${OPSX_TEST_PANE_ONCE:-}" ] && [ -f "$OPSX_TEST_PANE_ONCE" ]; then cat "$OPSX_TEST_PANE_ONCE"; rm -f "$OPSX_TEST_PANE_ONCE"
     else printf '%s\n' "${OPSX_TEST_PANE_TEXT:-}"; fi ;;
-  "pane send-keys") echo '{"result":{"type":"ok"}}' ;;
+  # OPSX_TEST_ON_SEND_KEYS 設了就拿整串參數呼叫它（relaunch 測送 esc 那一刻的 dispatch.json）
+  "pane send-keys") [ -n "${OPSX_TEST_ON_SEND_KEYS:-}" ] && bash "$OPSX_TEST_ON_SEND_KEYS" "$@"; echo '{"result":{"type":"ok"}}' ;;
   # 真格式（2026-11-06 在 pane 裡實跑存下來）：{"id":"cli:agent:list","result":{"agents":[{pane_id:"w1:p2",agent_status,…}],"type":"agent_list"}}
   "agent list")
     # OPSX_TEST_HERDR_LIST_FAIL 設了就把它的值當 stderr 原文、非 0 結束（模擬 socket 連不到）
