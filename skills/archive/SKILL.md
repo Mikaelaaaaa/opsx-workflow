@@ -22,7 +22,7 @@ If `openspec/workplan.yaml` exists, silently verify it matches reality before pr
 
 1. For each PR where status ≠ `merged`:
    - `gh pr list --head <branch> --json state --jq '.[0].state' 2>/dev/null` — is it merged on GitHub?
-   - If merged on GitHub but workplan says `pending`/`in-progress` → auto-update to `merged`
+   - If merged on GitHub but workplan says `pending`/`in-progress` → auto-update to `merged`, except the PR that holds the change you are archiving: step 6 marks that one, after step 4b's `opsx late` has passed (marking it here would release the cards that depend on it while commits pushed after the merge are still not in main)
 2. For each change where status ≠ `done`:
    - Check if `openspec/changes/<name>/` still exists
    - If missing (archived or deleted) → auto-update to `done`

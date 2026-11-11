@@ -97,6 +97,55 @@ late; rc=$?
 assert_eq "$rc" 2 "沒有分支名要退出 2"
 assert_grep 'branch' "$FX/err"
 
+# --- 合併後分支被 force-push：fetch 要能覆蓋 tracking ref（R1.1） ---
+printf '{"demo/g":{"mode":"stopped","agent":"claude","pane":"w1:p1","branch":"feat/g/m"}}' > "$OPSX_STATE_DIR/dispatch.json"
+git -C "$W" reset -q --hard "$S1"
+git -C "$W" commit -q --allow-empty -m "fix: rewritten"
+git -C "$W" push -q -f origin feat/g/m
+S4="$(git -C "$W" rev-parse HEAD)"
+late; rc=$?
+assert_eq "$rc" 1 "force-push 後要退出 1：$(cat "$FX/out" "$FX/err")"
+assert_eq "$(sed -n 1p "$FX/out")" "late 1 ${S4:0:7} feat/g/m"
+
+# --- 另有一個本機路徑的 remote：host 對得上的 origin 照常被選中（R1.2） ---
+git -C "$R" remote add backup "$BARE"
+late; rc=$?
+assert_eq "$rc" 1 "多一個本機路徑 remote 不能讓整個 repo 退出 2：$(cat "$FX/out" "$FX/err")"
+assert_eq "$(sed -n 1p "$FX/out")" "late 1 ${S4:0:7} feat/g/m"
+git -C "$R" remote remove backup
+
+# --- 空標題的 commit 在最舊的位置（R1.3） ---
+git -C "$W" reset -q --hard "$S1"
+git -C "$W" commit -q --allow-empty --allow-empty-message -m ""
+git -C "$W" commit -q --allow-empty -m "fix: top"
+git -C "$W" push -q -f origin feat/g/m
+S5="$(git -C "$W" rev-parse HEAD)"
+late; rc=$?
+assert_eq "$rc" 1 "空標題不能崩潰：$(cat "$FX/out" "$FX/err")"
+assert_eq "$(sed -n 1p "$FX/out")" "late 2 ${S5:0:7} feat/g/m"
+assert_not_grep Traceback "$FX/err"
+
+# --- git 逾時（R1.4）：ls-remote 睡過時限，退出 2，不是 none ---
+STUB="$FX/stub"; mkdir -p "$STUB"
+printf '#!/usr/bin/env bash\ncase "$*" in *ls-remote*) exec sleep 5 ;; esac\nexec %s "$@"\n' "$(command -v git)" > "$STUB/git"; chmod +x "$STUB/git"
+OPSX_LATE_GIT_TIMEOUT=1 PATH="$STUB:$PATH" late; rc=$?
+assert_eq "$rc" 2 "git 逾時要退出 2：$(cat "$FX/out" "$FX/err")"
+assert_grep '逾時' "$FX/err"
+assert_not_grep none "$FX/out"
+
+# --- head_sha 不是 sha（R1.5） ---
+mr_cache "--x"
+late; rc=$?
+assert_eq "$rc" 2 "head_sha 不是 sha 要退出 2"
+assert_grep 'head_sha' "$FX/err"
+assert_grep '[-][-]x' "$FX/err"
+mr_cache "$S1"
+
+# --- /archive 的 step 0 不先標這個 change 所屬的 PR 為 merged，由 step 6 在 opsx late 通過後才標（R2.1） ---
+sed -n '/^### 0\./,/^### 1\./p' "$OPSX_ROOT/skills/archive/SKILL.md" > "$FX/step0"
+assert_grep 'step 6' "$FX/step0"
+assert_grep 'except' "$FX/step0"
+
 # --- /archive 在搬目錄之前叫 opsx late ---
 SK="$OPSX_ROOT/skills/archive/SKILL.md"
 late_line="$(grep -n 'opsx late' "$SK" | head -1 | cut -d: -f1)"

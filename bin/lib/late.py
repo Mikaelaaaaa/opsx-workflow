@@ -17,7 +17,8 @@ import chain  # noqa: E402
 import jsonfile  # noqa: E402
 import safefile  # noqa: E402
 
-GATE_QUESTION = "PR 合併後分支又多了 %d 個 commit，沒進 main：要開後續 PR 帶進來嗎？"
+GIT_TIMEOUT = int(os.environ.get("OPSX_LATE_GIT_TIMEOUT", "60"))   # absent 與預設同義：不設就是 60 秒
+GATE_QUESTION ="PR 合併後分支又多了 %d 個 commit，沒進 main：要開後續 PR 帶進來嗎？"
 
 
 class Unknown(Exception):
@@ -25,23 +26,29 @@ class Unknown(Exception):
 
 
 def git(top, *args):
-    p = subprocess.run(["git", "-C", top] + list(args), capture_output=True, text=True)
+    """一個 git 指令。一個卡住的 remote 會卡住拿著 lock 的整輪 coordinate，所以有時限、不問密碼。"""
+    try:
+        p = subprocess.run(["git", "-C", top] + list(args), capture_output=True, text=True, timeout=GIT_TIMEOUT,
+                           env={**os.environ, "GIT_TERMINAL_PROMPT": "0"})
+    except subprocess.TimeoutExpired as e:
+        raise Unknown("git %s 逾時（%d 秒）" % (" ".join(args[:3]), GIT_TIMEOUT)) from e
     return p.returncode, p.stdout.strip(), p.stderr.strip()
 
 
 def host_of(url):
-    m = re.match(r"^(?:[a-z+]+://)?(?:[^@/]+@)?([^/:]+)", url)
-    if not m:
-        raise Unknown("無法從 %r 取出 host" % url)
-    return m.group(1)
+    """URL 的 host（小寫）；本機路徑與 file:// 沒有 host，回 None。"""
+    m = re.match(r"^(?:[A-Za-z+]+://)?(?:[^@/]+@)?([^/:]+)", url)
+    return m.group(1).lower() if m else None
 
 
 def remote_for(top, url):
     host = host_of(url)
+    if host is None:
+        raise Unknown("mr.url %r 取不出 host" % url)
     _, out, _ = git(top, "config", "--get-regexp", r"^remote\..*\.url$")
     found = []
     for line in out.splitlines():
-        key, value = line.split(None, 1)
+        key, _, value = line.partition(" ")
         if host_of(value) == host:
             found.append(key[len("remote."):-len(".url")])
     if len(found) != 1:
@@ -71,7 +78,8 @@ def late_commits(top, remote, branch, head_sha):
     if not out:
         return []
     tracking = "refs/remotes/%s/%s" % (remote, branch)
-    rc, _, err = git(top, "fetch", "-q", remote, "%s:%s" % (ref, tracking))
+    # tracking ref 只是這裡的快取，+ 讓被 force-push 或 rebase 過的分支也抓得下來
+    rc, _, err = git(top, "fetch", "-q", remote, "+%s:%s" % (ref, tracking))
     if rc != 0:
         raise Unknown("git fetch %s %s 失敗：%s" % (remote, branch, err[:200]))
     rc, _, _ = git(top, "cat-file", "-e", head_sha + "^{commit}")
@@ -80,7 +88,11 @@ def late_commits(top, remote, branch, head_sha):
     rc, out, err = git(top, "log", "--format=%H %s", "%s..%s" % (head_sha, tracking))
     if rc != 0:
         raise Unknown("git log %s..%s 失敗：%s" % (head_sha, tracking, err[:200]))
-    return [tuple(line.split(" ", 1)) for line in out.splitlines()]
+    commits = []
+    for line in out.splitlines():
+        sha, _, title = line.partition(" ")   # 最舊的一行標題是空的時，strip 已吃掉行尾空白
+        commits.append((sha, title))
+    return commits
 
 
 def gate_status(gates_path, gate_id):
@@ -114,6 +126,8 @@ def run(top, slug, state, want_gate, mr):
         raise Unknown("卡沒有 MR 連結（report.md 的 ## MR），mr.error=%s" % mr.get("error"))
     if not mr.get("head_sha"):
         raise Unknown("mr.head_sha 是空的（%s），mr.error=%s" % (mr["url"], mr.get("error")))
+    if not re.fullmatch(r"[0-9a-f]{7,64}", mr["head_sha"]):
+        raise Unknown("mr.head_sha %r 不是 sha（%s）" % (mr["head_sha"], mr["url"]))
     remote = remote_for(top, mr["url"])
     branch = branch_of(top, slug, state)
     commits = late_commits(top, remote, branch, mr["head_sha"])
