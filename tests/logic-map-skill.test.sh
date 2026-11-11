@@ -36,6 +36,11 @@ grep -F '# 邏輯表：' "$EX" > "$FX/titles"
 ! grep -qE '^# 邏輯表：[a-z]+(\([^)]*\))?!?: ' "$FX/titles" || fail "範例標題是 conventional-commit 句子：$(cat "$FX/titles")"
 ! grep -qvE '^# 邏輯表：[a-z]+/[a-z0-9-]+/[a-z0-9-]+$' "$FX/titles" || fail "範例標題不是 <type>/<slug>/<user> 分支名：$(cat "$FX/titles")"
 
+# --- git 指令先切到 <repo> 再跑：`git -C <repo> …` 對不到 autopilot allow 的 git diff / git rev-parse 前綴 ---
+assert_fixed 'cd <repo>' "$STEPS"
+assert_fixed 'git diff --name-only' "$STEPS"
+assert_not_fixed 'git -C <repo>' "$STEPS"
+
 # --- 純文字圖：沒有 mermaid，只留「不用 Mermaid」的說明句 ---
 grep -rniF mermaid "$SK" "$DIR/references" > "$FX/mermaid" || true
 ! grep -vF 'not Mermaid' "$FX/mermaid" | grep -q . || fail "mermaid 出現在說明句以外：$(cat "$FX/mermaid")"

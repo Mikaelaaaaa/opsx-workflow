@@ -17,11 +17,11 @@ Do not read `openspec/`, `report.md`, PR descriptions, or commit messages. They 
 
 ## Steps
 
-1. List the changed files: `git -C <repo> diff --name-only <base>...<head>`. Skip tests, fixtures, docs, and lockfiles. Keep source, hooks, scripts, and skill files whose text is executed as instructions.
+1. Run `cd <repo>` as its own Bash call; every git command below runs from there. List the changed files: `git diff --name-only <base>...<head>`. Skip tests, fixtures, docs, and lockfiles. Keep source, hooks, scripts, and skill files whose text is executed as instructions.
 2. For each kept file, read the diff, then read every changed function in full. A condition often sits outside the changed lines but decides whether they run.
 3. Group the changes into features. A feature is one behavior someone outside the code would notice ("the commit gate picks the repo from `git -C`"). One PR usually has one to three.
 4. For each feature, write the three parts below.
-5. Take the title from the branch name only. If `<head>` is a branch name, use it; otherwise run `git -C <repo> rev-parse --abbrev-ref HEAD`. Do not read the commit message or the PR description to name the map: a PR title is intent too.
+5. Take the title from the branch name only. If `<head>` is a branch name, use it; otherwise run `git rev-parse --abbrev-ref HEAD`. Do not read the commit message or the PR description to name the map: a PR title is intent too.
 6. Write `logic-map.md` to the output path. Print the path and the number of features, nodes, and ⚠ marks.
 
 ## The three parts of a feature
