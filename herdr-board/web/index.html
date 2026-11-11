@@ -419,6 +419,9 @@ function progressLine(progress,repos){
 const toggleProgressClass=(cur,cls)=>cur===cls?null:cls;
 const byProgressClass=(cards,cls)=>cls?cards.filter(c=>c.progress_class===cls):cards;
 const progressFilterMark=cls=>cls?`<button class="link" data-act="progress-filter" data-class="${cls}">篩選：${PROGRESS_LABEL[cls]} ×</button>`:'';
+const counterTail=cls=>cls?' · '+progressFilterMark(cls):'';
+/* 篩選中一區的卡：collect 也給收進 session 的主 change 卡分類，所以這裡不像 homeSect 那樣排除它們 */
+const progressSect=(cards,cls,name)=>byProgressClass(cards,cls).filter(c=>c.section===name);
 const notDispatchedNames=(progress,repos)=>repos.flatMap(r=>(progress||{})[r]?progress[r].not_dispatched_planned:[]);
 
 /* ---------- 範圍 ---------- */
@@ -544,9 +547,12 @@ function rowSession(s){
 const panel=(title,n,sub,body)=>`<section class="panel"><div class="panel-h"><span class="h2">${title}</span><span class="n">${n}</span>${sub?`<span class="sub">${sub}</span>`:''}</div>${body}</section>`;
 
 function renderHome(){
-  /* 篩進度類別時只留 progress_class 符合的卡；session、沒對到卡的 agent、孤兒 pane 都沒有 progress_class，篩選中不畫 */
+  /* 篩進度類別時只留 progress_class 符合的卡，收進 session 的卡單獨畫、收件匣裡符合的卡另成一區；
+     session 列、沒對到卡的 agent、孤兒 pane 都沒有 progress_class，篩選中不畫 */
   const pc=ui.progressClass;
-  const H=name=>homeSect(byProgressClass(data.cards.filter(inScope),pc).map(c=>pendApply(c,key(c),live.pending)),pc?[]:data.sessions.filter(inScope),name);
+  const cards=data.cards.filter(inScope).map(c=>pendApply(c,key(c),live.pending));
+  const H=name=>pc?{sessions:[],cards:progressSect(cards,pc,name)}:homeSect(cards,data.sessions.filter(inScope),name);
+  const inb=pc?progressSect(cards,pc,'收件匣'):[];
   const A=H('待處理'),R=H('進行中'),Y=H('待指派'),D=H('已完成');
   const n=x=>x.sessions.length+x.cards.length;
   const list=(x,row)=>x.sessions.map(rowSession).join('')+x.cards.map(row).join('');
@@ -557,6 +563,7 @@ function renderHome(){
   let h=renderBanner()+(pc==='not_dispatched'?panel('還沒建殼',nd.length,'workplan 排了、還沒建殼的項目',nd.length?nd.map(x=>`<div class="row"><div class="main"><div class="l1"><span class="title">${esc(x)}</span></div></div></div>`).join(''):'<div class="empty">沒有</div>'):'')+panel('待處理',n(A),'只有你能做的：授權、決定、合併、終端機卡住',n(A)?list(A,rowAttn):'<div class="empty">沒有等你的事</div>');
   h+=panel('進行中',n(R)+un.length+orph.length,'進度 status.json · 狀態 herdr',(list(R,rowRunning)+un.map(rowUnmatched).join('')+(orph.length?rowOrphanSummary(orph.length)+orph.map(rowOrphan).join(''):''))||'<div class="empty">沒有執行中的工作</div>');
   h+=panel(ui.scope==='ws'?`待指派 · ${esc(scopeLabel())}`:'待指派',n(Y),'explore 過、還沒派出去的（剛收進來的在收件匣）',(n(Y)?list(Y,rowReady):'<div class="empty">沒有待指派的工作</div>')+(leg.length?`<div class="empty">舊 schema 的 change 不列（沒有 inbox.md、不是 schema: opsx）：${leg.map(([r,n])=>`${esc(r)} ${n}`).join(' · ')}</div>`:''));
+  if(inb.length)h+=panel('收件匣',inb.length,'還沒 explore 的卡',inb.map(rowInbox).join(''));
   h+=`<section class="panel"><div class="panel-h"><button class="tg h2" data-act="done-toggle" aria-expanded="${ui.doneOpen}"><span class="chev"></span>已完成</button><span class="n">${n(D)}</span></div>${ui.doneOpen?(n(D)?list(D,rowDone):'<div class="empty">還沒有</div>'):''}</section>`;
   return h;
 }
@@ -730,7 +737,7 @@ function refocus(i){i.focus();if(i.tagName!=='SELECT')i.setSelectionRange(i.valu
 /* 重畫保焦點 end */
 function render(){
   const A=homeSect(data.cards.filter(inScope),data.sessions.filter(inScope),'待處理');
-  $('#counter').innerHTML=counterHtml(data.cards,data.sessions,inScope)+(ui.progressClass?' · '+progressFilterMark(ui.progressClass):'');
+  $('#counter').innerHTML=counterHtml(data.cards,data.sessions,inScope)+counterTail(ui.progressClass);
   $('#home-n').textContent=A.sessions.length+A.cards.length||'';
   $('#inbox-n').textContent=sect('收件匣').length+(data.unfiled||[]).length||'';
   for(const t of ['home','inbox','log'])$('#tab-'+t).setAttribute('aria-selected',ui.tab===t);

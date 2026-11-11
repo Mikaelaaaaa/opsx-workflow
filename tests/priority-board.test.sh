@@ -18,7 +18,7 @@ const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({'&': '&amp
 const h0 = html.indexOf('const hhmm=');
 if (h0 < 0) throw new Error('index.html 找不到 const hhmm=');
 const hhmmSrc = html.slice(h0, html.indexOf('\n', h0));
-const {priorityBadge, progressLine, toggleProgressClass, byProgressClass, progressFilterMark, notDispatchedNames, PRIO_HINT} = new Function('esc', hhmmSrc + html.slice(s, e) + ';return {priorityBadge, progressLine, toggleProgressClass, byProgressClass, progressFilterMark, notDispatchedNames, PRIO_HINT};')(esc);
+const {priorityBadge, progressLine, toggleProgressClass, byProgressClass, progressFilterMark, notDispatchedNames, progressSect, counterTail, PRIO_HINT} = new Function('esc', hhmmSrc + html.slice(s, e) + ';return {priorityBadge, progressLine, toggleProgressClass, byProgressClass, progressFilterMark, notDispatchedNames, progressSect, counterTail, PRIO_HINT};')(esc);
 
 // 改等級的提示：等級只排還沒派出去的卡，在跑的卡不受影響
 assert.ok(PRIO_HINT.includes('還沒派出去') && PRIO_HINT.includes('不會') && PRIO_HINT.includes('被停'), `提示文字：${PRIO_HINT}`);
@@ -105,6 +105,24 @@ assert.deepStrictEqual(notDispatchedNames({r: p, s: {...p, not_dispatched_planne
 assert.deepStrictEqual(notDispatchedNames({r: p, s: {...p, not_dispatched_planned: ['s-y']}}, ['r', 's', 't']), ['web-x', 's-y']);
 assert.deepStrictEqual(notDispatchedNames(undefined, ['r']), []);
 assert.ok(html.includes("pc==='not_dispatched'?notDispatchedNames(data.progress,scopeRepos())"), '篩還沒派時首頁畫還沒建殼的項目');
-assert.ok(html.includes("pc=ui.progressClass") && html.includes('byProgressClass(data.cards.filter(inScope),pc)'), '首頁各區照 ui.progressClass 篩卡');
 assert.ok(html.includes("a==='progress-filter'){ui.progressClass=toggleProgressClass(ui.progressClass,btn.dataset.class)"), '點數字切換篩選');
+
+// 篩選中各區的卡：收進 session 的主 change 卡也要出現（不篩時由 session 列代表），收件匣裡符合的卡也要畫
+const home = [
+  {slug: 'run', section: '進行中', progress_class: 'developing'},
+  {slug: 'in-session', section: '進行中', progress_class: 'developing', session: 'r/feat'},
+  {slug: 'other', section: '進行中', progress_class: 'testing'},
+  {slug: 'ready', section: '待指派', progress_class: 'not_dispatched'},
+  {slug: 'fresh', section: '收件匣', progress_class: 'not_dispatched'},
+];
+assert.deepStrictEqual(progressSect(home, 'developing', '進行中').map(c => c.slug), ['run', 'in-session'], '收進 session 的卡篩選中要出現');
+assert.deepStrictEqual(progressSect(home, 'not_dispatched', '待指派').map(c => c.slug), ['ready']);
+assert.deepStrictEqual(progressSect(home, 'not_dispatched', '收件匣').map(c => c.slug), ['fresh'], '收件匣裡還沒派的卡要畫');
+assert.ok(html.includes("pc?{sessions:[],cards:progressSect(cards,pc,name)}:homeSect(cards,"), '首頁各區篩選中走 progressSect');
+assert.ok(html.includes("progressSect(cards,pc,'收件匣')"), '篩選中首頁多畫收件匣裡符合的卡');
+
+// 篩選標記接到 counter
+assert.ok(text(counterTail('mergeable')).includes('篩選：可合併 ×'), `有篩選時 counter 帶標記：${counterTail('mergeable')}`);
+assert.strictEqual(counterTail(null), '', '取消後 counter 沒有標記');
+assert.ok(html.includes("counterHtml(data.cards,data.sessions,inScope)+counterTail(ui.progressClass)"), 'render 把標記接到 counter');
 JS

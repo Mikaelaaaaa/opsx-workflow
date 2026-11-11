@@ -296,6 +296,18 @@ class ProgressLinesTest(unittest.TestCase):
         self.assertEqual([y for y, text in scr.lines if "另 2 個 repo" in text], [4])
         self.assertEqual(min(y for y, text in scr.lines if "待處理 ·" in text), 6, "卡片從 2 + 4 行進度之後開始")
 
+    def test_short_terminal_still_shows_cursor_row(self):
+        scr = DrawScr(h=9)
+        rows = tm.rows(FIVE, done_open=False)
+        cur = tm.Cursor(rows)
+        cur.move(99)
+        tui.draw(scr, rows, cur, FIVE, "", None, None)
+        self.assertEqual(len(scr.reversed), 1, "游標在最後一張卡時反白列仍要畫出來：%s" % scr.lines)
+
+    def test_tiny_terminal_does_not_write_outside(self):
+        rows = tm.rows(FIVE, done_open=False)
+        tui.draw(DrawScr(h=4), rows, tm.Cursor(rows), FIVE, "", None, None)
+
 
 def typed(*keys):
     box = tm.LineInput()
@@ -416,14 +428,23 @@ class FakeScr:
 
 
 class DrawScr(FakeScr):
-    """記下 draw 每次 addstr 的 (y, 文字)。"""
+    """記下 draw 每次 addstr 的 (y, 文字)，反白的列另記；跟真的 curses 一樣，寫到視窗外丟 curses.error。"""
 
-    def __init__(self):
+    def __init__(self, h=24):
         super().__init__([])
+        self.h = h
         self.lines = []
+        self.reversed = []
+
+    def getmaxyx(self):
+        return (self.h, 80)
 
     def addstr(self, y, x, text, *attr):
+        if y >= self.h:
+            raise curses.error("addwstr() returned ERR")
         self.lines.append((y, text))
+        if attr and attr[0] == curses.A_REVERSE:
+            self.reversed.append(text)
 
 
 class FakeFeed:
