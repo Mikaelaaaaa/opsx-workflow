@@ -86,11 +86,13 @@ On FAIL: read the log, fix, with a scope guard (a fix that needs files outside t
 | | Interactive (default) | Autopilot (`--auto`) |
 |---|---|---|
 | Ambiguity | ask with **AskUserQuestion** | decide, log it in decisions.tsv |
-| Level-two actions (push, MR, migrate, install, delete, external API, `.env`) | ask | the grant hook decides from grants.toml / dispatch.json; denied → gate (step 5) |
+| Level-two actions (push, MR, migrate, install, delete, external API, `.env`, a test file in a directory with no tracked tests: `test-path`) | ask | the grant hook decides from grants.toml / dispatch.json; denied → gate (step 5) |
 | Commit | after the user says so | after the change's tests are green |
 | Pausing | on unclear task, design issue, error | never; a design issue becomes a gate or an inbox card, not a stop |
 
 Autopilot never touches `main`, never force-pushes, never merges. Those are level three and the hook denies them regardless of mode.
+
+Speaking to a customer or anyone outside the team (an issue comment, an email, a chat message) is level three too, but the grant hook cannot see it, so not being denied does not make it allowed. Before you speak, write a `type: approval` gate and stop on that action.
 
 ## When the main change has subs/
 
