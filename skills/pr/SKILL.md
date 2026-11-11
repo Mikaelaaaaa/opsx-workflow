@@ -18,7 +18,7 @@ Turn a reviewed change into a merge request the reviewer and the PM can both rea
 
 ## Where you are
 
-`openspec/changes/<slug>/report.md` exists (review ran) and has no MR URL yet. If report.md is missing, stop and say `/review <slug>` comes first; the Stop hook will say the same. If report.md still lists items under `待修（範圍內）`, stop and say `/apply <slug>` comes first; the Stop hook will say the same. If it already has an MR URL, this is an update: regenerate the description and `glab mr update` / `gh pr edit`. The update path never comments on the issue; step 5b runs only for a new MR.
+`openspec/changes/<slug>/report.md` exists (review ran) and has no MR URL yet. If report.md is missing, stop and say `/opsx-workflow:review <slug>` comes first; the Stop hook will say the same. If report.md still lists items under `待修（範圍內）`, stop and say `/opsx-workflow:apply <slug>` comes first; the Stop hook will say the same. If it already has an MR URL, this is an update: regenerate the description and `glab mr update` / `gh pr edit`. The update path never comments on the issue; step 5b runs only for a new MR.
 
 ## Steps
 
@@ -39,10 +39,10 @@ Turn a reviewed change into a merge request the reviewer and the PM can both rea
    - GitHub: `gh issue comment <upstream_url> --body "<mr url>"`, as its own Bash command for the same reason as step 4: the sandbox exclusion is `gh issue comment *`.
 
    The comment is the MR link and nothing else; never close the issue or change its labels. If the command exits non-zero, or inbox.md has no `upstream_url` (missing `upstream_url` counts as a failure; do not guess the project), add one line under `## MR` in report.md, `issue 回寫失敗：<reason>` (the first stderr line, or `缺 upstream_url`), and go on to step 6. A failed back-link does not stop /pr: the MR is already open. When the grant hook denies the command, that is a failure too: if the deny message carries `action: mr` (a one-time `mr` grant was used up by step 4), write `issue 回寫失敗：無 mr 授權`; for any other deny, use the first line of the deny message as the reason. Then go on; do not write a gate and do not retry, even though the deny message asks for a gate (apply step 5 names this exception).
-6. **Reply.** The URL, the title, what the Test plan says, and the two closing lines (skipped / unchecked / risks). Then continue to `/babysit <slug>` per `../../references/continue.md`: invoke it now unless a gate is open. Babysit handles CI and review threads and stops when the card is waiting for the user to merge.
+6. **Reply.** The URL, the title, what the Test plan says, and the two closing lines (skipped / unchecked / risks). Then continue to `/opsx-workflow:babysit <slug>` per `../../references/continue.md`: invoke it now unless a gate is open. Babysit handles CI and review threads and stops when the card is waiting for the user to merge.
 
 ## Guardrails
 
 - Push and MR creation need a level-two grant in autopilot; without one, write a gate and stop here.
 - No AI attribution in the title, body, or commits.
-- Do not merge. Do not resolve threads. That is `/babysit` for comments and the user for the merge button.
+- Do not merge. Do not resolve threads. That is `/opsx-workflow:babysit` for comments and the user for the merge button.

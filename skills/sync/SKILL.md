@@ -29,7 +29,7 @@ Four docs coexist in a project. Each has a distinct audience and scope — don't
 |-----|----------|-------|---------------|
 | `CLAUDE.md` | AI | Behavioral rules: what to do, what not to do, commands, conventions | Human (manual) |
 | `CODEBASE.md` | AI | Structural map: modules, exports, dependencies, entry points | `/sync` (auto) |
-| `CONTEXT.md` | AI | Domain language: glossary, relationships, flagged ambiguities | `/explore` (proposed, human-confirmed) |
+| `CONTEXT.md` | AI | Domain language: glossary, relationships, flagged ambiguities | `/opsx-workflow:explore` (proposed, human-confirmed) |
 | `docs/ARCHITECTURE.md` | Human | Visual architecture: Mermaid diagrams, flow diagrams, tech stack | `/sync` (auto) |
 
 `CLAUDE.md` is the king — it may include key structural info (e.g., a stacks table for an infra repo) when that info is also an operational instruction. Overlap with `CODEBASE.md` is fine; contradiction is not. When generating `CODEBASE.md`, check `CLAUDE.md` first and don't duplicate what's already there unless the structural detail goes deeper.
@@ -151,8 +151,8 @@ If `openspec/workplan.yaml` exists, verify it matches reality and reconcile afte
 ### Health check (auto)
 
 1. For each PR where status ≠ `merged`:
-   - `gh pr list --head <branch> --json state --jq '.[0].state' 2>/dev/null` — is it merged on GitHub?
-   - If merged on GitHub but workplan says `pending`/`in-progress` → auto-update to `merged`
+   - Find the forge from `git remote get-url gitlab` (else `origin`). A GitLab host: `glab mr list --source-branch <branch> --merged -F json`. `github.com`: `gh pr list --head <branch> --state merged --json number`. Any other host: skip this check and say so.
+   - If the list is not empty (merged on the forge) but workplan says `pending`/`in-progress` → auto-update to `merged`
 2. For each change where status ≠ `done`:
    - Check if `openspec/changes/<name>/` still exists
    - If missing (archived or deleted) → auto-update to `done`

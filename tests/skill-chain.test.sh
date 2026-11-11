@@ -13,13 +13,13 @@ check_node() { # check_node <skill> <next-command>
   grep -F -- '../../references/continue.md' "$sk" | grep -qF -- "$2" \
     || fail "no single line in $1/SKILL.md has both continue.md and '$2'"
 }
-check_node explore '/grill <slug>'
-check_node explore '/propose <slug>'
-check_node grill '/propose <slug>'
-check_node propose '/apply <name>'
-check_node apply '/review <slug>'
-check_node review '/pr <slug>'
-check_node pr '/babysit <slug>'
+check_node explore '/opsx-workflow:grill <slug>'
+check_node explore '/opsx-workflow:propose <slug>'
+check_node grill '/opsx-workflow:propose <slug>'
+check_node propose '/opsx-workflow:apply <name>'
+check_node apply '/opsx-workflow:review <slug>'
+check_node review '/opsx-workflow:pr <slug>'
+check_node pr '/opsx-workflow:babysit <slug>'
 
 assert_not_grep 'Do not run the review yourself' "$OPSX_ROOT/skills/apply/SKILL.md"
 
@@ -33,9 +33,9 @@ for w in '`wip:` commit' '[no-change]' 'clean' 'opsx next' 'opsx dispatch <slug>
   printf '%s' "$stop_line" | grep -qF -- "$w" || fail "收到 [<slug>] stop 那段要提到 $w：$stop_line"
 done
 
-for row in '| explore | `/grill <slug>`' '| explore | `/propose <slug>`' '| grill | `/propose <slug>`' \
-           '| propose | `/apply <slug>`' '| apply | `/review <slug>`' '| review | `/pr <slug>`' \
-           '| pr | `/babysit <slug>`' '| babysit | stop'; do
+for row in '| explore | `/opsx-workflow:grill <slug>`' '| explore | `/opsx-workflow:propose <slug>`' '| grill | `/opsx-workflow:propose <slug>`' \
+           '| propose | `/opsx-workflow:apply <slug>`' '| apply | `/opsx-workflow:review <slug>`' '| review | `/opsx-workflow:pr <slug>`' \
+           '| pr | `/opsx-workflow:babysit <slug>`' '| babysit | stop'; do
   assert_fixed "$row" "$CONT"
 done
 assert_fixed 'status: open' "$CONT"

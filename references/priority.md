@@ -22,6 +22,8 @@
 
 沒有證據不能填 impact：`impact` 有值而 `evidence` 空、`kind_of_work` 或 `impact` 有值域外的字，`opsx priority` 都拒絕並說是哪個欄位、哪個值。
 
+agent 開的卡（`source: agent:*`）由程式強制：`opsx new` 沒帶 `--kind-of-work` 就拒絕，incident 沒帶 `--impact` 與 `--evidence` 也拒絕；`opsx check <slug>` 與 Stop hook 檢查本卡與本卡開出去的卡，缺了不准往下。使用者開的卡不強制，沒寫當 planned。
+
 例：
 
 ```

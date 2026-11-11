@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 給 codex 的 AGENTS.md：codex 沒有 router hook 每句注入的規則，dispatch 把同一批規則渲染成檔放進 worktree。
 # 規則文字在 rules.sh（跟 router 同源）；接續規則與授權三級嵌 references/ 下的原檔。
-# 階段不寫進來：階段由每句 prompt 的 `/<stage> <slug>` 給。
+# 階段不寫進來：階段由每句 prompt 的 `/opsx-workflow:<stage> <slug>` 給。
 
 # shellcheck source=/dev/null
 source "$OPSX_ROOT/bin/lib/rules.sh"
@@ -17,7 +17,7 @@ render_agents_md() { # <interactive|autopilot>
   esac
   printf '# opsx 規則\n\n'
   printf '這張卡由 opsx 派工。下面的規則與 Claude Code 端每句 prompt 注入的是同一份；codex 沒有注入機制，靠這份文字遵守。\n'
-  printf '每句 prompt 是 `/<stage> <slug>`：讀 %s/skills/<stage>/SKILL.md 照做。接續規則裡「用 Skill 工具呼叫下一個 skill」在 codex 是讀那個 skill 檔照做。\n\n' "$OPSX_ROOT"
+  printf '每句 prompt 是 `/opsx-workflow:<stage> <slug>`（舊的 `/<stage> <slug>` 同義）：讀 %s/skills/<stage>/SKILL.md 照做。接續規則裡「用 Skill 工具呼叫下一個 skill」在 codex 是讀那個 skill 檔照做。\n\n' "$OPSX_ROOT"
   printf '## 這張卡的模式\n\n'
   printf '%s\n' "$mode_rule" | awk -F' · ' '{ for (i = 1; i <= NF; i++) print "- " $i }'
   printf '\n## 接續規則\n\n'

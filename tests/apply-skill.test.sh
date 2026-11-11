@@ -16,7 +16,7 @@ for k in '先 propose 沒有 tasks.md 的子殼' 'depends-on' 'subagent' '<主>-
 done
 
 # --- Scenario：apply skill 寫明疊回規則（openspec/changes/apply-fanout/specs/subchange-stack/spec.md）---
-for k in 'opsx stack' 'workplan 順序' '退出 3' 'session 自己重做' '/review' '/pr' '不在衝突標記上手解'; do
+for k in 'opsx stack' 'workplan 順序' '退出 3' 'session 自己重做' '/opsx-workflow:review' '/opsx-workflow:pr' '不在衝突標記上手解'; do
   has "$k" "$SUBS"
 done
 
@@ -37,7 +37,7 @@ for k in 'customer or anyone outside the team' 'level three' 'write a `type: app
 done
 
 # --- issue-backlink：/pr 5b 回原 issue 留 MR 連結是第二級 mr 的例外，閘門會判；其餘對外發話仍是第三級 ---
-has '`/pr` step 5b' "$MODES"
+has '`/opsx-workflow:pr` step 5b' "$MODES"
 has 'level two under `mr`' "$MODES"
 GR="$OPSX_ROOT/references/grants.md"
 grep -F '**要授權**' "$GR" | grep -qF '回原 issue 留 MR 連結' || fail "grants.md 第二級列要含回原 issue 留 MR 連結"
@@ -50,5 +50,5 @@ has 'unless a skill step names that deny as a failure to record' "$SK"
 has '## R<N>. review 退回' "$SK"
 has '測試先紅再修' "$SK"
 has '待修（範圍內）' "$OPSX_ROOT/skills/pr/SKILL.md"
-has '/apply <slug>' "$OPSX_ROOT/skills/pr/SKILL.md"
+has '/opsx-workflow:apply <slug>' "$OPSX_ROOT/skills/pr/SKILL.md"
 echo ok

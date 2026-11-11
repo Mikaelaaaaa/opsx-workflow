@@ -47,7 +47,7 @@ fi
 PY_FAIL="opsx 授權閘門：python 執行失敗（${OPSX_PY}），讀不到授權，先擋下。跑 opsx init --global"
 
 tool="$(hook_tool)"; cmd="$(hook_cmd)"; file="$(hook_file)"
-GATE_MSG="用 Edit 或 Write 寫 gates.md（type: approval | decision，要使用者在終端機跑指令的另加 needs: run；問題、建議、證據、風險、沒回答的預設；不要用 Bash 寫，opened_at 不用寫，hook 會補），然後做能做的；人在板上回了會自動繼續"
+GATE_MSG="用 Edit 或 Write 寫 gates.md（type: approval | decision，要使用者在終端機跑指令的另加 needs: run，decision 要等別張卡合進 main 才能做的另加 waits-on: <卡名>；問題、建議、證據、風險、沒回答的預設；不要用 Bash 寫，opened_at 不用寫，hook 會補），然後做能做的；人在板上回了會自動繼續"
 
 level3() { deny "opsx 授權閘門：「$1」是永遠要人的動作（第三級），任何授權蓋不掉。$GATE_MSG"; }
 
@@ -70,7 +70,7 @@ sys.path.insert(0, os.environ["OPSX_LIB"]); import authz
 print(authz.load(os.environ["OPSX_SD"]).get(os.environ["OPSX_KEY"], {}).get("merge_approved") or "")
 PY
 )" || deny "$PY_FAIL"
-  [ -n "$approved" ] || deny "opsx 授權閘門：merge 是永遠要人的動作（第三級）。要人在看板上按「合併」（opsx merge ${slug}）才會放行；在這之前把 MR 弄到五條件全綠（/babysit），不要自己合"
+  [ -n "$approved" ] || deny "opsx 授權閘門：merge 是永遠要人的動作（第三級）。要人在看板上按「合併」（opsx merge ${slug}）才會放行；在這之前把 MR 弄到五條件全綠（/opsx-workflow:babysit），不要自己合"
   want_iid="$(st_mr_url "$d" | grep -oE '[0-9]+$' || true)"
   if [ -n "$cmd_iid" ] && [ "$cmd_iid" != "$want_iid" ]; then
     deny "opsx 授權閘門：核准的是這張卡的 MR ${want_iid:-（report.md 沒有）}，指令要合併的是 ${cmd_iid}"
@@ -136,14 +136,19 @@ if [ "$tool" = "Edit" ] || [ "$tool" = "Write" ]; then
   [ "$UNMAPPED" = 1 ] && exit 0
   wtop="$(git -C "$(hook_cwd)" rev-parse --show-toplevel 2>/dev/null || true)"
   [ -n "$wtop" ] || exit 0
-  # 目錄還不存在時往上找最近存在的那層，用它判斷屬於哪個 worktree；pwd -P 讓 /tmp 與 /private/tmp 這類 symlink 對得上
+  case "$file" in /*) ;; *) deny "opsx 授權閘門：file_path 不是絕對路徑（${file}），分不出它在哪個 worktree，先擋下。用絕對路徑" ;; esac
+  # 下面往上找目錄是逐段剪字串，`..` 會讓它爬到跟檔案實際位置不同的地方
+  case "$file" in */../*|*/..) deny "opsx 授權閘門：file_path 含 ..（${file}），分不出它實際在哪個 worktree，先擋下。用不含 .. 的絕對路徑" ;; esac
+  # 目錄還不存在時往上找最近存在的那層，用它判斷屬於哪個 worktree；進不去就擋，不讓 git 默默失敗後放行
   base="${file%/*}"; missing=0
   while [ -n "$base" ] && [ ! -d "$base" ]; do base="${base%/*}"; missing=1; done
-  base="$(cd "${base:-/}" && pwd -P)"
+  real="$(cd "${base:-/}" && pwd -P)" || deny "opsx 授權閘門：進不了 ${base:-/}，分不出 ${file} 屬於哪個 worktree，先擋下"
+  base="$real"
   [ "$(git -C "$base" rev-parse --show-toplevel 2>/dev/null || true)" = "$wtop" ] || exit 0
   if [ "$missing" = 0 ]; then
-    tracked="$(git -C "$base" -c core.quotepath=off ls-files)" || deny "opsx 授權閘門：git ls-files 失敗（${base}），分不出這一層有沒有既有測試，先擋下"
-    printf '%s\n' "$tracked" | grep -qE '^([^/]*\.(test|spec)\.[^/]*|test_[^/]*\.py|[^/]*_test\.[^/]*)$' && exit 0
+    # :(glob) 的 * 不跨 /，所以只列這一層；樣式跟上面的檔名 case 同一組
+    tracked="$(git -C "$base" ls-files -- ':(glob)*.test.*' ':(glob)*.spec.*' ':(glob)test_*.py' ':(glob)*_test.*')" || deny "opsx 授權閘門：git ls-files 失敗（${base}），分不出這一層有沒有既有測試，先擋下"
+    [ -n "$tracked" ] && exit 0
   fi
   level2 test-path "測試檔寫進沒有既有測試的目錄（${file}）"
   allow
