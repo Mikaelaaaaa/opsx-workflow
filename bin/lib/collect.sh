@@ -11,6 +11,7 @@
 #        source, upstream, stale, priority{level, reason, overridden}（已歸檔或算不出來時 null）,
 #        notes[{at, text}]（inbox.md ## 派工指示，舊的在前）,
 #        merged[{id, when, source, text, kind_of_work, area, evidence?}]（inbox.md 的 ## 併入： 段，依檔案順序；已歸檔的卡是 []）,
+#        logic_map（卡目錄 logic-map.md 的全文，已歸檔的卡也讀；沒有檔時 null，讀不了時 null 並記一筆 errors）,
 #        session（收進 session 的主 change 才有："<repo>/<feature>"）,
 #        progress_class ∈ mergeable | waiting_on_you | testing | developing | not_dispatched（不在進度範圍內為 null）}
 # sessions[]：{repo, feature, section, main_done, main_total, sub_done, sub_total, current{slug, stage}|null,
@@ -240,6 +241,14 @@ def merged_of(inbox, slug, path):
             items.append(got)
     return items
 
+# logic-map.md 是 /pr 的 subagent 在看板刷新時寫的，讀到半個檔只壞這一張卡，不拖垮整份 collect
+def logic_map_of(path, key):
+    try:
+        return read(path, None)
+    except (UnicodeDecodeError, OSError) as e:
+        errors.append({"source": path, "message": "%s 的 logic-map.md 讀不了：%s" % (key, e)})
+        return None
+
 def kind_of(d):
     m = re.search(r"^kind:\s*(\S+)", read(os.path.join(d, ".openspec.yaml")), re.M)
     return m.group(1) if m else "dev"
@@ -318,6 +327,7 @@ for line in read(os.path.join(work, "cards.tsv")).split("\n"):
         "priority": priority_of(c["repo"], c["slug"], c["archived"], os.path.join(d, "inbox.md")),
         "notes": notes_of(inbox, c["slug"], os.path.join(d, "inbox.md")),
         "merged": [] if c["archived"] else merged_of(inbox, c["slug"], os.path.join(d, "inbox.md")),
+        "logic_map": logic_map_of(os.path.join(d, "logic-map.md"), key),
     })
 
 order = {"待處理": 0, "進行中": 1, "待指派": 2, "收件匣": 3, "已完成": 4}
