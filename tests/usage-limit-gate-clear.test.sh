@@ -24,17 +24,20 @@ assert_eq "$(count '^opsx answer')" 0 "暫停期間不代答：$(cat "$OPSX_FAKE
 grep -qF "$GATE" "$MEMO" || fail "memo 要記下卡在接 gate：$(cat "$MEMO")"
 assert_file "$CHAIN"
 
-# 暫停解除（重置時刻已過、畫面乾淨）、gate 仍 open：答重做、清計數、memo 清掉
-printf 'ok\n' > "$AR"; stuck_memo; gate_card "$GATE"; seed_chain
+# 暫停解除（重置時刻已過、畫面乾淨）、gate 仍 open：答重做、清計數、memo 清掉；collect 的快照仍把這個 gate 當作等人答，同一輪不能再通知人
+printf 'ok\n' > "$AR"; stuck_memo; seed_chain
+cards '[{"slug":"r1","section":"待處理","dispatch":'"$D"',"agent_status":"idle","open_gates":[{"id":"'"$GATE"'","opened_at":null}],"waiting":{"type":"等待決定","needs":null,"waits_on":null,"gate_id":"'"$GATE"'","question":"卡在哪","recommended":null,"options":["重做"]}}]'
 round || fail "rc: $(cat "$FX/out")"
 assert_grep '^opsx answer r1 --gate 卡在接 /apply #1 --repo .* -- 重做 /opsx-workflow:apply' "$OPSX_FAKE_LOG"
 assert_no_file "$CHAIN"
 if grep -qF "$GATE" "$MEMO"; then fail "答完要清 memo：$(cat "$MEMO")"; fi
+if grep -F '[demo/r1]' "$OPSX_FAKE_LOG" | grep -q 'agent prompt\|notification show'; then fail "答完同一輪不能再為這個 gate 通知：$(cat "$OPSX_FAKE_LOG")"; fi
 
-# 暫停解除時 gate 已被人答掉：不代答，memo 清掉
+# 暫停解除時 gate 已被人答掉：不代答，stop-chain 計數不動，memo 清掉
 stuck_memo; gate_card ""; seed_chain
 round || fail "rc: $(cat "$FX/out")"
 assert_eq "$(count '^opsx answer')" 0 "gate 已不是 open 不代答：$(cat "$OPSX_FAKE_LOG")"
+assert_file "$CHAIN"
 if grep -qF "$GATE" "$MEMO"; then fail "memo 要清掉：$(cat "$MEMO")"; fi
 
 # 沒有上限訊息、memo 沒有記錄：不動

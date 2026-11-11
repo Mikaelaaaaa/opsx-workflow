@@ -75,6 +75,7 @@ class Round:
         self.max_working = None
         self.woken = 0
         self.limit_panes = set()
+        self.stuck_answered = set()
         self.worktrees = {}
 
     def log(self, msg):
@@ -542,23 +543,25 @@ class Round:
                 self.memo["_limit_stuck"][card_key(c)] = ids
 
     def answer_stuck_gates(self, live, repo_paths):
-        """暫停解除後的第一輪：記下的「卡在接」gate 仍 open 的就答「重做」並清那張卡的 stop-chain 計數。
-        已被人答掉或卡已不在的記錄直接清掉。"""
+        """暫停解除後的第一輪：記下的「卡在接」gate 仍 open 的就答「重做」，答了才清那張卡的 stop-chain 計數，
+        同一輪不再為這張卡走 handle_gate（collect 的快照還把剛答的 gate 當作等人答）。
+        已被人答掉或卡已不在的記錄直接清掉，不動計數。記錄在答完之後才刪，答的過程出錯時下一輪還在。"""
         by_key = {card_key(c): c for c in live}
         for key in list(self.memo["_limit_stuck"]):
-            ids = self.memo["_limit_stuck"].pop(key)
             c = by_key.get(key)
-            if not c:
-                continue
-            still_open = [g["id"] for g in c["open_gates"]]
-            for gate in [i for i in ids if i in still_open]:
+            still_open = [g["id"] for g in c["open_gates"]] if c else []
+            answered = [i for i in self.memo["_limit_stuck"][key] if i in still_open]
+            for gate in answered:
                 stage = STUCK_GATE.match(gate).group(1)
                 self.log("-- %s 用量上限已過，hook 開的 gate「%s」代答重做" % (key, gate))
                 self.answer(c, repo_paths[c["repo"]], gate, "重做 /opsx-workflow:%s（用量上限期間 hook 開的 gate，額度恢復後繼續）" % stage)
-            try:
-                os.remove(os.path.join(self.state, "stop-chain", "%s-%s" % (c["repo"], c["slug"])))
-            except FileNotFoundError:
-                pass
+            if answered:
+                self.stuck_answered.add(key)
+                try:
+                    os.remove(os.path.join(self.state, "stop-chain", "%s-%s" % (c["repo"], c["slug"])))
+                except FileNotFoundError:
+                    pass
+            del self.memo["_limit_stuck"][key]
 
     def handle_gate(self, c, top):
         """派出去的卡的第一個 open gate，照 gaterule.decide 的處置答、停、或留給人。"""
@@ -1127,7 +1130,7 @@ def one_round(state, dry):
         w = c["waiting"]
         if not w:
             r.forget_waiting(c, live)
-        if c["dispatch"] and w and w["type"] != "可以合併" and not paused:
+        if c["dispatch"] and w and w["type"] != "可以合併" and not paused and card_key(c) not in r.stuck_answered:
             r.handle_gate(c, repo_paths[c["repo"]])
         if c["mr"] and c["mr"]["state"] == "ready":
             # 推了新 commit 再全綠是新的一次可以合併，所以綁 head sha

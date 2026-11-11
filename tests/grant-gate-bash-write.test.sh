@@ -43,6 +43,23 @@ out="$(gg 'echo K=v >> "$APP/.env"')"; assert_eq "$(decision "$out")" deny "整�
 reason "$out" | grep -qF '讀不到' || fail "deny 要說讀不到: $(reason "$out")"
 out="$(gg 'echo hi > "$OUT"')"; assert_eq "$out" "" "原文沒提到 env 或測試檔就不管"
 
+# >&檔名是寫檔、大小寫與 /dev 路徑
+for c in 'echo x >&src/newdir/a.test.ts' 'cat k > app/.Env' 'echo x > src/newdir/a.TEST.ts' 'echo x > /dev/../tmp/app/.env' "echo x > $R/app/.env"; do
+  out="$(gg "$c")"; assert_eq "$(decision "$out")" deny "要擋（${c}）: $(cat "$FX/hook.err")"
+done
+for c in 'cmd >&2' 'cmd 2>&1' 'echo x > /dev/null' 'echo x 2> /dev/stderr'; do
+  out="$(gg "$c")"; assert_eq "$out" "" "不該出聲（${c}）: $(reason "$out")"
+done
+# 已授權的寫檔只涵蓋寫它的那一段（有 env 授權）
+card_grants '["env"]'
+for c in 'echo K=v >> app/.env && ./evil.sh app/.env' 'echo K=v >> app/.env && node run.js app/.env' 'cp /tmp/x app/.env && chmod +x app/.env'; do
+  out="$(gg "$c")"; assert_eq "$(decision "$out")" deny "已授權的寫檔不能涵蓋別的段（${c}）: $(reason "$out")"
+done
+for c in 'echo K=v >> app/.env' 'cp /tmp/x app/.env'; do
+  out="$(gg "$c")"; assert_eq "$(decision "$out")" allow "已授權的寫檔本身要放行（${c}）: $(reason "$out")"
+done
+card_grants '[]'
+
 # 取不到字面目錄：deny 並說明
 for c in 'cp x.txt "$DEST"/a.test.ts' 'cp x.txt src/*/a.test.ts' 'echo x > $(pwd)/a.test.ts' 'cp x.txt ../a.test.ts'; do
   out="$(gg "$c")"; assert_eq "$(decision "$out")" deny "讀不到目錄要 deny（${c}）"

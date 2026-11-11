@@ -136,7 +136,7 @@ in_allow() { # <段>：Bash(<前綴>:*) 看前綴，Bash(<整句>) 看相等
   return 1
 }
 # 把指令拆成段，第一個沒涵蓋的存進 UNCOVERED（它缺的授權 action 存進 UNCOVERED_ACTION，是 allow 外的段則為空）、回 0；都涵蓋回 1。
-# 涵蓋：段屬於某個第二級類別而且那個類別有授權、是不碰檔案也不碰網路的小指令、或在 settings allow 裡
+# 涵蓋：段屬於某個第二級類別而且那個類別有授權；是不碰網路的小指令，而且沒有寫檔目標或目標都已授權；是 cp、mv、tee、git mv，而且目標都已授權；或在 settings allow 裡
 L2_ACTIONS=(push mr migrate delete install rebase)
 L2_REGEXES=("$RE_PUSH" "$RE_MR" "$RE_MIGRATE" "$RE_DELETE" "$RE_INSTALL" "$RE_REBASE")
 action_granted() { # <action>：整串逐條查授權時已放行的 action
@@ -145,13 +145,18 @@ action_granted() { # <action>：整串逐條查授權時已放行的 action
   return 1
 }
 UNCOVERED=""; UNCOVERED_ACTION=""
-WRITE_GRANTED=()   # bash_write_checks 查過授權、放行的寫檔目標：寫它的那一段算涵蓋
+WRITE_GRANTED=()   # bash_write_checks 查過授權、放行的寫檔目標；小指令的重導向與 cp、mv、tee 的目標都在這裡才算涵蓋
+write_target_ok() { # <目標>：已授權，或是這幾個裝置本身
+  local w
+  case "$1" in /dev/null|/dev/stdout|/dev/stderr|/dev/tty|/dev/fd/[0-9]*) return 0 ;; esac
+  for w in ${WRITE_GRANTED[@]+"${WRITE_GRANTED[@]}"}; do [ "$w" = "$1" ] && return 0; done
+  return 1
+}
 first_uncovered_segment() {
-  local segs seg i matched w
+  local segs seg i matched info kind targets t ungranted n
   segs="$(cmd_skeleton "$cmd" | "$OPSX_PY" -I "$OPSX_ROOT/bin/lib/cmdsegments.py" split)" || deny "opsx 授權閘門：拆不開指令的段（${OPSX_PY} cmdsegments.py split 失敗），先擋下"
   while IFS= read -r seg; do
     [ -n "$seg" ] || continue
-    case "$seg" in cd|"cd "*|echo|"echo "*|pwd|true|false|date|basename|dirname) continue ;; esac   # 不碰檔案也不碰網路的小指令
     matched=0
     for i in "${!L2_ACTIONS[@]}"; do
       printf '%s' "$seg" | grep -qE "${L2_REGEXES[$i]}" || continue
@@ -163,10 +168,19 @@ first_uncovered_segment() {
       if ! action_granted external; then UNCOVERED="$seg"; UNCOVERED_ACTION=external; return 0; fi
     fi
     [ "$matched" = 1 ] && continue
-    for w in ${WRITE_GRANTED[@]+"${WRITE_GRANTED[@]}"}; do
-      case "$seg" in *"$w"*) matched=1 ;; esac
-    done
-    [ "$matched" = 1 ] && continue
+    # 命令種類與寫檔目標（cmdsegments.py segment）：小指令不在 settings allow，帶重導向就得靠已授權的目標涵蓋；cp、mv、tee、git mv 同理
+    info="$(printf '%s' "$seg" | "$OPSX_PY" -I "$OPSX_ROOT/bin/lib/cmdsegments.py" segment)" || deny "opsx 授權閘門：讀不懂這段指令的寫檔目標（cmdsegments.py segment 失敗）：${seg}，先擋下"
+    kind="${info%%$'\n'*}"; targets=""
+    case "$info" in *$'\n'*) targets="${info#*$'\n'}" ;; esac
+    ungranted=0; n=0
+    while IFS= read -r t; do
+      [ -n "$t" ] || continue
+      n=$((n + 1)); write_target_ok "$t" || ungranted=1
+    done <<< "$targets"
+    case "$kind" in
+      cd|echo|pwd|true|false|date|basename|dirname) [ "$ungranted" = 0 ] && continue ;;
+      writer) [ "$ungranted" = 0 ] && [ "$n" -gt 0 ] && continue ;;
+    esac
     load_allow
     in_allow "$seg" && continue
     UNCOVERED="$seg"; UNCOVERED_ACTION=""; return 0
@@ -201,11 +215,11 @@ testpath_needs_grant() { # <絕對路徑>
 # 目錄讀不出來（含變數、命令替換、萬用字元、~、..）而檔名是 env 或測試檔時 deny；檔名本身讀不出來的不管。
 # shortcut: 只看檔名像 env 或測試的目標，其餘寫檔不查；cwd 之後的 cd 不追蹤（相對路徑照 session cwd 解），等有人靠 cd 繞過再補
 bash_write_checks() {
-  local targets t name dir abs
+  local targets t name lname dir abs
   targets="$(cmd_skeleton "$cmd" | "$OPSX_PY" -I "$OPSX_ROOT/bin/lib/cmdsegments.py" writes)" || deny "opsx 授權閘門：讀不懂指令的寫檔目標（cmdsegments.py writes 失敗），先擋下"
   while IFS= read -r t; do
     [ -n "$t" ] || continue
-    case "$t" in /dev/*) continue ;; esac
+    case "$t" in /dev/null|/dev/stdout|/dev/stderr|/dev/tty|/dev/fd/[0-9]*) continue ;; esac
     name="${t##*/}"; dir="${t%/*}"; [ "$dir" = "$t" ] && dir=""
     # 檔名整個被引號包住（骨架把含 $ 或空白的字串換成 ""）：原文提到 env 或測試檔的樣子就當成讀不到，不放行
     case "$name" in
@@ -215,7 +229,8 @@ bash_write_checks() {
         fi
         continue ;;
     esac
-    case "$name" in
+    lname="$(printf '%s' "$name" | tr '[:upper:]' '[:lower:]')"   # macOS 預設的檔案系統不分大小寫，.Env 與 .env 是同一個檔
+    case "$lname" in
       *.env.example) continue ;;
       *.env|*.env.*) ;;
       *.test.*|*.spec.*|test_*.py|*_test.*) ;;
@@ -225,7 +240,7 @@ bash_write_checks() {
       *[\$\`\*\?\[\{~\\\"\']*|..|../*|*/..|*/../*) deny "opsx 授權閘門：Bash 寫「${t}」，目錄讀不到（含變數、命令替換、萬用字元、~ 或 ..），分不出它是不是 env 或沒有測試的目錄，先擋下。改用不含這些的字面路徑" ;;
     esac
     case "$t" in /*) abs="$t" ;; *) abs="$(hook_cwd)/$t" ;; esac
-    case "$name" in
+    case "$lname" in
       *.env|*.env.*) level2 env "Bash 寫 ${t}"; WRITE_GRANTED+=("$t") ;;
       *) if testpath_needs_grant "$abs"; then level2 test-path "Bash 把測試檔寫進沒有既有測試的目錄（${t}）"; WRITE_GRANTED+=("$t"); fi ;;
     esac
