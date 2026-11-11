@@ -187,6 +187,25 @@ agent_new --kind-of-work planned --repo "$E" -- "- id: x-1 bin/x.sh"; new_shell_
 agent_new --kind-of-work planned --repo "$E" -- "- type: bug bin/x.sh"; new_shell_out agent; kept x
 agent_new --kind-of-work planned --repo "$E" -- "- area: board bin/x.sh"; new_shell_out agent; kept x
 
+# --- 讀不了的候選卡不能讓新項目遺失（review R1.2）---
+# 一張 inbox.md 不是 UTF-8：照常建殼，stderr 有警告，x 不動
+reset; card x 'bin/x.sh'; card bad 'bin/x.sh'; printf '\xff\xfe\n' >> "$C/bad/inbox.md"; keep x
+agent_new --kind-of-work planned --repo "$E" -- "bin/x.sh 有壞卡"; assert_eq "$?" 0 "壞卡不能讓 opsx new 失敗：$(cat "$ERR")"
+new_shell_out agent; kept x; assert_grep 'opsx: new:' "$ERR"
+# 候選 slug 對不到檔案（列出候選後卡被 drop／archive）：跳過那張並警告，其他照比
+reset; card x 'bin/x.sh'
+got="$(python3 -I "$OPSX_ROOT/bin/lib/mergematch.py" pick "$E" "bin/x.sh 錯" "" gone x 2> "$ERR")"; assert_eq "$?" 0 "$(cat "$ERR")"
+assert_eq "$got" x "消失的候選要跳過"; assert_grep 'gone' "$ERR"
+
+# --- 鎖內重查目標：判斷後、寫入前目標進了 apply 或被拆，就不寫（review R1.3）---
+append() { python3 -I "$OPSX_ROOT/bin/lib/inboxmerge.py" append "$C/x" agent-20261111-1040 2026-11-11T10:40:00+08:00 agent:foo planned "" bug "bin/x.sh 晚到" 2> "$ERR"; }
+reset; card x 'bin/x.sh'; printf -- '- [ ] 1.1 a\n' > "$C/x/tasks.md"; keep x
+append; assert_eq "$?" 4 "目標有 tasks.md 要退出 4：$(cat "$ERR")"; kept x; assert_grep 'tasks.md' "$ERR"
+reset; card x 'bin/x.sh' "split_into: [x-a, x-b]"; keep x
+append; assert_eq "$?" 4 "目標已拆要退出 4：$(cat "$ERR")"; kept x; assert_grep 'split_into' "$ERR"
+reset; card x 'bin/x.sh'
+append > /dev/null; assert_eq "$?" 0 "還沒開工的照寫：$(cat "$ERR")"; assert_grep '^bin/x.sh 晚到$' "$C/x/inbox.md"
+
 # --- 兩邊都有紀錄 ---
 reset; card x 'bin/x.sh'; card foo '沒路徑'
 agent_new --kind-of-work planned --repo "$E" -- "bin/x.sh 記兩邊"; assert_eq "$(cat "$OUT")" x

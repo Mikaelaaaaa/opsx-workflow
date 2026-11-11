@@ -3,6 +3,7 @@
 用法：
     $OPSX_PY -I inboxmerge.py append <卡目錄> <基本 id> <ISO 時間> <來源> <kind_of_work> <evidence> <type> <一句話>
         追加一段，印這段拿到的 id。id 是新卡原本會拿到的 slug；目標裡已經有同一個 id 時依序加 -2、-3。
+        鎖內發現目標已有 tasks.md 或已拆就不寫，退出 4。
     $OPSX_PY -I inboxmerge.py card <卡目錄> <id>
         印那一段拆回獨立卡時的 inbox.md（跟 opsx new 寫的同形）。找不到退出 2。
     $OPSX_PY -I inboxmerge.py remove <卡目錄> <id>
@@ -37,8 +38,30 @@ FIELD = re.compile(r"^- (id|kind_of_work|evidence|type|area): (.*)$")
 DATE = re.compile(r"^\d{4}-\d{2}-\d{2}")
 
 
+SPLIT_INTO = re.compile(r"^split_into:\s*(.*?)\s*(#.*)?$")
+SPLIT_EMPTY = re.compile(r"^(\[ *\]|\"\"|''|~|null)?$")
+
+
 class SectionNotFound(LookupError):
     pass
+
+
+class TargetStarted(Exception):
+    """併入目標在 opsx new 判斷之後已開工（有 tasks.md）或已拆：這段不寫，opsx new 改建殼。"""
+
+
+def split_into(text: str) -> str:
+    """frontmatter 的 split_into 值，空值算沒有；判斷跟 stage.sh 的 st_split_into 一致。"""
+    lines = text.split("\n")
+    if not lines or not lines[0].startswith("---"):
+        return ""
+    for line in lines[1:]:
+        if line.startswith("---"):
+            return ""
+        m = SPLIT_INTO.match(line.rstrip("\r"))
+        if m:
+            return "" if SPLIT_EMPTY.match(m.group(1)) else m.group(1)
+    return ""
 
 
 def merged_ids(text: str) -> set:
@@ -75,6 +98,11 @@ def append(card_dir: str, base: str, when: str, source: str, kind: str, evidence
     with safefile.CardLock(card_dir):
         with open(inbox, encoding="utf-8") as f:
             cur = f.read()
+        # opsx new 在鎖外判斷階段，這裡鎖內再查一次，免得併進剛開工或剛拆的卡
+        if os.path.exists(os.path.join(card_dir, "tasks.md")):
+            raise TargetStarted("%s 已有 tasks.md，不併" % card_dir)
+        if split_into(cur):
+            raise TargetStarted("%s 已拆（split_into: %s），不併" % (card_dir, split_into(cur)))
         mid = free_id(base, merged_ids(cur))
         if cur and not cur.endswith("\n"):
             cur += "\n"
@@ -259,6 +287,9 @@ def main() -> None:
     except SectionNotFound as e:
         print("inboxmerge: %s" % e, file=sys.stderr)
         sys.exit(2)
+    except TargetStarted as e:
+        print("inboxmerge: %s" % e, file=sys.stderr)
+        sys.exit(4)
     except (ValueError, OSError) as e:
         print("inboxmerge: %s" % e, file=sys.stderr)
         sys.exit(1)

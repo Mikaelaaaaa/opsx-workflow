@@ -64,17 +64,23 @@ def pick(top: str, text: str, evidence: str, candidates: list) -> str:
     mine = files_in(top, text + "\n" + evidence)
     if not mine:
         return ""
+    # 併入是可有可無的，新項目不能因為別張卡讀不了而開不成：讀不了的候選跳過、等級算不了就不併
     ranked = []
     for slug in candidates:
-        with open(os.path.join(top, "openspec", "changes", slug, "inbox.md"), encoding="utf-8") as f:
-            shared = mine & files_in(top, card_text(f.read()))
+        try:
+            with open(os.path.join(top, "openspec", "changes", slug, "inbox.md"), encoding="utf-8") as f:
+                body = f.read()
+        except (FileNotFoundError, UnicodeDecodeError) as e:
+            print("opsx: new: 讀不了 %s 的 inbox.md，不當併入目標：%s" % (slug, e), file=sys.stderr)
+            continue
+        shared = mine & files_in(top, card_text(body))
         if shared:
             ranked.append((-len(shared), slug))
     if not ranked:
         return ""
     try:
         lv = priority.levels(top)
-    except priority.PriorityError as e:
+    except (priority.PriorityError, UnicodeDecodeError) as e:
         print("opsx: new: 算不出目標卡的等級，不併：%s" % e, file=sys.stderr)
         return ""
     # str 依 code point 比，跟 UTF-8 位元組序（C locale）一致

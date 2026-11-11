@@ -49,9 +49,12 @@ merge_text_ok() { # <一句話>
 
 # 併進 <目標>：追加 ## 併入 段（id 在鎖內算）、兩邊記 decisions.tsv、在 herdr 裡才通知。stdout 印目標 slug，stderr 印併進哪裡。
 # 通知失敗只警告：併入已經寫好，退出非零會讓 agent 以為沒開成、再開一次。
+# 目標在判斷後已開工或已拆（append 退出 4）時回 1，呼叫端改建殼。
 merge_into() { # <top> <目標> <基本 id> <source> <kind> <evidence> <type> <一句話>
-  local top="$1" tgt="$2" source="$4" text="$8" id own err
-  id="$("$OPSX_PY" -I "$OPSX_ROOT/bin/lib/inboxmerge.py" append "$top/openspec/changes/$tgt" "$3" "$(now_iso)" "$source" "$5" "$6" "$7" "$text")" || die "new: 併不進 ${tgt}（上面是原因）"
+  local top="$1" tgt="$2" source="$4" text="$8" id own err rc=0
+  id="$("$OPSX_PY" -I "$OPSX_ROOT/bin/lib/inboxmerge.py" append "$top/openspec/changes/$tgt" "$3" "$(now_iso)" "$source" "$5" "$6" "$7" "$text")" || rc=$?
+  [ "$rc" -ne 4 ] || return 1
+  [ "$rc" -eq 0 ] || die "new: 併不進 ${tgt}（上面是原因）"
   log_row "$top/openspec/changes/$tgt" 系統 已決定 "併入 ${id}：${text}" "$source"
   own="$(st_card_dir "$top" "${source#agent:}")"
   [ ! -d "$own" ] || log_row "$own" 系統 已決定 "併進 ${tgt}（id ${id}）" "$source"
@@ -126,7 +129,7 @@ opsx_new() {
       # 子殼的 subagent 是 agent:<主>--<子>，它自己的卡是主殼
       case "$source" in agent:*) own="${source#agent:}"; own="${own%%--*}" ;; esac
       tgt="$("$OPSX_PY" -I "$OPSX_ROOT/bin/lib/mergematch.py" pick "$top" "$text" "$evidence" $(merge_candidates "$top" "$own"))" || die "new: 找不到併入目標（上面是原因）"
-      if [ -n "$tgt" ]; then merge_into "$top" "$tgt" "$slug" "$source" "${kind:-planned}" "$evidence" "$type" "$text"; return; fi
+      if [ -n "$tgt" ] && merge_into "$top" "$tgt" "$slug" "$source" "${kind:-planned}" "$evidence" "$type" "$text"; then return; fi
     fi
   fi
   body="$(mktemp "${TMPDIR:-/tmp}/opsx-new.XXXXXX")"
