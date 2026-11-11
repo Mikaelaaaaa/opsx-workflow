@@ -591,7 +591,7 @@ opsx-workflow/
 |---|---|---|---|
 | **收** | — | `openspec new change <slug> --schema opsx` + 寫 inbox.md（一句話 / agent 發現含證據 / GitLab issue 內文） | — |
 | **explore** | 讀檔、查 codebase、ASCII 圖、術語對 CONTEXT.md（不寫 code） | 固定步驟表：① 讀 inbox.md ② `how` 受影響子系統 ③ `blast-radius` 會動到誰 ④ `why` 只在要改結構時 ⑤ 有「跑了才知道」的問題 → `prototype` ⑥ 寫 explore.md：影響範圍、相關檔、實驗結果、未確定的。小事各步 `skip: 原因`，節點不跳過 | pstack `how`、`blast-radius`、`why`、playbook `prototype` |
-| **grill**（閘門，非節點） | 一題一題、AskUserQuestion | ① 讀 explore.md 的待決段，空 → 回「沒有待決」停 ② 每題附推薦答案 ③ 碰到查 code / 跑一次能答的題 → 退回 explore 補，不問人也不自己查 ④ 輸出 D1…Dn 進 grill.md ⑤ 總結過 unslop | Non-negotiables 的分類規則、grill-with-docs、`unslop` |
+| **grill**（閘門，非節點） | 一題一題、AskUserQuestion | ① 讀 explore.md 的待決段，空 → 回「沒有待決」停 ② 每題附推薦答案 ③ 碰到查 code / 跑一次能答的題 → 退回 explore 補，不問人也不自己查 ④ 輸出 D1…Dn 進 grill.md ⑤ 總結過 technical-writing → unslop | Non-negotiables 的分類規則、grill-with-docs、`technical-writing`、`unslop` |
 | **propose** | proposal / specs / design / tasks（殼在「收」時已建） | ① 檢查 explore.md 待決段，沒答完 → 停，指向 /grill ② 把 kind 寫進 `.openspec.yaml`（七種） ③ D1…Dn 原樣進 design.md ④ proposal.md、design.md 過 technical-writing → unslop | `technical-writing`、`unslop` |
 | **apply** | workplan 選目標、task 迴圈、self-check 四 grep、test agent、一 change 一 commit | ① 依 kind `Read skills/apply/references/playbooks/<kind>.md`，步驟逐字進 todo，skip 留原因 ② 先命名 data shape ③ 跨 function 邊界 → `architect`（單候選） ④ 要問人 → 寫 gate（建議·證據·風險·沒回預設），繼續做能做的 ⑤ task 外的問題 → 寫 inbox 卡不修 ⑥ 量到數字 → `benchmark-checklist` ⑦ 對真產物驗，不接受 it compiles ⑧ 收尾寫 decisions.tsv 一行、report.md 給 Stop gate | pstack playbooks、`principle-model-the-domain`、`architect`、never-block-on-the-human、ketchup action item、show-me-your-work、prove-it-works |
 | **review** | 雙 agent（spec conformance + code quality）、證據不足自動降級 | ① 合併用四桶 lead judgment（Act on / Consider / Noted / Dismissed） ② 兩 agent 不約而同標高訊號 ③ 設計有爭議 → `Read skills/interrogate/references/reviewer-prompt.md` 再跑一輪 | `interrogate` |
@@ -715,7 +715,7 @@ opsx-workflow/
 | 2 一題一題 AskUserQuestion，2–4 選項，附推薦；對照 CONTEXT.md 詞彙（有的話） | opsx `skills/grill/SKILL.md`、`references/CONTEXT-FORMAT.md` | — |
 | 3 碰到查 code / 跑一次能答的 → 退回 explore 補 | — | explore.md 補段 |
 | 4 全部答完 → 寫 D1…Dn：決定 / 理由 / 否決 | — | `grill.md` |
-| 5 總結過 unslop | `unslop` | — |
+| 5 總結過 technical-writing → unslop | `technical-writing`、`unslop` | — |
 
 hook：explore.md 待決非空、grill.md 沒 → 注入；propose 開頭檢查，沒答完就停。看板上答 gate 也走同一條，寫同一個 grill.md。
 
