@@ -25,7 +25,7 @@ The flow around you: `/propose` wrote `tasks.md` where each task carries `驗收
 
 If `openspec/workplan.yaml` exists, reconcile it before anything else:
 
-1. For each PR with status ≠ `merged`: `glab mr list --source-branch <branch> -F json` (or `gh pr list --head <branch> --json state`). Merged on the forge but the workplan says otherwise → update to `merged`.
+1. For each PR with status ≠ `merged`: find the forge from `git remote get-url gitlab` (else `origin`). A GitLab host: `glab mr list --source-branch <branch> --merged -F json`. `github.com`: `gh pr list --head <branch> --state merged --json number`. Any other host: skip this check and say so. A non-empty list means merged on the forge; if the workplan says otherwise → update to `merged`.
 2. For each change with status ≠ `done`: if `openspec/changes/<name>/` is gone (archived) → update to `done`.
 3. Report drift only when a decision is needed (branch deleted but MR not merged).
 
