@@ -50,7 +50,7 @@ def _session_line(s: dict) -> str:
 
 def refreshed(prev: dict, new: dict) -> dict:
     """collect 成功就整份換新；失敗的那份只有 errors，沿用上一份資料只換 errors，範圍與游標不會跳回全部。"""
-    return new if "cards" in new else dict(prev, errors=new["errors"])
+    return new if "cards" in new else dict(prev, errors=new["errors"], stale=True)
 
 
 def scopes(data: dict) -> list[str | None]:
@@ -85,7 +85,8 @@ def scope_repos(data: dict, scope: str | None) -> list[str] | None:
 def top_line(data: dict, scope: str | None) -> str:
     # 待處理數照舊數全部 cards[]：不受範圍篩選，收進 session 的主 change 卡也算
     n_wait = sum(1 for c in data.get("cards") or [] if c.get("section") == "待處理")
-    return " opsx  待處理 %d  範圍 %s" % (n_wait, scope_label(scope))
+    stale = "  ⚠ collect 失敗，顯示上一份" if data.get("stale") else ""
+    return " opsx  待處理 %d  範圍 %s%s" % (n_wait, scope_label(scope), stale)
 
 
 def rows(data: dict, done_open: bool, inbox_open: bool = False, scope: str | None = None) -> list[dict]:
@@ -136,6 +137,21 @@ ZOOM_ARGV = ["herdr", "pane", "zoom", "--current", "--toggle"]
 def outcome(argv: list[str], proc, ok: str) -> str:
     """外部指令跑完要寫在底列的一行：成功寫 ok，失敗寫 argv 與 stderr 前 80 字。"""
     return ok if proc.returncode == 0 else "%s 失敗：%s" % (" ".join(argv), proc.stderr.strip()[:80])
+
+
+def open_outcome(argv: list[str], proc) -> str:
+    """`o` 跑完的底列：失敗不寫 argv（絕對路徑會吃掉整列），寫 open-board 的整段訊息，換行壓成空白，沒有 opener 時網址才完整。"""
+    return "網頁開了 %s" % argv[-1] if proc.returncode == 0 else "open-board 失敗：%s" % " ".join(proc.stderr.split())
+
+
+def wrap(s: str, cols: int, rows: int) -> list[str]:
+    """照欄寬切成最多 rows 行，從頭開始留，不切到半個全形字。"""
+    out = [fit(s, cols)]
+    rest = s[len(out[0]):]
+    while rest and len(out) < rows:
+        out.append(fit(rest, cols))
+        rest = rest[len(out[-1]):]
+    return out
 
 
 def open_argv(root: str, row: dict | None) -> list[str] | None:

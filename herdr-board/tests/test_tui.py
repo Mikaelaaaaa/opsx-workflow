@@ -412,6 +412,39 @@ class MainLoopTest(unittest.TestCase):
         self.assertIn("超過", kept["errors"][0]["message"])
         self.assertIs(tm.refreshed(WDATA, DATA), DATA, "collect 成功就整份換新")
 
+    def test_kept_board_says_so_on_top_line(self):
+        with mock.patch.object(tui.subprocess, "run", side_effect=subprocess.TimeoutExpired("opsx", 60)):
+            err = tui.collect()
+        self.assertIn("collect 失敗", tm.top_line(tm.refreshed(WDATA, err), "w1"), "底列有 note 時頂列仍看得出資料是舊的")
+        self.assertIn("collect 失敗", tm.top_line(tm.refreshed(dict(tui.EMPTY), err), None), "一開始就失敗也要說")
+        self.assertNotIn("collect 失敗", tm.top_line(tm.refreshed(tm.refreshed(WDATA, err), WDATA), "w1"), "下一次成功就拿掉")
+
+
+TOKEN = "T" * 43
+NO_OPENER = "opsx board: 沒有 open 或 xdg-open，自己開 http://127.0.0.1:8791/#token=%s&card=opsx-workflow/notification-toast-replays-on-load" % TOKEN
+
+
+class OpenOutcomeTest(unittest.TestCase):
+    def test_failure_starts_with_short_label_and_keeps_whole_message(self):
+        argv = tm.open_argv("/Users/someone/code/sandbox/opsx-workflow", {"kind": "card", "card": {"repo": "a", "slug": "x"}})
+        note = tm.open_outcome(argv, proc(argv, rc=1, err=NO_OPENER + "\n"))
+        self.assertTrue(note.startswith("open-board 失敗："), note)
+        self.assertIn("#token=%s&card=" % TOKEN, note)
+        lines = tm.wrap(note, 79, 3)
+        self.assertEqual("".join(lines), note, "80 欄寬三行內放得下整個網址")
+        self.assertTrue(all(tm.width(l) <= 79 for l in lines))
+
+    def test_multiline_stderr_becomes_one_line(self):
+        argv = tm.open_argv("/r", {"kind": "card", "card": {"repo": "a", "slug": "x"}})
+        note = tm.open_outcome(argv, proc(argv, rc=1, err="opsx board: server 起不來\nTraceback (most recent call last):\n  x\n"))
+        self.assertNotIn("\n", note)
+        self.assertEqual(tm.open_outcome(argv, proc(argv)), "網頁開了 a/x")
+
+    def test_wrap_keeps_at_most_n_rows_from_the_start(self):
+        self.assertEqual(tm.wrap("中文字ab", 4, 3), ["中文", "字ab"])
+        self.assertEqual(tm.wrap("abcdefg", 2, 2), ["ab", "cd"])
+        self.assertEqual(tm.wrap("", 5, 3), [""])
+
 
 if __name__ == "__main__":
     unittest.main()

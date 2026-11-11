@@ -82,14 +82,19 @@ assert_eq "$(cat "$FX/open.log")" "open http://127.0.0.1:$port/#token=$tok&card=
 : > "$FX/open.log"
 out="$(bash "$OPSX_ROOT/herdr-board/scripts/open-board.sh" 2>&1)"; assert_eq "$?" 0 "open-board 不帶卡: $out"
 assert_eq "$(cat "$FX/open.log")" "open http://127.0.0.1:$port/#token=$tok" "不帶卡照舊"
-for bad in tui-keys /tui-keys opsx-workflow/Tui-keys opsx-workflow/ opsx-workflow/9x "opsx-workflow/$(printf 'a%.0s' $(seq 1 33))"; do
+for bad in tui-keys /tui-keys opsx-workflow/ opsx-workflow/a/b; do
   : > "$FX/open.log"
   err="$(bash "$OPSX_ROOT/herdr-board/scripts/open-board.sh" "$bad" 2>&1 >/dev/null)"; rc=$?
   [ "$rc" -ne 0 ] || fail "參數 [$bad] 形狀不對要非零結束"
   case "$err" in *"$bad"*) ;; *) fail "stderr 要指出參數 [$bad]：$err";; esac
   assert_eq "$(cat "$FX/open.log")" "" "參數 [$bad] 不對不開瀏覽器"
 done
-out="$(bash "$OPSX_ROOT/herdr-board/scripts/open-board.sh" "opsx-workflow/a$(printf 'b%.0s' $(seq 1 31))" 2>&1)"; assert_eq "$?" 0 "slug 32 字是上限內: $out"
+# collect 的 slug 就是目錄名：超過 32 字、數字開頭、大寫都是真的卡，都要開得了
+for good in "notification-toast-replays-on-load" "a$(printf 'b%.0s' $(seq 1 40))" 9x Tui-keys; do
+  : > "$FX/open.log"
+  out="$(bash "$OPSX_ROOT/herdr-board/scripts/open-board.sh" "opsx-workflow/$good" 2>&1)"; assert_eq "$?" 0 "slug [$good] 要開得了: $out"
+  assert_eq "$(cat "$FX/open.log")" "open http://127.0.0.1:$port/#token=$tok&card=opsx-workflow/$good" "slug [$good] 帶進 card="
+done
 # --- 沒有 open / xdg-open：非零結束、網址寫到 stderr，呼叫的人（TUI 的 o）才不會當成開好了 ---
 mkdir -p "$FX/noopen"
 for t in bash dirname cat mkdir seq sleep rmdir curl grep tail nohup; do ln -sf "$(command -v "$t")" "$FX/noopen/$t"; done

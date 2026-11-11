@@ -61,10 +61,13 @@ def draw(scr, rows, cur: tm.Cursor, data: dict, note: str, scope: str | None, bo
     scr.erase()
     h, w = scr.getmaxyx()
     scr.addstr(0, 0, tm.fit(tm.top_line(data, scope), w - 1), curses.A_BOLD)
+    errs = "；".join("%s：%s" % (e.get("source"), e.get("message")) for e in data.get("errors") or [])
+    foot = note or errs or "↑↓ 選  ↵ 跳 pane  r 重拉  i 收件匣  d 已完成  o 網頁  + 收件匣  ⇥ 範圍  z 全屏  q 關  （回 gate / 指派 / 合併在網頁）"
+    foot_lines = [""] if box is not None else tm.wrap(foot, w - 1, 3)   # 沒有 opener 時的網址要整段看得到
     y = 2
     top = max(0, (cur.index or 0) - (h - 6))
     for i, r in enumerate(rows):
-        if i < top or y >= h - 2:
+        if i < top or y >= h - 1 - len(foot_lines):
             continue
         if r["kind"] == "header":
             scr.addstr(y, 0, tm.fit("%s %s · %d%s" % ("▸" if r.get("collapsed") else "▾", r["section"], r["count"], " · 孤兒 pane %d（網頁上關）" % r["orphans"] if r["orphans"] else ""), w - 1), curses.A_BOLD)
@@ -72,14 +75,13 @@ def draw(scr, rows, cur: tm.Cursor, data: dict, note: str, scope: str | None, bo
             attr = curses.A_REVERSE if i == cur.index else curses.A_NORMAL
             scr.addstr(y, 2, tm.fit("%s %s" % (r["mark"], r["text"]), w - 3), attr)
         y += 1
-    errs = "；".join("%s：%s" % (e.get("source"), e.get("message")) for e in data.get("errors") or [])
     if box is not None:
         prompt = tm.fit("+ 收件匣：" + box.text, w - 2)
         scr.addstr(h - 1, 0, prompt)
         scr.move(h - 1, tm.width(prompt))
     else:
-        foot = note or errs or "↑↓ 選  ↵ 跳 pane  r 重拉  i 收件匣  d 已完成  o 網頁  + 收件匣  ⇥ 範圍  z 全屏  q 關  （回 gate / 指派 / 合併在網頁）"
-        scr.addstr(h - 1, 0, tm.fit(foot, w - 1), curses.A_DIM)
+        for i, line in enumerate(foot_lines):
+            scr.addstr(h - len(foot_lines) + i, 0, line, curses.A_DIM)
     scr.refresh()
 
 
@@ -143,7 +145,7 @@ def main(scr) -> None:
             if argv is None:
                 note = "沒有可開的卡（游標不在卡上，或 session 已全部合併）"
             else:
-                note = tm.outcome(argv, subprocess.run(argv, capture_output=True, text=True), "網頁開了 %s" % argv[-1])
+                note = tm.open_outcome(argv, subprocess.run(argv, capture_output=True, text=True))
         elif k == ord("+"):
             box = tm.LineInput(); curses.curs_set(1)
         elif k == ord("z"):

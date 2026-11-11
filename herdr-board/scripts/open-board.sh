@@ -6,7 +6,8 @@
 set -euo pipefail
 card="${1:-}"
 # 參數錯不起 server，所以先驗
-if [ -n "$card" ] && ! [[ "$card" =~ ^[^/]+/[a-z][a-z0-9_-]{0,31}$ ]]; then
+# slug 照 collect 列出的目錄名收，不套 herdr agent 名的 32 字上限；兩段都會經 quote 編碼
+if [ -n "$card" ] && ! [[ "$card" =~ ^[^/]+/[^/]+$ ]]; then
   echo "opsx board: 參數要是 <repo>/<slug>，收到 [$card]" >&2; exit 1
 fi
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
