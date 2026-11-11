@@ -267,33 +267,35 @@ def file_unfiled(state: pathlib.Path, item: dict, today: str) -> pathlib.Path:
 def update_debt(entry: dict, item: dict) -> bool:
     """回 True 表示改了檔。"""
     path = entry["path"]
-    old = path.read_text(encoding="utf-8")
-    new = fm_set(fm_set(old, "line", item["extra"]["line"]), "stale", None)
-    if new == old:
-        return False
-    safefile.write_atomic(str(path), new)
+    with safefile.CardLock(str(path.parent)):
+        old = path.read_text(encoding="utf-8")
+        new = fm_set(fm_set(old, "line", item["extra"]["line"]), "stale", None)
+        if new == old:
+            return False
+        safefile.write_atomic(str(path), new)
     return True
 
 
 def update_issue(entry: dict, item: dict) -> bool:
     """回 True 表示改了檔。重開的 issue 拿掉 upstream: closed；內容較新時照 D4 改。"""
     path = entry["path"]
-    old = path.read_text(encoding="utf-8")
-    new = old
-    if fm_get(new, "upstream") == "closed":
-        new = fm_set(new, "upstream", None)
-    known = fm_get(new, "upstream_updated")
-    if known is None:
-        raise ValueError("inbox.md 沒有 upstream_updated（%s），不知道上游是否較新，不改寫" % path)
-    if item["updated_at"] > known:
-        if (path.parent / "explore.md").exists():
-            new = append_to_section(new, "證據", "- %s 於 %s 更新" % (item["source"], item["updated_at"][:10]))
-        else:
-            new = set_section(set_section(new, "一句話", item["title"]), "內文", item["body"] or "（空）")
-        new = fm_set(new, "upstream_updated", item["updated_at"])
-    if new == old:
-        return False
-    safefile.write_atomic(str(path), new)
+    with safefile.CardLock(str(path.parent)):
+        old = path.read_text(encoding="utf-8")
+        new = old
+        if fm_get(new, "upstream") == "closed":
+            new = fm_set(new, "upstream", None)
+        known = fm_get(new, "upstream_updated")
+        if known is None:
+            raise ValueError("inbox.md 沒有 upstream_updated（%s），不知道上游是否較新，不改寫" % path)
+        if item["updated_at"] > known:
+            if (path.parent / "explore.md").exists():
+                new = append_to_section(new, "證據", "- %s 於 %s 更新" % (item["source"], item["updated_at"][:10]))
+            else:
+                new = set_section(set_section(new, "一句話", item["title"]), "內文", item["body"] or "（空）")
+            new = fm_set(new, "upstream_updated", item["updated_at"])
+        if new == old:
+            return False
+        safefile.write_atomic(str(path), new)
     return True
 
 
@@ -315,9 +317,18 @@ def mark_closed(opsx_root: pathlib.Path, kind: str, index: dict, seen: set[str],
         if p.returncode != 0:
             tally.error(src, p.stderr.strip() or "%s.sh state 退出 %d" % (kind, p.returncode))
             continue
-        if p.stdout.strip() == "closed":
-            safefile.write_atomic(str(entry["path"]), fm_set(text, "upstream", "closed"))
-            tally.updated += 1
+        if p.stdout.strip() != "closed":
+            continue
+        # 網路查完才鎖；鎖內重讀，查的期間併入的段與別人標的 closed 都不蓋掉
+        try:
+            with safefile.CardLock(str(entry["path"].parent)):
+                text = entry["path"].read_text(encoding="utf-8")
+                if fm_get(text, "upstream") == "closed":
+                    continue
+                safefile.write_atomic(str(entry["path"]), fm_set(text, "upstream", "closed"))
+        except FileNotFoundError:
+            continue
+        tally.updated += 1
 
 
 def mark_stale(index: dict, seen: set[str], scanned: set[str], tally: Tally) -> None:
@@ -327,12 +338,13 @@ def mark_stale(index: dict, seen: set[str], scanned: set[str], tally: Tally) -> 
         if src.split(":", 2)[1] not in scanned:
             continue
         try:
-            text = entry["path"].read_text(encoding="utf-8")
+            with safefile.CardLock(str(entry["path"].parent)):
+                text = entry["path"].read_text(encoding="utf-8")
+                if fm_get(text, "stale") == "true":
+                    continue
+                safefile.write_atomic(str(entry["path"]), fm_set(text, "stale", "true"))
         except FileNotFoundError:
             continue
-        if fm_get(text, "stale") == "true":
-            continue
-        safefile.write_atomic(str(entry["path"]), fm_set(text, "stale", "true"))
         tally.updated += 1
 
 

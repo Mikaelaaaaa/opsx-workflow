@@ -457,7 +457,7 @@ cp "$FX/sources.bak" "$OPSX_STATE_DIR/sources.toml"
 # 去重索引建好之後、處理那張卡之前，卡目錄被搬進 archive/（specs/board-sync「卡在同步中途被搬走不中斷同步」）。
 # 在隔離的 state / repo 目錄裡跑 sync.main，build_index 換成「回手造的索引，再搬走指定的卡」，不靠 sleep
 python3 -I -c '
-import os, pathlib, shutil, sys
+import os, pathlib, shlex, shutil, sys, threading, time
 
 sys.path.insert(0, sys.argv[1] + "/bin/lib")
 import sync
@@ -543,6 +543,63 @@ unfiled.mkdir(parents=True)
 (unfiled / "ok.md").write_text(CARD % "x:1", encoding="utf-8")
 index = real_build_index({}, WORK / "state5")
 assert list(index) == ["x:1"], index
+
+# 寫入在卡目錄鎖內重讀再寫（specs/board-sync「既有卡的寫入在卡目錄鎖內重讀再寫」）
+def run_into(out, *args):
+    out.append(run_sync(*args))
+
+
+def set_closed_hook(card):
+    return shlex.join(["perl", "-0pi", "-e", "s/line: 1\\n/line: 1\\nupstream: closed\\n/", str(card)])
+
+
+def view_closed(n):
+    (views / ("view-%d.json" % n)).write_text("{\"iid\":%d,\"state\":\"closed\"}" % n, encoding="utf-8")
+
+
+MERGED = "\n## 併入：2026-11-11T15:00:00+08:00 me\n\n- id: m1\n- kind_of_work: planned\n- area: x\n\n併入的一句\n"
+UPDATE = {"updated_at": "2026-11-06T08:00:00Z", "title": "新", "body": "新內文"}
+
+# 標 issue 關閉期間（查上游狀態時）併入新段：closed 與併入的段都在
+h = make_card("gl-a-4", "gitlab:a#4")
+view_closed(4)
+os.environ["OPSX_TEST_GLAB_VIEW_HOOK"] = shlex.join(
+    ["python3", "-I", OPSX_ROOT + "/bin/lib/inboxmerge.py", "append", str(h["path"].parent), "m1", "2026-11-11T15:00:00+08:00", "me", "planned", "", "x", "併入的一句"])
+rc, row = run_sync("gitlab", {"gitlab:a#4": h}, [], None, listed={"a": "g/a"})
+text = h["path"].read_text(encoding="utf-8")
+assert rc == 0 and "\nupstream: closed\n" in text and "## 併入：" in text, (rc, row, text)
+
+# 鎖內重讀發現已經是 closed：不寫、不計更新
+i = make_card("gl-a-5", "gitlab:a#5")
+view_closed(5)
+os.environ["OPSX_TEST_GLAB_VIEW_HOOK"] = set_closed_hook(i["path"])
+rc, row = run_sync("gitlab", {"gitlab:a#5": i}, [], None, listed={"a": "g/a"})
+assert rc == 0 and row == "新建 0 · 更新 0 · 沒變 0 · 錯誤 0", (rc, row)
+del os.environ["OPSX_TEST_GLAB_VIEW_HOOK"]
+
+# 別人持著卡鎖時，更新 issue 要等；放鎖後 sync 的更新與併入的段都在
+j = make_card("gl-a-6", "gitlab:a#6")
+out = []
+with sync.safefile.CardLock(str(j["path"].parent)):
+    t = threading.Thread(target=run_into, args=(out, "gitlab", {"gitlab:a#6": j}, [dict(UPDATE, source="gitlab:a#6", path=WORK)], None))
+    t.start()
+    time.sleep(0.3)
+    assert t.is_alive(), "sync 沒有等卡鎖"
+    j["path"].write_text(j["path"].read_text(encoding="utf-8") + MERGED, encoding="utf-8")
+t.join(10)
+text = j["path"].read_text(encoding="utf-8")
+assert out[0][0] == 0 and "新內文" in text and "## 併入：" in text, (out, text)
+
+# 等鎖期間卡被歸檔：計沒變，不是錯誤
+k = make_card("gl-a-7", "gitlab:a#7")
+out = []
+with sync.safefile.CardLock(str(k["path"].parent)):
+    t = threading.Thread(target=run_into, args=(out, "gitlab", {"gitlab:a#7": k}, [dict(UPDATE, source="gitlab:a#7", path=WORK)], None))
+    t.start()
+    time.sleep(0.3)
+    shutil.move(str(CARDS / "gl-a-7"), str(ARCHIVE / "gl-a-7"))
+t.join(10)
+assert out[0] == (0, "新建 0 · 更新 0 · 沒變 1 · 錯誤 0"), out
 ' "$OPSX_ROOT" "$FX/mid" "$OPSX_STATE_DIR" || fail "卡在同步中途被歸檔"
 
 echo ok
