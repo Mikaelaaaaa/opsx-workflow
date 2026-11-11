@@ -20,30 +20,32 @@ validate_spec() { # <repo> <change> <spec 檔>
 R="$(mk_repo demo)"
 ( cd "$R" && openspec init --tools none "$R" >/dev/null 2>&1 ) || fail "openspec init 失敗"
 
-# --- Scenario：範本也帶寫 spec 的規則（正例）---
-for w in 多條業務規則 多組測資 不可分割的業務邏輯單元 正例 反例 SHALL references/gherkin.md; do
-  grep -qF -- "$w" "$T" || fail "範本少 '$w'"
-done
-
-# --- Scenario：範本範例通過 openspec validate（正例）---
+# --- Scenario：範本骨架通過 openspec validate（正例）---
 validate_spec "$R" tmpl "$T"
 
-# --- Scenario：範本的 Background 放在規則句之後（反例）---
+# --- Scenario：範本帶齊骨架的每一塊（正例）---
+grep -q '^## ADDED Requirements$' "$T" || fail "範本少 ## ADDED Requirements"
+grep -q '^### Requirement: ' "$T" || fail "範本少 ### Requirement:"
+grep -q '^#### Scenario: .*（正例）$' "$T" || fail "範本要有正例骨架"
+grep -q '^#### Scenario: .*（反例）$' "$T" || fail "範本要有反例骨架"
+grep -q '^#### Scenario: .*（Scenario Outline，' "$T" || fail "範本要有 Scenario Outline 骨架（#### Scenario: <行為>（Scenario Outline，…））"
+! grep -q '^#### Scenario Outline:' "$T" || fail "Outline 標題照定案用 #### Scenario:，不用 #### Scenario Outline:"
+grep -qx 'Examples: 一般場景' "$T" || fail "範本少 Examples: 一般場景"
+grep -qx 'Examples: 邊界場景' "$T" || fail "範本少 Examples: 邊界場景"
+awk '/^Examples: 邊界場景$/{on=1;next} on && /^\|/{print;exit}' "$T" | grep -qF '備註' || fail "邊界場景表頭要多一欄 備註"
+grep -q '^Background:' "$T" || fail "範本要有選用的 Background 骨架"
+grep -q '^<!--.*references/gherkin.md.*-->$' "$T" || fail "範本要有一行註解指向 references/gherkin.md"
 firsts="$(awk '/^### Requirement:/{want=1;next} want && NF{print;want=0}' "$T")"
-[ -n "$firsts" ] || fail "範本沒有 ### Requirement:"
-[ "$(printf '%s\n' "$firsts" | wc -l | tr -d ' ')" -ge 2 ] || fail "範本要兩個以上 Requirement"
 while IFS= read -r l; do
   case "$l" in Background:*) fail "Requirement 下第一行是 Background：$l" ;; esac
   case "$l" in *SHALL*|*MUST*) ;; *) fail "Requirement 下第一行沒有 SHALL/MUST：$l" ;; esac
 done <<< "$firsts"
-grep -q '^Background:' "$T" || fail "範本要示範 Background"
-grep -q '^#### Scenario Outline:' "$T" || fail "範本要示範 Scenario Outline"
-grep -q '^Examples:' "$T" || fail "範本要示範 Examples 表"
-grep -q '^#### Scenario: .*（正例）$' "$T" || fail "範本要有正例"
-grep -q '^#### Scenario: .*（反例）$' "$T" || fail "範本要有反例"
-grep -qF 'references/gherkin.md' "$T" || fail "範本要指向 reference"
-# Background 只放 GIVEN
 awk '/^Background:/{on=1;next} on && /^(####|###|##) /{on=0} on && /^- \*\*/ && !/^- \*\*(GIVEN|AND)\*\*/{print; bad=1} END{exit bad}' "$T" || fail "Background 只能有 GIVEN / AND"
+
+# --- Scenario：範本不放真範例與寫法規則（反例）---
+for w in 可樂 小明 會員 不可分割的業務邏輯單元 禁用模糊詞 撰寫原則; do
+  ! grep -qF -- "$w" "$T" || fail "範本不該有 '$w'"
+done
 
 # --- specs 區塊：接進 fork 的 schema.yaml 能過 openspec schema validate，instructions 拿得到 ---
 grep -q '^  - id: specs$' "$B" || fail "artifacts-specs.yaml 要是 '  - id: specs' 區塊"
@@ -64,30 +66,33 @@ I="$FX/instruction.txt"
   || fail "openspec instructions specs 失敗：$(cat "$FX/instr.json")"
 python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1]))["instruction"])' "$FX/instr.json" > "$I" || fail "instructions 沒有 instruction 欄：$(cat "$FX/instr.json")"
 
-# --- Scenario：instruction 帶選層決策樹、原子化與撰寫原則（正例）---
-for w in 多條業務規則 多組測資 前置步驟 "Data Table" Docstring "Scenario Outline" Examples Background \
-         不可分割的業務邏輯單元 邏輯模組 \
-         業務語言 保持獨立 只驗證一件事 參數化 原子性 正例 反例 \
-         SHALL MUST references/gherkin.md ADDED MODIFIED REMOVED RENAMED; do
+# --- Scenario：instruction 帶齊寫 spec 的規則（正例）---
+for w in "| Feature |" "| Rule |" "| Scenario |" "| Scenario Outline |" "| Given |" "| When |" "| Then |" "| And / But |" "| Background |" "| Examples |" \
+         雙引號 可省略 不可分割的業務邏輯單元 邏輯模組 多條業務規則 多組測資 前置步驟 "Data Table" Docstring 不放測試邏輯 保持原始格式 \
+         業務語言 保持獨立 只驗證一件事 參數化 原子性 過度技術化 步驟耦合 缺乏具體性 "過度使用 Background" \
+         SHALL MUST ADDED MODIFIED REMOVED RENAMED 驗收： references/gherkin.md; do
   grep -qF -- "$w" "$I" || fail "instruction 少 '$w'：$(cat "$I")"
 done
 grep -qx '禁用模糊詞：正確的、適當的、合理的、正常、良好、妥善、等等、相關的、appropriate、properly、correctly、reasonable、etc.' "$I" \
   || fail "instruction 要有單獨一行的禁用模糊詞清單"
 
-# --- Scenario：instruction 不重抄 reference 的完整內容（反例）---
-for w in 會員下訂單 批次新增商品 完成購物 ❌ "Three Amigos"; do ! grep -qF "$w" "$I" || fail "instruction 不該有 reference 範例 '$w'"; done
+# --- Scenario：instruction 不放範例（反例）---
+for w in 可樂 小明 會員下訂單 批次新增商品 完成購物 ❌ "Three Amigos"; do ! grep -qF "$w" "$I" || fail "instruction 不該有範例 '$w'"; done
 
 # --- Scenario：instruction 不再要求只寫 WHEN/THEN（反例）---
 ! grep -qF 'with WHEN/THEN format' "$I" || fail "instruction 還有 'with WHEN/THEN format'"
 ! grep -qF 'with WHEN/THEN format' "$B" || fail "artifacts-specs.yaml 還有 'with WHEN/THEN format'"
 
-# --- Scenario：reference 帶原文三層範例與對應一節（正例）---
-for w in 查詢商品價格 計算訂單折扣 會員等級折扣計算 會員下訂單 建立會員資料 批次新增商品 完成購物 \
-         "Data Table：在單一步驟中傳遞多筆資料" "Examples：定義多組完整的場景參數" \
-         "問題一" "問題二" "問題三" 過度技術化 步驟耦合 缺乏具體性 "過度使用 Background"; do
+# --- Scenario：reference 帶原文三層與進階技巧範例（正例）---
+for w in 查詢商品價格 計算訂單折扣 會員等級折扣計算 優勢 會員下訂單 建立會員資料 批次新增商品 完成購物 ❌ ✅ "Step Definitions" 總結; do
   grep -qF -- "$w" "$G" || fail "reference 少 '$w'"
 done
 grep -q '^## .*對應到 openspec' "$G" || fail "reference 少「對應到 openspec」一節"
+
+# --- Scenario：reference 不重抄寫法規則（反例）---
+for w in "## 核心關鍵字" "## 如何選擇架構" "## 常見陷阱" 禁用模糊詞 "每條 Rule 是一個不可分割的業務邏輯單元"; do
+  ! grep -qF -- "$w" "$G" || fail "reference 不該有寫法規則 '$w'"
+done
 
 # --- Scenario：reference 的 opsx 範例通過 openspec validate（正例）---
 EX="$FX/ref-example.md"
