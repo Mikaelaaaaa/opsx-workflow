@@ -37,6 +37,11 @@ gone "$a" 'interactive：要授權就直接問' autopilot
 rc=0; render_agents_md yolo >/dev/null 2>&1 || rc=$?; assert_eq "$rc" 1 "不認得的模式要失敗"
 render_agents_md yolo 2>&1 | grep -q 'yolo' || fail "錯誤訊息要點名模式 yolo"
 for s in '直接做' '要授權' '永遠要人'; do has "$(cat "$OPSX_ROOT/references/grants.md")" "$s" grants.md; done
+# 把 main 合進自己的分支是直接做；合 MR 才是永遠要人
+has "$a" '不自己合 MR' autopilot
+gone "$a" '不自己 merge，' autopilot
+has "$(grep '^| \*\*直接做\*\*' "$OPSX_ROOT/references/grants.md")" 'git merge' "grants.md 直接做列"
+has "$(grep '^| \*\*永遠要人\*\*' "$OPSX_ROOT/references/grants.md")" 'MR' "grants.md 永遠要人列"
 # grant-outbound-speech：授權段寫明對外發話閘門不判，要自己先寫 gate
 for s in '對客戶或外部人發話' '閘門不判' '沒被擋不代表可以做' '發話前自己寫 `type: approval` 的 gate'; do has "$a" "$s" "autopilot 的授權段"; done
 

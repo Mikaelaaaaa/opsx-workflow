@@ -233,6 +233,10 @@ out="$(gg Bash "$(cmdj 'pnpm db:migrate && glab mr create -F desc.md')")"; asser
 out="$(gg Bash "$(cmdj 'glab mr merge 212')")"; assert_eq "$(decision "$out")" deny "grant: merge 第三級"
 reason "$out" | grep -q '第三級' || fail "grant: merge 要說第三級"
 out="$(gg Bash "$(cmdj 'git push --force gitlab main')")"; assert_eq "$(decision "$out")" deny "grant: force push"
+# 把 main 合進自己的分支是直接做，閘門不分級；倒回 main 的合併靠人合 MR 前看 diff，旗標比對擋不住（merge --no-commit 後 checkout 也做得到）
+for c in 'git merge origin/main' 'git merge --no-edit origin/main' 'git merge --abort' 'git merge --continue' 'git merge --squash origin/main' 'git merge origin/main -m "fix -s flag"'; do
+  out="$(gg Bash "$(cmdj "$c")")"; [ "$(decision "$out")" != deny ] || fail "grant: $c 不擋"
+done
 out="$(gg Bash "$(cmdj 'pnpm add left-pad')")"; assert_eq "$(decision "$out")" deny "grant: 裝套件第二級沒授權"
 out="$(gg Bash "$(cmdj 'pnpm test:ring0')")"; assert_eq "$(decision "$out")" allow "grant: 跑測試直接做"
 out="$(gg Bash "$(cmdj 'curl -s http://localhost:3000/api/health')")"; assert_eq "$(decision "$out")" allow "grant: localhost 不算外部"

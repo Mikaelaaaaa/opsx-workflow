@@ -25,7 +25,7 @@ render_agents_md() { # <interactive|autopilot>
   printf '\n## 授權\n\n'
   [ -z "$grant_note" ] || printf '%s\n\n' "$grant_note"
   cat "$OPSX_ROOT/references/grants.md"
-  printf '\n## 合併\n\nmerge 永遠是人：不自己 merge，不替自己的 MR 按核准；到「等合併」就停。\n'
+  printf '\n## 合併\n\n合 MR 永遠是人：不自己合 MR，不替自己的 MR 按核准；到「等合併」就停。把 main 合進自己的分支屬直接做。\n'
 }
 
 # 把渲染結果放進 worktree 根並排除出 git。repo 自己追蹤了 AGENTS.md 就不動它，改寫 AGENTS.override.md（原內容 + opsx 區塊）。
