@@ -139,12 +139,18 @@ out="$(cg 'git commit -m "feat: x" -- a.ts')"; assert_eq "$(decision "$out")" al
 out="$(cg 'git -C /x commit -m "feat: x"')"; assert_eq "$(decision "$out")" allow "commit: git -C 也認得"
 # gate-bypass-closure：所有會執行 git commit 的寫法都要走同一道閘門（tasks 全未勾時擋）
 printf '## 1. x\n\n- [ ] 1.1 a\n' > "$C/tasks.md"
-for c in 'git commit -m x' 'echo `git commit -m x`' 'echo $(git commit -m x)' '\git commit -m x' '/usr/bin/git commit -m x' 'git -c alias.ci=commit ci -m x' 'git -c user.name=a commit -m x' 'git --no-pager commit -m x' 'git push gitlab feat/a/b && echo `git commit -m x`'; do
+for c in 'git commit -m x' 'echo `git commit -m x`' 'echo $(git commit -m x)' '\git commit -m x' '/usr/bin/git commit -m x' 'git -c alias.ci=commit ci -m x' 'git -c user.name=a commit -m x' 'git --no-pager commit -m x' 'git push gitlab feat/a/b && echo `git commit -m x`' 'git -p commit -m x' 'git -P commit -m x' 'git --git-dir .git commit -m x' 'git --work-tree . commit -m x'; do
   out="$(cg "$c")"; assert_eq "$(decision "$out")" deny "commit: $c 沒勾 task 要擋"
   reason "$out" | grep -q 'tasks.md' || fail "commit: $c 的 deny 要說 tasks.md：$(reason "$out")"
 done
 for c in 'git log --oneline' 'echo "git commit"' 'git commit-tree HEAD' 'echo git-commit' 'ls /usr/bin/git-commit'; do
   out="$(cg "$c")"; assert_eq "$out" "" "commit: $c 不是 commit，不出聲"
+done
+# session cwd 在別的 repo、commit 實際作用在 $R（沒勾 task）：每一種寫法都要對到 $R 的卡
+R2="$(mk_repo Other git@gitlab.tsg-navigator.com:agentory/Other.git)"
+for c in "git -C $R commit -m x" "/usr/bin/git -C $R commit -m x" "git -c user.name=a -C $R commit -m x" "git --no-pager -C $R commit -m x" "\\git -C $R commit -m x" "echo \`git -C $R commit -m x\`" "cd $R && /usr/bin/git commit -m x" "cd $R && \\git commit -m x"; do
+  out="$(run_hook openspec-commit-gate.sh "$(j "$R2" Bash "{\"command\":$(printf '%s' "$c" | jq -Rs .)}")")"
+  assert_eq "$(decision "$out")" deny "commit: cwd 在別的 repo，$c 要對到 $R 的卡"
 done
 printf '## 1. x\n\n- [x] 1.1 a\n- [ ] 1.2 b\n' > "$C/tasks.md"
 git -C "$R" checkout -q main
@@ -312,12 +318,18 @@ out="$(gg Bash "$(cmdj 'eval "git push --force gitlab main"')")"; assert_eq "$(d
 out="$(gg Bash "$(cmdj 'echo ok && sh -c '"'"'pnpm add left-pad'"'"'')")"; assert_eq "$(decision "$out")" deny "grant: sh -c 單引號內的裝套件仍擋"
 
 # gate-bypass-closure：push 的 force / main 寫法照 shell 實際解析的結果判斷；會執行程式的參數不放行
-for c in 'git push -fu gitlab feat/x' 'git push -uf gitlab feat/x' 'git push gitlab +feat/x' 'git push gitlab "+feat/x"' 'git push gitlab \main' 'git push --mirror gitlab' 'git push --receive-pack=/tmp/x gitlab feat/x' 'git push --exec=/tmp/x gitlab feat/x'; do
+for c in 'git push -fu gitlab feat/x' 'git push -uf gitlab feat/x' 'git push gitlab +feat/x' 'git push gitlab "+feat/x"' 'git push gitlab "main"' 'git push gitlab $'"'main'" 'git push gitlab \main' 'git push --mirror gitlab' 'git push --receive-pack=/tmp/x gitlab feat/x' 'git push --exec=/tmp/x gitlab feat/x'; do
   out="$(gg Bash "$(cmdj "$c")")"; assert_eq "$(decision "$out")" deny "grant: $c 不能放行"
 done
 for c in 'git push -u gitlab feat/x' 'git push gitlab feat/x' 'git push --follow-tags gitlab feat/x'; do
   out="$(gg Bash "$(cmdj "$c")")"; assert_eq "$(decision "$out")" allow "grant: $c 照常放行"
 done
+# 第三級的 force 旗標只看同一段 push：後面串的指令自己的 -f、+5 不算
+for c in 'git push gitlab feat/x 2>&1 | tail -n +5' 'git push -u gitlab feat/x && echo "see +1" && ls -lf'; do
+  out="$(gg Bash "$(cmdj "$c")")"; assert_eq "$(decision "$out")" allow "grant: $c 的 push 本身沒有 force，不能當第三級擋"
+done
+out="$(gg Bash "$(cmdj 'git push gitlab feat/x && rm -rf /tmp/a')")"; assert_eq "$(decision "$out")" deny "grant: 串的 rm -rf 沒授權還是要擋（第二級）"
+reason "$out" | grep -qF 'force-push' && fail "grant: rm -rf 不是 force-push：$(reason "$out")"
 # 檔名樣式不分大小寫（APFS 預設不分）
 for f in /x/.Env /x/.ENV.local /x/Secrets.yaml /x/.GitLab-CI.yml; do
   out="$(gg Write "{\"file_path\":\"$f\",\"content\":\"A=1\"}")"; assert_eq "$(decision "$out")" deny "grant: Write $f 要照 .env / CI / secrets 擋"
@@ -335,6 +347,12 @@ for opener in "cat <<'E'F" 'cat <<E\OF' 'cat <<EOF-X'; do
   case "$sk" in *hello*) fail "skeleton: $opener 的 heredoc 本體不該在骨架：$sk" ;; esac
   out="$(gg Bash "$(cmdj "$cmd")")"; assert_eq "$(decision "$out")" deny "grant: $opener 後面的 mr 指令沒授權要擋"
 done
+cmd="$(printf "cat <<\$'EOF'\nhello\nEOF\nglab mr create -F d.md\n\$EOF\n")"
+sk="$(printf '%s' "$cmd" | perl "$H/cmd-skeleton.pl")"
+case "$sk" in *'glab mr create'*) ;; *) fail "skeleton: <<\$'EOF' 之後的指令不能從骨架消失：$sk" ;; esac
+out="$(gg Bash "$(cmdj "$cmd")")"; assert_eq "$(decision "$out")" deny "grant: <<\$'EOF' 後面的 mr 指令沒授權要擋"
+# 沒結尾的重複開頭不能讓骨架慢到 hook 逾時（逾時等於放行）
+perl -e 'print "cat <<\x27aaa\x27\n" x 2000' | perl -e 'alarm 10; exec @ARGV' perl "$H/cmd-skeleton.pl" >/dev/null || fail "skeleton: 2000 個沒結尾的 heredoc 開頭要在 10 秒內跑完"
 cmd="$(printf "cat <<'EOF'\nglab mr create -F d.md\nEOF\n")"
 sk="$(printf '%s' "$cmd" | perl "$H/cmd-skeleton.pl")"
 case "$sk" in *'glab mr create'*) fail "skeleton: 一般 heredoc 本體不進骨架：$sk" ;; esac

@@ -105,9 +105,10 @@ if [ "$tool" = "Bash" ]; then
     [ "$UNMAPPED" = 1 ] && level3 "merge"
     merge_gate && GRANTED=1
   fi
-  # push 的旗標與 refspec 照 shell 解析完的樣子比：拿掉引號與反斜線（"main"、\main、'+feat/x' 才跟 main、+feat/x 一樣被認出來）
-  l3n="$(printf '%s' "$l3" | tr -d "\"'\\\\")"
-  push_args='git[[:space:]]+push([[:space:]].*)?[[:space:]]'
+  # push 的旗標與 refspec 照 shell 解析完的樣子比：拿掉引號、反斜線與 $（"main"、\main、$'main'、'+feat/x' 才跟 main、+feat/x 一樣被認出來）；
+  # 換行當 ; 用，旗標只在同一段 push 裡找，後面串的指令自己的 -f、+5 不算
+  l3n="$(cmd_l3text "$cmd" | tr '\n' ';' | tr -d "\"'\\\\\$")"
+  push_args='git[[:space:]]+push([[:space:]][^;&|]*)?[[:space:]]'
   printf '%s' "$l3n" | grep -qE "${push_args}(--force[^[:space:]]*|--mirror|-[a-zA-Z]*f[a-zA-Z]*|\\+[^[:space:]]+)([[:space:]]|\$)" && level3 "force-push"
   printf '%s' "$l3n" | grep -qE "${push_args}--(receive-pack|exec)(=|[[:space:]]|\$)" && level3 "push 帶會執行程式的參數"
   # 同一段 push 內，refspec 目標是 main / master 才算；分支名只含 main 片段、push 以外的 main 字樣不算（hooks/security-guard.sh 同一條）

@@ -59,6 +59,7 @@ sub unquote_word {
     while ($i < length $w) {
         my $c = substr $w, $i, 1;
         if ($c eq '\\') { $out .= substr($w, $i + 1, 1); $i += 2; next }
+        if ($c eq '$' && substr($w, $i + 1, 1) =~ /^[\x27"]$/) { $i++; next }   # $'EOF'、$"EOF"：$ 不算分隔字的一部分
         if ($c eq $SQ || $c eq '"') {
             my $end = index $w, $c, $i + 1;
             $end = length $w if $end < 0;
@@ -72,17 +73,31 @@ sub unquote_word {
     return $out;
 }
 
-my $HEREDOC_WORD = qr/(?>(?:[^\s;&|<>()\\'"]|\\.|'[^']*'|"[^"]*")+)/;
+my $HEREDOC_WORD = qr/(?>(?:\$?'[^']*'|\$?"[^"]*"|[^\s;&|<>()\\'"]|\\.)+)/;
 
-sub heredoc_of {
-    my ($lead, $prefix, $opener, $word, $body, $depth) = @_;
-    return heredoc($lead, $prefix, $opener, $word =~ /[\x27"\\]/ ? $SQ : '', $body, $depth);
+# 由左到右把每一段 heredoc 換成 heredoc() 的結果；開頭沒有結尾行的原樣留下，繼續找後面的
+sub strip_heredocs {
+    my ($s, $depth) = @_;
+    my ($out, $rest) = ('', $s);
+    while ($rest =~ /(^|\n)([^\n]*?)(?<!<)(<<-?[ \t]*($HEREDOC_WORD)[^\n]*)\n/s) {
+        my ($pre, $lead, $prefix, $opener, $word, $after) = ($`, $1, $2, $3, $4, $');
+        my $delim = unquote_word($word);
+        if ($after =~ /\A(.*?)\n[ \t]*\Q$delim\E[ \t]*(?:\n|\z)/s) {
+            my ($body, $tail) = ($1, $');
+            $out .= $pre . heredoc($lead, $prefix, $opener, $word =~ /[\x27"\\]/ ? $SQ : '', $body, $depth);
+            $rest = $tail;
+        } else {
+            $out .= "$pre$lead$prefix$opener\n";
+            $rest = $after;
+        }
+    }
+    return $out . $rest;
 }
 
 sub skeleton {
     my ($s, $depth) = @_;
     return $s if $depth > MAX_DEPTH;
-    $s =~ s/(^|\n)([^\n]*?)(?<!<)(<<-?[ \t]*($HEREDOC_WORD)[^\n]*)\n(.*?)\n[ \t]*(??{ quotemeta unquote_word($4) })[ \t]*(?:\n|\z)/heredoc_of($1, $2, $3, $4, $5, $depth)/sge;
+    $s = strip_heredocs($s, $depth);
     my ($out, $i, $n) = ('', 0, length $s);
     while ($i < $n) {
         my $c = substr $s, $i, 1;
