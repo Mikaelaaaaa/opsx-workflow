@@ -35,6 +35,7 @@ opsx <command> [args]
   new [--repo <path>] -- <一句話>       ＋新增收件卡（source: me）；不給 repo 就進 <state>/unfiled/ 待分類，印 slug
   file <slug> --repo <path>            待分類搬進 repo：unfiled/<slug>.md 原樣變成殼的 inbox.md
   drop <slug> [--repo <path>] -- <理由>  捨棄：歸檔並標 outcome: declined；不給 repo 就把待分類移到 unfiled/dropped/
+  split-out [--repo <path>] <目標> <id>   把目標 inbox.md 裡 id 那段 ## 併入 拆回獨立的殼、刪掉那段，印新 slug
   merge-card <來源> --into <目標> --repo <path>   併進：捨棄來源（理由「併入 <repo>/<目標>」），目標 ## 證據 追加一行來源 id 與連結
   sync [--source gitlab|github|debt|obsidian]   撈 sources.toml 的 issue、shortcut: 註解與 obsidian 收件夾進收件匣，去重；每次在 <state>/sync.log 記一行
   mr <card dir> [--refresh]            印卡的 MR 狀態（mr_json）；--refresh 跳過快取重抓並寫快取（collect 的背景重抓用）

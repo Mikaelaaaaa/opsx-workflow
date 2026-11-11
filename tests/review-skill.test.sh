@@ -49,6 +49,14 @@ assert_fixed '確認: <sha>' "$STEP4"
 assert_fixed '待修（範圍內）' "$STEP5"
 assert_fixed '確認: <sha>' "$STEP5"
 
+# --- card-area-field：範圍外開卡帶 --area，slug 可能是既有的卡；priority.md 事實欄位表有 area（specs/card-auto-merge「review 的範圍外開卡」）---
+grep -F -- '- **範圍外.**' "$STEP4" > "$FX/oos"; [ -s "$FX/oos" ] || fail "Step 4 找不到範圍外段"
+for k in 'opsx new' '--area' 'openspec/areas.txt' 'existing card'; do assert_fixed "$k" "$FX/oos"; done
+assert_not_fixed 'openspec new change' "$FX/oos"
+assert_fixed '併進' "$FX/oos"; assert_fixed '--evidence' "$FX/oos"
+assert_fixed 'before you know whether it merges' "$FX/oos"; assert_fixed 'opsx split-out' "$FX/oos"
+grep -q '^| `area` |' "$OPSX_ROOT/references/priority.md" || fail "references/priority.md 事實欄位表缺 area 列"
+
 # --- 2.3 hook 擋下：引用的共用文件要解析得到，不在本文重寫 ---
 assert_fixed '../../references/harness-claude-code.md' "$STEP4"
 [ -f "$(dirname "$SK")/../../references/harness-claude-code.md" ] || fail "harness-claude-code.md does not resolve from skills/review/"

@@ -85,6 +85,8 @@ Run `opsx late <name>`. Exit 0 (`none` or `acked <sha>`): continue. Exit 1 (`lat
 
 ### 5. Perform the archive
 
+First run `opsx check <name>`. Among other things it lists every `## 併入` item in inbox.md (a problem another agent's card was merged into this one) that no task names, on a built card and on a declined one alike. An archived card's merged items are out of reach of `opsx split-out`, so while it prints anything, stop: give each listed item its own card with `opsx split-out <name> <id>`, then run the check again.
+
 Create the archive directory if it doesn't exist:
 ```bash
 mkdir -p openspec/changes/archive

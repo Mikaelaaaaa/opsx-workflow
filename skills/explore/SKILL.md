@@ -201,7 +201,7 @@ A gate's `type` is `approval` (a permission) or `decision` (a choice) and nothin
 1. Each main change: `openspec new change <pr> --schema opsx`, with an inbox.md that says what the whole main change does and lists its sub-changes.
 2. Each sub-change: `openspec/changes/<main>/subs/<sub>/` with `inbox.md` (frontmatter `parent: <main>`, `depends-on: [<sibling>]`) and `.openspec.yaml` (`schema: opsx`, `kind:`, `parent: <main>`). The openspec CLI does not know about these; `opsx check <main>` does.
 3. `openspec/workplan.yaml`: the features, PRs and changes with all three levels of `depends-on`. No dependency means no waiting.
-4. The original card's inbox frontmatter gets `split_into: <main1>, <main2>`. Its stage becomes `split` and the flow stops there; continue with the first main change that has no unmet dependency.
+4. The original card's inbox frontmatter gets `split_into: <main1>, <main2>`. Its stage becomes `split` and the flow stops there; continue with the first main change that has no unmet dependency. Before writing `split_into`, turn each `## 併入：` section of the original card's inbox.md into its own card with `opsx split-out <original> <id>`: nobody works a split card again, so a merged item left on it is lost.
 
 Every inbox.md you write here, and any card you open while exploring, gets the facts in its frontmatter (`kind_of_work`, plus `impact` and `evidence` for an incident); then run `opsx priority <slug>`, and if it prints P0 without a user override write the `p0-review` gate per `references/priority.md`.
 

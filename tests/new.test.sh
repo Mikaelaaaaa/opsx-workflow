@@ -268,4 +268,63 @@ wait
 assert_eq "$(cat "$FX/q1.out" "$FX/q2.out" | sort -u | wc -l | tr -d ' ')" 2 "並行兩張的 slug 要不同：$(cat "$FX/q1.err" "$FX/q2.err")"
 assert_eq "$(grep -l '^並行甲$' "$OPSX_STATE_DIR"/unfiled/agent-20261110-1701*.md | wc -l | tr -d ' ')" 1
 assert_eq "$(grep -l '^並行乙$' "$OPSX_STATE_DIR"/unfiled/agent-20261110-1701*.md | wc -l | tr -d ' ')" 1
+
+# --- area 欄位（new-auto-merge card-area-field，specs/card-auto-merge「area 清單」「--area 寫進 frontmatter」）---
+# E 有 openspec/areas.txt；A 沒有。在 $W 裡跑就是 agent 開的卡（source 看 cwd，不看 --repo）。
+export OPSX_TEST_NOW="2026-11-11 10:00"
+E="$(mk_opsx_repo e)"
+snapE() { find "$E/openspec/changes" "$A/openspec/changes" "$OPSX_STATE_DIR/unfiled" | sort; }
+area_err() { # area_err <cwd> <opsx new 參數…>：要退出 2，印 stderr
+  local d="$1" e; shift
+  e="$(cd "$d" && opsx new "$@" 2>&1 >/dev/null)"; assert_eq "$?" 2 "要退出 2：$* — $e"; printf '%s' "$e"
+}
+area_of() { awk -F': ' '$1=="area"{print $2}' "$E/openspec/changes/$1/inbox.md"; }
+
+# 註解、空行、行尾空白不算；清單內的值寫進 frontmatter
+printf '# 子系統\n\nhooks  \nskills/apply\n' > "$E/openspec/areas.txt"
+out="$(cd "$W" && opsx new --kind-of-work planned --area hooks --repo "$E" -- 有 area)"; assert_eq "$?" 0 "area hooks: $out"
+assert_eq "$(area_of "$out")" hooks
+assert_eq "$(grep -c '^area:' "$E/openspec/changes/$out/inbox.md")" 1 "area 只寫一行"
+out="$(cd "$W" && opsx new --kind-of-work planned --area skills/apply --repo "$E" -- 帶斜線)"; assert_eq "$(area_of "$out")" skills/apply
+
+before="$(snapE)"
+# 清單外的值：stderr 含該值，並列出清單讓 agent 知道能選什麼
+e="$(area_err "$W" --kind-of-work planned --area board --repo "$E" -- 清單外)"
+case "$e" in *board*hooks*) ;; *) fail "清單外的 area：stderr 要含 board 與清單內容：$e" ;; esac
+# 使用者卡帶清單外的值一樣拒絕
+case "$(area_err "$A" --area board --repo "$E" -- 使用者清單外)" in *board*) ;; *) fail "使用者卡清單外也要拒絕" ;; esac
+# 前綴、大小寫不同都不算在清單裡
+area_err "$W" --kind-of-work planned --area hook --repo "$E" -- 前綴 > /dev/null
+area_err "$W" --kind-of-work planned --area Hooks --repo "$E" -- 大寫 > /dev/null
+# --area 後面沒給值
+area_err "$W" --kind-of-work planned --repo "$E" --area > /dev/null
+# agent 卡沒帶 --area
+case "$(area_err "$W" --kind-of-work planned --repo "$E" -- 沒帶 area)" in *--area*) ;; *) fail "agent 卡沒帶 area 的訊息要含 --area" ;; esac
+# unfiled 帶 --area：訊息含 --repo（有沒有 areas.txt 都一樣）
+case "$(area_err "$A" --area hooks -- 待分類)" in *--repo*) ;; *) fail "unfiled 帶 area 的訊息要含 --repo" ;; esac
+case "$(area_err "$W" --kind-of-work planned --area hooks -- agent 待分類)" in *--repo*) ;; *) fail "agent unfiled 帶 area 的訊息要含 --repo" ;; esac
+# 沒有清單的 repo 帶 --area：訊息含 areas.txt
+case "$(area_err "$W" --kind-of-work planned --area hooks --repo "$A" -- 沒清單)" in *areas.txt*) ;; *) fail "沒清單帶 area 的訊息要含 areas.txt" ;; esac
+assert_eq "$(snapE)" "$before" "area 不合格不能寫任何檔"
+
+# 清單有不合格的行：退出 2，stderr 含 areas.txt 與行號；帶 --area 或 agent 卡都擋
+printf '# 子系統\nhooks\nHooks!\n' > "$E/openspec/areas.txt"
+case "$(area_err "$W" --kind-of-work planned --area hooks --repo "$E" -- 壞清單)" in *areas.txt*3*) ;; *) fail "壞清單的訊息要含 areas.txt 與行號 3" ;; esac
+case "$(area_err "$W" --kind-of-work planned --repo "$E" -- 壞清單沒帶)" in *areas.txt*3*) ;; *) fail "agent 卡遇到壞清單要報行號" ;; esac
+printf 'hooks\n-lead\n' > "$E/openspec/areas.txt"
+case "$(area_err "$W" --kind-of-work planned --area hooks --repo "$E" -- 開頭是減號)" in *areas.txt*2*) ;; *) fail "- 開頭的行要拒絕並報行號 2" ;; esac
+printf 'hooks\nbad area\n' > "$E/openspec/areas.txt"
+case "$(area_err "$W" --kind-of-work planned --area hooks --repo "$E" -- 中間空白)" in *areas.txt*2*) ;; *) fail "中間有空白的行要拒絕" ;; esac
+assert_eq "$(snapE)" "$before" "壞清單不能寫任何檔"
+
+# 使用者卡不必帶 area，沒有 area: 行
+printf 'hooks\n' > "$E/openspec/areas.txt"
+out="$(cd "$E" && opsx new --repo "$E" -- 使用者不帶)"; assert_eq "$?" 0 "使用者卡: $out"
+assert_not_grep '^area:' "$E/openspec/changes/$out/inbox.md"
+# 使用者卡帶清單內的值也收
+out="$(cd "$E" && opsx new --area hooks --repo "$E" -- 使用者帶)"; assert_eq "$(area_of "$out")" hooks
+
+# 沒有清單的 repo：agent 卡不帶 area 跟原本一樣
+out="$(cd "$W" && opsx new --kind-of-work planned --repo "$A" -- 沒清單照舊)"; assert_eq "$?" 0 "沒清單: $out"
+assert_not_grep '^area:' "$A/openspec/changes/$out/inbox.md"
 echo ok

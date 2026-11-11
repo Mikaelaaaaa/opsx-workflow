@@ -51,4 +51,16 @@ has '## R<N>. review 退回' "$SK"
 has '測試先紅再修' "$SK"
 has '待修（範圍內）' "$OPSX_ROOT/skills/pr/SKILL.md"
 has '/opsx-workflow:apply <slug>' "$OPSX_ROOT/skills/pr/SKILL.md"
+
+# --- card-area-field：範圍外開卡一律走 opsx new，帶 --area，slug 可能是既有的卡（specs/card-auto-merge「apply 的範圍外開卡」）---
+grep -F "A problem outside this task's scope" "$SK" > "$FX/row6"
+[ "$(wc -l < "$FX/row6" | tr -d ' ')" = 1 ] || fail "skeleton 第 6 列要剛好一行"
+for k in 'opsx new' '--kind-of-work' '--area' 'openspec/areas.txt' 'existing card' 'never dispatch'; do has "$k" "$FX/row6"; done
+! grep -qF 'openspec new change' "$FX/row6" || fail "第 6 列不能再叫 agent 用 openspec new change 開範圍外卡"
+# 開卡前不知道會不會被併：完整證據事前就寫進 --evidence；放不下時 split-out 再寫；priority 只對沒被併的新卡跑
+has '併進' "$FX/row6"
+has 'before you know whether it merges' "$FX/row6"
+has 'opsx split-out' "$FX/row6"
+has 'only when it was not merged' "$FX/row6"
+! grep -qF "Put longer evidence under \`## 證據\` in that slug's" "$FX/row6" || fail "第 6 列不能叫被併入的 agent 把證據寫進目標卡的 ## 證據"
 echo ok

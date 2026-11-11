@@ -15,6 +15,9 @@ has 'opsx check <name>' "$SUB"
 has 'do not continue to `/opsx-workflow:apply`' "$SUB"
 OUT="$FX/out"; sec "$P" "## Output" > "$OUT"; has 'opsx check' "$OUT"
 
+# --- new-auto-merge：寫 tasks.md 前，每段 ## 併入 要嘛變成 task，要嘛先 opsx split-out ---
+has '## 併入' "$P"; has 'opsx split-out' "$P"
+
 # --- Scenario：review 步驟 0 呼叫 check ---
 S0="$FX/s0"; sec "$RV" "## Step 0: the gate" > "$S0"; [ -s "$S0" ] || fail "review 少 Step 0"
 has 'opsx check <slug>' "$S0"

@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
-# opsx new [--repo <path>] [--source <me|agent:<slug>>] [--kind-of-work <incident|planned>] [--impact <值,…>] [--evidence <一行>] [--attach <file>]… -- <一句話>：＋新增一張收件卡，印出 slug。
+# opsx new [--repo <path>] [--source <me|agent:<slug>>] [--kind-of-work <incident|planned>] [--impact <值,…>] [--evidence <一行>] [--area <名>] [--attach <file>]… -- <一句話>：＋新增一張收件卡，印出 slug。
 # 給了 repo 就在那裡建殼；沒給就寫 <state>/unfiled/<slug>.md，等 opsx file 選 repo（board-inbox D6）。
 # slug 是 me-<YYYYMMDD-HHMM>，同名依序加 -2（D2）。specs/board-actions「新增到收件匣」「新增時附檔」「agent 開的卡標明來源」。
 # --attach 的檔複製進卡的 attachments/（待分類是 unfiled/<slug>/attachments/），有附件時 source: paste。
 # 在 dispatch 的 worktree（<top>/.claude/worktrees/<slug>）裡呼叫是 agent 開的：source: agent:<slug>、slug 前綴 agent-；--source me 蓋過偵測。
 # agent 開的卡必帶 --kind-of-work；incident 還要 --impact 與 --evidence（references/priority.md 的事實欄位）。使用者開的卡不強制，沒帶是 planned。
+# --area 寫進 frontmatter 的 area:，值要在 repo 的 openspec/areas.txt 裡；有清單時 agent 開的卡必帶。沒有清單的 repo 不收 --area，其餘照舊（new-auto-merge D2、D3）。
+# agent 開的卡遇到同 area、還沒有 tasks.md 的卡就併進那張的 inbox.md，不建殼，印的是那張的 slug（new-auto-merge D1、D4）。
 
 OPSX_ATTACH_MAX=10485760
 
@@ -26,8 +28,72 @@ check_fact_flags() { # <source> <kind> <impact> <evidence>
   fi
 }
 
+# 讀 area 清單，一行印一個。忽略空行、# 開頭的行與行尾空白；不合格式的行 die 並報行號，免得打錯字的 area 永遠對不到。
+opsx_areas() { # <areas.txt>
+  local f="$1" line n=0
+  while IFS= read -r line || [ -n "$line" ]; do
+    n=$((n+1))
+    line="${line%"${line##*[![:space:]]}"}"
+    case "$line" in ""|"#"*) continue ;; esac
+    [[ "$line" =~ ^[a-z0-9][a-z0-9/_-]*$ ]] || die "new: $f 第 $n 行不是合格的 area 名（要符合 [a-z0-9][a-z0-9/_-]*）：$line"
+    printf '%s\n' "$line"
+  done < "$f"
+}
+
+check_area() { # <top> <source> <area>
+  local top="$1" src="$2" area="$3" f="$1/openspec/areas.txt" list
+  if [ -z "$top" ]; then
+    [ -z "$area" ] || die "new: --area 要配 --repo（待分類的卡沒有 repo，對不到 areas.txt）"
+    return 0
+  fi
+  if [ ! -f "$f" ]; then
+    [ -z "$area" ] || die "new: $f 不存在，這個 repo 不收 --area（拿到：${area}）"
+    return 0
+  fi
+  case "$src" in agent:*) ;; *) [ -n "$area" ] || return 0 ;; esac
+  list="$(opsx_areas "$f")" || exit 2
+  [ -n "$area" ] || die "new: 這個 repo 有 openspec/areas.txt，agent 開的卡要帶 --area <名>，可選：${list//$'\n'/ }"
+  grep -qxF -- "$area" <<< "$list" || die "new: --area「${area}」不在 openspec/areas.txt 裡，可選：${list//$'\n'/ }"
+}
+
+# 自動併入的目標（new-auto-merge D1–D3）：主殼 frontmatter area: 等於 <area>、stage 是 explore/grill/propose、不是開卡 agent 自己的主殼。
+# 好幾張取 slug 字母序（C locale）第一張；沒有就不印。archive 目錄沒有 inbox.md，子殼在 subs/ 底下，glob 都碰不到。
+merge_target() { # <top> <area> <開卡 agent 的主殼名>
+  local f=("$1"/openspec/changes/*/inbox.md) s
+  [ -e "${f[0]}" ] || return 0
+  while IFS= read -r s; do
+    [ "$s" != "$3" ] || continue
+    case "$(stage_name "$1" "$s")" in explore|grill|propose) printf '%s\n' "$s"; return ;; esac
+  done < <(awk -v a="$2" '
+    FNR == 1 { fm = ($0 ~ /^---[[:space:]]*$/); next }
+    fm && /^---[[:space:]]*$/ { fm = 0; nextfile }
+    fm && /^area:/ { v = $0; sub(/^area:[[:space:]]*/, "", v); sub(/[[:space:]]+$/, "", v); if (v == a) print FILENAME; fm = 0; nextfile }
+  ' "${f[@]}" | sed -E 's#/inbox\.md$##; s#.*/##' | LC_ALL=C sort)
+}
+
+# 一句話會原樣成為併入段的最後一行：長得像段落標題或段內欄位，就會切斷那一段或多出一個假 id，之後拆不出來。
+merge_text_ok() { # <一句話>
+  local re='^(## |- (id|kind_of_work|evidence|area):)'
+  [[ ! "$1" =~ $re ]]
+}
+
+# 併進 <目標>：追加 ## 併入 段（id 在鎖內算）、兩邊記 decisions.tsv、在 herdr 裡才通知。stdout 印目標 slug，stderr 印併進哪裡。
+# 通知失敗只警告：併入已經寫好，退出非零會讓 agent 以為沒開成、再開一次。
+merge_into() { # <top> <目標> <基本 id> <source> <kind> <evidence> <area> <一句話>
+  local top="$1" tgt="$2" source="$4" text="$8" id own err
+  id="$("$OPSX_PY" -I "$OPSX_ROOT/bin/lib/inboxmerge.py" append "$top/openspec/changes/$tgt" "$3" "$(now_iso)" "$source" "$5" "$6" "$7" "$text")" || die "new: 併不進 ${tgt}（上面是原因）"
+  log_row "$top/openspec/changes/$tgt" 系統 已決定 "併入 ${id}：${text}" "$source"
+  own="$(st_card_dir "$top" "${source#agent:}")"
+  [ ! -d "$own" ] || log_row "$own" 系統 已決定 "併進 ${tgt}（id ${id}）" "$source"
+  if [ -n "${HERDR_ENV:-}" ]; then
+    err="$(herdr notification show "[${top##*/}/${tgt}] 併入" --body "${text} 併進 ${tgt}" 2>&1 >/dev/null)" || warn "new: 已併進 ${tgt}，但 herdr 通知送不出去：$err"
+  fi
+  printf '併進 %s（id %s）\n' "$tgt" "$id" >&2
+  printf '%s\n' "$tgt"
+}
+
 opsx_new() {
-  local top="" text="" source="" kind="" impact="" evidence="" prefix=me files=() names=() f b stem ext cand n taken=$'\n' i wt mt
+  local top="" text="" source="" kind="" impact="" evidence="" area="" prefix=me files=() names=() f b stem ext cand n taken=$'\n' i wt mt
   while [ $# -gt 0 ]; do
     case "$1" in
       --repo) top="$2"; shift 2 ;;
@@ -36,8 +102,9 @@ opsx_new() {
       --impact) [ $# -ge 2 ] || die "new: --impact 後面要給值"; impact="$2"; shift 2 ;;
       --evidence) [ $# -ge 2 ] || die "new: --evidence 後面要給一行證據"; evidence="$2"; shift 2 ;;
       --attach) [ $# -ge 2 ] || die "new: --attach 後面要給檔案"; files+=("$2"); shift 2 ;;
+      --area) [ $# -ge 2 ] || die "new: --area 後面要給 openspec/areas.txt 裡的一個名字"; area="$2"; shift 2 ;;
       --) shift; text="$*"; break ;;
-      *) die "new: 用法 opsx new [--repo <path>] [--source <me|agent:<slug>>] [--kind-of-work <incident|planned>] [--impact <值,…>] [--evidence <一行>] [--attach <file>]… -- <一句話>" ;;
+      *) die "new: 用法 opsx new [--repo <path>] [--source <me|agent:<slug>>] [--kind-of-work <incident|planned>] [--impact <值,…>] [--evidence <一行>] [--area <名>] [--attach <file>]… -- <一句話>" ;;
     esac
   done
   single_line "$text"
@@ -55,6 +122,7 @@ opsx_new() {
   [ -z "$source" ] || [[ "$source" =~ ^(me|agent:[A-Za-z0-9][A-Za-z0-9._-]*)$ ]] || die "new: --source 要是 me 或 agent:<slug>，拿到：$source"
   check_fact_flags "$source" "$kind" "$impact" "$evidence"
   [ -z "$top" ] || top="$(opsx_repo_top "$top")"
+  check_area "$top" "$source" "$area"
   for f in ${files[@]+"${files[@]}"}; do
     [ -f "$f" ] || die "new: --attach 不存在或不是一般檔案：$f"
     [ "$(( $(wc -c < "$f") ))" -le "$OPSX_ATTACH_MAX" ] || die "new: --attach $f 超過 10 MB"
@@ -73,11 +141,24 @@ opsx_new() {
     agent:*) prefix=agent ;;
     *) source=me; [ ${#names[@]} -eq 0 ] || source=paste ;;
   esac
-  local slug body; slug="$prefix-$(date '+%Y%m%d-%H%M')"; body="$(mktemp "${TMPDIR:-/tmp}/opsx-new.XXXXXX")"
+  local slug body lv tgt own; slug="$prefix-$(date '+%Y%m%d-%H%M')"
+  # agent 開、有 repo 與 area、沒附件、一句話不像段落結構、等級是 P2 的卡才找目標；等級由 priority.py 算。
+  # 只併 P2：目標的等級事後可能因 milestone、覆寫或依賴繼承掉回 P2，併進去的 P0／P1 會跟著掉。
+  if [ "$prefix" = agent ] && [ -n "$top" ] && [ -n "$area" ] && [ ${#names[@]} -eq 0 ] && merge_text_ok "$text"; then
+    lv="$("$OPSX_PY" -I "$OPSX_ROOT/bin/lib/priority.py" level "${kind:-planned}" "$impact")" || die "new: 算不出新卡的等級（上面是原因）"
+    if [ "${lv%%$'\t'*}" = P2 ]; then
+      # 子殼的 subagent 是 agent:<主>--<子>，它自己的卡是主殼
+      own="${source#agent:}"; own="${own%%--*}"
+      tgt="$(merge_target "$top" "$area" "$own")"
+      if [ -n "$tgt" ]; then merge_into "$top" "$tgt" "$slug" "$source" "${kind:-planned}" "$evidence" "$area" "$text"; return; fi
+    fi
+  fi
+  body="$(mktemp "${TMPDIR:-/tmp}/opsx-new.XXXXXX")"
   trap 'rm -f "$body"' RETURN
   printf -- '---\ntype: 功能\nsource: %s\nfound: %s\nrelated:\nkind_of_work: %s\n' "$source" "$(date '+%Y-%m-%d')" "${kind:-planned}" > "$body"
   [ -z "$impact" ] || printf 'impact: %s\n' "$impact" >> "$body"
   [ -z "$evidence" ] || printf 'evidence: %s\n' "$evidence" >> "$body"
+  [ -z "$area" ] || printf 'area: %s\n' "$area" >> "$body"
   printf -- '---\n\n## 一句話\n\n%s\n\n' "$text" >> "$body"
   if [ ${#names[@]} -gt 0 ]; then
     printf '## 附件\n\n' >> "$body"

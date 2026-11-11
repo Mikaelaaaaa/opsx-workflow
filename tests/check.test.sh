@@ -245,4 +245,23 @@ mk_inbox f-prog-1 "source: agent:f-prog${NL}kind_of_work: planned"
 out="$(stop)"; assert_eq "$(printf '%s' "$out" | jq -r '.decision // ""')" block "stop: 補了一張就是進度，不開 gate"
 assert_no_file "$R/openspec/changes/f-prog/gates.md"
 printf '%s' "$out" | jq -r '.reason' | grep -q 'gates.md' || fail "stop: 理由要提可以寫 gates.md: $out"
+
+# --- new-auto-merge：## 併入 的 id 要有去處（tasks.md 提到它，或先 opsx split-out）---
+mk_merged() { # <slug> <tasks.md 內容，空字串是沒有 tasks.md>：inbox.md 有一段 id 為 <slug>-m1 的併入
+  local d="$R/openspec/changes/$1"; mkdir -p "$d"
+  printf 'schema: opsx\nkind: dev\n' > "$d/.openspec.yaml"
+  printf -- '---\nsource: me\nkind_of_work: planned\n---\n\n## 一句話\n\nx\n\n## 證據\n\n- id: fake-1\n\n## 併入：2026-11-11T10:40:00+08:00 agent:foo\n\n- id: %s-m1\n- kind_of_work: planned\n- area: hooks\n\n別人的問題\n' "$1" > "$d/inbox.md"
+  [ -z "$2" ] || printf '%s\n' "$2" > "$d/tasks.md"
+}
+mk_merged mg-explore ""
+out="$(chk mg-explore)" || fail "還在 explore（沒有 tasks.md、沒有 outcome）不擋：$out"
+mk_merged mg-miss '- [ ] 1.1 別的事'
+out="$(chk mg-miss)" && fail "tasks.md 沒提到併入 id 要退出 1：$out"
+case "$out" in *mg-miss-m1*split-out*) ;; *) fail "要列出 id 並提示 split-out：$out" ;; esac
+case "$out" in *fake-1*) fail "## 證據 裡的 - id: 不是併入段：$out" ;; esac
+mk_merged mg-ok '- [ ] 1.1 修別人的問題（併入 mg-ok-m1）'
+out="$(chk mg-ok)" || fail "tasks.md 提到 id 就過：$out"
+mk_merged mg-drop ""; printf 'outcome: declined\n' >> "$R/openspec/changes/mg-drop/.openspec.yaml"
+out="$(chk mg-drop)" && fail "捨棄的卡還有併入要退出 1：$out"
+case "$out" in *mg-drop-m1*) ;; *) fail "要列出 id：$out" ;; esac
 echo ok

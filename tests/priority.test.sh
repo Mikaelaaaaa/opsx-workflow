@@ -266,4 +266,19 @@ expect base P0 "top 在等它"
 # --- 沒有這張卡 ---
 expect_err nope nope
 
+# --- 從事實欄位直接算等級（new-auto-merge new-merge-into：opsx new 判斷 P0 不併，卡還不在磁碟上）---
+PY="$(cat "$OPSX_STATE_DIR/python")"
+lv() { "$PY" -I "$OPSX_ROOT/bin/lib/priority.py" level "$@"; }
+assert_eq "$(lv incident "security")" "P0	P0：security（附證據）"
+assert_eq "$(lv incident "data, prod_or_main")" "P0	P0：data、prod_or_main（附證據）"
+assert_eq "$(lv incident workaround_exists)" "P1	P1：workaround_exists"
+assert_eq "$(lv incident "")" "P2	P2：incident，沒有 impact"
+assert_eq "$(lv planned "")" "P2	P2：不在 workplan"
+# 跟 opsx priority 對同一組事實算出同一個等級（判斷只有一份）
+card same "kind_of_work: incident" "impact: security" "evidence: e"
+assert_eq "$(lv incident "security")" "$(pr same)"
+# 不合格的值：退出 1，stderr 指名值
+! lv urgent "" > /dev/null 2>"$ERR" || fail "level urgent 應該退出非 0"; assert_grep urgent "$ERR"
+! lv incident slow > /dev/null 2>"$ERR" || fail "level slow 應該退出非 0"; assert_grep slow "$ERR"
+
 echo ok

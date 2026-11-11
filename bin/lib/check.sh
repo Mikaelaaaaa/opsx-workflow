@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # opsx check <slug>：檢查 openspec/changes/<slug>/subs/ 底下每個子殼齊不齊（openspec CLI 只管主殼，子殼靠這支），
-# explore.md 的 ## 步驟 九行齊不齊，以及 agent 開的卡的事實欄位（本卡是 agent 開的，或本卡開出去的卡）。
+# explore.md 的 ## 步驟 九行齊不齊，agent 開的卡的事實欄位（本卡是 agent 開的，或本卡開出去的卡），以及併入項目有沒有去處。
 # 一個缺項一行「subs/<子>/<檔>: <缺什麼>」或「explore.md 步驟 <號> <名>: <缺什麼>」，有缺項退出 1。只用 bash 與 awk：Stop hook 直接 source 它，不能依賴 python。
 # 驗收：openspec/changes/split-plan/specs/subchange-propose/spec.md「opsx check 檢查子殼」；board-actions「agent 開的卡要帶事實欄位」。
 
@@ -10,11 +10,24 @@ opsx_check() {
   [ -n "$top" ] || die "check: 不在 git repo 裡"
   local dir="$top/openspec/changes/$1"
   [ -d "$dir" ] || die "check: 沒有這張卡：$dir"
-  local out cand; out="$(check_explore "$dir"; check_subs "$dir"; check_facts "$dir")"; cand="$(check_blast "$top" "$dir")"
+  local out cand; out="$(check_explore "$dir"; check_subs "$dir"; check_facts "$dir"; check_merged "$dir")"; cand="$(check_blast "$top" "$dir")"
   [ -z "$cand" ] || printf '%s\n' "$cand"
   [ -z "$out" ] && return 0
   printf '%s\n' "$out"
   exit 1
+}
+
+# 併進這張卡的項目（inbox.md 的 ## 併入 段）要有去處：tasks.md 提到它的 id，或已經 opsx split-out。
+# 有 tasks.md（propose 寫完了）或 outcome: declined（archive 正要捨棄）才檢查；沒有 tasks.md 時一個 id 都不算提到。
+# 不給 Stop hook 用：explore 階段的卡本來就還沒處理併入項目。
+check_merged() { # <卡目錄>：一個沒去處的 id 印一行
+  local d="$1" slug id; slug="$(basename "$1")"
+  [ -f "$d/inbox.md" ] || return 0
+  [ -f "$d/tasks.md" ] || grep -q '^outcome: declined' "$d/.openspec.yaml" 2>/dev/null || return 0
+  while IFS= read -r id; do
+    [ -f "$d/tasks.md" ] && grep -qF -- "$id" "$d/tasks.md" && continue
+    printf 'inbox.md: 併入 %s 沒有去處：寫成 tasks.md 的 task（帶這個 id），或 opsx split-out %s %s\n' "$id" "$slug" "$id"
+  done < <(awk '/^## / { inside = ($0 ~ /^## 併入：/); next } inside && /^- id: [^ ]+ *$/ { sub(/^- id: /, ""); sub(/ +$/, ""); print }' "$d/inbox.md")
 }
 
 # 步驟名與順序要跟 skills/explore/SKILL.md 的 Steps 表、schemas/opsx/templates/explore.md 一致

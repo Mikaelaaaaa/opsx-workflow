@@ -10,6 +10,9 @@ ENDING="$FX/ending"; SPLIT="$FX/split"; ENGAGE="$FX/engage"
 section "Ending: explore.md" > "$ENDING"; section "Splitting a big card" > "$SPLIT"; section "How to Engage" > "$ENGAGE"
 for f in "$ENDING" "$SPLIT" "$ENGAGE"; do [ -s "$f" ] || fail "section missing: $f"; done
 
+# --- new-auto-merge：拆卡前先處理原卡的 ## 併入 段（拆出或帶進主 change），不留在 split 的卡上 ---
+has '## 併入' "$SPLIT"; has 'opsx split-out' "$SPLIT"
+
 # --- Scenario：explore skill 有 D5 對照段 ---
 has 'D5 check' "$ENDING"
 has 'more than one subsystem' "$ENDING"
