@@ -20,7 +20,7 @@ Turn a reviewed change into a merge request the reviewer and the PM can both rea
 
 ## Where you are
 
-`openspec/changes/<slug>/report.md` exists (review ran) and has no MR URL yet. If report.md is missing, stop and say `/opsx-workflow:review <slug>` comes first; the Stop hook will say the same. If report.md still lists items under `待修（範圍內）`, stop and say `/opsx-workflow:apply <slug>` comes first; the Stop hook will say the same. If it already has an MR URL, this is an update: regenerate the description and `glab mr update` / `gh pr edit`. The update path never comments on the issue; step 5b runs only for a new MR.
+`openspec/changes/<slug>/report.md` exists (review ran) and has no MR URL yet. If report.md is missing, stop and say `/opsx-workflow:review <slug>` comes first; the Stop hook will say the same. If report.md still lists items under `待修（範圍內）`, stop and say `/opsx-workflow:apply <slug>` comes first; the Stop hook will say the same. If it already has an MR URL, this is an update: regenerate the description and `glab mr update` / `gh pr edit`. The update path never comments on the issue; step 5b runs only for a new MR. The logic map is different: step 5c runs on both, so the MR always has a map of its current head.
 
 ## Steps
 
@@ -41,6 +41,30 @@ Turn a reviewed change into a merge request the reviewer and the PM can both rea
    - GitHub: `gh issue comment <upstream_url> --body "<mr url>"`, as its own Bash command for the same reason as step 4: the sandbox exclusion is `gh issue comment *`.
 
    The comment is the MR link and nothing else; never close the issue or change its labels. If the command exits non-zero, or inbox.md has no `upstream_url` (missing `upstream_url` counts as a failure; do not guess the project), add one line under `## MR` in report.md, `issue 回寫失敗：<reason>` (the first stderr line, or `缺 upstream_url`), and go on to step 6. A failed back-link does not stop /pr: the MR is already open. When the grant hook denies the command, that is a failure too: if the deny message carries `action: mr` (a one-time `mr` grant was used up by step 4), write `issue 回寫失敗：無 mr 授權`; for any other deny, use the first line of the deny message as the reason. Then go on; do not write a gate and do not retry, even though the deny message asks for a gate (apply step 5 names this exception).
+5c. **Logic map.** Runs on a new MR and on an update. It gives the MR one comment that shows what the code at the current head does, written by an agent that never saw the intent.
+   1. `git fetch <remote> main`, with the `<remote>` from step 1. A stale local `main` gives an old merge-base, and the map would include other people's commits. Step 4 already pushed, so `HEAD` is the MR head.
+   2. Spawn one fresh subagent with the Agent tool (general-purpose). The prompt is exactly these four lines, with absolute paths written in:
+
+      ```
+      repo: <absolute path of this checkout>
+      range: <remote>/main...HEAD
+      output: <absolute path of openspec/changes/<slug>/logic-map.md in the checkout that holds openspec/>
+      Load <absolute path of ../logic-map/SKILL.md, next to this skill> and follow it.
+      ```
+
+      Nothing else goes into the prompt: no spec, proposal, design, report, tasks, conversation, PR title or description. The map exists to show where the code and the intent differ, and an agent that has read the intent describes the intent.
+   3. When the subagent fails or the file does not exist afterwards, write `產表失敗：<the first line of its report>` as the `## 邏輯表` line below and go on to step 6. A failed map does not stop /pr: the MR is already open.
+   4. Check the size before posting. The comment limit is 65,536 characters on GitHub and 1,000,000 on GitLab; count characters of the file, not bytes. Over the limit: never truncate the table. Post one line instead, `邏輯表超過留言上限（<n> 字元），全文在本機 openspec/changes/<slug>/logic-map.md`, and write the same reason after the URL in the `## 邏輯表` line.
+   5. Post or edit the comment. Run every `gh` call as its own Bash command, for the same reason as step 4. The body always comes from the file, never from text pasted into the command.
+      - No `## 邏輯表` line in report.md, or its line has no comment URL: post a new comment. GitHub: `gh pr comment <n> --body-file openspec/changes/<slug>/logic-map.md`; it prints the URL ending in `#issuecomment-<id>`. GitLab: `glab api --method POST "projects/:id/merge_requests/<iid>/notes" --field body=@openspec/changes/<slug>/logic-map.md`; the URL is the MR URL plus `#note_<id>`, with the `id` from the JSON it returns.
+      - A recorded comment URL on GitHub: first `gh pr view <n> --json comments`. Find the recorded URL in the list. When it is there and no later comment has the same author, run `gh pr comment <n> --edit-last --body-file openspec/changes/<slug>/logic-map.md`; `--edit-last` edits that author's last comment, which is then the recorded one. Otherwise (the URL is gone, or the same account commented after it) post a new comment and replace the URL in report.md; never edit any other comment.
+      - A recorded comment URL on GitLab: take `<note_id>` from the `#note_<id>` at its end and run `glab api --method PUT "projects/:id/merge_requests/<iid>/notes/<note_id>" --field body=@openspec/changes/<slug>/logic-map.md`.
+   6. Write the `## 邏輯表` section of report.md. It holds one line, and a later run (this step on an update, or babysit after a push) must overwrite the whole line, not append:
+
+      ```
+      ## 邏輯表
+      openspec/changes/<slug>/logic-map.md · 留言 <comment url> · <head sha 前 7 碼>
+      ```
 6. **Reply.** The URL, the title, what the Test plan says, and the two closing lines (skipped / unchecked / risks). Then continue to `/opsx-workflow:babysit <slug>` per `../../references/continue.md`: invoke it now unless a gate is open. Babysit handles CI and review threads and stops when the card is waiting for the user to merge.
 
 ## Guardrails
