@@ -13,7 +13,7 @@ assert_eq "$rc" 1 "假 nohup 要失敗"
 assert_eq "$out" "nohup: can't detach from console"
 
 # 程式碼裡不能有 nohup 呼叫（註解不算）
-sites="$(grep -rn '^[^#]*nohup ' "$OPSX_ROOT/bin" "$OPSX_ROOT/hooks" "$OPSX_ROOT/herdr-board/scripts" || true)"
+sites="$(grep -rInwE '^[^#]*nohup' "$OPSX_ROOT/bin" "$OPSX_ROOT/hooks" "$OPSX_ROOT/herdr-board" --exclude-dir=tests || true)"
 [ -z "$sites" ] || fail "這些地方還在用 nohup：
 $sites"
 echo ok

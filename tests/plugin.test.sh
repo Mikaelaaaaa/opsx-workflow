@@ -70,6 +70,10 @@ curl -sf "http://127.0.0.1:$port/healthz" | grep -q '"app": *"opsx-board"' || fa
 curl -sf "http://127.0.0.1:$port/healthz" >/dev/null || fail "healthz 不通"
 out="$(bash "$OPSX_ROOT/herdr-board/scripts/open-board.sh" 2>&1)"; assert_eq "$?" 0 "open-board 第二次: $out"
 assert_eq "$(cat "$pidf")" "$pid1" "第二次不該換 pid"
+# pane 關掉時整個 process group 收到 SIGHUP：pid 檔記的 server 要活著、還在回 healthz（背景程序不靠 nohup，靠子 shell 忽略 SIGHUP）
+kill -HUP "$pid1"; sleep 0.5
+kill -0 "$pid1" 2>/dev/null || fail "server 收到 SIGHUP 死了（pid ${pid1}）"
+curl -sf "http://127.0.0.1:$port/healthz" >/dev/null || fail "SIGHUP 之後 healthz 不通"
 assert_eq "$(grep -c '^open ' "$FX/open.log" || true)" 2 "兩次都要開瀏覽器"
 assert_eq "$(grep -c '^listening' "$OPSX_STATE_DIR/board.log" || true)" 1 "只該起過一支 server（沙盒不能 pgrep，數 log 的 listening 行）"
 # --- token 檔被刪 → 下一次 open-board 重起 server，新 token ---
