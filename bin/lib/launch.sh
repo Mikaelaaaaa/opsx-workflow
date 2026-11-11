@@ -45,7 +45,7 @@ deny=["Bash(git push --force:*)","Bash(git push -f:*)","Bash(deploy.sh:*)","Bash
 try:
     g=tomllib.load(open(os.path.join(sd,"grants.toml"),"rb")).get("repos",{}).get(repo,{})
     if g.get("push"): allow.append("Bash(git push:*)")
-    if g.get("mr"): allow+=["Bash(glab mr create:*)","Bash(glab mr update:*)","Bash(gh pr create:*)","Bash(gh pr edit:*)","Bash(glab issue note:*)","Bash(glab issue comment:*)","Bash(gh issue comment:*)","Bash(gh pr comment:*)"]   # 不放 glab api 規則：規則裡的 * 吃得下 / 與 ?，merge?x=/notes/1 會打到 merge 端點；GitLab notes 只由 opsx-grant-gate.sh 放行
+    if g.get("mr"): allow+=["Bash(glab mr create:*)","Bash(glab mr update:*)","Bash(gh pr create:*)","Bash(gh pr edit:*)","Bash(glab issue note:*)","Bash(glab issue comment:*)","Bash(gh issue comment:*)"]   # MR 留言（gh pr comment、glab api notes）不進 allow：規則放行形狀之外的寫法（-R other/repo、merge?x=/notes/1），只由 opsx-grant-gate.sh 錨定整條指令放行
     if g.get("migrate"): allow+=["Bash(pnpm db:migrate:*)","Bash(alembic upgrade:*)"]
 except FileNotFoundError: pass
 safefile.write_atomic(sys.argv[1], json.dumps({"permissions":{"allow":allow,"deny":deny,"additionalDirectories":dirs}},indent=2))

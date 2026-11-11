@@ -190,7 +190,7 @@ rm "$OPSX_STATE_DIR/workspaces.toml"; cp "$FX/ws.real" "$OPSX_STATE_DIR/workspac
 printf '[repos."scam-guard"]\nmr = true\n' >> "$OPSX_STATE_DIR/grants.toml"
 opsx dispatch rdap-timeout --agent claude --mode autopilot --kind dev >/dev/null 2>&1 || fail "dispatch unmapped repo"
 python3 -I -c 'import json,sys;a=json.load(open(sys.argv[1]))["permissions"]["allow"];miss=[x for x in ["Bash(glab mr create:*)","Bash(gh pr create:*)","Bash(glab issue note:*)","Bash(glab issue comment:*)","Bash(gh issue comment:*)"] if x not in a];assert not miss,miss' "$OPSX_STATE_DIR/settings/scam-guard-rdap-timeout-autopilot.json" || fail "mr 授權的 allow 要含 issue 留言"
-python3 -I -c 'import json,sys;a=json.load(open(sys.argv[1]))["permissions"]["allow"];assert "Bash(gh pr comment:*)" in a,a;assert not any("glab api" in x for x in a),a;assert "Bash(git -C:*)" not in a,a' "$OPSX_STATE_DIR/settings/scam-guard-rdap-timeout-autopilot.json" || fail "mr 授權的 allow 要含 gh pr comment，不含任何 glab api 規則與 git -C"
+python3 -I -c 'import json,sys;a=json.load(open(sys.argv[1]))["permissions"]["allow"];assert not any("gh pr comment" in x or "glab api" in x for x in a),a;assert "Bash(git -C:*)" not in a,a' "$OPSX_STATE_DIR/settings/scam-guard-rdap-timeout-autopilot.json" || fail "mr 授權的 allow 不含任何 gh pr comment、glab api 規則與 git -C"
 assert_grep '^workspace create --label scam-guard' "$OPSX_FAKE_LOG"
 assert_grep '^"scam-guard" = "scam-guard"$' "$OPSX_STATE_DIR/workspaces.toml"   # 記 label，id 在 dispatch.json
 assert_grep '^tab create --workspace w9 ' "$OPSX_FAKE_LOG"

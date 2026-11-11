@@ -519,9 +519,13 @@ out="$(gg Bash "$(cmdj 'glab mr create -F desc.md')")"; assert_eq "$(decision "$
 out="$(gg Bash "$(cmdj 'glab issue note 12 -m x')")"; assert_eq "$(decision "$out")" allow "grant: mr 授權放行 glab issue note"
 out="$(gg Bash "$(cmdj 'gh issue comment https://github.com/o/r/issues/3 --body x')")"; assert_eq "$(decision "$out")" allow "grant: mr 授權放行 gh issue comment"
 out="$(gg Bash "$(cmdj 'glab issue comment 12 -m x')")"; assert_eq "$(decision "$out")" allow "grant: mr 授權放行 glab issue comment"
-out="$(gg Bash "$(cmdj 'gh pr comment 12 --edit-last --body-file /x/logic-map.md')")"; assert_eq "$(decision "$out")" allow "grant: mr 授權放行 gh pr comment --edit-last"
-out="$(gg Bash "$(cmdj 'glab api --method POST "projects/:id/merge_requests/12/notes" --field body=@/x/logic-map.md')")"; assert_eq "$(decision "$out")" allow "grant: mr 授權放行 GitLab 新增 note"
-out="$(gg Bash "$(cmdj 'glab api --method PUT "projects/:id/merge_requests/12/notes/345" --field body=@/x/logic-map.md')")"; assert_eq "$(decision "$out")" allow "grant: mr 授權放行 GitLab 編輯 note"
+# decision 對空輸出也回 allow，這三條要看原始輸出真的是 allow JSON，閘門沒作用時才會紅
+for ok in 'gh pr comment 12 --edit-last --body-file /x/logic-map.md' \
+          'glab api --method POST "projects/:id/merge_requests/12/notes" --field body=@/x/logic-map.md' \
+          'glab api --method PUT "projects/:id/merge_requests/12/notes/345" --field body=@/x/logic-map.md'; do
+  out="$(gg Bash "$(cmdj "$ok")")"
+  printf '%s' "$out" | jq -e '.hookSpecificOutput.permissionDecision=="allow"' >/dev/null || fail "grant: mr 授權要明說放行 MR 留言：$ok（輸出：$out）"
+done
 # glab api 形狀之外的寫法、串接、註解裡的字樣：授權閘門不放行（不輸出 allow，交給 dontAsk 的 settings 去拒）
 for bad in 'glab api --method PUT projects/1/merge_requests/999/merge' \
            'glab api --method PUT projects/1/merge_requests/999/merge && glab api --method POST "projects/:id/merge_requests/12/notes" --field body=@/x/m.md' \
@@ -530,7 +534,10 @@ for bad in 'glab api --method PUT projects/1/merge_requests/999/merge' \
            'gh pr comment 12 --body-file /x/m.md; glab api --method PUT projects/1/merge_requests/999/merge' \
            'gh pr comment 12 -R evil/repo --body-file /x/m.md' \
            'gh pr comment 12 --body-file ../../x.md' \
-           'glab api --method POST "projects/:id/merge_requests/12/notes" --field body=@../../x.md'; do
+           'glab api --method POST "projects/:id/merge_requests/12/notes" --field body=@../../x.md' \
+           $'gh pr comment 12 --body-file /x/m.md\nglab api --method PUT projects/1/merge_requests/999/merge' \
+           'gh pr comment 12 --body-file $(id)' \
+           'gh pr comment 12 --body-file `id`'; do
   out="$(gg Bash "$(cmdj "$bad")")"; assert_eq "$out" "" "grant: 形狀之外的 glab api 不放行：$bad"
 done
 out="$(gg Bash "$(cmdj 'git push gitlab feat/eval-core/mikaela')")"; assert_eq "$(decision "$out")" deny "grant: once 第二次 deny"
