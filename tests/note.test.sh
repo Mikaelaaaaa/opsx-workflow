@@ -91,6 +91,36 @@ cd "$FX"
 out="$(opsx note x --repo "$R" -- "--開頭的指示" 2>&1)"; assert_eq "$?" 0 "note --repo: $out"
 notes | tail -1 | grep -q ' --開頭的指示$' || fail "-- 之後全是文字：$(notes)"
 
+# --- inbox-write-lock：別人持卡目錄鎖時 note 等到放鎖才寫 ---
+PYBIN="$(cat "$OPSX_STATE_DIR/python")"; LIBDIR="$OPSX_ROOT/bin/lib"
+printf '{}' > "$OPSX_STATE_DIR/dispatch.json"
+rm -f "$FX/held"
+"$PYBIN" -I -c '
+import sys, time
+sys.path.insert(0, sys.argv[1]); import safefile
+with safefile.CardLock(sys.argv[2]):
+    open(sys.argv[3], "w").close()
+    time.sleep(1.5)
+' "$LIBDIR" "$C" "$FX/held" &
+for _ in $(seq 100); do [ -e "$FX/held" ] && break; sleep 0.05; done
+[ -e "$FX/held" ] || fail "持鎖的 process 沒有拿到鎖"
+n="$(notes | wc -l | tr -d ' ')"
+opsx note x --repo "$R" "等鎖的指示" > "$FX/note.out" 2>&1 &
+sleep 0.5
+assert_eq "$(notes | wc -l | tr -d ' ')" "$n" "持鎖時 note 不能寫"
+wait
+notes | tail -1 | grep -q ' 等鎖的指示$' || fail "放鎖後 note 要寫進去：$(cat "$FX/note.out")"
+
+# --- inbox-write-lock：note 與併入並行，每一條指示與每一段併入都在 ---
+n="$(notes | wc -l | tr -d ' ')"
+for i in 1 2 3 4 5 6; do
+  opsx note x --repo "$R" "並行指示$i" > /dev/null 2>&1 &
+  "$PYBIN" -I "$LIBDIR/inboxmerge.py" append "$C" "m$i" "2026-11-11T10:0$i:00+08:00" "agent:t" planned "" hooks "並行併入$i" > /dev/null &
+done
+wait
+assert_eq "$(notes | wc -l | tr -d ' ')" "$((n + 6))" "並行後 6 條指示都要在"
+assert_eq "$(grep -c '^## 併入：' "$I")" 6 "並行後 6 段併入都要在"
+
 # --- 用法說明有 note ---
 opsx --help 2>&1 | grep -q '^  note ' || fail "opsx --help 要列 note"
 echo ok

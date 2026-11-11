@@ -53,10 +53,25 @@ st_mr_url() {
   return 0
 }
 st_mr_in_report() { [ -n "$(st_mr_url "$1")" ]; }
-st_open_gates() { [ -f "$1/gates.md" ] || { printf 0; return; }; grep -cE '^status:[[:space:]]*open[[:space:]]*$' "$1/gates.md" || true; }
-# 會擋 Stop 的 open gate 數：標題或「問題:」行問「要不要接 /apply」「要不要繼續？」這類接站問題的不算（接站不用問，continue.md）
+# 一張卡的 open gate 數：主殼加每個子殼（subs/<子>/gates.md，apply 把 NEEDS-USER 寫在那）
+st_open_gates() {
+  local f n=0
+  for f in "$1/gates.md" "$1"/subs/*/gates.md; do
+    [ -f "$f" ] || continue
+    n=$((n + $(grep -cE '^status:[[:space:]]*open[[:space:]]*$' "$f" || true)))
+  done
+  printf '%s' "$n"
+}
+# 會擋 Stop 的 open gate 數：標題或「問題:」行問「要不要接 /apply」「要不要繼續？」這類接站問題的不算（接站不用問，continue.md）。主殼加每個子殼
 st_open_gates_blocking() {
-  [ -f "$1/gates.md" ] || { printf 0; return; }
+  local f n=0
+  for f in "$1/gates.md" "$1"/subs/*/gates.md; do
+    [ -f "$f" ] || continue
+    n=$((n + $(st_gates_file_blocking "$f")))
+  done
+  printf '%s' "$n"
+}
+st_gates_file_blocking() { # <gates.md>
   awk '
     function flush() { if (open && (!ask || appr)) n++; open = 0; ask = 0; appr = 0 }
     /^## / { flush() }
@@ -64,7 +79,7 @@ st_open_gates_blocking() {
     /^type:[ \t]*approval[ \t]*$/ { appr = 1 }   # 核准只有人能答，不管問法
     /^(## |問題:).*要不要(接|派|繼續)([ ]*\/|[ ]*下一|\?|？|：|$)/ { ask = 1 }
     END { flush(); print n + 0 }
-  ' "$1/gates.md"
+  ' "$1"
 }
 # slug 是 PR 名或 PR 底下的 change 名，印該 PR 的 <field>（branch、status）；對不到印空。
 # 用 awk 不用 chain.py 的 load_workplan：collect 每張卡都判 stage，router 每句 prompt 都判，不能每次 fork python。
