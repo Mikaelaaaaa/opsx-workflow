@@ -41,7 +41,7 @@ Draw it as plain text in a fenced block, not Mermaid. The user reads it in a ter
 - A loop writes `(回D<n>)` at the end of the path that returns, instead of drawing the line back.
 - Use only `─ │ └ ┐ ┤ ┘ ▼ →`. Keep lines under about 100 characters; split a long chart into two blocks at a decision and say where the second one starts.
 
-Keep the chart to the logic the PR added or changed, plus the existing decisions needed to reach it. Mark an existing decision with `（既有）` after its question so the user knows not to judge it as new work.
+Keep the chart to the logic the PR added or changed, plus every existing decision on the path from the entry of the enclosing function to it, including checks that return early before the new code runs for some input. A reader who cannot see the earlier checks will think the new code runs in cases it never reaches. Mark an existing decision with `（既有）` after its question so the user knows not to judge it as new work.
 
 ```
 訊息 → D1 已登入? ─是→ 讀DB ─┐

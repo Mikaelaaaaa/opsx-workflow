@@ -44,5 +44,9 @@ assert_not_fixed 'references/technical-writing.md' "$SK"
 assert_no_file "$DIR/references/technical-writing.md"
 assert_file "$DIR/../technical-writing/SKILL.md"
 
+# --- 既有判斷的範圍：入口到新程式碼路上的每個判斷都要畫，含提前 return 的（第一輪 eval 1 漏了子殼齊的檢查）---
+assert_fixed 'every existing decision on the path from the entry of the enclosing function' "$SK"
+assert_fixed 'including checks that return early' "$SK"
+
 # --- frontmatter name 對得上目錄 ---
 assert_eq "$(sed -n '2p' "$SK")" 'name: logic-map'

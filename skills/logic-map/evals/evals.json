@@ -14,7 +14,7 @@
         "每列「位置」的 path:line 在 HEAD 存在，且那一行是判斷行（check_map.py 退出 0）",
         "條件欄保留原 regex、7200 與 subagent- 等字面值，沒有改寫成意圖描述",
         "既有判斷（tasks.md 存在、子殼齊、未勾 task、會擋的 open gate）標了（既有），st_subagent_running 沒標",
-        "skills/apply/SKILL.md 的文字改動沒有被當成判斷列進條件表",
+        "skills/apply/SKILL.md 的改動若列進條件表，位置指到寫出那個條件的行，條件照原文的判斷（not NEEDS-USER、DONE）寫，不補程式裡沒有的分支",
         "沒有引用 openspec/、report.md、PR 描述或 commit 訊息的內容"
       ]
     },

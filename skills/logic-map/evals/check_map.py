@@ -3,7 +3,8 @@
 Usage: python3 -I check_map.py <repo> <head> <logic-map.md>
 
 Exits 1 and prints one line per problem on stderr when a position line does not
-exist at <head>, a position line is not a judgment line, a feature's flowchart
+exist at <head>, a position line in code is not a judgment line (a Markdown
+skill file is prose an agent executes, so only its line's existence is checked), a feature's flowchart
 and condition table do not name the same D nodes, or a flowchart is Mermaid.
 Exits 2 on bad arguments. Whether a condition is faithful is left to the grader.
 """
@@ -14,8 +15,10 @@ import subprocess
 import sys
 
 JUDGMENT_PREFIXES = ("if ", "elif ", "case ", "[[", "while ", "until ")
-JUDGMENT_PARTS = ("grep -q", "&&", "||")
+JUDGMENT_PARTS = ("grep -q", "jq -e", "&&", "||")
 TERNARY = re.compile(r"\sif\s.+\selse\s")
+COMPREHENSION_FILTER = re.compile(r"\bfor\s.+\sin\s.+\sif\s")
+AWK_PATTERN = re.compile(r"^/.+/\s*\{")
 NODE = re.compile(r"(?<![A-Za-z0-9_])D(\d+)(?!\d)")
 POSITION = re.compile(r"([\w./-]+)?:(\d+)")
 MERMAID = re.compile(r"^```\s*mermaid", re.M)
@@ -29,7 +32,7 @@ def is_judgment(line):
         return True
     if any(p in s for p in JUDGMENT_PARTS):
         return True
-    return TERNARY.search(s) is not None
+    return any(p.search(s) for p in (TERNARY, COMPREHENSION_FILTER, AWK_PATTERN))
 
 
 def subsections(feature):
@@ -88,7 +91,7 @@ def check_positions(src, label, node, cell):
             problems.append("%s:%d 不存在（head 沒有這個檔）" % (path, n))
         elif n < 1 or n > len(lines):
             problems.append("%s:%d 不存在（檔案只有 %d 行）" % (path, n, len(lines)))
-        elif not is_judgment(lines[n - 1]):
+        elif not path.endswith(".md") and not is_judgment(lines[n - 1]):
             problems.append("%s:%d 不是判斷行：%s" % (path, n, lines[n - 1].strip()))
     return problems
 

@@ -42,6 +42,29 @@ expect_bad "$FX/nofile.md" "nope.sh:3 不存在"
 write_map "$FX/nopos.md" "" "" ""
 expect_bad "$FX/nopos.md" "D1"
 
+# --- 校正：第一輪 eval 的真 PR 裡被誤判的判斷寫法（awk 樣式行、推導式的 if、jq -e）---
+printf '%s\n' 'awk '"'"'' '/^status:[ \t]*open[ \t]*$/ { open = 1 }' 'named = [i for i in titled if title_of(parts[i]) == gate]' '  jq -e --argjson now "$now" '"'"'' 'cp a b' 'print("if you like")' > "$repo/more.sh"
+git -C "$repo" add more.sh
+git -C "$repo" commit -q -m more
+judged() { # judged <行號> <期望 0|1>
+  write_map "$FX/j.md" "more.sh:$1" "" ""
+  if run_check "$FX/j.md"; then got=0; else got=1; fi
+  assert_eq "$got" "$2" "more.sh:$1 $(sed -n "$1p" "$repo/more.sh") — $(cat "$FX/err")"
+}
+# skill 檔的文字是給 agent 執行的指示（SKILL.md Steps 1）：.md 的位置只要行存在，不要求是判斷行
+printf '# x\n\n1. When the report is not NEEDS-USER, mark it done.\n' > "$repo/SKILL.md"
+git -C "$repo" add SKILL.md
+git -C "$repo" commit -q -m skill
+write_map "$FX/md.md" SKILL.md:3 "" ""
+run_check "$FX/md.md" || fail "skill 檔的指示行被拒：$(cat "$FX/err")"
+write_map "$FX/md-missing.md" SKILL.md:30 "" ""
+expect_bad "$FX/md-missing.md" "SKILL.md:30 不存在"
+judged 2 0
+judged 3 0
+judged 4 0
+judged 5 1
+judged 6 1
+
 # --- 校正：examples.md 的範例 1、2 對它們的 commit 要通過 ---
 EX="$OPSX_ROOT/skills/logic-map/references/examples.md"
 awk '/^## Example 1:/{on=1;next} /^## Example 2:/{on=0} on' "$EX" > "$FX/ex1.md"
