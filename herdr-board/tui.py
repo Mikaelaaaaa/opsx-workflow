@@ -64,8 +64,11 @@ def draw(scr, rows, cur: tm.Cursor, data: dict, note: str, scope: str | None, bo
     errs = "；".join("%s：%s" % (e.get("source"), e.get("message")) for e in data.get("errors") or [])
     foot = note or errs or "↑↓ 選  ↵ 跳 pane  r 重拉  i 收件匣  d 已完成  o 網頁  + 收件匣  ⇥ 範圍  z 全屏  q 關  （回 gate / 指派 / 合併在網頁）"
     foot_lines = [""] if box is not None else tm.wrap(foot, w - 1, 3)   # 沒有 opener 時的網址要整段看得到
-    y = 2
-    top = max(0, (cur.index or 0) - (h - 6))
+    lines = tm.progress_lines(data, scope)
+    for i, line in enumerate(lines):
+        scr.addstr(1 + i, 0, tm.fit(line, w - 1))
+    y = 2 + len(lines)
+    top = max(0, (cur.index or 0) - (h - 6 - len(lines)))
     for i, r in enumerate(rows):
         if i < top or y >= h - 1 - len(foot_lines):
             continue

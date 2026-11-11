@@ -4,9 +4,11 @@
 """
 import curses
 import importlib.util
+import os
 import pathlib
 import subprocess
 import threading
+import time
 import unittest
 from unittest import mock
 
@@ -229,6 +231,72 @@ class ScopeTest(unittest.TestCase):
         self.assertEqual(tm.keep_scope(WDATA, tm.UNMOUNTED), tm.UNMOUNTED)
 
 
+def progress(milestone="1.0", at="2026-11-11T14:30:00+08:00", remaining=5):
+    return {"milestone": milestone, "goal": "能開單出貨", "remaining": remaining, "mergeable": 1, "testing": 1, "developing": 1,
+            "waiting_on_you": 1, "not_dispatched": 1, "not_dispatched_planned": ["x"], "at": at}
+
+
+ONE_LINE = "進度 14:30 · 1.0：剩 5 張 · 可合併 1 · 測試中 1 · 開發中 1 · 等你 1 · 還沒派 1"
+FIVE = dict(WDATA, scopes=[{"workspace": "w1", "repos": ["e", "d"]}, {"workspace": None, "repos": ["c", "b", "a"]}],
+            progress={r: progress() for r in "abcde"})
+
+
+class ProgressLinesTest(unittest.TestCase):
+    """specs/board-plugin「TUI 頂列下的進度行」；預期字串與網頁 progressLine 的測試共用。"""
+
+    def setUp(self):
+        self.tz = os.environ.get("TZ")
+        os.environ["TZ"] = "Asia/Taipei"
+        time.tzset()
+
+    def tearDown(self):
+        if self.tz is None:
+            del os.environ["TZ"]
+        else:
+            os.environ["TZ"] = self.tz
+        time.tzset()
+
+    def test_same_string_as_web(self):
+        self.assertEqual(tm.progress_lines(dict(WDATA, progress={"a": progress()}), "w1"), [ONE_LINE])
+
+    def test_no_milestone_says_in_progress(self):
+        line = tm.progress_text("a", progress(milestone=None, remaining=4), False)
+        self.assertIn("進行中 4 張", line)
+        self.assertNotIn("剩", line)
+
+    def test_time_is_local(self):
+        os.environ["TZ"] = "UTC"
+        time.tzset()
+        self.assertTrue(tm.progress_text("a", progress(), False).startswith("進度 06:30 · "))
+
+    def test_out_of_scope_repo_not_listed(self):
+        data = dict(WDATA, progress={"a": progress(), "b": progress()})
+        self.assertEqual(tm.progress_lines(data, "w1"), [ONE_LINE], "b 不在 w1，也只剩一個 repo 所以不加 repo 名")
+        self.assertEqual(tm.top_line(data, "w1"), " opsx  待處理 2  範圍 w1", "頂列待處理數仍照全部算")
+
+    def test_two_repos_prefix_repo_name_in_scopes_order(self):
+        data = dict(WDATA, progress={"b": progress(), "a": progress()})
+        self.assertEqual(tm.progress_lines(data, None), ["a " + ONE_LINE, "b " + ONE_LINE])
+
+    def test_repo_without_progress_skipped(self):
+        self.assertEqual(tm.progress_lines(dict(WDATA, progress={"b": progress()}), None), [ONE_LINE])
+
+    def test_more_than_three_repos_collapse(self):
+        self.assertEqual(tm.progress_lines(FIVE, None),
+                         ["e " + ONE_LINE, "d " + ONE_LINE, "c " + ONE_LINE, "另 2 個 repo，⇥ 切範圍"])
+
+    def test_no_progress_field_draws_nothing(self):
+        self.assertEqual(tm.progress_lines(WDATA, None), [])
+        self.assertEqual(tm.progress_lines(dict(tui.EMPTY), None), [], "一開始還沒資料也不報錯")
+
+    def test_cards_start_below_progress_lines(self):
+        scr = DrawScr()
+        rows = tm.rows(FIVE, done_open=False)
+        tui.draw(scr, rows, tm.Cursor(rows), FIVE, "", None, None)
+        self.assertEqual([y for y, text in scr.lines if "另 2 個 repo" in text], [4])
+        self.assertEqual(min(y for y, text in scr.lines if "待處理 ·" in text), 6, "卡片從 2 + 4 行進度之後開始")
+
+
 def typed(*keys):
     box = tm.LineInput()
     results = [box.feed(k) for k in keys]
@@ -345,6 +413,17 @@ class FakeScr:
 
     def refresh(self):
         pass
+
+
+class DrawScr(FakeScr):
+    """記下 draw 每次 addstr 的 (y, 文字)。"""
+
+    def __init__(self):
+        super().__init__([])
+        self.lines = []
+
+    def addstr(self, y, x, text, *attr):
+        self.lines.append((y, text))
 
 
 class FakeFeed:
