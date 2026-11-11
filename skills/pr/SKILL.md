@@ -18,7 +18,7 @@ Turn a reviewed change into a merge request the reviewer and the PM can both rea
 
 ## Where you are
 
-`openspec/changes/<slug>/report.md` exists (review ran) and has no MR URL yet. If report.md is missing, stop and say `/review <slug>` comes first; the Stop hook will say the same. If report.md still lists items under `待修（範圍內）`, stop and say `/apply <slug>` comes first; the Stop hook will say the same. If it already has an MR URL, this is an update: regenerate the description and `glab mr update` / `gh pr edit`.
+`openspec/changes/<slug>/report.md` exists (review ran) and has no MR URL yet. If report.md is missing, stop and say `/review <slug>` comes first; the Stop hook will say the same. If report.md still lists items under `待修（範圍內）`, stop and say `/apply <slug>` comes first; the Stop hook will say the same. If it already has an MR URL, this is an update: regenerate the description and `glab mr update` / `gh pr edit`. The update path never comments on the issue; step 5b runs only for a new MR.
 
 ## Steps
 
@@ -34,6 +34,11 @@ Turn a reviewed change into a merge request the reviewer and the PM can both rea
    ```
 
    and `opsx status pr 5/5 "MR 已開"`.
+5b. **Back-link.** Leave the MR URL on the issue the card came from, only when this run opened a new MR (report.md had no MR URL before step 5) and the card's inbox.md `source:` starts with `gitlab:` or `github:`. Cards from any other source are skipped. Locate the issue through inbox.md's `upstream_url`, not through `source` (its `<repo>` is the local repo name).
+   - GitLab: `glab issue note <n> -R <upstream_url without /-/issues/<n>> -m "<mr url>"`, where `<n>` is the `#<n>` at the end of `source`.
+   - GitHub: `gh issue comment <upstream_url> --body "<mr url>"`, as its own Bash command for the same reason as step 4: the sandbox exclusion is `gh issue comment *`.
+
+   The comment is the MR link and nothing else; never close the issue or change its labels. If the command exits non-zero, or inbox.md has no `upstream_url` (missing `upstream_url` counts as a failure; do not guess the project), add one line under `## MR` in report.md, `issue 回寫失敗：<reason>` (the first stderr line, or `缺 upstream_url`), and go on to step 6. A failed back-link does not stop /pr: the MR is already open.
 6. **Reply.** The URL, the title, what the Test plan says, and the two closing lines (skipped / unchecked / risks). Then continue to `/babysit <slug>` per `../../references/continue.md`: invoke it now unless a gate is open. Babysit handles CI and review threads and stops when the card is waiting for the user to merge.
 
 ## Guardrails
