@@ -73,22 +73,15 @@ merge_target() { # <top> <area> <開卡 agent 的主殼名>
 
 # 一句話會原樣成為併入段的最後一行：長得像段落標題或段內欄位，就會切斷那一段或多出一個假 id，之後拆不出來。
 merge_text_ok() { # <一句話>
-  local re='^(## |- (id|kind_of_work|impact|evidence|area):)'
+  local re='^(## |- (id|kind_of_work|evidence|area):)'
   [[ ! "$1" =~ $re ]]
-}
-
-# 新卡等級比目標高就不併：併進去之後是照目標的等級排隊。目標的事實不合格、算不出等級時也不併，照樣建殼。
-merge_level_ok() { # <top> <目標> <新卡等級>
-  local got
-  got="$("$OPSX_PY" -I "$OPSX_ROOT/bin/lib/priority.py" get "$1" "$2" 2>&1)" || { warn "new: 算不出 $2 的等級，不併入：$got"; return 1; }
-  [[ ! "$3" < "${got%%$'\t'*}" ]]
 }
 
 # 併進 <目標>：追加 ## 併入 段（id 在鎖內算）、兩邊記 decisions.tsv、在 herdr 裡才通知。stdout 印目標 slug，stderr 印併進哪裡。
 # 通知失敗只警告：併入已經寫好，退出非零會讓 agent 以為沒開成、再開一次。
-merge_into() { # <top> <目標> <基本 id> <source> <kind> <impact> <evidence> <area> <一句話>
-  local top="$1" tgt="$2" source="$4" text="$9" id own err
-  id="$("$OPSX_PY" -I "$OPSX_ROOT/bin/lib/inboxmerge.py" append "$top/openspec/changes/$tgt" "$3" "$(now_iso)" "$source" "$5" "$6" "$7" "$8" "$text")" || die "new: 併不進 ${tgt}（上面是原因）"
+merge_into() { # <top> <目標> <基本 id> <source> <kind> <evidence> <area> <一句話>
+  local top="$1" tgt="$2" source="$4" text="$8" id own err
+  id="$("$OPSX_PY" -I "$OPSX_ROOT/bin/lib/inboxmerge.py" append "$top/openspec/changes/$tgt" "$3" "$(now_iso)" "$source" "$5" "$6" "$7" "$text")" || die "new: 併不進 ${tgt}（上面是原因）"
   log_row "$top/openspec/changes/$tgt" 系統 已決定 "併入 ${id}：${text}" "$source"
   own="$(st_card_dir "$top" "${source#agent:}")"
   [ ! -d "$own" ] || log_row "$own" 系統 已決定 "併進 ${tgt}（id ${id}）" "$source"
@@ -149,17 +142,15 @@ opsx_new() {
     *) source=me; [ ${#names[@]} -eq 0 ] || source=paste ;;
   esac
   local slug body lv tgt own; slug="$prefix-$(date '+%Y%m%d-%H%M')"
-  # agent 開、有 repo 與 area、沒附件、一句話不像段落結構、不是 P0 的卡才找目標；等級由 priority.py 算
+  # agent 開、有 repo 與 area、沒附件、一句話不像段落結構、等級是 P2 的卡才找目標；等級由 priority.py 算。
+  # 只併 P2：目標的等級事後可能因 milestone、覆寫或依賴繼承掉回 P2，併進去的 P0／P1 會跟著掉。
   if [ "$prefix" = agent ] && [ -n "$top" ] && [ -n "$area" ] && [ ${#names[@]} -eq 0 ] && merge_text_ok "$text"; then
     lv="$("$OPSX_PY" -I "$OPSX_ROOT/bin/lib/priority.py" level "${kind:-planned}" "$impact")" || die "new: 算不出新卡的等級（上面是原因）"
-    lv="${lv%%$'\t'*}"
-    if [ "$lv" != P0 ]; then
+    if [ "${lv%%$'\t'*}" = P2 ]; then
       # 子殼的 subagent 是 agent:<主>--<子>，它自己的卡是主殼
       own="${source#agent:}"; own="${own%%--*}"
       tgt="$(merge_target "$top" "$area" "$own")"
-      if [ -n "$tgt" ] && merge_level_ok "$top" "$tgt" "$lv"; then
-        merge_into "$top" "$tgt" "$slug" "$source" "${kind:-planned}" "$impact" "$evidence" "$area" "$text"; return
-      fi
+      if [ -n "$tgt" ]; then merge_into "$top" "$tgt" "$slug" "$source" "${kind:-planned}" "$evidence" "$area" "$text"; return; fi
     fi
   fi
   body="$(mktemp "${TMPDIR:-/tmp}/opsx-new.XXXXXX")"

@@ -63,13 +63,13 @@ assert_grep '併進 x（id agent-20261111-1040-2）' "$ERR"
 assert_eq "$(grep '^- id:' "$C/x/inbox.md" | tr '\n' ' ')" "- id: agent-20261111-1040 - id: agent-20261111-1040-2 "
 assert_eq "$(dirs)" "x "
 
-# --- incident 的事實欄位帶進去（目標 P1，新卡 P1，同級可併）---
-reset; card x hooks "priority: P1" "priority_reason: 測試"
-agent_new --kind-of-work incident --impact workaround_exists --evidence "tests/a.test.sh 紅" --area hooks --repo "$E" -- 有事實
+# --- planned 帶 evidence：evidence 跟著進併入段 ---
+reset; card x hooks
+agent_new --kind-of-work planned --evidence "tests/a.test.sh 紅" --area hooks --repo "$E" -- 有證據
 assert_eq "$(cat "$OUT")" x "$(cat "$ERR")"
-assert_grep '^- kind_of_work: incident$' "$C/x/inbox.md"
-assert_grep '^- impact: workaround_exists$' "$C/x/inbox.md"
+assert_grep '^- kind_of_work: planned$' "$C/x/inbox.md"
 assert_grep '^- evidence: tests/a.test.sh 紅$' "$C/x/inbox.md"
+assert_not_grep '^- impact:' "$C/x/inbox.md"
 
 # --- 不併的情況：照樣建殼，別的卡不動 ---
 keep() { cp "$C/$1/inbox.md" "$FX/keep.md"; }
@@ -123,9 +123,11 @@ reset; card x hooks; keep x
 agent_new --kind-of-work planned --area hooks --repo "$E" -- "- id: x-1"; new_shell_out agent; kept x
 reset; card x hooks; keep x
 agent_new --kind-of-work planned --area hooks --repo "$E" -- "- area: board"; new_shell_out agent; kept x
-# 等級比目標高不併：P1 incident 對不在 workplan 的 P2 卡
+# incident 一律不併：目標的等級事後可能掉回 P2（milestone、覆寫、依賴繼承），併進去的 incident 會跟著掉
 reset; card x hooks; keep x
 agent_new --kind-of-work incident --impact blocks_all_agents --evidence e --area hooks --repo "$E" -- 擋住大家; new_shell_out agent; kept x
+reset; card x hooks "priority: P1" "priority_reason: 測試"; keep x
+agent_new --kind-of-work incident --impact workaround_exists --evidence e --area hooks --repo "$E" -- 目標是 P1 也不併; new_shell_out agent; kept x
 
 # --- 兩邊都有紀錄 ---
 reset; card x hooks; card foo board

@@ -1,7 +1,7 @@
 """目標卡 inbox.md 的 `## 併入：<時間> <來源>` 段：opsx new 追加、opsx split-out 拆回獨立的卡。
 
 用法：
-    $OPSX_PY -I inboxmerge.py append <卡目錄> <基本 id> <ISO 時間> <來源> <kind_of_work> <impact> <evidence> <area> <一句話>
+    $OPSX_PY -I inboxmerge.py append <卡目錄> <基本 id> <ISO 時間> <來源> <kind_of_work> <evidence> <area> <一句話>
         追加一段，印這段拿到的 id。id 是新卡原本會拿到的 slug；目標裡已經有同一個 id 時依序加 -2、-3。
     $OPSX_PY -I inboxmerge.py card <卡目錄> <id>
         印那一段拆回獨立卡時的 inbox.md（跟 opsx new 寫的同形）。找不到退出 2。
@@ -26,7 +26,7 @@ HEAD = re.compile(r"^## ")
 MERGED = re.compile(r"^## 併入：")
 MERGED_HEAD = re.compile(r"^## 併入：(\S+) (\S+)\s*$")
 ID_LINE = re.compile(r"^- id: (\S+)\s*$")
-FIELD = re.compile(r"^- (id|kind_of_work|impact|evidence|area): (.*)$")
+FIELD = re.compile(r"^- (id|kind_of_work|evidence|area): (.*)$")
 DATE = re.compile(r"^\d{4}-\d{2}-\d{2}")
 
 
@@ -69,17 +69,15 @@ def free_id(base: str, taken: set) -> str:
     return "%s-%d" % (base, n)
 
 
-def section(mid: str, when: str, source: str, kind: str, impact: str, evidence: str, area: str, text: str) -> str:
+def section(mid: str, when: str, source: str, kind: str, evidence: str, area: str, text: str) -> str:
     lines = ["## 併入：%s %s" % (when, source), "", "- id: " + mid, "- kind_of_work: " + kind]
-    if impact:
-        lines.append("- impact: " + impact)
     if evidence:
         lines.append("- evidence: " + evidence)
     lines += ["- area: " + area, "", text, ""]
     return "\n".join(lines)
 
 
-def append(card_dir: str, base: str, when: str, source: str, kind: str, impact: str, evidence: str, area: str, text: str) -> str:
+def append(card_dir: str, base: str, when: str, source: str, kind: str, evidence: str, area: str, text: str) -> str:
     inbox = os.path.join(card_dir, "inbox.md")
     with CardLock(card_dir):
         with open(inbox, encoding="utf-8") as f:
@@ -89,7 +87,7 @@ def append(card_dir: str, base: str, when: str, source: str, kind: str, impact: 
             cur += "\n"
         if cur and not cur.endswith("\n\n"):
             cur += "\n"
-        safefile.write_atomic(inbox, cur + section(mid, when, source, kind, impact, evidence, area, text))
+        safefile.write_atomic(inbox, cur + section(mid, when, source, kind, evidence, area, text))
     return mid
 
 
@@ -134,8 +132,6 @@ def parse(block: list) -> dict:
 
 def card_body(fields: dict) -> str:
     lines = ["---", "type: 功能", "source: " + fields["source"], "found: " + fields["when"][:10], "related:", "kind_of_work: " + fields["kind_of_work"]]
-    if "impact" in fields:
-        lines.append("impact: " + fields["impact"])
     if "evidence" in fields:
         lines.append("evidence: " + fields["evidence"])
     lines += ["area: " + fields["area"], "---", "", "## 一句話", "", fields["text"], "", "## 證據", "", ""]
@@ -163,9 +159,9 @@ def remove(card_dir: str, mid: str) -> None:
 def main() -> None:
     args = sys.argv[1:]
     cmd = args[0] if args else ""
-    want = {"append": 10, "card": 3, "remove": 3, "ids": 2}
+    want = {"append": 9, "card": 3, "remove": 3, "ids": 2}
     if cmd not in want or len(args) != want[cmd]:
-        sys.exit("用法：inboxmerge.py append <卡目錄> <基本 id> <ISO 時間> <來源> <kind_of_work> <impact> <evidence> <area> <一句話> | card <卡目錄> <id> | remove <卡目錄> <id> | ids <卡目錄>")
+        sys.exit("用法：inboxmerge.py append <卡目錄> <基本 id> <ISO 時間> <來源> <kind_of_work> <evidence> <area> <一句話> | card <卡目錄> <id> | remove <卡目錄> <id> | ids <卡目錄>")
     try:
         if cmd == "append":
             print(append(*args[1:]))

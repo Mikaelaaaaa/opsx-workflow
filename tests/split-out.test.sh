@@ -27,14 +27,13 @@ dirs() { find "$C" -mindepth 1 -maxdepth 1 -type d | sed 's#.*/##' | LC_ALL=C so
 
 # --- 拆回獨立的卡 ---
 # 併入時在段前補的空行不屬於那一段，拆完留著：x 是併入前的內容加一個空行
-# P1 incident 只能併進 P1 以上的卡，所以目標用使用者覆寫成 P1
-reset; card x hooks "priority: P1" "priority_reason: 測試"; cp "$C/x/inbox.md" "$FX/orig.md"; printf '\n' >> "$FX/orig.md"
-merge --kind-of-work incident --impact workaround_exists --evidence "tests/a.test.sh 紅" -- 鉤子漏擋
+reset; card x hooks; cp "$C/x/inbox.md" "$FX/orig.md"; printf '\n' >> "$FX/orig.md"
+merge --kind-of-work planned --evidence "tests/a.test.sh 紅" -- 鉤子漏擋
 assert_grep "^- id: $ID\$" "$C/x/inbox.md"
 split x "$ID"; assert_eq "$?" 0 "拆出要退出 0：$(cat "$ERR")"
 assert_eq "$(cat "$OUT")" "$ID" "stdout 是新 slug"
 assert_eq "$(dirs)" "$ID x "
-printf -- '---\ntype: 功能\nsource: agent:foo\nfound: 2026-11-11\nrelated:\nkind_of_work: incident\nimpact: workaround_exists\nevidence: tests/a.test.sh 紅\narea: hooks\n---\n\n## 一句話\n\n鉤子漏擋\n\n## 證據\n\n' > "$FX/want.md"
+printf -- '---\ntype: 功能\nsource: agent:foo\nfound: 2026-11-11\nrelated:\nkind_of_work: planned\nevidence: tests/a.test.sh 紅\narea: hooks\n---\n\n## 一句話\n\n鉤子漏擋\n\n## 證據\n\n' > "$FX/want.md"
 cmp -s "$C/$ID/inbox.md" "$FX/want.md" || fail "新殼 inbox.md 形狀不對：$(diff "$FX/want.md" "$C/$ID/inbox.md")"
 assert_file "$C/$ID/.openspec.yaml"
 assert_not_grep "$ID" "$C/x/inbox.md"

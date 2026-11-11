@@ -10,10 +10,23 @@ opsx_check() {
   [ -n "$top" ] || die "check: 不在 git repo 裡"
   local dir="$top/openspec/changes/$1"
   [ -d "$dir" ] || die "check: 沒有這張卡：$dir"
-  local out; out="$(check_subs "$dir"; check_facts "$dir")"
+  local out; out="$(check_subs "$dir"; check_facts "$dir"; check_merged "$dir")"
   [ -z "$out" ] && return 0
   printf '%s\n' "$out"
   exit 1
+}
+
+# 併進這張卡的項目（inbox.md 的 ## 併入 段）要有去處：tasks.md 提到它的 id，或已經 opsx split-out。
+# 有 tasks.md（propose 寫完了）或 outcome: declined（archive 正要捨棄）才檢查；沒有 tasks.md 時一個 id 都不算提到。
+# 不給 Stop hook 用：explore 階段的卡本來就還沒處理併入項目。
+check_merged() { # <卡目錄>：一個沒去處的 id 印一行
+  local d="$1" slug id; slug="$(basename "$1")"
+  [ -f "$d/inbox.md" ] || return 0
+  [ -f "$d/tasks.md" ] || grep -q '^outcome: declined' "$d/.openspec.yaml" 2>/dev/null || return 0
+  while IFS= read -r id; do
+    [ -f "$d/tasks.md" ] && grep -qF -- "$id" "$d/tasks.md" && continue
+    printf 'inbox.md: 併入 %s 沒有去處：寫成 tasks.md 的 task（帶這個 id），或 opsx split-out %s %s\n' "$id" "$slug" "$id"
+  done < <(awk '/^## / { inside = ($0 ~ /^## 併入：/); next } inside && /^- id: [^ ]+ *$/ { sub(/^- id: /, ""); sub(/ +$/, ""); print }' "$d/inbox.md")
 }
 
 check_subs() { # <主殼目錄>：印缺項，一行一個；沒有 subs/ 或全齊什麼都不印
