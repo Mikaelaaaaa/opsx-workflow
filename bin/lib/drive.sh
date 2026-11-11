@@ -91,6 +91,10 @@ opsx_drive() {
               if [ "$backoff" -eq 0 ]; then backoff="$poll"; else backoff=$((backoff * 2 > 3600 ? 3600 : backoff * 2)); fi
               say "drive: $slug 送了 /opsx-workflow:$stage 之後 agent 立刻失敗（pane 尾巴有 API 錯誤），不重送、不寫 gate，退避 $backoff 秒"
               sleep "$backoff" ;;
+            # shortcut: 只認 inbox 證據裡見過的兩種畫面，subagent 列只認 general-purpose / Explore / Plan；沒在真 pane 上校正過，漏掉的樣式會退回開 gate，有需要再補
+            *"still running"*|*"general-purpose "[0-9]*|*"Explore "[0-9]*|*"Plan "[0-9]*)
+              say "drive: $slug 送了 /opsx-workflow:$stage 之後階段沒動，但 pane 有背景工作或 subagent 在跑，不寫 gate、不重送，等 $poll 秒"
+              sleep "$poll" ;;
             *)
               write_stuck_gate "$d" "$stage" "$repo" "$slug"; say "drive: $slug 送了 /opsx-workflow:$stage 之後階段沒動，寫了 gate 等人"
               coordinate_kick "$slug" ;;   # shell 附加寫的 gate 不經過 gate-timestamp hook
