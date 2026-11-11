@@ -65,8 +65,8 @@ Run this automatically whenever `openspec/workplan.yaml` exists. Don't narrate u
 
 1. For each PR where status ≠ `merged`:
    - `git branch --list <branch>` — does the branch exist locally?
-   - `gh pr list --head <branch> --json state --jq '.[0].state' 2>/dev/null` — is it merged on GitHub?
-   - If merged on GitHub but workplan says `pending`/`in-progress` → auto-update to `merged`
+   - Find the forge from `git remote get-url gitlab` (else `origin`). A GitLab host: `glab mr list --source-branch <branch> --merged -F json`. `github.com`: `gh pr list --head <branch> --state merged --json number`. Any other host: skip this check and say so.
+   - If the list is not empty (merged on the forge) but workplan says `pending`/`in-progress` → auto-update to `merged`
 2. For each change where status ≠ `done`:
    - Check if `openspec/changes/<name>/` still exists
    - If missing (archived or deleted) → auto-update to `done`
