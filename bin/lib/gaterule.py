@@ -5,12 +5,9 @@ decide(waiting) 回傳三種處置之一：
   ("human", reason)        留給人；reason 是理由代碼，文字由呼叫端對照
   ("park", waits_on)       等 waits_on 那張卡合進 main
 """
-import os
 import re
-import sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import grantactions  # noqa: E402
+import grantactions
 
 VERIFY_WORDS = ("真機", "實測", "瀏覽器", "herdr 驗", "resume", "真的 claude", "真 herdr", "量測")
 GRANT_WORDS = ("授權", "開 PR", "開 / 改 MR", "gh pr create", "push", "推到 origin", "rebase")

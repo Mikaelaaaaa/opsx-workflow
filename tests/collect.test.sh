@@ -719,6 +719,15 @@ printf '## g1\ntype: decision\nstatus: open\n問題: 哪個？\n建議: 用 A\n'
 # m-park：dispatch stopped，waits-on 的 gate（建議含合併字，仍是 park）
 D=$(pc10 r m-park); printf '## 1\n\n- [ ] 1.1 a\n' > "$D/tasks.md"
 printf '## g1\ntype: decision\nstatus: open\nwaits-on: m-apply\n問題: 等 m-apply\n建議: 等 m-apply 合併後繼續\n' > "$D/gates.md"
+# m-ready-gate：派出、MR 全綠、另有會代答的 gate：照 D3 看 mr.state，算可合併
+D=$(pc10 r m-ready-gate); printf '## 1\n\n- [x] 1.1 a\n' > "$D/tasks.md"
+printf '# report\n\n## MR\nhttps://gitlab.tsg-navigator.com/agentory/r/-/merge_requests/7\n' > "$D/report.md"
+printf '## g1\ntype: decision\nstatus: open\n問題: 哪個？\n建議: 用 A\n' > "$D/gates.md"
+# m-pr-run：派出、stage pr、needs: run 的 gate：等你排在測試中之前
+D=$(pc10 r m-pr-run); printf '## 1\n\n- [x] 1.1 a\n' > "$D/tasks.md"; printf '# report\n' > "$D/report.md"
+printf '## g1\ntype: decision\nstatus: open\nneeds: run\n問題: 跑 x？\n建議: bash x.sh\n' > "$D/gates.md"
+# m-block：派出、沒 gate、herdr 說 pane p9 blocked：終端機等待輸入算等你
+D=$(pc10 r m-block); printf '## 1\n\n- [ ] 1.1 a\n' > "$D/tasks.md"
 # m-idle：只有 inbox、沒派；m-later：在 1.1；loose：不在 workplan；m-split：已拆，底下的子殼不是卡
 pc10 r m-idle >/dev/null; pc10 r m-later >/dev/null; pc10 r loose >/dev/null
 D=$(pc10 r m-split 'split_into: m-idle'); mkdir -p "$D/subs/a"; printf 'schema: opsx\nkind: dev\nparent: m-split\n' > "$D/subs/a/.openspec.yaml"
@@ -757,6 +766,12 @@ features:
         status: merged
       - name: arch-x
         status: pending
+      - name: m-ready-gate
+        status: in-progress
+      - name: m-pr-run
+        status: in-progress
+      - name: m-block
+        status: in-progress
   - name: later
     milestone: "1.1"
     prs:
@@ -765,21 +780,39 @@ features:
 EOF
 # n：沒有 workplan 的 repo
 pc10 n solo >/dev/null
-printf '{"r/m-merge":{"pane":"q1","mode":"autopilot"},"r/m-gate":{"pane":"q2","mode":"autopilot"},"r/m-review":{"pane":"q3","mode":"autopilot"},"r/m-apply":{"pane":"q4","mode":"autopilot"},"r/m-auto":{"pane":"q5","mode":"autopilot"},"r/m-park":{"pane":"q6","mode":"stopped"}}' > "$S10/dispatch.json"
+# nc：有 milestones 沒有 current_milestone，兩張活卡，一張不在 workplan
+mkdir -p "$R10/nc/.git"; pc10 nc nc-a >/dev/null; pc10 nc nc-loose >/dev/null
+cat > "$R10/nc/openspec/workplan.yaml" <<'EOF'
+milestones:
+  - name: "1.0"
+    goal: "能開單出貨"
+features:
+  - name: f
+    milestone: "1.0"
+    prs:
+      - name: nc-a
+        status: pending
+EOF
+printf '{"r/m-merge":{"pane":"q1","mode":"autopilot"},"r/m-gate":{"pane":"q2","mode":"autopilot"},"r/m-review":{"pane":"q3","mode":"autopilot"},"r/m-apply":{"pane":"q4","mode":"autopilot"},"r/m-auto":{"pane":"q5","mode":"autopilot"},"r/m-park":{"pane":"q6","mode":"stopped"},"r/m-ready-gate":{"pane":"q7","mode":"autopilot"},"r/m-pr-run":{"pane":"q8","mode":"autopilot"},"r/m-block":{"pane":"p9","mode":"autopilot"}}' > "$S10/dispatch.json"
 J="$(opsx collect --root "$R10" --state "$S10")"; assert_eq "$?" 0 "progress collect rc: $J"
 pclass() { q "$(card "$J" r "$1")" progress_class; }
 # 五類各一張
 assert_eq "$(pclass m-merge) $(pclass m-gate) $(pclass m-review) $(pclass m-apply) $(pclass m-idle)" "mergeable waiting_on_you testing developing not_dispatched"
 # 沒派出的卡有 gate 算等你；會代答的 gate 照 stage 歸；waits-on 停著的卡算還沒派
 assert_eq "$(pclass m-free) $(pclass m-auto) $(pclass m-park)" "waiting_on_you developing not_dispatched"
+# MR ready 有 open gate 仍是可合併；stage pr 的留給人 gate 排在測試中之前；終端機等待輸入算等你
+assert_eq "$(pclass m-ready-gate) $(pclass m-pr-run) $(pclass m-block)" "mergeable waiting_on_you waiting_on_you"
+assert_eq "$(q "$(card "$J" r m-pr-run)" stage) $(q "$(card "$J" r m-block)" waiting.type)" "pr 終端機等待輸入" "fixture 真的走到 pr 與 blocked"
 # 不在 current milestone 的卡沒有分類；子 change 與拆過的母卡不算
 assert_eq "$(pclass m-later) $(pclass loose) $(pclass m-split)" "null null null"
 assert_eq "$(card "$J" r a)" null "子殼不是卡"
 # 相加等於剩幾張；workplan 排了沒殼的項目（merged 與已歸檔的不算）
 P="$(q "$J" progress.r)"
-assert_eq "$(q "$P" mergeable) $(q "$P" waiting_on_you) $(q "$P" testing) $(q "$P" developing) $(q "$P" not_dispatched)" "1 2 1 2 3"
+assert_eq "$(q "$P" mergeable) $(q "$P" waiting_on_you) $(q "$P" testing) $(q "$P" developing) $(q "$P" not_dispatched)" "2 4 1 2 3"
 assert_eq "$(q "$P" not_dispatched_planned)" '["web-x"]'
-assert_eq "$(q "$P" remaining) $(q "$P" milestone) $(q "$P" goal)" "9 1.0 能開單出貨"
+assert_eq "$(q "$P" remaining) $(q "$P" milestone) $(q "$P" goal)" "12 1.0 能開單出貨"
+# 沒設 current milestone：milestone、goal 為 null，兩張活卡都算（含不在 workplan 的）
+assert_eq "$(q "$J" progress.nc.milestone) $(q "$J" progress.nc.goal) $(q "$J" progress.nc.remaining)" "null null 2"
 assert_eq "$(q "$P" at)" "$(q "$J" generated_at)"
 # 沒有 workplan 的 repo：milestone null、數全部活卡
 assert_eq "$(q "$J" progress.n.milestone) $(q "$J" progress.n.remaining) $(q "$J" progress.n.not_dispatched_planned) $(q "$(card "$J" n solo)" progress_class)" "null 1 [] not_dispatched"

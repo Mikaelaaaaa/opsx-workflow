@@ -408,7 +408,8 @@ ARCHIVED_NAME = re.compile(r"^\d{4}-\d{2}-\d{2}-(.+)$")
 def progress_class(c):
     """由上往下取第一個符合的；不看協調者在不在跑、不看 agent_status。dispatch 為 None 包含 stopped。"""
     w = c["waiting"]
-    if w and w["type"] == "可以合併": return "mergeable"
+    # 看 mr.state 不看 waiting：有 open gate 時 waiting 是那個 gate，協調者仍照 mr.state 發「可以合併」
+    if c["mr"] and c["mr"].get("state") == "ready": return "mergeable"
     if w:
         verdict = gaterule.decide(w)
         # 沒派出的卡協調者不會答它的 gate，只剩人能答；停 pane 等別張卡的不算

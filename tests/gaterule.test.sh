@@ -37,4 +37,11 @@ assert_eq "$(decide '{"question": "選哪個", "recommended": "你在 sandbox �
 assert_eq "$(decide '{"question": "這只有你能做", "recommended": "用 A"}')" "('human', 'hands')" "題目說只有你能做"
 assert_eq "$(decide '{"question": "選哪個", "recommended": "用 A"}')" "('answer', '用 A', False)" "代答建議"
 assert_eq "$(decide '{"question": "選哪個", "options": ["B", "C"]}')" "('answer', 'B', False)" "沒建議答第一個選項"
+# import 全在檔頂（~/.claude/CLAUDE.md §5）：docstring 之後，第一個非 import 敘述之前
+assert_eq "$(python3 -I -c '
+import ast, sys
+body = ast.parse(open(sys.argv[1], encoding="utf-8").read()).body
+if isinstance(body[0], ast.Expr): body = body[1:]
+kinds = [isinstance(n, (ast.Import, ast.ImportFrom)) for n in body]
+print(kinds.count(True) == kinds[:kinds.index(False)].count(True))' "$OPSX_ROOT/bin/lib/gaterule.py")" True "gaterule.py 的 import 要在檔頂"
 echo ok
