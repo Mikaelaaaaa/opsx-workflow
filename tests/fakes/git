@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # 假 git（coordinate 測試用）：記一行「git <參數>」到 $OPSX_FAKE_LOG，不碰任何 repo。
 # rev-parse --abbrev-ref HEAD 印 $OPSX_TEST_GIT_BRANCH（預設 main）；status --porcelain 印 $OPSX_TEST_GIT_DIRTY（預設空）。
+# rev-list --count 印 $OPSX_TEST_GIT_UNPUSHED（預設 0，本機分支上沒有只在本機的 commit）。
 # 參數含 $OPSX_TEST_GIT_FAIL 的子字串時退出 $OPSX_TEST_GIT_FAIL_RC（預設 1）。
 printf 'git %s\n' "$*" >> "${OPSX_FAKE_LOG:?}"
 if [ -n "${OPSX_TEST_GIT_FAIL:-}" ]; then
@@ -9,5 +10,6 @@ fi
 case " $* " in
   *" rev-parse --abbrev-ref HEAD "*) printf '%s\n' "${OPSX_TEST_GIT_BRANCH:-main}" ;;
   *" status --porcelain "*) [ -n "${OPSX_TEST_GIT_DIRTY:-}" ] && printf '%s\n' "$OPSX_TEST_GIT_DIRTY" ;;
+  *" rev-list --count "*) printf '%s\n' "${OPSX_TEST_GIT_UNPUSHED:-0}" ;;
 esac
 exit 0

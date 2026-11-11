@@ -11,6 +11,45 @@ coordinator_say() { # <一行>
   return 1
 }
 
+# 在剛開的 tab 的 pane 起 agent。shell 還沒到 prompt 時 herdr 回 agent_pane_busy，同一個 pane 最多試六次；
+# 起不來就收掉剛開的 tab（不留空 tab 給人收）並以 <who> 開頭的訊息結束。dispatch 與 lead 共用。
+# 名字已被占用（agent_name_taken）時收掉 tab、把另一個的位置放進 HERDR_TAKEN_AT、回 3：該怎麼說由呼叫者決定。
+herdr_start_agent() { # <who> <agent 名> <kind> <pane> <tab> [agent 參數…]
+  local who="$1" name="$2" kind="$3" pane="$4" tab="$5" out try=1 screen
+  shift 5
+  until out="$(herdr agent start "$name" --kind "$kind" --pane "$pane" -- "$@" 2>&1)"; do
+    case "$out" in
+      *agent_pane_busy*)
+        if [ "$try" -lt 6 ]; then try=$((try + 1)); sleep "${OPSX_DISPATCH_RETRY_SLEEP:-1}"; continue; fi
+        # pane 已壞時 pane read 會失敗，當成沒輸出，不讓診斷擋住錯誤回報
+        screen="$(herdr pane read "$pane" 2>/dev/null | tail -20)" || screen=""
+        [ -n "${screen//[[:space:]]/}" ] || screen="pane 沒有任何輸出"
+        # 間隔可以是小數（sleep 吃 0.5），shell 算術只吃整數
+        out="${out}
+新 pane 的 shell 超過 $(awk -v n="$((try - 1))" -v s="${OPSX_DISPATCH_RETRY_SLEEP:-1}" 'BEGIN { print n * s }') 秒沒有出現提示字元，可能是 shell 啟動卡住。常見原因：pyenv 鎖檔 ~/.pyenv/shims/.pyenv-shim 殘留（opsx init --check 會檢查）
+pane 畫面：
+${screen}" ;;
+      *agent_name_taken*)
+        HERDR_TAKEN_AT="$(printf '%s' "$out" | grep -oE '(workspace_id|tab_id|pane_id|status)=[^ "]*' | tr '\n' ' ')"
+        herdr tab close "$tab" >/dev/null 2>&1 || true
+        return 3 ;;
+      *agent_not_ready*)
+        # Claude Code 在沒信任過的目錄先問 trust，herdr 判成 blocked；名字已記下，按 Yes 等到 idle 就等於 start 成功
+        if herdr pane wait-output --match "trust this folder" --timeout 3000 "$pane" >/dev/null 2>&1; then
+          herdr pane send-keys "$pane" down enter >/dev/null
+          if herdr agent wait "$name" --until idle --timeout 60000 >/dev/null 2>&1; then break; fi
+          out="trust 按了但 agent 沒到 idle"
+        else
+          out="${out}
+pane 畫面：
+$(herdr pane read "$pane" 2>/dev/null | tail -20)"
+        fi ;;
+    esac
+    herdr tab close "$tab" >/dev/null 2>&1 || true
+    die "${who}: herdr agent start 失敗（第 ${try} 次）：${out}"
+  done
+}
+
 say()  { printf '%s\n' "$*"; }
 warn() { printf 'opsx: %s\n' "$*" >&2; }
 die()  { printf 'opsx: %s\n' "$*" >&2; exit "${2:-2}"; }
