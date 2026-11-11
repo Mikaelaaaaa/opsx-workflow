@@ -402,10 +402,11 @@ out="$(gg Bash "$(cmdj 'glab issue note 12 -m x')")"; assert_eq "$(decision "$ou
 out="$(gg Bash "$(cmdj 'gh issue comment https://github.com/o/r/issues/3 --body x')")"; assert_eq "$(decision "$out")" allow "grant: mr 授權放行 gh issue comment"
 out="$(gg Bash "$(cmdj 'glab issue comment 12 -m x')")"; assert_eq "$(decision "$out")" allow "grant: mr 授權放行 glab issue comment"
 out="$(gg Bash "$(cmdj 'git push gitlab feat/eval-core/mikaela')")"; assert_eq "$(decision "$out")" deny "grant: once 第二次 deny"
-# 一次性 mr 授權被開 MR 用掉，回寫 issue 會被擋；/pr 5b 把這個 deny 當回寫失敗，不再開 gate
+# once mr 只放行一次：開 MR 用掉後，回寫 issue 會被擋，deny 訊息帶 action: mr（/pr 5b 靠它分辨原因）
 printf '{"Agentory-AI/eval-core":{"once":["mr"]}}' > "$PD/authz.json"
 out="$(gg Bash "$(cmdj 'glab mr create -F desc.md')")"; assert_eq "$(decision "$out")" allow "grant: once mr 開 MR"
 out="$(gg Bash "$(cmdj 'glab issue note 12 -m x')")"; assert_eq "$(decision "$out")" deny "grant: once mr 用掉後 issue note deny"
+reason "$out" | grep -qF 'action: mr' || fail "grant: once mr 用掉後的 deny 要帶 action: mr：$(reason "$out")"
 # grants.toml 壞掉：當成沒授權，不是放行
 printf 'this is not toml ===\n' > "$OPSX_STATE_DIR/grants.toml"
 out="$(gg Bash "$(cmdj 'git push gitlab feat/eval-core/mikaela')")"; assert_eq "$(decision "$out")" deny "grant: 壞 toml deny"

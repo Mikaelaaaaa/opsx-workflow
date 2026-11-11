@@ -31,6 +31,9 @@ assert_grep "does not stop /pr" "$f"
 # 授權閘門擋下回寫（一次性 mr 授權已被開 MR 用掉）也是回寫失敗：記一行、不開 gate
 assert_grep "issue 回寫失敗：無 mr 授權" "$f"
 assert_grep "do not write a gate" "$f"
+# 只有 deny 訊息帶 action: mr 才記「無 mr 授權」，其他 deny 記訊息第一行
+assert_grep 'deny message carries `action: mr`' "$f"
+assert_grep "first line of the deny message" "$f"
 
 # Back-link 在步驟 5（寫 report.md）之後、步驟 6（Reply）之前
 python3 -I - "$f" <<'PY' || fail "Back-link 不在步驟 5 與 6 之間"

@@ -32,9 +32,19 @@ has "grant hook's deny message" "$SK"
 # --- grant-outbound-speech：Two modes 寫明對外發話是第三級、hook 不擋、發話前寫 gate；第二級列有 test-path ---
 MODES="$FX/modes"
 section "Two modes" > "$MODES"
-for k in 'customer or anyone outside the team' 'level three' 'the grant hook cannot see it' 'write a `type: approval` gate' 'test file in a directory with no tracked tests'; do
+for k in 'customer or anyone outside the team' 'level three' 'write a `type: approval` gate' 'test file in a directory with no tracked tests'; do
   has "$k" "$MODES"
 done
+
+# --- issue-backlink：/pr 5b 回原 issue 留 MR 連結是第二級 mr 的例外，閘門會判；其餘對外發話仍是第三級 ---
+has '`/pr` step 5b' "$MODES"
+has 'level two under `mr`' "$MODES"
+GR="$OPSX_ROOT/references/grants.md"
+grep -F '**要授權**' "$GR" | grep -qF '回原 issue 留 MR 連結' || fail "grants.md 第二級列要含回原 issue 留 MR 連結"
+grep -qF 'hook 看不到 issue 留言' "$GR" && fail "grants.md 不能再說 hook 看不到 issue 留言"
+grep -qF '其他 issue 留言' "$GR" || fail "grants.md 要寫明其他 issue 留言仍是第三級"
+# 被擋的動作開 gate 是通則；skill 步驟明定記成失敗的 deny 是唯一例外
+has 'unless a skill step names that deny as a failure to record' "$SK"
 
 # --- review-fix-in-scope：apply 接 review 退回的 task；pr 在有待修時拒絕 ---
 has '## R<N>. review 退回' "$SK"
