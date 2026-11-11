@@ -50,6 +50,11 @@ case "$1 $2" in
     [ -z "${OPSX_TEST_PANE_READ_FAIL:-}" ] || herdr_err pane_not_found read
     if [ -n "${OPSX_TEST_PANE_ONCE:-}" ] && [ -f "$OPSX_TEST_PANE_ONCE" ]; then cat "$OPSX_TEST_PANE_ONCE"; rm -f "$OPSX_TEST_PANE_ONCE"
     else printf '%s\n' "${OPSX_TEST_PANE_TEXT:-}"; fi ;;
+  # 真格式（2026-11-11 在 pane 實跑）：herdr-samples/process-info-claude.json（caffeinate 排在 claude 前面）、process-info-shell.json（空 shell）。
+  # OPSX_TEST_PROCESS_INFO 指到一個檔就印它，沒設印 claude 那份；OPSX_TEST_PROCESS_INFO_ERR 設了就回那個錯誤碼
+  "pane process-info")
+    [ -z "${OPSX_TEST_PROCESS_INFO_ERR:-}" ] || herdr_err "$OPSX_TEST_PROCESS_INFO_ERR" process_info
+    cat "${OPSX_TEST_PROCESS_INFO:-$(dirname "${BASH_SOURCE[0]}")/herdr-samples/process-info-claude.json}" ;;
   # OPSX_TEST_ON_SEND_KEYS 設了就拿整串參數呼叫它（relaunch 測送 esc 那一刻的 dispatch.json）
   "pane send-keys") [ -n "${OPSX_TEST_ON_SEND_KEYS:-}" ] && bash "$OPSX_TEST_ON_SEND_KEYS" "$@"; echo '{"result":{"type":"ok"}}' ;;
   # 真格式（2026-11-06 在 pane 裡實跑存下來）：{"id":"cli:agent:list","result":{"agents":[{pane_id:"w1:p2",agent_status,…}],"type":"agent_list"}}
