@@ -484,5 +484,60 @@ EOF
 printf -- '---\nsplit_into: m1\n---\n' > "$R6/openspec/changes/c/inbox.md"; split_entry
 out="$(python3 -I "$OPSX_ROOT/bin/lib/chain.py" children "$R6" split c "$J")"
 echo "$out" | grep -q $'^skip\t' || fail "feature 有 depends-on 的主 change 要 skip: $out"
+# feature 的依賴都合了：照常接（coordinate 的 feature_plan 不派沒有 tasks.md 的殼，這裡不接就沒人接）
+python3 -I -c 'import sys;p=sys.argv[1];s=open(p).read();open(p,"w").write(s.replace("status: pending","status: merged",1))' "$R6/openspec/workplan.yaml"
+out="$(python3 -I "$OPSX_ROOT/bin/lib/chain.py" children "$R6" split c "$J")"
+assert_eq "$out" "$(printf 'child\tm1\tfix/m1/mikaela\tdev')" "feature 依賴已合要接 m1"
+
+# --unclaimed：split_into 裡沒合、沒有活條目、沒有 tasks.md 的主 change，一行一張，附還沒合的依賴（PR 與 feature 兩層）
+cat > "$R6/openspec/workplan.yaml" <<'EOF'
+features:
+  - name: f1
+    prs:
+      - name: a
+        branch: fix/a/mikaela
+        status: pending
+        depends-on: []
+        changes:
+          - name: a
+            status: pending
+      - name: m1
+        branch: fix/m1/mikaela
+        status: pending
+        depends-on: []
+        changes:
+          - name: m1
+            status: pending
+      - name: m2
+        branch: fix/m2/mikaela
+        status: pending
+        depends-on: [m1]
+        changes:
+          - name: m2
+            status: pending
+  - name: f2
+    depends-on: [a]
+    prs:
+      - name: m3
+        branch: fix/m3/mikaela
+        status: pending
+        depends-on: []
+        changes:
+          - name: m3
+            status: pending
+EOF
+mkdir -p "$R6/openspec/changes/m3"; printf '## 一句話\n\nm3\n' > "$R6/openspec/changes/m3/inbox.md"
+printf -- '---\nsplit_into: m1, m2, m3\n---\n' > "$R6/openspec/changes/c/inbox.md"
+printf '{"split/c":{"mode":"autopilot","pane":"w5:pC","worktree":"%s","handed_to":["m1"]},"split/m1":{"mode":"autopilot","pane":"w5:pC"}}' "$R6" > "$J"
+cp "$J" "$FX/disp-unclaimed.before"
+out="$(opsx chain --unclaimed c 2>&1)"; assert_eq "$?" 0 "--unclaimed: $out"
+assert_eq "$out" "$(printf 'm2\tm1\nm3\ta')" "m1 有活條目不列；m2 等 m1；m3 等 feature 依賴 a"
+cmp -s "$J" "$FX/disp-unclaimed.before" || fail "--unclaimed 只讀，dispatch.json 不該動"
+# 有 tasks.md 的交給 coordinate，不列；人停掉的條目不算活的
+: > "$R6/openspec/changes/m2/tasks.md"
+printf '{"split/m1":{"mode":"stopped","pane":"w5:pC"}}' > "$J"
+out="$(opsx chain --unclaimed c 2>&1)"
+assert_eq "$out" "$(printf 'm1\t\nm3\ta')" "有 tasks.md 的 m2 不列；停掉的 m1 要列"
+rm -f "$R6/openspec/changes/m2/tasks.md"
 cd "$R"
 echo ok

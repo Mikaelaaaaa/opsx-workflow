@@ -117,13 +117,14 @@ def children(top: str, repo: str, parent: str, dispatch_path: str) -> list:
     prs = [pr for f in features for pr in f.get("prs") or []]
     feature_of = {pr.get("name"): f.get("name") for f in features for pr in f.get("prs") or []}
     mine = find_pr(prs, parent)
-    gated = {f.get("name") for f in features if f.get("depends-on")}   # 有自己依賴的 feature，由 coordinate 照 feature 依賴派
     if mine is None:
         split = split_into(top, parent)
         if split:
-            return split_next(top, repo, prs, split, dispatch, {n for n, f in feature_of.items() if f in gated})
+            # coordinate 的 feature_plan 不派只有 inbox.md 的殼，所以只有 feature 依賴還沒合的才留給它
+            return split_next(top, repo, prs, split, dispatch, feature_waits(features, prs))
         return [("skip", "workplan 裡沒有 %s" % parent)]
     session = me.get("feature")
+    gated = {f.get("name") for f in features if f.get("depends-on")}   # 有自己依賴的 feature，由 coordinate 照 feature 依賴派
     status = {pr.get("name"): pr.get("status") for pr in prs}
     out = []
     for pr in prs:
@@ -164,9 +165,47 @@ def split_into(top: str, card: str) -> list:
     return [s for s in (priority.unquote(x.strip()) for x in v.split(",")) if s]
 
 
-def split_next(top: str, repo: str, prs: list, split: list, dispatch: dict, gated_prs: set) -> list:
+def feature_waits(features: list, prs: list) -> dict:
+    """PR 名對到它所屬 feature 還沒合的 depends-on；feature 的依賴都合了就不列。"""
+    status = {pr.get("name"): pr.get("status") for pr in prs}
+    out = {}
+    for f in features:
+        deps = [d for d in f.get("depends-on") or [] if status.get(d) != "merged"]
+        if deps:
+            out.update({pr.get("name"): deps for pr in f.get("prs") or []})
+    return out
+
+
+def unclaimed(top: str, repo: str, card: str, dispatch_path: str) -> list:
+    """被拆的原卡 split_into 裡沒人接的主 change：PR 沒合、沒有活的條目、沒有 tasks.md（有的話 coordinate 會派）。
+    每張回 (名字, 還沒合的依賴)，PR 層的依賴在前、feature 層的在後。"""
+    split = split_into(top, card)
+    wp_path = os.path.join(top, "openspec", "workplan.yaml")
+    if not split or not os.path.exists(wp_path):
+        return []
+    dispatch = jsonfile.load(dispatch_path)
+    features = load_workplan(wp_path).get("features") or []
+    prs = [pr for f in features for pr in f.get("prs") or []]
+    status = {pr.get("name"): pr.get("status") for pr in prs}
+    waits = feature_waits(features, prs)
+    out = []
+    for name in split:
+        pr = next((p for p in prs if p.get("name") == name), None)
+        if pr is None or pr.get("status") == "merged":
+            continue
+        entry = dispatch.get("%s/%s" % (repo, name))
+        if entry and session_alive(entry):
+            continue
+        if os.path.exists(os.path.join(top, "openspec", "changes", name, "tasks.md")):
+            continue
+        deps = [d for d in pr.get("depends-on") or [] if status.get(d) != "merged"]
+        out.append((name, ",".join(deps + [d for d in waits.get(name, []) if d not in deps])))
+    return out
+
+
+def split_next(top: str, repo: str, prs: list, split: list, dispatch: dict, gated_prs: dict) -> list:
     """被拆的原卡只接一張：split_into 順序裡第一個 PR 沒合、依賴都合了、沒有活的條目、不是 P2 的主 change。
-    剛拆出來的殼只有 inbox.md，所以不看 tasks.md。gated_prs 是所屬 feature 有 depends-on 的 PR，跟 children 一樣交給 coordinate。"""
+    剛拆出來的殼只有 inbox.md，所以不看 tasks.md。gated_prs 是所屬 feature 還有依賴沒合的 PR，交給 coordinate。"""
     status = {pr.get("name"): pr.get("status") for pr in prs}
     rows = []
     for name in split:
@@ -361,6 +400,9 @@ if __name__ == "__main__":
                if k.startswith(repo + "/@") and v.get("worktree") and os.path.realpath(v["worktree"]) == wt]
         if hit:
             print("\n".join(session_members(top, repo, hit[0], d)))
+    elif len(sys.argv) == 6 and sys.argv[1] == "unclaimed":
+        for row in unclaimed(*sys.argv[2:]):
+            print("\t".join(row))
     elif len(sys.argv) == 5 and sys.argv[1] == "deps":
         print("\n".join(sub_deps(*sys.argv[2:])))
     elif len(sys.argv) == 4 and sys.argv[1] == "feature":
@@ -373,4 +415,4 @@ if __name__ == "__main__":
         print(jsonfile.load(sys.argv[2])[os.environ["OPSX_KEY"]].get("mode"))
         jsonfile.update(sys.argv[2], register_fan_out)
     else:
-        sys.exit("用法：chain.py children <top> <repo> <父卡 slug> <dispatch.json> | chain.py feature <top> <feature> | chain.py deps <top> <主> <子> | chain.py siblings <top> <repo> <worktree> <dispatch.json> | chain.py continue|session|fan-out <dispatch.json>")
+        sys.exit("用法：chain.py children|unclaimed <top> <repo> <父卡 slug> <dispatch.json> | chain.py feature <top> <feature> | chain.py deps <top> <主> <子> | chain.py siblings <top> <repo> <worktree> <dispatch.json> | chain.py continue|session|fan-out <dispatch.json>")
