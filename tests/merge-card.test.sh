@@ -5,6 +5,7 @@ use_fakes date
 export OPSX_TEST_NOW="2026-11-10 09:00"
 mkdir -p "$OPSX_STATE_DIR"
 ROOT="$FX/code"; mkdir -p "$ROOT"
+cd "$ROOT"   # 從 dispatch 的 worktree 跑時，cwd 不能讓 opsx new 把 fixture 的卡當成 agent 開的
 A="$(mk_opsx_repo a)"; mv "$A" "$ROOT/a"; A="$(cd "$ROOT/a" && pwd -P)"
 CH="$A/openspec/changes"
 snap() { find "$CH" -type f -exec shasum {} + | sort; }
