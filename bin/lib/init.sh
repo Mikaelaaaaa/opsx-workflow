@@ -105,7 +105,16 @@ $term_line
 # 沙盒不讓沒登記的目錄可寫，裝完 opsx 的 session 才不用人手動開權限（herdr socket 只給主控 session，見 write_coordinator_settings）。
 claude_settings_file() { printf '%s/settings.json' "${CLAUDE_CONFIG_DIR:-$HOME/.claude}"; }
 
+# 插件 skill 名 → 撞到的 Claude Code 內建指令；沒撞印空。
+# shortcut: 手維護的已知表，內建指令改名或新增時更新；Claude Code 沒有可查的清單。只收有證據的（status 疑似撞 /status，未驗證，不收）
+builtin_command_for() { # <skill 名>
+  case "$1" in
+    review) printf 'code-review' ;;
+  esac
+}
+
 # 使用者層、專案層（在 repo 裡時）的 skills 目錄名跟插件 skills/ 同名就警告。只警告：可能是刻意留的個人版本，opsx 不動使用者的檔案。
+# 另外列出插件 skill 名撞內建指令的：手打短名會跑到內建。
 warn_skill_clashes() {
   local top plugin_skills dirs=() dir skill name real seen=$'\n'
   top="$(git_toplevel)"
@@ -123,6 +132,12 @@ warn_skill_clashes() {
       seen="$seen$real"$'\n'
       warn "skill 同名：${skill%/} 跟 opsx 插件的 skills/${name} 同名，手打 /${name} 會跑到這份，模型也可能選錯。要用插件的就把它搬走或改名；這份是刻意留的就忽略這行（opsx 自己送的指令都帶 /opsx-workflow: 前綴，不受影響）"
     done
+  done
+  local builtin
+  for skill in "$OPSX_ROOT"/skills/*/; do
+    name="$(basename "$skill")"
+    builtin="$(builtin_command_for "$name")"
+    [ -z "$builtin" ] || warn "插件 skill ${name} 與內建 /${builtin} 撞名：手打 /${name} 會跑到內建指令，要用 /opsx-workflow:${name}（opsx 自己送的指令都已帶前綴）"
   done
 }
 

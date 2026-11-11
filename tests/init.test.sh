@@ -278,6 +278,14 @@ cd "$FX"
 outk="$(CLAUDE_CONFIG_DIR="$CCS" opsx init --check 2>&1)"
 case "$outk" in *"$R/.claude/skills/review"*) fail "repo 外不掃專案層：$outk" ;; esac
 
+# --- 插件 skill 名撞內建指令：查表，--check 與 --global 警告，不改 rc ---
+assert_eq "$( source "$OPSX_ROOT/bin/lib/common.sh"; source "$OPSX_ROOT/bin/lib/init.sh"; builtin_command_for review )" "code-review" "review 撞內建 code-review"
+assert_eq "$( source "$OPSX_ROOT/bin/lib/common.sh"; source "$OPSX_ROOT/bin/lib/init.sh"; builtin_command_for explore )" "" "表外的名字回空"
+case "$outk" in *"插件 skill review 與內建 /code-review 撞名"*"/opsx-workflow:review"*) ;; *) fail "--check 要警告 review 撞 /code-review 並說用 /opsx-workflow:review：$outk" ;; esac
+case "$outk" in *"插件 skill explore 與內建"*) fail "表外的 explore 不該警告：$outk" ;; esac
+outk="$(CLAUDE_CONFIG_DIR="$CCS" opsx init --global 2>&1)"; assert_eq "$?" 0 "內建撞名不讓 --global 失敗：$outk"
+case "$outk" in *"插件 skill review 與內建 /code-review 撞名"*) ;; *) fail "--global 也要警告內建撞名：$outk" ;; esac
+
 # --- 每日同步 launchd：第一次安裝 ---
 PL="$OPSX_LAUNCH_AGENTS_DIR/com.opsx.sync.plist"
 assert_file "$PL"
