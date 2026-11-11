@@ -48,6 +48,11 @@ def _session_line(s: dict) -> str:
         s["feature"], s["main_done"], s["main_total"], s["sub_done"], s["sub_total"], here)
 
 
+def refreshed(prev: dict, new: dict) -> dict:
+    """collect 成功就整份換新；失敗的那份只有 errors，沿用上一份資料只換 errors，範圍與游標不會跳回全部。"""
+    return new if "cards" in new else dict(prev, errors=new["errors"])
+
+
 def scopes(data: dict) -> list[str | None]:
     """Tab 的輪替清單：None 是全部，接著 collect scopes[] 的 workspace；workspace null 用 UNMOUNTED 代表。"""
     return [None] + [s["workspace"] if s["workspace"] is not None else UNMOUNTED for s in data.get("scopes") or []]

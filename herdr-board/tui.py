@@ -25,16 +25,17 @@ EMPTY = {"cards": [], "unmatched_agents": [], "errors": []}
 
 
 def collect() -> dict:
+    """成功回 collect 的 JSON；失敗只回 {errors}，畫面沿用上一份（tm.refreshed）。"""
     try:
         p = subprocess.run(["bash", str(HERE.parent / "bin" / "opsx"), "collect"], capture_output=True, text=True, timeout=COLLECT_TIMEOUT)
     except subprocess.TimeoutExpired:
-        return dict(EMPTY, errors=[{"source": "opsx", "message": "opsx collect 超過 %d 秒" % COLLECT_TIMEOUT}])
+        return {"errors": [{"source": "opsx", "message": "opsx collect 超過 %d 秒" % COLLECT_TIMEOUT}]}
     if p.returncode != 0:
-        return dict(EMPTY, errors=[{"source": "opsx", "message": p.stderr.strip()[:200]}])
+        return {"errors": [{"source": "opsx", "message": p.stderr.strip()[:200]}]}
     try:
         return json.loads(p.stdout)
     except json.JSONDecodeError as e:
-        return dict(EMPTY, errors=[{"source": "opsx", "message": "collect 不是 JSON：%s" % e}])
+        return {"errors": [{"source": "opsx", "message": "collect 不是 JSON：%s" % e}]}
 
 
 class Feed:
@@ -96,7 +97,7 @@ def main(scr) -> None:
     note = "載入中…"
     while True:
         if feed.latest is not None and feed.seq != seen:
-            data = feed.latest; seen = feed.seq
+            data = tm.refreshed(data, feed.latest); seen = feed.seq
             scope = tm.keep_scope(data, scope)
             rows = tm.rows(data, done_open, inbox_open, scope); cur.rebind(rows)
             if note == "載入中…" or note == "重拉了": note = ""
@@ -107,7 +108,8 @@ def main(scr) -> None:
             except curses.error:   # timeout 到了沒有按鍵
                 continue
             if res is not None:
-                box = None; curses.curs_set(0); note = ""
+                # 貼上的多行或手快多按的鍵還在緩衝裡，不清掉會落到一般模式當熱鍵（q 關 TUI、o 開網頁）
+                box = None; curses.curs_set(0); curses.flushinp(); note = ""
             if res is not None and res[0] == "submit":
                 argv = tm.new_argv(str(HERE.parent), data, scope, res[1])
                 r = subprocess.run(argv, capture_output=True, text=True)

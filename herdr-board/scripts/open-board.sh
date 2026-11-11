@@ -46,5 +46,5 @@ frag=()   # fragment 不進 server log、不進 Referer
 open_url="$url"; [ ${#frag[@]} -gt 0 ] && open_url="${url}#$(IFS='&'; printf '%s' "${frag[*]}")"
 if command -v open >/dev/null 2>&1; then open "$open_url"
 elif command -v xdg-open >/dev/null 2>&1; then xdg-open "$open_url"
-else echo "opsx board: 自己開 $open_url"; fi
+else echo "opsx board: 沒有 open 或 xdg-open，自己開 $open_url" >&2; exit 1; fi
 echo "opsx 看板：${url}（server pid $(cat "$pidfile")，log ${logfile}）"

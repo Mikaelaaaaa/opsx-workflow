@@ -90,6 +90,15 @@ for bad in tui-keys /tui-keys opsx-workflow/Tui-keys opsx-workflow/ opsx-workflo
   assert_eq "$(cat "$FX/open.log")" "" "參數 [$bad] 不對不開瀏覽器"
 done
 out="$(bash "$OPSX_ROOT/herdr-board/scripts/open-board.sh" "opsx-workflow/a$(printf 'b%.0s' $(seq 1 31))" 2>&1)"; assert_eq "$?" 0 "slug 32 字是上限內: $out"
+# --- 沒有 open / xdg-open：非零結束、網址寫到 stderr，呼叫的人（TUI 的 o）才不會當成開好了 ---
+mkdir -p "$FX/noopen"
+for t in bash dirname cat mkdir seq sleep rmdir curl grep tail nohup; do ln -sf "$(command -v "$t")" "$FX/noopen/$t"; done
+ln -sf "$(python3 -I -c 'import sys; print(sys.executable)')" "$FX/noopen/python3"
+: > "$FX/open.log"
+err="$(PATH="$FX/noopen" "$FX/noopen/bash" "$OPSX_ROOT/herdr-board/scripts/open-board.sh" opsx-workflow/tui-keys 2>&1 >/dev/null)"; rc=$?
+[ "$rc" -ne 0 ] || fail "沒有 open/xdg-open 要非零結束：$err"
+case "$err" in *"自己開 http://127.0.0.1:$port/#token=$tok&card=opsx-workflow/tui-keys"*) ;; *) fail "stderr 要有完整網址：$err";; esac
+assert_eq "$(cat "$FX/open.log")" "" "沒有 opener 不該叫到假的 open"
 # --- token 檔被刪 → 下一次 open-board 重起 server，新 token ---
 rm -f "$OPSX_STATE_DIR/board-token"
 out="$(bash "$OPSX_ROOT/herdr-board/scripts/open-board.sh" 2>&1)"; assert_eq "$?" 0 "open-board 第三次: $out"
