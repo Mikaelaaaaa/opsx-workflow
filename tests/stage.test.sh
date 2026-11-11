@@ -174,7 +174,7 @@ assert_bytes 'feat/archive-pr/mikaela\n' wp_pr_field "$R" archive-child branch
 assert_bytes 'merged\n' wp_pr_field "$R" archive-pr status
 assert_bytes 'in-progress\n' wp_pr_field "$R" x status
 assert_bytes '' wp_pr_field "$R" nope branch
-# 序列不縮排（PyYAML 預設輸出；`prs:` 與 `- name:` 同縮排，`changes:` 亦同）
+# 序列不縮排（PyYAML `sort_keys=False` 的輸出，`name` 是每個項目的第一個 key；`prs:` 與 `- name:` 同縮排，`changes:` 亦同）
 FLAT="$FX/flat"; mkdir -p "$FLAT/openspec"
 cat > "$FLAT/openspec/workplan.yaml" <<'EOF'
 features:
@@ -204,4 +204,71 @@ assert_bytes 'feat/p2/u\n' wp_pr_field "$FLAT" p2 branch
 assert_bytes 'pending\n' wp_pr_field "$FLAT" c2 status
 assert_bytes 'feat/p1/u\n' wp_pr_field "$FLAT" c1 branch
 assert_bytes '' wp_pr_field "$FLAT" nope branch
+# change 底下有更深的 `- name:` 清單，後面還有 change 與 PR；空 `changes: []`；第二個 feature（兩種縮排）
+DEEP="$FX/deep"; mkdir -p "$DEEP/openspec"
+cat > "$DEEP/openspec/workplan.yaml" <<'EOF'
+features:
+  - name: f
+    prs:
+      - name: p1
+        branch: b1
+        status: merged
+        changes:
+          - name: c1
+            status: done
+            steps:
+              - name: s
+          - name: c2
+            status: done
+      - name: p2
+        branch: b2
+        status: pending
+        changes: []
+      - name: p3
+        branch: b3
+        status: done
+  - name: g
+    prs:
+      - name: p4
+        branch: b4
+        status: pending
+EOF
+assert_bytes 'b1\n' wp_pr_field "$DEEP" c2 branch
+assert_bytes 'merged\n' wp_pr_field "$DEEP" c2 status
+assert_bytes 'b2\n' wp_pr_field "$DEEP" p2 branch
+assert_bytes 'done\n' wp_pr_field "$DEEP" p3 status
+assert_bytes 'b4\n' wp_pr_field "$DEEP" p4 branch
+DEEPF="$FX/deepflat"; mkdir -p "$DEEPF/openspec"
+cat > "$DEEPF/openspec/workplan.yaml" <<'EOF'
+features:
+- name: f
+  prs:
+  - name: p1
+    branch: b1
+    status: merged
+    changes:
+    - name: c1
+      status: done
+      steps:
+      - name: s
+    - name: c2
+      status: done
+  - name: p2
+    branch: b2
+    status: pending
+    changes: []
+  - name: p3
+    branch: b3
+    status: done
+- name: g
+  prs:
+  - name: p4
+    branch: b4
+    status: pending
+EOF
+assert_bytes 'b1\n' wp_pr_field "$DEEPF" c2 branch
+assert_bytes 'merged\n' wp_pr_field "$DEEPF" c2 status
+assert_bytes 'b2\n' wp_pr_field "$DEEPF" p2 branch
+assert_bytes 'done\n' wp_pr_field "$DEEPF" p3 status
+assert_bytes 'b4\n' wp_pr_field "$DEEPF" p4 branch
 echo "ok stage"

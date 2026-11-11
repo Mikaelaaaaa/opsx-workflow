@@ -82,11 +82,13 @@ wp_pr_field() { # <top> <slug> <field>
       if (ci >= 0) {
         if (cii < 0 && i >= ci) cii = i
         if (i == cii) { if (hit == "" && val() == s) hit = pr; next }
+        if (cii >= 0 && i > cii) next
         ci = -1; cii = -1
       }
       if (pi >= 0) {
         if (pii < 0 && i >= pi) pii = i
         if (i == pii) { pr = val(); ki = i + 2; if (hit == "" && pr == s) hit = pr; next }
+        if (pii >= 0 && i > pii) next
       }
       pi = -1; pii = -1; pr = ""; next
     }
