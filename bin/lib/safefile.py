@@ -4,6 +4,7 @@
     sys.path.insert(0, os.environ["OPSX_LIB"]); import safefile
     safefile.open_append(path)      # 附加寫入的 log、TOML、gates.md
     safefile.open_lock(path)        # flock 用的鎖檔與標記檔；不截斷
+    safefile.CardLock(card_dir)     # with 區塊：卡目錄獨占鎖，讀改寫 inbox.md 的寫入者都包在裡面
     safefile.write_atomic(path, s)  # 同目錄隨機暫存檔，再 os.replace；保留原檔權限
 
 shell 與 hooks 走 CLI：`<python> -I safefile.py append|replace <path>`，內容從 stdin 來。
@@ -12,6 +13,7 @@ shell 與 hooks 走 CLI：`<python> -I safefile.py append|replace <path>`，內�
 from __future__ import annotations
 
 import errno
+import fcntl
 import os
 import stat
 import sys
@@ -20,6 +22,22 @@ import tempfile
 
 class SymlinkRefused(OSError):
     pass
+
+
+class CardLock:
+    """卡目錄上的獨占 flock，所有讀改寫 inbox.md 的寫入者共用。鎖目錄而不是 inbox.md：write_atomic 會換 inode，鎖檔案本身擋不住。"""
+
+    def __init__(self, card_dir: str):
+        self.card_dir = card_dir
+        self.fd = -1
+
+    def __enter__(self) -> "CardLock":
+        self.fd = os.open(self.card_dir, os.O_RDONLY)
+        fcntl.flock(self.fd, fcntl.LOCK_EX)
+        return self
+
+    def __exit__(self, *exc) -> None:
+        os.close(self.fd)
 
 
 def _open_nofollow(path: str, flags: int) -> int:

@@ -94,4 +94,27 @@ grep -q '^- \[ \] 1.2 `s2`' "$M/tasks.md" || fail "衝突的 s2 不勾"
 # 衝突之後沒依賴的子 change 照疊
 out="$(opsx stack m s3 "$S3" 2>&1)"; assert_eq "$?" 0 "s3 疊回: $out"
 grep -q '^- \[x\] 1.3 `s3`' "$M/tasks.md" || fail "s3 要勾"
+
+# --- Scenario：裸名項目被拒並說明格式 ---
+cat >> "$R/openspec/workplan.yaml" <<'EOF'
+          - name: s4
+            status: pending
+            depends-on: []
+EOF
+printf -- '- [ ] 1.4 s4：沒包反引號\n  - 驗收：x\n  - 測試：x\n' >> "$M/tasks.md"
+git checkout -q -b feat/m--s4/u feat/m/u; printf 'c\n' > c.txt; git add c.txt; git commit -q -m "feat: s4"; S4="$(git rev-parse HEAD)"
+git checkout -q feat/m/u
+head="$(git rev-parse HEAD)"
+out="$(opsx stack m s4 "$S4" 2>&1)"; rc=$?
+assert_eq "$rc" 2 "裸名項目要拒絕: $out"
+echo "$out" | grep -q '`s4`' || fail "訊息要含 \`s4\`: $out"
+echo "$out" | grep -q -- '- \[ \] <編號> `s4`' || fail "訊息要給格式範例: $out"
+assert_eq "$(git rev-parse HEAD)" "$head" "裸名被拒不動歷史"
+
+# --- Scenario：文件寫出反引號格式 ---
+for f in skills/propose/SKILL.md references/work-split.md; do
+  grep -q '反引號' "$OPSX_ROOT/$f" || fail "$f 要寫反引號"
+  grep -q 'opsx stack' "$OPSX_ROOT/$f" || fail "$f 要提 opsx stack"
+  grep -q -- '- \[ \] 1.1 `<子 change 名>`：' "$OPSX_ROOT/$f" || fail "$f 要給範例"
+done
 echo ok

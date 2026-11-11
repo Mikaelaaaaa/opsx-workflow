@@ -121,7 +121,7 @@ d. **In autopilot** (the router line carries `autopilot：`), never use AskUserQ
 
 When `openspec/changes/<name>/subs/` exists, `<name>` is a main change (`../../references/work-split.md`). The openspec CLI sees only the main shell, so:
 
-- The main shell's tasks.md has one item per sub-change, in workplan `depends-on` order. Each item's `驗收：` points at that sub-change's spec and its `測試：` at the test files the sub-change's tasks name. Checking it off means that sub-change is committed on the PR branch.
+- The main shell's tasks.md has one item per sub-change, in workplan `depends-on` order. Write each as ``- [ ] 1.1 `<子 change 名>`：<說明>``, the sub-change name wrapped in backticks (反引號) right after the number: `opsx stack` finds the item by that name and refuses a bare one. Each item's `驗收：` points at that sub-change's spec and its `測試：` at the test files the sub-change's tasks name. Checking it off means that sub-change is committed on the PR branch.
 - Each `subs/<sub>/` gets proposal.md, specs/<capability>/spec.md, design.md and tasks.md from the same templates and rules as above. Its design.md cites the main shell's D-ids rather than inventing new ones; its tasks are cut against the D5 limit (more than 6 means the split was wrong, say so).
 - The main shell's specs/ holds the union of the sub-change specs, because archive merges only the main shell's specs. A sub spec that changes is copied to the main shell.
 - Last, run `opsx check <name>`. Any line it prints is a missing piece: fix it and run again. While it fails, do not continue to `/opsx-workflow:apply`.

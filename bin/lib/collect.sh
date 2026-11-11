@@ -5,10 +5,14 @@
 #
 # 輸出：{generated_at, scopes[{workspace, repos[]}], repo_paths{repo: 實體路徑}, cards[], unfiled[{slug, title, source, found}],
 #       last_sync（sync.log 最後一行，沒有檔時 null）， unmatched_agents[], errors[{source,message}],
-#       milestones{repo: {current, goal, remaining}}（只列設了 current_milestone 的 repo）}
+#       progress{repo: {milestone, goal, remaining, mergeable, testing, developing, waiting_on_you, not_dispatched,
+#         not_dispatched_planned[], at}}（每個 repo 一份；沒設 current_milestone 或 workplan 壞了時 milestone、goal 為 null，數全部活的 main change）}
 # 每張卡：{repo, slug, title, kind, stage, section, since, waiting, open_gates[{id, opened_at}], dispatch, status, agent_status, mr,
 #        source, upstream, stale, priority{level, reason, overridden}（已歸檔或算不出來時 null）,
-#        notes[{at, text}]（inbox.md ## 派工指示，舊的在前）, session（收進 session 的主 change 才有："<repo>/<feature>"）}
+#        notes[{at, text}]（inbox.md ## 派工指示，舊的在前）,
+#        merged[{id, when, source, text, kind_of_work, area, evidence?}]（inbox.md 的 ## 併入： 段，依檔案順序；已歸檔的卡是 []）,
+#        session（收進 session 的主 change 才有："<repo>/<feature>"）,
+#        progress_class ∈ mergeable | waiting_on_you | testing | developing | not_dispatched（不在進度範圍內為 null）}
 # sessions[]：{repo, feature, section, main_done, main_total, sub_done, sub_total, current{slug, stage}|null,
 #   mains[{slug, pr_status, stage, section, dispatch, agent_status, open_gates, waiting, subs[{slug, status, stage, worker, open_gates, waiting}]}]}
 #   section ∈ 待處理 | 進行中 | 待指派 | 收件匣 | 已完成（收件匣＝沒派出、stage 還是 explore）；waiting.type ∈ 等待授權 | 等待決定 | type 不明 | 可以合併 | 終端機等待輸入；waiting.needs ∈ run | null
@@ -85,11 +89,13 @@ opsx_collect() {
   OPSX_C_WORK="$work" OPSX_C_STATE="$state" OPSX_C_HERDR_ERR="$herdr_err" OPSX_C_NOW="$now" OPSX_C_LIB="$OPSX_ROOT/bin/lib" "$OPSX_PY" -I - <<'PY'
 import datetime, json, os, re, sys, tomllib
 sys.path.insert(0, os.environ["OPSX_C_LIB"])
+import gaterule
 import gatetype
 import grantactions
 from chain import load_workplan
 
 sys.path.insert(0, os.path.join(os.environ["OPSX_ROOT"], "bin", "lib"))
+import inboxmerge
 import priority
 
 work, state = os.environ["OPSX_C_WORK"], os.environ["OPSX_C_STATE"]
@@ -123,23 +129,19 @@ grants = load_toml(os.path.join(state, "grants.toml")).get("repos", {})
 dispatch = load_json(os.path.join(state, "dispatch.json"), {}) or {}
 
 # 等級跟 opsx priority 同一個計算，一個 repo 算一次（依賴繼承要看整個 repo）。workplan 壞了：那個 repo 的卡都沒有等級
-levels, milestones, unreadable = {}, {}, {}
+# workplan 壞了的 repo plans 為 None：進度照沒設 current milestone 算
+levels, plans, unreadable = {}, {}, {}
 for r, top in repo_paths.items():
+    plans[r] = None
     try:
         levels[r] = priority.levels(top)
-        plan = priority.load_plan(top)
+        plans[r] = priority.load_plan(top)
     except priority.WorkplanUnreadable as e:
         levels[r] = None   # sessions 那段多半也會記同一個檔；輸出前才補記它沒記到的，一個檔一筆
         unreadable[os.path.join(top, "openspec", "workplan.yaml")] = str(e)
-        continue
     except priority.PriorityError as e:
         errors.append({"source": os.path.join(top, "openspec", "workplan.yaml"), "message": str(e)})
         levels[r] = None
-        continue
-    if plan["current"]:
-        remaining = sum(1 for f in plan["features"] if f.get("milestone") == plan["current"]
-                        for pr in f.get("prs") or [] for ch in pr.get("changes") or [] if ch.get("status") != "done")
-        milestones[r] = {"current": plan["current"], "goal": plan["goals"][plan["current"]], "remaining": remaining}
 
 def priority_of(repo, slug, archived, inbox_path):
     if archived or levels[repo] is None:
@@ -228,6 +230,16 @@ def notes_of(inbox, slug, path):
         else: errors.append({"source": path, "message": "%s 的派工指示格式不對：%s" % (slug, l)})
     return notes
 
+# 格式以 split-out 讀的為準（inboxmerge.parse）：看板列得出來的項目一定拆得回來
+def merged_of(inbox, slug, path):
+    items = []
+    for head, got in inboxmerge.sections(inbox):
+        if isinstance(got, ValueError):
+            errors.append({"source": path, "message": "%s 的併入段格式不對：%s（%s）" % (slug, head, got)})
+        else:
+            items.append(got)
+    return items
+
 def kind_of(d):
     m = re.search(r"^kind:\s*(\S+)", read(os.path.join(d, ".openspec.yaml")), re.M)
     return m.group(1) if m else "dev"
@@ -305,6 +317,7 @@ for line in read(os.path.join(work, "cards.tsv")).split("\n"):
         "source": frontmatter(inbox, "source"), "upstream": frontmatter(inbox, "upstream"), "stale": frontmatter(inbox, "stale") == "true",
         "priority": priority_of(c["repo"], c["slug"], c["archived"], os.path.join(d, "inbox.md")),
         "notes": notes_of(inbox, c["slug"], os.path.join(d, "inbox.md")),
+        "merged": [] if c["archived"] else merged_of(inbox, c["slug"], os.path.join(d, "inbox.md")),
     })
 
 order = {"待處理": 0, "進行中": 1, "待指派": 2, "收件匣": 3, "已完成": 4}
@@ -388,6 +401,47 @@ for repo in repos:
             else:
                 c["session"] = "%s/%s" % (repo, s["feature"])
     sessions.extend(mine)
+
+PROGRESS_CLASSES = ("mergeable", "waiting_on_you", "testing", "developing", "not_dispatched")
+ARCHIVED_NAME = re.compile(r"^\d{4}-\d{2}-\d{2}-(.+)$")
+
+def progress_class(c):
+    """由上往下取第一個符合的；不看協調者在不在跑、不看 agent_status。dispatch 為 None 包含 stopped。"""
+    w = c["waiting"]
+    # 看 mr.state 不看 waiting：有 open gate 時 waiting 是那個 gate，協調者仍照 mr.state 發「可以合併」
+    if c["mr"] and c["mr"].get("state") == "ready": return "mergeable"
+    if w:
+        verdict = gaterule.decide(w)
+        # 沒派出的卡協調者不會答它的 gate，只剩人能答；停 pane 等別張卡的不算
+        if verdict[0] == "human" or (not c["dispatch"] and verdict[0] != "park"): return "waiting_on_you"
+    if c["stage"] in ("review", "pr", "babysit"): return "testing"
+    if c["dispatch"]: return "developing"
+    return "not_dispatched"
+
+def has_shell(top, name):
+    changes = os.path.join(top, "openspec", "changes")
+    if os.path.isdir(os.path.join(changes, name)): return True
+    archive = os.path.join(changes, "archive")
+    return any((m := ARCHIVED_NAME.match(n)) and m[1] == name for n in (os.listdir(archive) if os.path.isdir(archive) else []))
+
+# 進度以 main change 為單位：有殼的卡，加上 workplan 排了還沒建殼的 PR；子 change 與拆過的母卡不算
+progress = {}
+for repo in repos:
+    plan = plans.get(repo)
+    current = plan["current"] if plan else None
+    scoped = [f for f in (plan["features"] if plan else []) if not current or f.get("milestone") == current]
+    owned = {pr["name"] for f in scoped for pr in f.get("prs") or []} if current else None
+    counts = dict.fromkeys(PROGRESS_CLASSES, 0)
+    for c in cards:
+        if c["repo"] != repo: continue
+        live = not c["archived"] and c["stage"] not in ("archive", "split")
+        c["progress_class"] = progress_class(c) if live and (owned is None or c["slug"] in owned) else None
+        if c["progress_class"]: counts[c["progress_class"]] += 1
+    planned = [pr["name"] for f in scoped for pr in f.get("prs") or []
+               if pr.get("status") != "merged" and not has_shell(repo_paths[repo], pr["name"])]
+    counts["not_dispatched"] += len(planned)
+    progress[repo] = {"milestone": current, "goal": plan["goals"][current] if current else None,
+                      "remaining": sum(counts.values()), **counts, "not_dispatched_planned": planned, "at": now}
 
 cards.sort(key=lambda x: (order[x["section"]], x["repo"], x["slug"]))
 unfiled_dir = os.path.join(state, "unfiled")
@@ -473,6 +527,6 @@ unmatched = [{"name": a.get("terminal_title_stripped") or a.get("agent") or "", 
 reported = {e["source"] for e in errors}
 errors.extend({"source": p, "message": m} for p, m in unreadable.items() if p not in reported)
 print(json.dumps({"generated_at": now, "scopes": scopes, "repo_paths": repo_paths, "cards": cards, "sessions": sessions, "unfiled": unfiled, "last_sync": last_sync, "unmatched_agents": unmatched, "orphans": orphans, "errors": errors,
-                  "milestones": milestones, "legacy": legacy, "worktrees_skipped": worktrees}, ensure_ascii=False))
+                  "progress": progress, "legacy": legacy, "worktrees_skipped": worktrees}, ensure_ascii=False))
 PY
 }
