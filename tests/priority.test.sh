@@ -307,4 +307,9 @@ assert_eq "$(lv incident "security")" "$(pr same)"
 ! lv urgent "" > /dev/null 2>"$ERR" || fail "level urgent 應該退出非 0"; assert_grep urgent "$ERR"
 ! lv incident slow > /dev/null 2>"$ERR" || fail "level slow 應該退出非 0"; assert_grep slow "$ERR"
 
+# --- 事實欄位表有 type 列、沒有 area 列（specs/card-auto-merge「事實欄位表」）---
+REF="$OPSX_ROOT/references/priority.md"
+grep '^| `type` |' "$REF" > "$FX/type-row" || fail "references/priority.md 事實欄位表缺 type 列"
+for k in bug 功能 想法 技術債 待定; do assert_grep "$k" "$FX/type-row"; done
+! grep -q '^| `area` |' "$REF" || fail "references/priority.md 事實欄位表不該再有 area 列"
 echo ok

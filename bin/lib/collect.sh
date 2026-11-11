@@ -10,7 +10,7 @@
 # 每張卡：{repo, slug, title, kind, stage, section, since, waiting, open_gates[{id, opened_at}], dispatch, status, agent_status, mr,
 #        source, upstream, stale, priority{level, reason, overridden}（已歸檔或算不出來時 null）,
 #        notes[{at, text}]（inbox.md ## 派工指示，舊的在前）,
-#        merged[{id, when, source, text, kind_of_work, area, evidence?}]（inbox.md 的 ## 併入： 段，依檔案順序；已歸檔的卡是 []）,
+#        merged[{id, when, source, text, kind_of_work, type 或 area, evidence?}]（inbox.md 的 ## 併入： 段，依檔案順序；已歸檔的卡是 []）,
 #        logic_map（卡目錄 logic-map.md 的全文，已歸檔的卡也讀；沒有檔時 null，讀不了時 null 並記一筆 errors）,
 #        session（收進 session 的主 change 才有："<repo>/<feature>"）,
 #        progress_class ∈ mergeable | waiting_on_you | testing | developing | not_dispatched（不在進度範圍內為 null）}

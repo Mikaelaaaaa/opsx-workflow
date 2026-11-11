@@ -124,20 +124,19 @@ assert_no_file "$CH/$L2"; assert_not_grep '捨棄' "$CH/$L2.moved/decisions.tsv"
 assert_not_grep '^outcome: declined$' "$CH/$L2.moved/.openspec.yaml"; assert_not_grep '捨棄理由' "$CH/$L2.moved/inbox.md"
 
 # --- drop-card-lock：archive 進行中，另一個行程 opsx new 要併進同一張卡：等鎖，放鎖後併不進（不是併進歸檔的卡）---
-printf 'hooks\n' > "$A/openspec/areas.txt"
-mkdir -p "$A/.claude/worktrees" "$FX/slowbin"
+mkdir -p "$A/.claude/worktrees" "$FX/slowbin" "$A/bin"; printf 'x\n' > "$A/bin/x.sh"
 git -C "$A" worktree add -q -b fix/foo/mikaela "$A/.claude/worktrees/foo" || fail "worktree foo 建不起來"
 W="$(cd "$A/.claude/worktrees/foo" && pwd -P)"
 T=target
 mkdir -p "$CH/$T"; printf 'schema: opsx\n' > "$CH/$T/.openspec.yaml"
-printf -- '---\ntype: 功能\nsource: me\nfound: 2026-11-10\nrelated:\nkind_of_work: planned\narea: hooks\n---\n\n## 一句話\n\n要被捨棄的\n\n## 證據\n\n' > "$CH/$T/inbox.md"
+printf -- '---\ntype: 功能\nsource: me\nfound: 2026-11-10\nrelated:\nkind_of_work: planned\n---\n\n## 一句話\n\n要被捨棄的\n\n## 證據\n\nbin/x.sh\n' > "$CH/$T/inbox.md"
 printf '#!/usr/bin/env bash\n: > "$OPSX_TEST_ARCHIVING"\nwhile [ ! -e "$OPSX_TEST_RELEASE" ]; do sleep 0.02; done\nmkdir -p openspec/changes/archive\nmv "openspec/changes/$2" "openspec/changes/archive/2026-11-11-$2"\n' > "$FX/slowbin/openspec"; chmod +x "$FX/slowbin/openspec"
 export OPSX_TEST_ARCHIVING="$FX/archiving" OPSX_TEST_RELEASE="$FX/release"; rm -f "$OPSX_TEST_ARCHIVING" "$OPSX_TEST_RELEASE"
 PATH="$FX/slowbin:$PATH" opsx drop "$T" --repo "$A" -- 不要了 > "$FX/drop.out" 2>&1 &
 DROP=$!
 for _ in $(seq 100); do [ -e "$OPSX_TEST_ARCHIVING" ] && break; sleep 0.05; done
 [ -e "$OPSX_TEST_ARCHIVING" ] || fail "drop 沒有跑到 archive：$(cat "$FX/drop.out")"
-(cd "$W" && opsx new --kind-of-work planned --area hooks --repo "$A" -- 晚到的併入) > "$FX/new.out" 2> "$FX/new.err" &
+(cd "$W" && opsx new --kind-of-work planned --repo "$A" -- "bin/x.sh 晚到的併入") > "$FX/new.out" 2> "$FX/new.err" &
 NEW=$!
 sleep 1
 assert_not_grep '晚到的併入' "$CH/$T/inbox.md"

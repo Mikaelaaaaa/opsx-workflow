@@ -294,13 +294,16 @@ mkmerged() { # <changes 底下的路徑> <inbox 內容>
   local d="$RM/rm/openspec/changes/$1"; mkdir -p "$d"
   printf 'schema: opsx\ncreated: 2026-11-05\nkind: dev\n' > "$d/.openspec.yaml"; printf '%s' "$2" > "$d/inbox.md"
 }
-mkmerged x $'## 一句話\n\n收了兩項\n\n## 證據\n\n- e\n\n## 併入：2026-11-11T10:40:00+08:00 agent:foo\n\n- id: agent-20261111-1040\n- kind_of_work: planned\n- area: hooks\n\nhook 漏擋\n\n## 併入：2026-11-11T11:00:00+08:00 me\n\n- id: me-20261111-1100\n- kind_of_work: unplanned\n- evidence: tests/x.sh\n- area: hooks\n\n第二項\n'
+mkmerged x $'## 一句話\n\n收了兩項\n\n## 證據\n\n- e\n\n## 併入：2026-11-11T10:40:00+08:00 agent:foo\n\n- id: agent-20261111-1040\n- kind_of_work: planned\n- area: hooks\n\nhook 漏擋\n\n## 併入：2026-11-11T11:00:00+08:00 me\n\n- id: me-20261111-1100\n- kind_of_work: unplanned\n- evidence: tests/x.sh\n- area: hooks\n\n第二項\n\n## 併入：2026-11-11T11:10:00+08:00 agent:bar\n\n- id: agent-20261111-1110\n- kind_of_work: planned\n- type: bug\n\n新格式\n'
 mkmerged y $'## 一句話\n\n沒有併入\n'
+mkmerged w $'## 一句話\n\n欄位不齊\n\n## 併入：2026-11-11T10:40:00+08:00 agent:foo\n\n- id: agent-20261111-1040\n- kind_of_work: planned\n\n沒有 type 也沒有 area\n'
 mkmerged z $'## 一句話\n\n手動搬入\n\n## 併入：me-20261110-1614（全文）\n\n隨手貼的一段\n'
 mkmerged archive/2026-11-01-old $'## 一句話\n\n歸檔的\n\n## 併入：me-20261101-0900（全文）\n\n隨手貼的一段\n'
 J="$(opsx collect --root "$RM")"; assert_eq "$?" 0 "merged collect rc: $J"
-assert_eq "$(q "$(card "$J" rm x)" merged)" '[{"area": "hooks", "id": "agent-20261111-1040", "kind_of_work": "planned", "source": "agent:foo", "text": "hook 漏擋", "when": "2026-11-11T10:40:00+08:00"}, {"area": "hooks", "evidence": "tests/x.sh", "id": "me-20261111-1100", "kind_of_work": "unplanned", "source": "me", "text": "第二項", "when": "2026-11-11T11:00:00+08:00"}]'
+assert_eq "$(q "$(card "$J" rm x)" merged)" '[{"area": "hooks", "id": "agent-20261111-1040", "kind_of_work": "planned", "source": "agent:foo", "text": "hook 漏擋", "when": "2026-11-11T10:40:00+08:00"}, {"area": "hooks", "evidence": "tests/x.sh", "id": "me-20261111-1100", "kind_of_work": "unplanned", "source": "me", "text": "第二項", "when": "2026-11-11T11:00:00+08:00"}, {"id": "agent-20261111-1110", "kind_of_work": "planned", "source": "agent:bar", "text": "新格式", "type": "bug", "when": "2026-11-11T11:10:00+08:00"}]'
 assert_eq "$(q "$(card "$J" rm y)" merged)" '[]'
+assert_eq "$(q "$(card "$J" rm w)" merged)" '[]' "type 與 area 都沒有的段不列"
+case "$(q "$J" errors)" in *"w 的併入段格式不對"*"- type: 或 - area:"*) ;; *) fail "type 與 area 都沒有的段要進 errors：$(q "$J" errors)" ;; esac
 assert_eq "$(q "$(card "$J" rm z)" merged)" '[]'
 assert_eq "$(q "$(card "$J" rm old)" merged)" '[]' "歸檔的卡 merged 是空的"
 ME="$(printf '%s' "$J" | python3 -I -c 'import json,sys;print(json.dumps([e for e in json.load(sys.stdin)["errors"] if e["source"].endswith("/z/inbox.md")],ensure_ascii=False))')"
