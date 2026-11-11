@@ -231,7 +231,7 @@ out="$(chk f-m)" && fail "子殼 subagent 開的卡缺 kind 要非零"
 printf '%s' "$out" | grep -q 'f-m-child/inbox.md: ' || fail "要指出子殼開的卡: $out"
 # 子殼的 subagent 在跑：事實欄位不擋（只在 subagent 條件被拿掉時才會紅）
 mk_main f-sub >/dev/null; mk_inbox f-sub 'source: agent:q'   # mk_inbox 重寫 .openspec.yaml，子殼仍齊全
-printf 'schema: opsx\nkind: dev\n' > "$R/openspec/changes/f-sub/.openspec.yaml"
+printf 'schema: opsx\nkind: dev\nspec_format: when-then\n' > "$R/openspec/changes/f-sub/.openspec.yaml"   # 驗事實欄位，不驗 Gherkin
 printf '## 1. x\n\n- [ ] 1.1 `a`：子殼\n' > "$R/openspec/changes/f-sub/tasks.md"
 printf '{"phase":"apply","step":1,"total":3,"worker":"subagent-a","at":"%s"}' "$(date -u '+%Y-%m-%dT%H:%M:%S+00:00')" > "$R/openspec/changes/f-sub/subs/a/status.json"
 git -C "$R" checkout -q -b feat/f-sub/mikaela
@@ -390,4 +390,32 @@ printf '%s\n' "$out" | tail -1 | grep -q 'opsx init' || fail "舊 schema 最後�
 out="$(gchk g-ref)" || fail "舊 schema 但沒有問題要回 0: $out"
 printf '%s' "$out" | grep -q 'opsx init' && fail "沒有問題不提示 init: $out"
 printf "$NEW_SCHEMA" > "$G/openspec/schemas/opsx/schema.yaml"
+
+# --- check-wiring：Stop hook 在 propose 之後跑 Gherkin 四條（驗收：openspec/changes/gherkin-check/subs/check-wiring/specs/spec-gherkin-check/spec.md）---
+gstop() { printf '{"cwd":"%s","stop_hook_active":false}' "$G" | bash "$H/openspec-stop-gate.sh" 2>"$FX/gstop.err"; }
+printf '## ADDED Requirements\n\n### Requirement: R1\nx SHALL y\n\n#### Scenario: a（正例）\n- **WHEN** a\n- **THEN** b\n' > "$SP"
+
+# Scenario：Stop hook 擋不合格的 spec（正例）——有 tasks.md、沒有 subs/
+mk_g g-stop "$SP"; printf '## 1. x\n\n- [ ] 1.1 a\n' > "$G/openspec/changes/g-stop/tasks.md"
+git -C "$G" checkout -q -b feat/g-stop/mikaela
+out="$(gstop)"
+assert_eq "$(printf '%s' "$out" | jq -r '.decision // ""')" block "stop: spec 缺反例要擋（stderr: $(cat "$FX/gstop.err")）"
+printf '%s' "$out" | jq -r '.reason' | grep 'spec.md: ' | grep -q '沒有反例' || fail "stop: 理由要含沒有反例: $out"
+printf '%s' "$out" | jq -r '.reason' | grep -q 'opsx check g-stop' || fail "stop: 理由要含 opsx check g-stop: $out"
+printf '%s' "$out" | jq -r '.reason' | grep -q 'task 沒勾' && fail "stop: spec 的問題排在未勾 task 之前: $out"
+# 有會擋的 open gate 時不查 spec
+printf '## g1\ntype: decision\nstatus: open\n' > "$G/openspec/changes/g-stop/gates.md"
+out="$(gstop)"
+printf '%s' "$out" | grep -q '沒有反例' && fail "stop: 有 open gate 時不查 spec: $out"
+rm "$G/openspec/changes/g-stop/gates.md"
+# 標了 spec_format: when-then 的卡照舊判斷
+printf 'spec_format: when-then\n' >> "$G/openspec/changes/g-stop/.openspec.yaml"
+out="$(gstop)"
+printf '%s' "$out" | jq -r '.reason' | grep -q 'task 沒勾' || fail "stop: 豁免的卡照舊擋未勾: $out"
+
+# Scenario：還沒有 tasks.md 時 Stop hook 不查 spec（反例）
+mk_g g-prop "$SP"
+git -C "$G" checkout -q -b feat/g-prop/mikaela
+out="$(gstop)"
+printf '%s' "$out" | grep -q '沒有反例' && fail "stop: 沒有 tasks.md 不查 spec: $out"
 echo ok

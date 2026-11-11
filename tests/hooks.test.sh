@@ -928,6 +928,7 @@ mk_sub() { # <子> <worker> <at> [step]
   printf '{"phase":"apply","step":%s,"total":4,"label":"x","tests":"unknown","at":"%s","worker":"%s"}' "${4:-0}" "$3" "$2" > "$s/status.json"
 }
 FRESH="$( source "$OPSX_ROOT/bin/lib/common.sh"; now_iso )"
+printf 'spec_format: when-then\n' >> "$C/.openspec.yaml"   # 子殼 spec 是 WHEN/THEN 舊寫法：這段驗 subagent 等待，不驗 Gherkin
 printf '## 1. x\n\n- [ ] 1.1 `attach-cli`：a\n- [x] 1.2 `attach-board`：b\n' > "$C/tasks.md"
 mk_sub attach-cli subagent-attach-cli "$FRESH"
 out="$(KEEP=1 sg)"; out="$(KEEP=1 sg)"; out="$(KEEP=1 sg)"; out="$(KEEP=1 sg)"; out="$(KEEP=1 sg)"

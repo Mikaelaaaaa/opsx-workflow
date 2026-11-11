@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Stop：branch 對到的卡，agent 要停時依 stage_name 看下一站。要擋就 block 並說原因：
-#   apply 站 tasks.md 仍有 - [ ]（有會擋的 open gate 時這一項放行）、status.json tests 不是 green、有 commit 但 review 沒跑
+#   有 tasks.md 且沒有 open gate 時主殼或子殼 spec 不合 Gherkin 寫法；apply 站 tasks.md 仍有 - [ ]（有會擋的 open gate 時這一項放行）、status.json tests 不是 green、有 commit 但 review 沒跑
 #   （report.md 有「確認: <sha>」且 HEAD 等於該 sha 時不算）、report.md 的「待修（範圍內）」還有項目；
 #   explore 站（explore.md 已存在、卡建立日期晚於 2026-11-10）## 步驟 不齊；
 #   grill / propose / pr / babysit 站該 invoke 下一站而沒有會擋的 open gate；
@@ -40,6 +40,16 @@ $missing
     return 0
   fi
   if [ -f "$d/tasks.md" ]; then
+    if [ "$(st_open_gates "$d")" -eq 0 ]; then
+      # check_gherkin die 時（插件的 artifacts-specs.yaml 沒有禁用模糊詞那行）hook 以 2 結束，stderr 帶原因
+      missing="$(check_gherkin "$d")" || exit 2
+      if [ -n "$missing" ]; then
+        printf '%s' "apply|opsx：${slug} 的 spec 不合 Gherkin 寫法（opsx check ${slug}）：
+$missing
+改好 spec 再停。"
+        return 0
+      fi
+    fi
     if [ -d "$d/subs" ] && [ "$(st_open_gates "$d")" -eq 0 ]; then
       missing="$(check_subs "$d")"
       if [ -n "$missing" ]; then
