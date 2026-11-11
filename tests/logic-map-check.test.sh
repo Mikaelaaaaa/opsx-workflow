@@ -77,6 +77,25 @@ tight 8 0
 tight 9 0
 tight 10 0
 
+# 第 2 輪校正：註解（整行與行尾）不算；skills/ 底下 .md 的標題不算
+printf '%s\n' '# skip if empty else run' 'n=3  # grep -q x' > "$repo/comments.sh"
+git -C "$repo" add comments.sh
+git -C "$repo" commit -q -m comments
+write_map "$FX/c1.md" comments.sh:1 "" ""
+expect_bad "$FX/c1.md" "comments.sh:1 不是判斷行"
+write_map "$FX/c2.md" comments.sh:2 "" ""
+expect_bad "$FX/c2.md" "comments.sh:2 不是判斷行"
+
+# 真 PR 裡的判斷寫法：述詞呼叫接控制流程、行中的 case、awk 運算式樣式
+real() { # real <commit> <path:line>
+  write_map "$FX/real.md" "$2" "" ""
+  python3 -I "$CHECK" "$OPSX_ROOT" "$1" "$FX/real.md" 2> "$FX/err" || fail "$1 $2 被拒：$(cat "$FX/err")"
+}
+real 8389924 hooks/openspec-stop-gate.sh:35
+real 7b30eef hooks/openspec-commit-gate.sh:13
+real 7b30eef hooks/openspec-commit-gate.sh:25
+real 24b2c40 hooks/gate-timestamp.sh:69
+
 # 一個 D 都沒有的功能：流程圖與條件表都空也不能通過
 printf '# 邏輯表：fix/x/dev\n\n## 功能 1：空\n\n### 做了什麼\n1. 無。\n\n### 流程圖\n```\n輸入 → 結束\n```\n\n### 條件表\n| 節點 | 決策 | 條件（FEEL） | 結果 | 位置 |\n|---|---|---|---|---|\n\n### ⚠ 要看的地方\n- 無\n' > "$FX/empty.md"
 expect_bad "$FX/empty.md" "沒有任何 D 節點"
@@ -89,6 +108,10 @@ git -C "$repo" add skills/x/SKILL.md README.md
 git -C "$repo" commit -q -m docs
 write_map "$FX/skillmd.md" skills/x/SKILL.md:3 "" ""
 run_check "$FX/skillmd.md" || fail "skills/ 底下的 SKILL.md 指示行被拒：$(cat "$FX/err")"
+write_map "$FX/md-heading.md" skills/x/SKILL.md:1 "" ""
+expect_bad "$FX/md-heading.md" "skills/x/SKILL.md:1 不是判斷行"
+write_map "$FX/md-blank.md" skills/x/SKILL.md:2 "" ""
+expect_bad "$FX/md-blank.md" "skills/x/SKILL.md:2 不是判斷行"
 write_map "$FX/md-missing.md" skills/x/SKILL.md:30 "" ""
 expect_bad "$FX/md-missing.md" "skills/x/SKILL.md:30 不存在"
 write_map "$FX/readme.md" README.md:1 "" ""

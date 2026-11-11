@@ -17,12 +17,17 @@ import sys
 
 JUDGMENT_PREFIXES = ("if ", "elif ", "case ", "[[", "while ", "until ")
 JUDGMENT_PARTS = ("grep -q", "jq -e")
-TEST_LEFT = ("[", "test ", "! ")
+# An `&&` / `||` chain is a decision when one operand is a test or the branch it guards is control flow.
+DECIDING_OPERAND = ("[", "test ", "! ", "return", "exit", "continue", "break", "{")
 OPERANDS = re.compile(r";|&&|\|\|")
 QUOTED = re.compile(r'"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'')
+TRAILING_COMMENT = re.compile(r"\s#.*$")
 TERNARY = re.compile(r"\sif\s.+\selse\s")
 COMPREHENSION_FILTER = re.compile(r"\bfor\s.+\sin\s.+\sif\s")
 AWK_PATTERN = re.compile(r"^/.+/\s*\{")
+AWK_EXPRESSION = re.compile(r"^[^{=]*\s(==|!=|~|<=|>=|<|>)\s[^{]*\{$")
+CASE_INLINE = re.compile(r"\bcase\s.+\sin\b")
+CASE_ARM = re.compile(r"^[^()\s]+(\|[^()\s]+)*\)\s")
 NODE = re.compile(r"(?<![A-Za-z0-9_])D(\d+)(?!\d)")
 POSITION = re.compile(r"([\w./-]+)?:(\d+)")
 MERMAID = re.compile(r"^```\s*mermaid", re.M)
@@ -31,18 +36,24 @@ SUBSECTION = re.compile(r"^### (.+)$", re.M)
 
 
 def is_judgment(line):
-    """Keywords inside comments and quoted strings do not count, and `&&` / `||` count only when one operand is a test."""
+    """Keywords inside comments and quoted strings do not count."""
     s = line.strip()
     if s.startswith("#"):
         return False
-    s = QUOTED.sub('""', s)
+    s = TRAILING_COMMENT.sub("", QUOTED.sub('""', s))
     if s.startswith(JUDGMENT_PREFIXES):
         return True
     if any(p in s for p in JUDGMENT_PARTS):
         return True
-    if ("&&" in s or "||" in s) and any(seg.strip().startswith(TEST_LEFT) for seg in OPERANDS.split(s)):
+    if ("&&" in s or "||" in s) and any(seg.strip().startswith(DECIDING_OPERAND) for seg in OPERANDS.split(s)):
         return True
-    return any(p.search(s) for p in (TERNARY, COMPREHENSION_FILTER, AWK_PATTERN))
+    return any(p.search(s) for p in (TERNARY, COMPREHENSION_FILTER, AWK_PATTERN, AWK_EXPRESSION, CASE_INLINE, CASE_ARM))
+
+
+def is_instruction(line):
+    """A prose line of a skill file: not blank, not a heading, not frontmatter or a fence."""
+    s = line.strip()
+    return bool(s) and not s.startswith(("#", "---", "```"))
 
 
 def subsections(feature):
@@ -101,7 +112,10 @@ def check_positions(src, label, node, cell):
             problems.append("%s:%d 不存在（head 沒有這個檔）" % (path, n))
         elif n < 1 or n > len(lines):
             problems.append("%s:%d 不存在（檔案只有 %d 行）" % (path, n, len(lines)))
-        elif not (path.startswith("skills/") and path.endswith(".md")) and not is_judgment(lines[n - 1]):
+        elif path.startswith("skills/") and path.endswith(".md"):
+            if not is_instruction(lines[n - 1]):
+                problems.append("%s:%d 不是判斷行：%s" % (path, n, lines[n - 1].strip()))
+        elif not is_judgment(lines[n - 1]):
             problems.append("%s:%d 不是判斷行：%s" % (path, n, lines[n - 1].strip()))
     return problems
 

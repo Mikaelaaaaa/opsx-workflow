@@ -6,18 +6,26 @@ set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
 # 字眼跟 tests/scenarios.test.sh 同一份。opsx 自己的快照帶著 evals/、別的 skill 的題目和答案、
 # 描述評測工具的 tests/*.test.sh，候選者看到就知道自己在被評，所以 base 與 head 都刪掉。
-# 只留這個 commit 改到的檔：那些是 PR 的內容，刪了 diff 就不對。
+# tests/ 底下的其他檔（lib.sh、fakes/、一般測試）是 repo 的測試，照 scenarios 的規則留著，題目自己的測試才跑得起來。
+# 這個 commit 改到的檔一律留：那些是 PR 的內容，刪了 diff 就不對。
 banned='eval|test|judge|experiment|rubric|score|compare|benchmark|candidate|arena'
+own_tests='(\.test\.|_test\.|(^|/)tests?/)'
+harness_tests='^tests/(run-candidate|scenarios|eval-playbook)\.test\.sh$'
 
 snapshot() { # snapshot <commit> <dest> <message> <keep-file>：工作樹換成 commit 的內容，刪掉洩題路徑後 commit
+  local listed pruned
+  listed="$(mktemp "${TMPDIR:-/tmp}/listed.XXXXXX")"
+  pruned="$(mktemp "${TMPDIR:-/tmp}/pruned.XXXXXX")"
+  git -C "$root" ls-tree -r --name-only "$1" > "$listed"
+  grep -Ei "$banned" "$listed" | grep -Ev "$own_tests" | grep -vxF -f "$4" > "$pruned" || true
+  grep -E "$harness_tests" "$listed" | grep -vxF -f "$4" >> "$pruned" || true
+  # 先刪再 add：add 過的檔即使之後 rm，blob 也會留在 .git/objects，git fsck 挖得回來
   git -C "$root" archive "$1" | tar -x -C "$2"
-  git -C "$2" add -A
-  local pruned; pruned="$(mktemp "${TMPDIR:-/tmp}/pruned.XXXXXX")"
-  git -C "$2" ls-files | grep -Ei "$banned" | grep -vxF -f "$4" > "$pruned" || true
   if [ -s "$pruned" ]; then
-    xargs git -C "$2" rm -qf -- < "$pruned"
+    (cd "$2" && xargs rm -f -- < "$pruned")
   fi
-  rm -f "$pruned"
+  rm -f "$listed" "$pruned"
+  git -C "$2" add -A
   git -C "$2" -c user.name=dev -c user.email=dev@example.com commit -q -m "$3"
 }
 

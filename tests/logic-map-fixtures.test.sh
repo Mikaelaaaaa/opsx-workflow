@@ -47,6 +47,11 @@ base" "$name 只有 head、base 兩個 commit"
   assert_no_file "$dest/tests/run-candidate.test.sh"
   assert_no_file "$dest/tests/scenarios.test.sh"
   assert_no_file "$dest/tests/eval-playbook.test.sh"
+  # 題目自己的測試要跑得起來：共用的 lib.sh 與 fakes 留著
+  assert_file "$dest/tests/lib.sh"
+  assert_dir "$dest/tests/fakes"
+  # 被刪的檔不能留在 .git/objects：git fsck 挖得回來
+  assert_eq "$(git -C "$dest" fsck --unreachable --no-reflogs 2>&1)" "" "$name 有 unreachable 物件"
   assert_eq "$(ls "$dest/.git")" "$(ls "$FX/plain/.git")" "$name 的 .git 不該多出檔案（例如刪掉的路徑清單）"
   assert_eq "$(git -C "$dest" rev-parse --abbrev-ref HEAD)" "fix/$name/dev" "$name 停在卡的分支上"
 }
