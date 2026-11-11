@@ -46,6 +46,7 @@ features:
 ```
 
 - session 之間：`features[].depends-on`，列前一個 session 裡相關的 PR 名，全部 merged 才開工。
+- feature 有 `depends-on`，或底下有 2 個以上 PR（已合的也算）時，由一個 session 依序做；只有 1 個 PR 又沒有依賴的照舊單卡派。想讓 PR 同時做，就在 workplan 拆成不同 feature。
 - 主 change 之間：`prs[].depends-on`。沒依賴的從 main 開新 branch；有依賴的等前一個 PR 合併。
 - 子 change 之間：`changes[].depends-on`，只列同一個 PR 底下的子 change。沒依賴的各給一個 subagent 平行做，有依賴的依序做。
 

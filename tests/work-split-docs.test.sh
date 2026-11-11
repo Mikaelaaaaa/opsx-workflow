@@ -16,6 +16,12 @@ for layer in 派工 session '主 change' '子 change'; do
   awk '/^## 四層/{f=1;next} /^## /{f=0} f' "$DOC" | grep -qF -- "$layer" || fail "四層段沒有 $layer"
 done
 
+# --- Scenario：work-split 寫明多 PR feature 走 session（openspec/changes/root-feature-session/subs/session-rule-docs）---
+for k in '2 個以上 PR' '拆成不同 feature'; do
+  awk '/^## 三層依賴/{f=1;next} /^## /{f=0} f' "$DOC" | grep -qF -- "$k" || fail "三層依賴段沒有 $k"
+done
+! grep -rqF -- '根 feature SHALL 不自動開 session' "$OPSX_ROOT/references" || fail "references/ 還有根 feature 不自動開 session 的句子"
+
 # --- Scenario：README 與需求檔有連結 ---
 for f in README.md docs/rewrite-requirements-pstack-grill.md; do
   grep -qF 'references/work-split.md' "$OPSX_ROOT/$f" || fail "$f 沒連到 references/work-split.md"
