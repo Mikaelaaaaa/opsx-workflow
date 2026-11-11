@@ -34,6 +34,14 @@ for s in 'reports review done' 'Do not rerun the suite yourself' 'git merge-tree
 done
 case "$D4" in *"run the full suite"*|*"rerun the suite against"*) fail "職責 4 不能叫協調者自己重跑全套：$D4" ;; esac
 
+# 去重是協調者的職責（specs/card-auto-merge「協調者 skill 寫明去重」）：Duties 裡有一條含 opsx merge-card 與同一件事，不受只併小事限制
+DUTIES="$(sed -n '/^## Duties/,/^## Report format/p' "$F")"
+DEDUP="$(printf '%s\n' "$DUTIES" | grep -F 'opsx merge-card')"
+[ -n "$DEDUP" ] || fail "Duties 缺 opsx merge-card 的去重職責"
+for s in '同一件事' '只併小事' 'decisions.tsv' '④'; do
+  case "$DEDUP" in *"$s"*) ;; *) fail "去重職責缺：$s — $DEDUP" ;; esac
+done
+
 # frontmatter 的 name 是 lead（/opsx-workflow:lead）
 assert_eq "$(sed -n 2p "$F")" "name: lead" "frontmatter name"
 echo ok

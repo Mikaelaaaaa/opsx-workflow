@@ -45,9 +45,15 @@ opsx_drop() {
   [ ! -f "$d/inbox.md" ] || ids="$("$OPSX_PY" -I "$OPSX_ROOT/bin/lib/inboxmerge.py" ids "$d")" || die "drop: 讀不了 $d/inbox.md 的併入段（上面是原因）"
   [ -z "$ids" ] || die "drop: $repo/$slug 還有併入的項目（${ids//$'\n'/ }），先用 opsx split-out $slug <id> 拆出來再捨棄"
 
-  printf 'outcome: declined\n' >> "$d/.openspec.yaml"
-  printf '\n## 捨棄理由\n\n%s\n' "$reason" >> "$d/inbox.md"
-  log_row "$d" 你 已決定 "捨棄：$reason" declined
-  ( cd "$top" && openspec archive "$slug" --yes --skip-specs >/dev/null ) || die "drop: openspec archive $slug 失敗；outcome 與理由已寫進 $d"
+  # 預檢之後才併進來的段，只有卡鎖內的重查擋得住；鎖要到 archive 結束才放，等鎖的 opsx new 才會報併不進而不是跟著歸檔
+  local rc=0
+  "$OPSX_PY" -I "$OPSX_ROOT/bin/lib/inboxmerge.py" drop "$d" "$reason" -- \
+    bash -c 'bash "$1/bin/opsx" log "$2" 你 已決定 "$3" declined --repo "$4" && cd "$4" && openspec archive "$2" --yes --skip-specs >/dev/null' \
+    opsx-drop "$OPSX_ROOT" "$slug" "捨棄：$reason" "$top" || rc=$?
+  case "$rc" in
+    0) ;;
+    3) die "drop: 記 decisions.tsv 或 openspec archive $slug 失敗（上面是原因）；outcome 與理由已寫進 $d" ;;
+    *) die "drop: 沒有捨棄 $repo/$slug（上面是原因）" ;;
+  esac
   say "drop: $repo/$slug 已捨棄並歸檔"
 }

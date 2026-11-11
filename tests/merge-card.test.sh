@@ -95,4 +95,38 @@ out="$(opsx merge-card "debt-$H" --into "$Y" --repo "$A" 2>&1)"; assert_eq "$?" 
 assert_eq "$(last_evidence "$CH/$Y/inbox.md")" "- 併進：a/debt-$H · source: shortcut:a:x.py:$H"
 out="$(opsx sync --root "$ROOT" --source debt 2>&1)"; assert_eq "$?" 0 "sync again: $out"
 assert_eq "$(find "$CH" -mindepth 1 -maxdepth 1 -type d ! -name archive | sort)" "$CH/$Y" "只剩目標卡"
+
+# ========== merge-card-card-lock：證據行在目標卡鎖內插入 ==========
+PYBIN="$(cat "$OPSX_STATE_DIR/python")"; LIBDIR="$OPSX_ROOT/bin/lib"
+# --- 慢的寫入者：鎖內先讀 inbox.md，等 $FX/go 才寫回（多一段併入）。merge-card 不等鎖就會被它蓋掉 ---
+export OPSX_TEST_NOW="2026-11-10 09:10"; P="$(opsx new --repo "$A" -- 並行的來源)"
+"$PYBIN" -I -c '
+import os, sys, time
+sys.path.insert(0, sys.argv[1]); import safefile, inboxmerge
+card = sys.argv[2]
+with safefile.CardLock(card):
+    p = os.path.join(card, "inbox.md")
+    with open(p, encoding="utf-8") as f:
+        cur = f.read()
+    open(sys.argv[3], "w").close()
+    while not os.path.exists(sys.argv[4]):
+        time.sleep(0.02)
+    safefile.write_atomic(p, cur + "\n" + inboxmerge.section("late-1", "2026-11-11T10:00:00+08:00", "agent:t", "planned", "", "hooks", "晚到的併入"))
+' "$LIBDIR" "$CH/$Y" "$FX/held" "$FX/go" &
+HOLDER=$!
+for _ in $(seq 100); do [ -e "$FX/held" ] && break; sleep 0.05; done
+[ -e "$FX/held" ] || fail "持鎖的 process 沒有拿到鎖"
+opsx merge-card "$P" --into "$Y" --repo "$A" > "$FX/mc.out" 2>&1 &
+MC=$!
+sleep 1; : > "$FX/go"
+wait "$HOLDER"; wait "$MC"; assert_eq "$?" 0 "merge-card: $(cat "$FX/mc.out")"
+assert_eq "$(last_evidence "$CH/$Y/inbox.md")" "- 併進：a/$P · source: me" "證據行要在"
+assert_grep '^- id: late-1$' "$CH/$Y/inbox.md"
+
+# --- helper 在鎖內讀到沒有證據段：非 0 退出、指出檔案路徑、inbox.md 不變 ---
+printf -- '---\ntype: 功能\nsource: me\n---\n\n## 一句話\n\n沒有證據段\n' > "$CH/$Y/inbox.md"
+before="$(shasum "$CH/$Y/inbox.md")"
+err="$("$PYBIN" -I "$LIBDIR/inboxmerge.py" evidence "$CH/$Y" '- 併進：x' 2>&1)" && fail "沒有證據段要退出非零"
+case "$err" in *"$CH/$Y/inbox.md"*) ;; *) fail "stderr 要含檔案路徑：$err" ;; esac
+assert_eq "$(shasum "$CH/$Y/inbox.md")" "$before"
 echo ok

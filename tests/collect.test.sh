@@ -294,19 +294,43 @@ mkmerged() { # <changes 底下的路徑> <inbox 內容>
   local d="$RM/rm/openspec/changes/$1"; mkdir -p "$d"
   printf 'schema: opsx\ncreated: 2026-11-05\nkind: dev\n' > "$d/.openspec.yaml"; printf '%s' "$2" > "$d/inbox.md"
 }
-mkmerged x $'## 一句話\n\n收了兩項\n\n## 證據\n\n- e\n\n## 併入：2026-11-11T10:40:00+08:00 agent:foo\n\n- id: agent-20261111-1040\n- kind_of_work: planned\n- area: hooks\n\nhook 漏擋\n\n## 併入：2026-11-11T11:00:00+08:00 me\n\n- id: me-20261111-1100\n- kind_of_work: unplanned\n- evidence: tests/x.sh\n- area: hooks\n\n第二項\n'
+mkmerged x $'## 一句話\n\n收了兩項\n\n## 證據\n\n- e\n\n## 併入：2026-11-11T10:40:00+08:00 agent:foo\n\n- id: agent-20261111-1040\n- kind_of_work: planned\n- area: hooks\n\nhook 漏擋\n\n## 併入：2026-11-11T11:00:00+08:00 me\n\n- id: me-20261111-1100\n- kind_of_work: unplanned\n- evidence: tests/x.sh\n- area: hooks\n\n第二項\n\n## 併入：2026-11-11T11:10:00+08:00 agent:bar\n\n- id: agent-20261111-1110\n- kind_of_work: planned\n- type: bug\n\n新格式\n'
 mkmerged y $'## 一句話\n\n沒有併入\n'
+mkmerged w $'## 一句話\n\n欄位不齊\n\n## 併入：2026-11-11T10:40:00+08:00 agent:foo\n\n- id: agent-20261111-1040\n- kind_of_work: planned\n\n沒有 type 也沒有 area\n'
 mkmerged z $'## 一句話\n\n手動搬入\n\n## 併入：me-20261110-1614（全文）\n\n隨手貼的一段\n'
 mkmerged archive/2026-11-01-old $'## 一句話\n\n歸檔的\n\n## 併入：me-20261101-0900（全文）\n\n隨手貼的一段\n'
 J="$(opsx collect --root "$RM")"; assert_eq "$?" 0 "merged collect rc: $J"
-assert_eq "$(q "$(card "$J" rm x)" merged)" '[{"area": "hooks", "id": "agent-20261111-1040", "kind_of_work": "planned", "source": "agent:foo", "text": "hook 漏擋", "when": "2026-11-11T10:40:00+08:00"}, {"area": "hooks", "evidence": "tests/x.sh", "id": "me-20261111-1100", "kind_of_work": "unplanned", "source": "me", "text": "第二項", "when": "2026-11-11T11:00:00+08:00"}]'
+assert_eq "$(q "$(card "$J" rm x)" merged)" '[{"area": "hooks", "id": "agent-20261111-1040", "kind_of_work": "planned", "source": "agent:foo", "text": "hook 漏擋", "when": "2026-11-11T10:40:00+08:00"}, {"area": "hooks", "evidence": "tests/x.sh", "id": "me-20261111-1100", "kind_of_work": "unplanned", "source": "me", "text": "第二項", "when": "2026-11-11T11:00:00+08:00"}, {"id": "agent-20261111-1110", "kind_of_work": "planned", "source": "agent:bar", "text": "新格式", "type": "bug", "when": "2026-11-11T11:10:00+08:00"}]'
 assert_eq "$(q "$(card "$J" rm y)" merged)" '[]'
+assert_eq "$(q "$(card "$J" rm w)" merged)" '[]' "type 與 area 都沒有的段不列"
+case "$(q "$J" errors)" in *"w 的併入段格式不對"*"- type: 或 - area:"*) ;; *) fail "type 與 area 都沒有的段要進 errors：$(q "$J" errors)" ;; esac
 assert_eq "$(q "$(card "$J" rm z)" merged)" '[]'
 assert_eq "$(q "$(card "$J" rm old)" merged)" '[]' "歸檔的卡 merged 是空的"
 ME="$(printf '%s' "$J" | python3 -I -c 'import json,sys;print(json.dumps([e for e in json.load(sys.stdin)["errors"] if e["source"].endswith("/z/inbox.md")],ensure_ascii=False))')"
 assert_eq "$(printf '%s' "$ME" | python3 -I -c 'import json,sys;print(len(json.load(sys.stdin)))')" 1 "壞併入段一筆 error：$(q "$J" errors)"
 printf '%s' "$ME" | grep -q 'z.*## 併入：me-20261110-1614（全文）' || fail "error 要有 slug 與標題行：$ME"
 case "$(q "$J" errors)" in *old*|*/x/inbox.md*|*/y/inbox.md*) fail "歸檔卡與好卡不該進 errors：$(q "$J" errors)" ;; esac
+# ---------- 邏輯表（specs/board-collect「卡帶邏輯表」） ----------
+RL="$FX/code-logic"; mkdir -p "$RL/rl/.git" "$RL/rl/openspec/changes/archive"
+mklm() { # <changes 底下的路徑> [logic-map.md 內容]
+  local d="$RL/rl/openspec/changes/$1"; mkdir -p "$d"
+  printf 'schema: opsx\ncreated: 2026-11-05\nkind: dev\n' > "$d/.openspec.yaml"; printf '## 一句話\n\n%s\n' "$1" > "$d/inbox.md"
+  [ $# -lt 2 ] || printf '%s' "$2" > "$d/logic-map.md"
+}
+mklm x $'# 邏輯表：x\n┌─┐\n'
+mklm none
+mklm archive/2026-11-01-y $'# 邏輯表：y\n└─┘\n'
+mklm bad $'# \xe9\x82'   # 寫到一半、斷在中文字中間
+J="$(opsx collect --root "$RL")"; assert_eq "$?" 0 "logic collect rc（壞檔不能拖垮整份）: $J"
+lm() { printf '%s' "$(card "$J" rl "$1")" | python3 -I -c 'import json,sys;c=json.load(sys.stdin);print(json.dumps(c["logic_map"],ensure_ascii=False) if "logic_map" in c else "MISSING")'; }
+assert_eq "$(lm x)" '"# 邏輯表：x\n┌─┐\n"' "有邏輯表：全文含換行與框線"
+assert_eq "$(lm none)" 'null' "沒有邏輯表：key 在、值 null"
+assert_eq "$(lm y)" '"# 邏輯表：y\n└─┘\n"' "已歸檔的卡讀歸檔目錄的檔"
+case "$(q "$J" errors)" in *changes/none*|*changes/x/*|*2026-11-01-y*) fail "沒有或讀得到的邏輯表不該進 errors：$(q "$J" errors)" ;; esac
+assert_eq "$(lm bad)" 'null' "讀不了的邏輯表：值 null"
+LE="$(printf '%s' "$J" | python3 -I -c 'import json,sys;print(json.dumps([e for e in json.load(sys.stdin)["errors"] if e["source"].endswith("/bad/logic-map.md")],ensure_ascii=False))')"
+assert_eq "$(printf '%s' "$LE" | python3 -I -c 'import json,sys;print(len(json.load(sys.stdin)))')" 1 "讀不了的邏輯表一筆 error：$(q "$J" errors)"
+printf '%s' "$LE" | grep -q 'rl/bad' || fail "error 要指名 repo/slug：$LE"
 
 # ---------- generated_at 在讀任何來源之前取：卡片迴圈裡的 glab 慢 4 秒也不會往後（banner-same-second） ----------
 # 慢的是迴圈裡的 mr_json：它比 herdr 早讀，取時點放在迴圈之後的實作會被抓到

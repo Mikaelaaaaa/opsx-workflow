@@ -16,6 +16,7 @@ import subprocess
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from argslost import args_lost  # noqa: E402
 import chain  # noqa: E402
 import gaterule  # noqa: E402
 import jsonfile  # noqa: E402
@@ -26,6 +27,8 @@ MAX_DISPATCH = 6
 # 同時 working 的卡數上限預設值；<state>/max-working 可改
 DEFAULT_MAX_WORKING = 6
 REDISPATCH_MINUTES = 10
+# relaunch 失敗後同一個 pane 不再試的時間；跟重派同一個節流，不會每輪對壞掉的 pane 送 Esc、/exit
+RELAUNCH_MINUTES = REDISPATCH_MINUTES
 # 真實訊息是 `Usage limit reached[ again] · …`，前面只有 Claude Code 畫的 ⎿ │ 與空白；引用、清單、diff 行都不算
 USAGE_LIMIT_LINE = re.compile(r"[\s⎿│]*Usage limit reached(?: again)?\s*·")
 USAGE_LIMIT_STALE_MINUTES = 30
@@ -69,6 +72,8 @@ class Round:
         self.level_errors = {}
         self.orders = {}
         self.redispatched_now = set()
+        # 這輪已經看過、或已經動過（代答、叫醒、重派）的 pane 根條目：check_args 不再看
+        self.args_checked = set()
         self.stages = {}
         self.woken_cards = set()
         self.max_working = None
@@ -107,7 +112,7 @@ class Round:
         if herdr:
             raise CoordinateError("herdr 讀不到，agent 狀態不可得，這輪不動：%s" % "；".join(herdr))
         self.memo = read_json(self.memo_path, "coordinator memo")
-        for k in ("_parked", "_redispatched", "_notified"):
+        for k in ("_parked", "_redispatched", "_notified", "_relaunched"):
             self.memo.setdefault(k, {})   # 沒有這個 key 就是還沒記過任何一張
         self.dispatch_file = read_json(os.path.join(self.state, "dispatch.json"), "dispatch.json")
         self.stages = {card_key(c): c["stage"] for c in data["cards"]}
@@ -224,7 +229,13 @@ class Round:
         if session_key in self.dispatch_file:
             return self.archive_member(top, c, entry, session_key)
         shared = self.session_siblings(key, top)
-        if entry and entry.get("mode") != "stopped" and not shared:
+        # 單卡派的卡屬於 session 代管的 feature、session 還活著：依賴它的下一個主 change 要叫醒。
+        # chain.children 從磁碟讀這張的條目，opsx stop 標 stopped 之前叫醒，不然它會當成人停的而不接
+        owner = self.session_feature_of(top, c["slug"])
+        session = self.dispatch_file.get("%s/@%s" % (c["repo"], owner)) if owner and not shared else None
+        wake_session = bool(session) and chain.session_alive(session)
+        stop = entry and entry.get("mode") != "stopped" and not shared
+        if stop and not wake_session:
             self.act(["opsx", "stop", c["slug"], "--repo", top])
         if not self.mark_merged(top, c["slug"]):
             return False
@@ -232,6 +243,10 @@ class Round:
         if rc != 0:
             self.log("?? %s openspec archive 失敗：%s" % (key, err[:200]))
             return False
+        if wake_session:
+            self.wake(top, c, owner, session)
+            if stop:
+                self.act(["opsx", "stop", c["slug"], "--repo", top])
         if shared:
             # pane 與 worktree 是同 feature 的 session 共用的，它還在做 shared 這幾張：不送 opsx stop（會打到 session），
             # 只把這張的條目標 stopped，之後算「session 還有誰活著」、開新 session 撞名檢查才不會把它算進去
@@ -298,7 +313,7 @@ class Round:
         coordinate 在沙盒外，不寫 herdr 佇列。"""
         path = os.path.join(self.state, "dispatch.json")
         try:
-            rows = chain.children(top, c["repo"], c["slug"], path)
+            rows = chain.children(top, c["repo"], c["slug"], path, feature)
         except SystemExit as e:
             self.log("?? %s 算不出同 feature 的下一個主 change，不叫醒：%s" % (card_key(c), e))
             return
@@ -320,6 +335,7 @@ class Round:
                 self.log("?? %s 送不到 session %s，條目已寫，下一輪由 session 重派接手：%s" % (child, feature, (err or out)[:200]))
             else:
                 self.woken += 1   # 叫醒的 session 開始做這張，同時上限要算它
+                self.args_checked.add("%s/@%s" % (c["repo"], feature))
 
     def close_session(self, top, repo, feature):
         """同 feature 沒有活成員了：停 session、移 worktree、刪已合併成員的分支、拿掉 session 條目。哪一步失敗就停在那一步，留給人。"""
@@ -410,6 +426,7 @@ class Round:
         rc, out, err = self.act(args)
         if rc == 0:
             self.woken += 1   # 代答會喚醒 idle 的 agent，同時上限要算它
+            self.args_checked.add(self.pane_chain(c)[-1])
         if "agent_not_found" in out + err:
             self.redispatch(c, top, "answer 送不到")
         elif rc != 0:
@@ -565,16 +582,55 @@ class Round:
         if "agent" not in c["dispatch"]:
             self.log("?? %s %s，但 dispatch.json 沒記 agent，不知道派給誰" % (key, why))
             return
+        try:
+            plan = chain.feature_plan(top, feature)
+        except SystemExit as e:
+            self.log("?? %s 算不出能交給 session 的卡，不重派：%s" % (key, e))
+            return
+        only = self.feature_members(c["repo"], feature, plan)[1]
+        if not only:
+            self.log("-- %s 現在沒有能交給 session 的卡（單卡派過或人停的不算），不重派" % key)
+            return
         self.log("!! %s %s，停 session 後整個 feature 重派" % (key, why))
         self.act(["opsx", "stop", "@" + feature, "--repo", top])
-        rc, _, err = self.act(["opsx", "dispatch", "--feature", feature, "--agent", c["dispatch"]["agent"], "--mode", "autopilot", "--repo", top])
+        rc, _, err = self.act(["opsx", "dispatch", "--feature", feature, "--only", ",".join(only), "--agent", c["dispatch"]["agent"], "--mode", "autopilot", "--repo", top])
         if rc != 0:
             self.log("?? %s 重派開不了 session：%s" % (key, err[:200]))
             return
         self.memo["_redispatched"][key] = self.now.isoformat(timespec="seconds")
         self.redispatched_now.add(key)
+        self.args_checked.add(key)
+
+    def pane_chain(self, c):
+        """從卡自己的條目沿 via 往上到代管 pane 的根條目，加上 session 條目；最後一筆是根。
+        fan-out 子卡 via 父卡、成員卡 via @<feature>，pane 與它的 settings 檔、relaunch 標記都屬於根。"""
+        keys, k = [], card_key(c)
+        while k in self.dispatch_file and k not in keys:
+            keys.append(k)
+            via = self.dispatch_file[k].get("via")
+            if not via:
+                break
+            k = "%s/%s" % (c["repo"], via)
+        scope = session_scope(c)
+        if scope and scope not in keys:
+            keys.append(scope)
+        return keys or [card_key(c)]
+
+    def relaunching(self, c):
+        """opsx relaunch 正在重開這張卡的 pane：回 (條目 key, relaunching_at)，否則 None。
+        過了 RELAUNCH_MINUTES 的是被 kill 的 relaunch 留下的，不算。"""
+        for k in self.pane_chain(c):
+            at = (self.dispatch_file.get(k) or {}).get("relaunching_at")
+            if at and self.now - datetime.datetime.fromisoformat(at) < datetime.timedelta(minutes=RELAUNCH_MINUTES):
+                return k, at
+        return None
 
     def redispatch(self, c, top, why):
+        # relaunch 的空窗裡 claude 已經 /exit，看起來就是 agent 不在、或代答送不到；這時收掉 pane 會打斷 relaunch
+        busy = self.relaunching(c)
+        if busy:
+            self.log("-- %s %s，但 %s 從 %s 起在 relaunch，不重派" % (card_key(c), why, busy[0], busy[1]))
+            return
         if c["dispatch"].get("feature"):
             self.redispatch_feature(c, top, why)
             return
@@ -594,6 +650,66 @@ class Round:
         self.act(["opsx", "dispatch", c["slug"], "--agent", c["dispatch"]["agent"], "--mode", "autopilot", "--kind", c["kind"], "--repo", top])
         self.memo["_redispatched"][key] = self.now.isoformat(timespec="seconds")
         self.redispatched_now.add(key)
+        self.args_checked.add(self.pane_chain(c)[-1])
+
+    def check_args(self, c, top):
+        """pane 裡的 claude 丟了 dispatch 給的 --settings（herdr 還原 pane、手動 resume）就 opsx relaunch。
+        只看 autopilot 或 drive 的 claude、idle 或 blocked、settings 檔在的卡；session 成員共用 pane，一輪只看一次。
+        讀不到、判不了、relaunch 失敗都記 ?? 並通知，不改走 stop 加重派：那會開新 session、丟掉原本的 context。"""
+        d = c["dispatch"]
+        if d.get("mode") not in ("autopilot", "drive") or d.get("agent") != "claude" or c["agent_status"] not in ("idle", "blocked"):
+            return
+        # 這輪代答、叫醒、重派過的 pane 已記在 args_checked：collect 的 agent_status 是動手前讀的，已經過時
+        key = self.pane_chain(c)[-1]
+        if key in self.args_checked:
+            return
+        self.args_checked.add(key)
+        if self.relaunching(c):
+            return
+        # launch_args 用根條目的 herdr 名（單卡是 slug，session 是 feature 名）與 mode 命名 settings 檔；fan-out 會把父卡的 drive 轉成子卡的 autopilot。
+        # 根條目不在 dispatch.json 時（session 條目已被拿掉），用卡自己的條目
+        name = key.split("/", 1)[1].lstrip("@")
+        mode = (self.dispatch_file.get(key) or d)["mode"]
+        settings = os.path.join(self.state, "settings", "%s-%s-%s.json" % (c["repo"], name, mode))
+        if not os.path.isfile(settings):
+            return
+        last = self.memo["_relaunched"].get(key)
+        if last and not last["ok"] and self.now - datetime.datetime.fromisoformat(last["at"]) < datetime.timedelta(minutes=RELAUNCH_MINUTES):
+            self.log("-- %s relaunch %s 失敗過，%d 分鐘內不再試" % (key, last["at"], RELAUNCH_MINUTES))
+            return
+        pane = d["pane"]
+        rc, out, err = self.run(["herdr", "pane", "process-info", "--pane", pane])
+        if rc != 0:
+            self.args_unknown(c, key, pane, "unknown", "herdr pane process-info 失敗（rc %d）：%s" % (rc, (err or out).replace("\n", " ")[:200]))
+            return
+        try:
+            lost = args_lost(claude_argv(json.loads(out)), settings)
+        except (CoordinateError, ValueError) as e:
+            self.args_unknown(c, key, pane, "unknown", str(e))
+            return
+        if not lost:
+            for k in [k for k in self.memo["_notified"] if k.startswith(key + "/args/")]:
+                del self.memo["_notified"][k]
+            if last and last["ok"]:
+                del self.memo["_relaunched"][key]
+            return
+        if last and last["ok"]:
+            # 上一次 relaunch 回 0 卻沒把參數帶回來：再 relaunch 只會一再對 pane 送 Esc、/exit，等人看過、參數判讀正常一次才再試
+            self.args_unknown(c, key, pane, "unfixed", "relaunch 後仍沒帶 --settings %s（上次 relaunch %s）" % (settings, last["at"]))
+            return
+        self.log("!! %s pane %s 的 claude 沒帶 --settings %s，relaunch" % (key, pane, settings))
+        rc, out, err = self.act(["opsx", "relaunch", c["slug"], "--repo", top])
+        at = self.now.isoformat(timespec="seconds")
+        self.memo["_relaunched"][key] = {"at": at, "ok": rc == 0}
+        if rc != 0:
+            self.log("?? %s opsx relaunch 失敗，%d 分鐘內不再試：%s" % (key, RELAUNCH_MINUTES, (err or out).replace("\n", " ")[:200]))
+            self.notify(c, "relaunch", at, "relaunch 失敗", "pane %s 留著沒關，到 pane 看；%d 分鐘後 coordinator 再試" % (pane, RELAUNCH_MINUTES),
+                        scope=key)
+
+    def args_unknown(self, c, key, pane, reason, why):
+        """reason 是 unknown（判不了）或 unfixed（relaunch 沒修好），兩件事各通知一次。"""
+        self.log("?? %s pane %s 的啟動參數判不了，不 relaunch：%s" % (key, pane, why))
+        self.notify(c, "args", "%s/%s" % (pane, reason), "啟動參數判不了", "pane %s：%s" % (pane, one_line(why)), scope=key)
 
     def settle_parked(self, cards):
         """人手動重派了的 parked 卡不再由這裡管。人在板上把那個 gate 答掉了，記成已答，
@@ -645,7 +761,7 @@ class Round:
             if owner:
                 self.log("-- %s 屬於 feature %s，由那個 session 做，不單獨派" % (key, owner))
                 continue
-            missing = deps_unmerged(c["slug"], self.workplan(top))
+            missing = deps_unmerged(c["slug"], self.workplan(top), read_features(os.path.join(top, "openspec", "workplan.yaml")))
             if missing:
                 self.log("⏳ %s 等 %s merged 才派" % (key, "、".join(missing)))
                 continue
@@ -736,7 +852,7 @@ class Round:
             status = {p.get("name"): p.get("status") for p in prs}
             features = read_features(os.path.join(top, "openspec", "workplan.yaml"))
             for f in features:
-                if not chain.session_managed(f) and len(f.get("prs") or []) >= 2:
+                if not chain.session_managed(f) and (len(f.get("prs") or []) >= 2 or f.get("depends-on")):
                     self.log("?? %s 的 feature %s 不是合法的 agent 名，開不了 session，它的卡照單卡派" % (repo, f.get("name")))
             for f in session_features(features):
                 name = f.get("name")
@@ -765,7 +881,7 @@ class Round:
                     self.log("-- %s 的 feature %s 不開 session：%s" % (repo, name, e))
                     continue
                 # 單卡派過的卡（上線前派的、人手動派的）只要 worktree 還在就佔著它的分支，dispatch --feature 會在 worktree add 撞上
-                single = [p[0] for p in plan if self.holds_branch(repo, p[0], name)]
+                single, slugs = self.feature_members(repo, name, plan)
                 live = [s for s in single if self.dispatch_file["%s/%s" % (repo, s)].get("mode") != "stopped"]
                 if live:
                     self.log("-- %s 的 feature %s 不開 session：%s 已經單卡派著" % (repo, name, "、".join(live)))
@@ -773,8 +889,6 @@ class Round:
                 # 停了的單卡不會自己合併，擋整個 feature 就永遠不開；只把它從 --only 拿掉，它的分支留給它自己
                 if single:
                     self.log("-- %s 的 feature %s 不交 %s：單卡派過、停了但 worktree 還在" % (repo, name, "、".join(single)))
-                # 人停的成員 dispatch --feature 會跳過，等級也不算它
-                slugs = [p[0] for p in plan if p[0] not in single and not chain.human_stopped(self.dispatch_file.get("%s/%s" % (repo, p[0])), name)]
                 levels = [(s, self.level(top, s)) for s in slugs]
                 held = ["%s %s" % (s, got["error"] if "error" in got else got["reason"]) for s, got in levels if "error" in got or got["level"] == "P2"]
                 ready = [(priority.LEVELS.index(got["level"]), i, s) for i, (s, got) in enumerate(levels) if "error" not in got and got["level"] != "P2"]
@@ -797,6 +911,12 @@ class Round:
                     continue
                 if not p0:
                     n += 1
+
+    def feature_members(self, repo, name, plan):
+        """feature_plan 的卡分成 (單卡派過的卡, 交給 session 的卡)。人停的成員 dispatch --feature 會跳過，也不在後者。"""
+        single = [p[0] for p in plan if self.holds_branch(repo, p[0], name)]
+        slugs = [p[0] for p in plan if p[0] not in single and not chain.human_stopped(self.dispatch_file.get("%s/%s" % (repo, p[0])), name)]
+        return single, slugs
 
     def holds_branch(self, repo, slug, feature):
         """<slug> 有條目、不是這個 feature 的 session 成員，而且沒停、或停了但 worktree 還在（opsx stop 不收 worktree）。"""
@@ -926,12 +1046,15 @@ def session_features(features):
     return [f for f in features if chain.session_managed(f)]
 
 
-def deps_unmerged(slug, prs):
+def deps_unmerged(slug, prs, features):
+    """卡所屬 PR 的 depends-on，加上所屬 feature 的 depends-on（chain.feature_waits），還沒 merged 的。"""
     pr = pr_of(prs, slug)
     if pr is None:
         return []
     status = {p.get("name"): p.get("status") for p in prs}
-    return [d for d in pr.get("depends-on") or [] if status.get(d) != "merged"]
+    deps = list(pr.get("depends-on") or [])
+    deps += [d for d in chain.feature_waits(features, prs).get(pr["name"], []) if d not in deps]
+    return [d for d in deps if status.get(d) != "merged"]
 
 
 def is_archived(top, name):
@@ -965,6 +1088,25 @@ def status_line(lines, key, name):
                 return None
         return None
     return None
+
+
+def claude_argv(info):
+    """herdr pane process-info 的輸出裡，前景行程中唯一一筆 argv0 是 claude 的 argv。
+    不用 name 欄位：claude 那筆的 name 是版本號。認不得就 raise CoordinateError，點名欄位與值。"""
+    try:
+        procs = info["result"]["process_info"]["foreground_processes"]
+    except (KeyError, TypeError) as e:
+        raise CoordinateError("process-info 沒有 result.process_info.foreground_processes：%s" % json.dumps(info, ensure_ascii=False)[:200]) from e
+    if not isinstance(procs, list) or not all(isinstance(p, dict) for p in procs):
+        raise CoordinateError("foreground_processes 要是物件的 list：%s" % json.dumps(procs, ensure_ascii=False)[:200])
+    hits = [p for p in procs if p.get("argv0") == "claude"]
+    if not hits:
+        raise CoordinateError("前景沒有 claude（argv0 是 %s）" % "、".join(str(p.get("argv0")) for p in procs))
+    if len(hits) > 1:
+        raise CoordinateError("前景有 %d 個 claude，認不出是哪一個（pid %s）" % (len(hits), "、".join(str(p.get("pid")) for p in hits)))
+    if "argv" not in hits[0]:
+        raise CoordinateError("claude 那筆前景行程沒有 argv 欄位：%s" % json.dumps(hits[0], ensure_ascii=False)[:200])
+    return hits[0]["argv"]
 
 
 def drive_dead(disp):
@@ -1057,6 +1199,8 @@ def one_round(state, dry):
             r.redispatch(c, repo_paths[c["repo"]], "agent 不在 herdr 裡（pane %s）" % c["dispatch"].get("pane"))
         elif drive_dead(c["dispatch"]):
             r.redispatch(c, repo_paths[c["repo"]], "drive pid %s 已經不在" % c["dispatch"]["drive_pid"])
+        else:
+            r.check_args(c, repo_paths[c["repo"]])
     if not paused:
         r.dispatch_features(repo_paths, r.dispatch_new(live, repo_paths), r.working(live))
     r.act(["opsx", "reap"])   # 失敗 act 已經記 log；孤兒的判斷與關閉條件都在 opsx reap

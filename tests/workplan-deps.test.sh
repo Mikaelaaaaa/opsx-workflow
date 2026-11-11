@@ -55,6 +55,89 @@ assert ch[1]["depends-on"] == ["c1"], ch
 assert (ch[0].get("depends-on") or []) == [], ch
 PY
 
+# --- Scenario：序列與父 key 同縮排（PyYAML sort_keys=False 的輸出）讀得到，且與多縮排讀出相同結構 ---
+cat > "$FX/flat.yaml" <<'EOF'
+created: 2026-11-10
+description:
+features:
+- name: a
+  status: active
+  description: 折行的純量
+    第二行 含冒號: 照樣接上
+  prs:
+  - name: p1
+    branch: feat/p1/mikaela
+    status: merged
+    depends-on: []
+    changes:
+    - name: c1
+      status: pending
+    - name: c2
+      status: pending
+      depends-on:
+      - c1
+  - name: p2
+    branch: feat/p2/mikaela
+    status: pending
+    depends-on:
+    - p1
+- name: b
+  status: active
+  depends-on:
+  - p1
+  prs:
+  - name: c4
+    branch: feat/c4/mikaela
+    status: pending
+EOF
+cat > "$FX/deep.yaml" <<'EOF'
+created: 2026-11-10
+description:
+features:
+  - name: a
+    status: active
+    description: 折行的純量
+      第二行 含冒號: 照樣接上
+    prs:
+      - name: p1
+        branch: feat/p1/mikaela
+        status: merged
+        depends-on: []
+        changes:
+          - name: c1
+            status: pending
+          - name: c2
+            status: pending
+            depends-on:
+              - c1
+      - name: p2
+        branch: feat/p2/mikaela
+        status: pending
+        depends-on:
+          - p1
+  - name: b
+    status: active
+    depends-on:
+      - p1
+    prs:
+      - name: c4
+        branch: feat/c4/mikaela
+        status: pending
+EOF
+python3 -I - "$OPSX_ROOT/bin/lib" "$FX/flat.yaml" "$FX/deep.yaml" <<'PY' || fail "load_workplan 序列與父 key 同縮排"
+import sys; sys.path.insert(0, sys.argv[1]); import chain
+flat, deep = chain.load_workplan(sys.argv[2]), chain.load_workplan(sys.argv[3])
+assert len(flat["features"]) == 2, flat
+assert flat["features"][0]["prs"][0]["changes"][1]["depends-on"] == ["c1"], flat
+assert flat["features"][0]["prs"][1]["depends-on"] == ["p1"], flat
+assert flat["features"][0]["prs"][0]["depends-on"] == [], flat
+assert flat["features"][1]["depends-on"] == ["p1"], flat
+assert flat["description"] is None and flat["created"] == "2026-11-10", flat
+assert flat["features"][0]["description"] == "折行的純量 第二行 含冒號: 照樣接上", flat
+assert flat["features"][0]["prs"][0]["name"] == "p1", flat
+assert flat == deep, (flat, deep)
+PY
+
 bash_fn() { ( source "$OPSX_ROOT/bin/lib/common.sh"; source "$OPSX_ROOT/bin/lib/stage.sh"; source "$OPSX_ROOT/bin/lib/dispatch.sh"; "$@" ); }
 
 # --- Scenario：PR 名查到 PR 的 branch；子 change 名查到所屬 PR 的 branch ---
