@@ -23,7 +23,14 @@ import priority  # noqa: E402
 import safefile  # noqa: E402
 
 MAX_DISPATCH = 6
+# 同時 working 的卡數上限預設值；<state>/max-working 可改
+DEFAULT_MAX_WORKING = 6
 REDISPATCH_MINUTES = 10
+# 真實訊息是 `Usage limit reached[ again] · …`，前面只有 Claude Code 畫的 ⎿ │ 與空白；引用、清單、diff 行都不算
+USAGE_LIMIT_LINE = re.compile(r"[\s⎿│]*Usage limit reached(?: again)?\s*·")
+USAGE_LIMIT_STALE_MINUTES = 30
+USAGE_LIMIT_WARNING = "grace allowance"   # 「還有一小段寬限」是警告，agent 還在跑，不算停下
+USAGE_LIMIT_RESET = re.compile(r"(?:limit resets|continuing automatically at)\s+(\d{1,2})(?::(\d{2}))?\s*([ap]m)", re.IGNORECASE)
 # 合併後交給卡自己的 /archive（它標 workplan merged、叫 opsx chain）；過了這麼久還沒歸檔就要人看
 ARCHIVE_GRACE_MINUTES = 30
 # 協調者 session 在 herdr 裡的 agent 名；hooks 與 common.sh 的 COORDINATOR_AGENT 是同一個名字
@@ -39,6 +46,8 @@ HUMAN_QUESTION = ("只有你能做", "誰來跑")
 MERGE_WORDS = ("合併", "merge")
 # explore 寫的拆法確認 gate 的 id：要人決定，永遠不代答
 SPLIT_GATE = "split"
+# drive 與 Stop hook 卡住時寫的 gate 標題（drive-<站>-<n>、卡在接 /<站> [#<n>]）：建議欄是給人看的提示，不是答案，永遠不代答
+STUCK_GATE = re.compile(r"drive-[a-z]+-[0-9]+|卡在接 /[a-z]+( #[0-9]+)?")
 VERIFY_ANSWER = "這個要真機跑的驗證使用者之後自己做：把它標成「等使用者驗」寫進 report.md 的 Consider，不要再開 gate，繼續做完剩下的 task 到 /opsx-workflow:review、/opsx-workflow:pr。"
 GRANT_ANSWER = "允許。長期授權在 grants.toml，直接做。"
 
@@ -61,6 +70,10 @@ class Round:
         self.level_errors = {}
         self.orders = {}
         self.redispatched_now = set()
+        self.stages = {}
+        self.woken_cards = set()
+        self.max_working = None
+        self.woken = 0
 
     def log(self, msg):
         line = "%s %s" % (self.now.strftime("%Y-%m-%d %H:%M:%S"), msg)
@@ -82,6 +95,7 @@ class Round:
         return rc, out, err
 
     def load(self):
+        self.max_working = read_max_working(os.path.join(self.state, "max-working"))
         rc, out, err = self.run(["opsx", "collect"])
         if rc != 0:
             raise CoordinateError("opsx collect 失敗（rc %d）：%s" % (rc, err[:300]))
@@ -96,6 +110,7 @@ class Round:
         for k in ("_parked", "_redispatched", "_notified"):
             self.memo.setdefault(k, {})   # 沒有這個 key 就是還沒記過任何一張
         self.dispatch_file = read_json(os.path.join(self.state, "dispatch.json"), "dispatch.json")
+        self.stages = {card_key(c): c["stage"] for c in data["cards"]}
         return data
 
     def save(self):
@@ -147,6 +162,22 @@ class Round:
         self.log("?? %s 合併 %d 分鐘了還沒歸檔，agent 是 %s，要人看它卡在哪" % (key, minutes, c["agent_status"]))
         return False
 
+    def no_late_commits(self, top, c):
+        """合併後分支沒有多出的 commit（或多出的已經有人答了 gate）才回 True，卡才收尾；收尾會刪分支，多出的 commit 本機就沒了。
+        多出 commit 時 opsx late 已在卡上開 gate，這裡通知一次；查不出來不通知（不是人能處理的事件），下一輪再查。"""
+        key = card_key(c)
+        rc, out, err = self.act(["opsx", "late", c["slug"], "--repo", top, "--open-gate"])
+        if rc == 0:
+            return True
+        m = re.match(r"late (\d+) (\w+) ", out + " ") if rc == 1 else None
+        if rc == 1 and m:
+            n, sha = m.groups()
+            self.log("?? %s 合併後分支又多了 %s 個 commit，不收尾；卡上有 gate late-%s" % (key, n, sha))
+            self.notify(c, "late", sha, "合併後分支又多了 %s 個 commit" % n, "看板：%s 的 gate late-%s" % (c["slug"], sha))
+        else:
+            self.log("?? %s opsx late 查不出來（rc %d），不收尾：%s" % (key, rc, (err or out).replace("\n", " ")[:200]))
+        return False
+
     def clean_up(self, top, merged):
         """agent 已經不在的已合併卡：代做 /opsx-workflow:archive 的事。回傳收尾成功的卡。"""
         self.update_main(top)
@@ -173,6 +204,9 @@ class Round:
         key = card_key(c)
         entry = self.dispatch_file.get(key)
         self.log("++ %s 已在 forge 合併、agent 不在，收尾" % key)
+        session_key = "%s/@%s" % (c["repo"], entry["feature"]) if entry and entry.get("feature") else None
+        if session_key in self.dispatch_file:
+            return self.archive_member(top, c, entry, session_key)
         shared = self.session_siblings(key, top)
         if entry and entry.get("mode") != "stopped" and not shared:
             self.act(["opsx", "stop", c["slug"], "--repo", top])
@@ -207,6 +241,103 @@ class Round:
         if rc != 0:
             self.log("?? %s 分支 %s 刪不掉：%s" % (key, entry["branch"], err[:200]))
         return True
+
+    def archive_member(self, top, c, entry, session_key):
+        """有 session 條目的成員主 change。不送 opsx stop <slug>：它會把 stop 送進共用的 session。
+        歸檔後把同 feature 接得上的主 change 交給 session，之後同 feature 沒有活成員就關掉 session。"""
+        key, feature = card_key(c), entry["feature"]
+        if not self.mark_merged(top, c["slug"]):
+            return False
+        rc, _, err = self.act(["openspec", "archive", c["slug"], "-y"], cwd=top)
+        if rc != 0:
+            self.log("?? %s openspec archive 失敗：%s" % (key, err[:200]))
+            return False
+        session = self.dispatch_file[session_key]
+        if chain.session_alive(session):
+            # chain.children 從磁碟讀這張的條目，標 stopped 之前叫醒，不然它會當成人停的而不接
+            self.wake(top, c, feature, session)
+        else:
+            self.log("-- %s 的 session %s 不活，不叫醒下一個主 change" % (key, session_key))
+        entry["mode"] = "stopped"
+        if self.dry:
+            self.log("DRY dispatch.json %s 標 stopped" % key)
+        else:
+            jsonfile.update(os.path.join(self.state, "dispatch.json"), functools.partial(mark_stopped, key=key, at=self.now.isoformat(timespec="seconds")))
+        members = chain.session_members(top, c["repo"], feature, self.dispatch_file)
+        if members:
+            self.log("-- %s 的 session %s 還在做 %s，不關 session" % (key, session_key, "、".join(members)))
+        elif session.get("mode") == "stopped":
+            self.log("-- %s 是人停的，pane、worktree、分支與條目留給人" % session_key)
+        else:
+            self.close_session(top, c["repo"], feature)
+        return True
+
+    def wake(self, top, c, feature, session):
+        """同 feature 依賴這張、依賴都合了、主殼有 tasks.md 的主 change（chain.children）：寫成員條目，直接用 herdr 送第一句。
+        coordinate 在沙盒外，不寫 herdr 佇列。"""
+        path = os.path.join(self.state, "dispatch.json")
+        try:
+            rows = chain.children(top, c["repo"], c["slug"], path)
+        except SystemExit as e:
+            self.log("?? %s 算不出同 feature 的下一個主 change，不叫醒：%s" % (card_key(c), e))
+            return
+        for row in rows:
+            if row[0] == "skip":
+                self.log("-- %s 沒有要叫醒的主 change：%s" % (card_key(c), row[1]))
+                continue
+            _, slug, branch, kind = row
+            child = "%s/%s" % (c["repo"], slug)
+            new = chain.session_member(session, feature, slug, branch, kind, session["model"], session["mode"], self.now.isoformat(timespec="seconds"))
+            if self.dry:
+                self.log("DRY dispatch.json 寫 %s（via @%s）" % (child, feature))
+            else:
+                jsonfile.update(path, functools.partial(put_entry, key=child, entry=new))
+            self.dispatch_file[child] = new
+            self.woken_cards.add(child)
+            rc, out, err = self.act(["herdr", "agent", "prompt", feature, "[%s] /opsx-workflow:%s %s" % (slug, self.stages[child], slug)])
+            if rc != 0:
+                self.log("?? %s 送不到 session %s，條目已寫，下一輪由 session 重派接手：%s" % (child, feature, (err or out)[:200]))
+            else:
+                self.woken += 1   # 叫醒的 session 開始做這張，同時上限要算它
+
+    def close_session(self, top, repo, feature):
+        """同 feature 沒有活成員了：停 session、移 worktree、刪已合併成員的分支、拿掉 session 條目。哪一步失敗就停在那一步，留給人。"""
+        session_key = "%s/@%s" % (repo, feature)
+        self.log("-- %s 沒有活的成員了，關 session" % session_key)
+        rc, _, err = self.act(["opsx", "stop", "@" + feature, "--repo", top])
+        if rc != 0:
+            self.log("?? %s opsx stop 失敗，worktree、分支與條目留給人：%s" % (session_key, err[:200]))
+            return
+        wt = self.dispatch_file[session_key]["worktree"]
+        if os.path.isdir(wt):
+            # 不 --force：worktree 裡有沒 commit 的東西就刪不掉，留給人
+            rc, _, err = self.act(["git", "-C", top, "worktree", "remove", wt])
+            if rc != 0:
+                self.log("?? %s 的 worktree %s 刪不掉，分支與 session 條目留給人：%s" % (session_key, wt, err[:200]))
+                return
+        prs = self.workplan(top)
+        for k, v in self.dispatch_file.items():
+            if not k.startswith(repo + "/") or v.get("via") != "@" + feature or not v.get("branch"):
+                continue
+            pr = pr_of(prs, k.split("/", 1)[1])
+            if pr is None or pr.get("status") != "merged":
+                continue
+            # 上一次關同名 session 時刪過的成員分支，條目還留著；--quiet 下退出 1 才是分支不在，其他是 git 自己出錯
+            rc, _, err = self.run(["git", "-C", top, "rev-parse", "--verify", "--quiet", "refs/heads/" + v["branch"]])
+            if rc == 1:
+                continue
+            if rc != 0:
+                self.log("?? %s 查不了分支 %s，session 條目留給人：%s" % (session_key, v["branch"], err[:200]))
+                return
+            rc, _, err = self.act(["git", "-C", top, "branch", "-D", v["branch"]])
+            if rc != 0:
+                self.log("?? %s 分支 %s 刪不掉，session 條目留給人：%s" % (session_key, v["branch"], err[:200]))
+                return
+        if self.dry:
+            self.log("DRY dispatch.json 拿掉 %s" % session_key)
+            return
+        jsonfile.update(os.path.join(self.state, "dispatch.json"), functools.partial(drop_entry, key=session_key))
+        del self.dispatch_file[session_key]
 
     def mark_merged(self, top, slug):
         """workplan 裡這個 change 標 done；它的 PR 每個 change 都 done 了才標 merged，依賴它的卡這輪就派得出去。
@@ -251,6 +382,8 @@ class Round:
     def answer(self, c, top, gate, text, grant=False):
         args = ["opsx", "answer", c["slug"], "--gate", gate] + (["--grant", "this"] if grant else []) + ["--repo", top, "--", text]
         rc, out, err = self.act(args)
+        if rc == 0:
+            self.woken += 1   # 代答會喚醒 idle 的 agent，同時上限要算它
         if "agent_not_found" in out + err:
             self.redispatch(c, top, "answer 送不到")
         elif rc != 0:
@@ -261,13 +394,14 @@ class Round:
         scope 是去重鍵的前綴，預設是這張卡；feature session 的事屬於整個 session，傳 <repo>/@<feature>。
         先送協調者 session（herdr agent prompt）；它不在或卡住（COORDINATOR_UNAVAILABLE）才發桌面通知。
         herdr 的通知沒有點擊動作，內文要寫去哪裡處理。"""
-        key = "%s/%s/%s" % (scope or card_key(c), kind, ident)
+        self.send_notification("%s/%s/%s" % (scope or card_key(c), kind, ident), "[%s] %s" % (card_key(c), event), body)
+
+    def send_notification(self, key, title, body):
         if key in self.memo["_notified"]:
             return
-        rc, out, err = self.act(["herdr", "agent", "prompt", COORDINATOR, "[%s] %s：%s" % (card_key(c), event, body)])
+        rc, out, err = self.act(["herdr", "agent", "prompt", COORDINATOR, "%s：%s" % (title, body)])
         if rc != 0 and any(code in out + err for code in COORDINATOR_UNAVAILABLE):
-            rc, out, err = self.act(["herdr", "notification", "show", "[%s] %s" % (card_key(c), event),
-                                     "--body", body, "--sound", "request"])
+            rc, out, err = self.act(["herdr", "notification", "show", title, "--body", body, "--sound", "request"])
         if rc != 0:
             self.log("?? 通知 %s 送不出去，下一輪再送：%s" % (key, (err or out).replace("\n", " ")[:200]))
             return
@@ -291,9 +425,66 @@ class Round:
     def notify_gate(self, c, w, why):
         self.notify(c, "gate", w["gate_id"], "gate %s %s" % (w["gate_id"], why), "看板：" + one_line(w.get("question") or ""))
 
+    def usage_limit_seen(self, live):
+        """派出去、沒在 working 也不是 unknown 的 agent，畫面最後 10 行有沒有用量上限訊息。
+        working 的不讀：它在跑，代表已經續上。回 (顯示訊息的 pane 清單, 最晚的重置時刻或 None)。"""
+        hits, times, panes = [], [], set()
+        for c in live:
+            if not c["dispatch"] or c["agent_status"] in ("working", "unknown"):
+                continue
+            pane = c["dispatch"].get("pane")
+            if not pane or pane in panes:
+                continue
+            panes.add(pane)
+            rc, out, err = self.run(["herdr", "agent", "read", pane, "--lines", "10", "--format", "text"])
+            if rc != 0:
+                self.log("?? %s 的畫面讀不到，用量上限看不了：%s" % (card_key(c), err[:200]))
+                continue
+            hit, resets_at = parse_usage_limit(out, self.now)
+            if hit:
+                hits.append(pane)
+                if resets_at:
+                    times.append(resets_at)
+        return hits, max(times) if times else None
+
+    def usage_limit_paused(self, live):
+        """用量上限到了就暫停：不派、不重派、不代答。暫停到記下的重置時刻過了、而且沒有 agent 畫面還顯示訊息。
+        重置時刻只在進入暫停時記一次：訊息還在時每輪重算會一直往後推（時刻過了還顯示，算出來是明天）。"""
+        panes, resets_at = self.usage_limit_seen(live)
+        held = self.memo.get("_usage_limit")
+        if panes and not held:
+            self.memo["_usage_limit"] = held = {"seen_at": self.now.isoformat(timespec="seconds"),
+                                                "resets_at": resets_at.isoformat(timespec="seconds") if resets_at else None}
+            if resets_at:
+                self.log("!! 用量上限到了，預計 %s 恢復，暫停派卡、重派與代答" % resets_at.strftime("%m-%d %H:%M"))
+                body = "預計 %s 恢復；Claude Code 到時間會自己續跑" % resets_at.strftime("%m-%d %H:%M")
+            else:
+                self.log("?? 看得到用量上限訊息但讀不出重置時刻，不猜：暫停到畫面不再出現")
+                body = "讀不出重置時刻，畫面不再顯示上限訊息才恢復派卡"
+            self.send_notification("usage-limit/paused/" + held["seen_at"], "[usage-limit] 用量上限，暫停派卡", body)
+        if panes:
+            # 過了重置時刻還有 pane 顯示訊息（停在等人的 gate、parked、按過 esc 的 pane）：沒人會替它續跑，要人看
+            stale_from = datetime.datetime.fromisoformat(held["resets_at"] or held["seen_at"])
+            if self.now > stale_from + datetime.timedelta(minutes=USAGE_LIMIT_STALE_MINUTES):
+                self.log("?? 重置時刻已過 %d 分鐘（讀不出時刻就從進入暫停起算），pane %s 還顯示上限訊息，繼續暫停" % (USAGE_LIMIT_STALE_MINUTES, "、".join(panes)))
+                self.send_notification("usage-limit/stale/" + held["seen_at"], "[usage-limit] 重置時刻過了仍暫停",
+                                       "pane %s 還顯示上限訊息；看過它再回板上" % "、".join(panes))
+            return True
+        if held and held["resets_at"] and self.now < datetime.datetime.fromisoformat(held["resets_at"]):
+            return True
+        if held:
+            self.log("ok   用量已重置，恢復派卡與代答")
+            self.send_notification("usage-limit/resumed/" + held["seen_at"], "[usage-limit] 用量已重置", "恢復派卡與代答")
+            del self.memo["_usage_limit"]
+        return False
+
     def handle_gate(self, c, top):
         """派出去的卡的第一個 open gate，照固定規則答、停、或留給人。"""
         w, key = c["waiting"], card_key(c)
+        if w["gate_id"] and STUCK_GATE.fullmatch(w["gate_id"]):
+            self.log("?? %s gate %s 是 drive 或 Stop hook 卡住時寫的，建議欄是給人看的提示，不代答：%s" % (key, w["gate_id"], (w.get("question") or "")[:100]))
+            self.notify_gate(c, w, "卡住了，要你看")
+            return
         if w.get("needs") == "run":
             self.log("?? %s gate %s 要人在終端機跑指令再貼結果，不代答：%s" % (key, w["gate_id"], (w.get("recommended") or "")[:100]))
             self.notify_gate(c, w, "要你在終端機跑指令")
@@ -418,8 +609,13 @@ class Round:
                 self.log("-- %s 等的 gate %s 被人答掉，記成已答，照派卡規則重派" % (key, parked["gate"]))
                 parked["answered"] = True
 
+    def working(self, cards):
+        """這輪開始前在跑的卡，加上這輪代答或叫醒的。"""
+        return self.woken + sum(1 for c in cards if c["dispatch"] and c["agent_status"] == "working")
+
     def dispatch_new(self, cards, repo_paths):
         n = 0
+        working = self.working(cards)
         ranked = sorted((self.rank(c, repo_paths[c["repo"]]), i, c) for i, c in enumerate(cards))
         for _, _, c in ranked:
             key, top = card_key(c), repo_paths[c["repo"]]
@@ -437,13 +633,15 @@ class Round:
                         continue
             elif c["section"] != "待指派":
                 continue
+            elif key in self.woken_cards:
+                continue   # 這輪收尾時已交給 session；collect 是收尾前讀的，還當它待指派
             elif entry and entry.get("mode") == "stopped":
                 continue   # 人在板上停掉的
             if not os.path.isfile(os.path.join(c["path"], "tasks.md")) or c["mr"]:
                 continue
-            owner, waiting = self.feature_wait(top, c["slug"])
-            if waiting:
-                self.log("⏳ %s 的 feature %s 等 %s merged 才派" % (key, owner, "、".join(waiting)))
+            owner = self.session_feature_of(top, c["slug"])
+            if owner:
+                self.log("-- %s 屬於 feature %s，由那個 session 做，不單獨派" % (key, owner))
                 continue
             missing = deps_unmerged(c["slug"], self.workplan(top))
             if missing:
@@ -465,6 +663,9 @@ class Round:
             if not p0 and n >= MAX_DISPATCH:
                 self.log("-- 這輪派滿 %d 張，%s 下輪" % (MAX_DISPATCH, key))
                 continue
+            if not p0 and working + n >= self.max_working:
+                self.log("-- 同時在跑 %d 張，達上限 %d，%s 下輪" % (working + n, self.max_working, key))
+                continue
             if parked and not parked.get("answered"):
                 text = "停下之後合進 main 的 PR：%s。照最新的 main 繼續；你等的那張還沒合就再開 gate。" % "、".join(newly)
                 rc, _, err = self.act(["opsx", "answer", c["slug"], "--gate", parked["gate"], "--repo", top, "--", text])
@@ -480,25 +681,125 @@ class Round:
                 self.log("?? %s 派不出去：%s" % (key, err[:200]))
                 continue
             self.memo["_parked"].pop(key, None)
+        return n
 
-    def feature_wait(self, top, slug):
-        """卡所屬的 feature 名，與它 depends-on 裡還沒合併的 PR。coordinate 不自動開 session
-        （等 session-entry 卡重構 session 條目），所以有依賴的 feature 的卡等依賴合了照單卡派。"""
-        prs = self.workplan(top)
-        pr = pr_of(prs, slug)
-        if pr is None:
-            return None, []
-        status = {p.get("name"): p.get("status") for p in prs}
+    def session_feature_of(self, top, slug):
+        pr = pr_of(self.workplan(top), slug)
         for f in session_features(read_features(os.path.join(top, "openspec", "workplan.yaml"))):
-            if any(p.get("name") == pr.get("name") for p in f.get("prs") or []):
-                return f.get("name"), [d for d in f["depends-on"] if status.get(d) != "merged"]
-        return None, []
+            if pr is not None and any(p.get("name") == pr.get("name") for p in f.get("prs") or []):
+                return f.get("name")
+        return None
+
+    def dispatch_features(self, repo_paths, n, working):
+        """feature 的 depends-on 都合了、還有沒合的 PR、session 條目不存在或不活：開一個 session（opsx dispatch --feature）。
+        條目是 stopped 的不開：coordinate 自己關 session 時會拿掉條目，留下的 stopped 只會是人停的。
+        n 是這輪單卡派掉的張數，working 是這輪開始前在跑的卡；兩個上限跟單卡派一樣算。"""
+        for repo, top in sorted(repo_paths.items()):
+            prs = self.workplan(top)
+            status = {p.get("name"): p.get("status") for p in prs}
+            for f in session_features(read_features(os.path.join(top, "openspec", "workplan.yaml"))):
+                name = f.get("name")
+                if all(p.get("status") == "merged" for p in f.get("prs") or []):
+                    continue
+                missing = [d for d in f["depends-on"] if status.get(d) != "merged"]
+                if missing:
+                    self.log("⏳ %s 的 feature %s 等 %s merged 才開 session" % (repo, name, "、".join(missing)))
+                    continue
+                key = "%s/@%s" % (repo, name)
+                session = self.dispatch_file.get(key)
+                if session and session.get("mode") == "stopped":
+                    self.log("-- %s 是人停的，不重開 session" % key)
+                    continue
+                if session and chain.session_alive(session):
+                    continue
+                last = self.memo["_redispatched"].get(key)
+                if last and self.now - datetime.datetime.fromisoformat(last) < datetime.timedelta(minutes=REDISPATCH_MINUTES):
+                    continue   # redispatch_feature 剛派過（這輪或十分鐘內）
+                if not AGENT_NAME.match(name):
+                    self.log("-- %s 的 feature %s 不是合法的 agent 名，跳過" % (repo, name))
+                    continue
+                try:
+                    plan = chain.feature_plan(top, name)
+                except SystemExit as e:
+                    self.log("-- %s 的 feature %s 不開 session：%s" % (repo, name, e))
+                    continue
+                # 單卡派過的卡（上線前派的、人手動派的）只要 worktree 還在就佔著它的分支，dispatch --feature 會在 worktree add 撞上
+                single = [p[0] for p in plan if self.holds_branch(repo, p[0], name)]
+                if single:
+                    self.log("-- %s 的 feature %s 不開 session：%s 已經單卡派著（或停了但 worktree 還在）" % (repo, name, "、".join(single)))
+                    continue
+                # 人停的成員 dispatch --feature 會跳過，等級也不算它
+                slugs = [p[0] for p in plan if not chain.human_stopped(self.dispatch_file.get("%s/%s" % (repo, p[0])), name)]
+                levels = [(s, self.level(top, s)) for s in slugs]
+                held = ["%s %s" % (s, got["error"] if "error" in got else got["reason"]) for s, got in levels if "error" in got or got["level"] == "P2"]
+                ready = [(priority.LEVELS.index(got["level"]), i, s) for i, (s, got) in enumerate(levels) if "error" not in got and got["level"] != "P2"]
+                if not ready:
+                    self.log("-- %s 的 feature %s 能開工的卡都是 P2、等級算不出來或人停的，不自動開 session：%s" % (repo, name, "；".join(held) or "全部人停"))
+                    continue
+                # 照等級排、同等級保留 workplan 順序：第一句給排第一的，P0 不會排在 P1 後面
+                ranked = sorted(ready)
+                only = [s for _, _, s in ranked]
+                p0 = ranked[0][0] == priority.LEVELS.index("P0")
+                if not p0 and n >= MAX_DISPATCH:
+                    self.log("-- 這輪派滿 %d 個，feature %s 下輪" % (MAX_DISPATCH, name))
+                    continue
+                if not p0 and working + n >= self.max_working:
+                    self.log("-- 同時在跑 %d 張，達上限 %d，feature %s 下輪" % (working + n, self.max_working, name))
+                    continue
+                rc, _, err = self.act(["opsx", "dispatch", "--feature", name, "--only", ",".join(only), "--agent", "claude", "--mode", "autopilot", "--repo", top])
+                if rc != 0:
+                    self.log("?? %s 的 feature %s 開不了 session：%s" % (repo, name, err[:200]))
+                    continue
+                if not p0:
+                    n += 1
+
+    def holds_branch(self, repo, slug, feature):
+        """<slug> 有條目、不是這個 feature 的 session 成員，而且沒停、或停了但 worktree 還在（opsx stop 不收 worktree）。"""
+        entry = self.dispatch_file.get("%s/%s" % (repo, slug))
+        if not entry or entry.get("via") == "@" + feature:
+            return False
+        return entry.get("mode") != "stopped" or ("worktree" in entry and os.path.isdir(entry["worktree"]))
+
+
+def read_max_working(path):
+    """同時 working 的卡數上限。launchd 與 --kick 都讀這個檔；沒有檔是預設值，內容不合法就拒跑。"""
+    if not os.path.exists(path):
+        return DEFAULT_MAX_WORKING
+    with open(path, encoding="utf-8") as f:
+        raw = f.read().strip()
+    if not re.fullmatch(r"[0-9]+", raw) or int(raw) < 1:
+        raise CoordinateError("%s 要是正整數，拿到 %r" % (path, raw))
+    return int(raw)
+
+
+def parse_usage_limit(text, now):
+    """畫面文字裡有沒有用量上限訊息，以及它說的重置時刻：(有沒有, 時刻或 None)。
+    訊息只寫時刻（7pm），沒有日期：取 now 之後的下一個該時刻。多個時刻取最晚的。"""
+    if not any(USAGE_LIMIT_LINE.match(line) and USAGE_LIMIT_WARNING not in line for line in text.splitlines()):
+        return False, None
+    times = []
+    for hour, minute, ampm in USAGE_LIMIT_RESET.findall(text):
+        if not 1 <= int(hour) <= 12 or int(minute or 0) > 59:
+            continue
+        at = now.replace(hour=int(hour) % 12 + (12 if ampm.lower() == "pm" else 0), minute=int(minute or 0), second=0, microsecond=0)
+        times.append(at if at > now else at + datetime.timedelta(days=1))
+    return True, max(times) if times else None
 
 
 def mark_stopped(d, key, at):
     """jsonfile.update 的 mutate：條目標 stopped，不碰 pane。"""
     d[key]["mode"] = "stopped"
     d[key]["stopped_at"] = at
+
+
+def put_entry(d, key, entry):
+    """jsonfile.update 的 mutate：寫一筆條目。"""
+    d[key] = entry
+
+
+def drop_entry(d, key):
+    """jsonfile.update 的 mutate：拿掉一筆條目。"""
+    del d[key]
 
 
 def card_key(c):
@@ -565,7 +866,7 @@ def pr_of(prs, slug):
 
 
 def session_features(features):
-    """有 depends-on 的 feature：它的卡要等 feature 的依賴都合併才派。"""
+    """有 depends-on 的 feature 由一個 session 代管：依賴合了才由 coordinate 開 session，它的卡不單獨派。"""
     return [f for f in features if f.get("depends-on")]
 
 
@@ -674,29 +975,32 @@ def one_round(state, dry):
             r.log("?? %s 已合併但從沒派過，歸檔留給人%s" % (card_key(c), "；在等它的 PR：" + "、".join(waiting) if waiting else ""))
         elif owner_gone(c) or r.nobody_archiving(c):
             orphans.append(c)
+    orphans = [c for c in orphans if r.no_late_commits(repo_paths[c["repo"]], c)]
     done = []
     for repo in sorted({c["repo"] for c in orphans}):
         done += r.clean_up(repo_paths[repo], [c for c in orphans if c["repo"] == repo])
     live = [c for c in cards if c not in merged]
     r.settle_parked(live)
+    paused = r.usage_limit_paused(live)
 
     for c in live:
         w = c["waiting"]
         if not w:
             r.forget_waiting(c, live)
-        if c["dispatch"] and w and w["type"] != "可以合併":
+        if c["dispatch"] and w and w["type"] != "可以合併" and not paused:
             r.handle_gate(c, repo_paths[c["repo"]])
         if c["mr"] and c["mr"]["state"] == "ready":
             # 推了新 commit 再全綠是新的一次可以合併，所以綁 head sha
             r.notify(c, "ready", c["mr"]["head_sha"], "可以合併", "看板按「合併」：" + c["mr"]["url"])
     for c in live:
-        if not c["dispatch"] or card_key(c) in r.memo["_parked"]:
+        if paused or not c["dispatch"] or card_key(c) in r.memo["_parked"]:
             continue
         if c["agent_status"] == "unknown":
             r.redispatch(c, repo_paths[c["repo"]], "agent 不在 herdr 裡（pane %s）" % c["dispatch"].get("pane"))
         elif drive_dead(c["dispatch"]):
             r.redispatch(c, repo_paths[c["repo"]], "drive pid %s 已經不在" % c["dispatch"]["drive_pid"])
-    r.dispatch_new(live, repo_paths)
+    if not paused:
+        r.dispatch_features(repo_paths, r.dispatch_new(live, repo_paths), r.working(live))
     r.act(["opsx", "reap"])   # 失敗 act 已經記 log；孤兒的判斷與關閉條件都在 opsx reap
     r.save()
     r.log("== 結束：%d 張卡，收尾 %d 張" % (len(live), len(done)))

@@ -60,10 +60,19 @@ src = open(gates_path, encoding="utf-8").read()
 parts = re.split(r"(?m)^(?=## )", src)
 def field_of(section, name):
     m = re.search(r"(?m)^%s:\s*(.*)$" % name, section); return m.group(1).strip() if m else ""
-named = [i for i, p in enumerate(parts) if p.startswith("## ") and p.split("\n", 1)[0][3:].strip() == gate]
+def title_of(section): return section.split("\n", 1)[0][3:].strip()
+def first_word(section): return (title_of(section).split() or [""])[0].lower()
+titled = [i for i, p in enumerate(parts) if p.startswith("## ")]
+named = [i for i in titled if title_of(parts[i]) == gate]
+by_word = not named
+if by_word:
+    named = [i for i in titled if first_word(parts[i]) == gate.lower()]
 if not named:
-    fail("answer: gates.md 裡沒有 gate「%s」（有：%s）" % (gate, ", ".join(p.split("\n", 1)[0][3:].strip() for p in parts if p.startswith("## ")) or "無"))
-idx = next((i for i in named if field_of(parts[i], "status") == "open"), None)
+    fail("answer: gates.md 裡沒有 gate「%s」（有：%s）" % (gate, ", ".join(title_of(parts[i]) for i in titled) or "無"))
+open_named = [i for i in named if field_of(parts[i], "status") == "open"]
+if by_word and len(open_named) > 1:
+    fail("answer: 「%s」對到好幾個 open 的 gate，不猜；請用完整標題：%s" % (gate, "；".join(title_of(parts[i]) for i in open_named)))
+idx = open_named[0] if open_named else None
 if idx is None:
     fail("answer: gate「%s」不是 open（status: %s），不能再回" % (gate, "、".join(field_of(parts[i], "status") or "缺" for i in named)))
 sec = parts[idx]

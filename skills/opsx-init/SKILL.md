@@ -31,7 +31,7 @@ One script does the work: `${CLAUDE_PLUGIN_ROOT}/bin/opsx`. This skill is only t
    cd "$(git rev-parse --show-toplevel)" && bash "${CLAUDE_PLUGIN_ROOT}/bin/opsx" init
    ```
 
-   It refuses outside a git repo, is a no-op when rerun, and prints one line per thing it did or skipped.
+   It refuses outside a git repo and prints one line per thing it did or skipped. Rerunning it leaves settings and registrations as they are, but always overwrites the templates and the specs artifact in `openspec/schemas/opsx/` with the plugin's version, so hand edits there are lost.
 
 3. Relay the script's output lines to the user as they are. If it asked nothing (non-interactive), say that the herdr workspace for this repo was not set and can be set with one line in `~/.local/state/opsx/workspaces.toml`, or will be recorded automatically on the first dispatch.
 

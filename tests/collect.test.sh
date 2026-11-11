@@ -302,6 +302,33 @@ grep -q '^mr view 9 ' "$OPSX_FAKE_LOG" || fail "glab 要真的被叫到，慢才
 G="$(printf '%s' "$J" | python3 -I -c 'import datetime,json,sys;print(int(datetime.datetime.fromisoformat(json.load(sys.stdin)["generated_at"]).timestamp()))')"
 [ "$G" -le $((S + 2)) ] || fail "generated_at 要在讀來源前取：呼叫前 ${S}，generated_at ${G}"
 
+# ---------- MR 狀態只讀快取：過期回舊的、背景重抓；沒快取同步抓（collect-background / mr-fetch-off-path） ----------
+ms() { perl -MTime::HiRes=time -e 'printf "%d\n", time * 1000'; }
+R9="$FX/code9"; D9="$R9/r9/openspec/changes/cached-mr"; mkdir -p "$R9/r9/.git" "$D9"
+printf 'schema: opsx\ncreated: 2026-11-10\nkind: dev\n' > "$D9/.openspec.yaml"; printf '## 一句話\n\n快取\n' > "$D9/inbox.md"
+printf '# report\n\n## MR\nhttps://gitlab.tsg-navigator.com/agentory/r9/-/merge_requests/11\n' > "$D9/report.md"
+CACHE9="$OPSX_STATE_DIR/cache/mr-$(printf '%s' "https://gitlab.tsg-navigator.com/agentory/r9/-/merge_requests/11" | shasum | cut -c1-12).json"
+SLOW2="$FX/slow2-bin"; mkdir -p "$SLOW2"
+printf '#!/usr/bin/env bash\n[ "$1 $2" = "mr view" ] && sleep 2\nexec bash "%s/tests/fakes/glab" "$@"\n' "$OPSX_ROOT" > "$SLOW2/glab"; chmod +x "$SLOW2/glab"
+printf '{"state":"opened","draft":false,"has_conflicts":false,"sha":"new222","head_pipeline":{"status":"success"},"unresolved_discussions_count":0}' > "$FX/glab-new.json"
+OLD9='{"url": "https://gitlab.tsg-navigator.com/agentory/r9/-/merge_requests/11", "state": "ready", "head_sha": "old111", "conditions": null, "blocked_on": null, "error": null, "created_at": null, "merged_at": null}'
+collect9() { PATH="$SLOW2:$PATH" OPSX_MR_CACHE_TTL=60 OPSX_TEST_GLAB_JSON="$FX/glab-new.json" OPSX_TEST_GLAB_JSON_BY_IID= opsx collect --root "$R9"; }
+mkdir -p "$(dirname "$CACHE9")"; printf '%s\n' "$OLD9" > "$CACHE9"; touch -t 202601010000 "$CACHE9"; : > "$OPSX_FAKE_LOG"
+t0="$(ms)"; J="$(collect9)"; assert_eq "$?" 0; elapsed=$(( $(ms) - t0 ))
+[ "$elapsed" -lt 1000 ] || fail "過期快取時 collect 不該等 glab，花了 ${elapsed} ms"
+assert_eq "$(q "$(card "$J" r9 cached-mr)" mr.head_sha)" old111 "過期時回快取內容"
+J="$(collect9)"; assert_eq "$(q "$(card "$J" r9 cached-mr)" mr.head_sha)" old111 "重抓還沒完成，第二次 collect 也回舊的"
+for i in $(seq 50); do [ -d "$CACHE9.lock" ] || break; sleep 0.1; done
+[ ! -d "$CACHE9.lock" ] || fail "背景重抓 5 秒內沒結束"
+assert_eq "$(grep -c '^mr view' "$OPSX_FAKE_LOG" || true)" 1 "連跑兩次 collect 只重抓一次"
+assert_eq "$(q "$(cat "$CACHE9")" head_sha)" new222 "背景重抓寫回快取"
+# 沒有快取：等 glab 回來、卡上是這次抓到的、快取被寫入
+rm -f "$CACHE9"; : > "$OPSX_FAKE_LOG"
+t0="$(ms)"; J="$(collect9)"; elapsed=$(( $(ms) - t0 ))
+[ "$elapsed" -ge 2000 ] || fail "沒快取時要同步等 glab，只花了 ${elapsed} ms"
+assert_eq "$(q "$(card "$J" r9 cached-mr)" mr.head_sha)" new222 "沒快取時是這次抓到的"
+assert_eq "$(q "$(cat "$CACHE9")" head_sha)" new222 "沒快取時同步寫入快取"
+
 # ---------- 卡的等級與目前 milestone（workplan-priority/priority-board，specs/board-collect「卡的等級」「目前 milestone」） ----------
 R8="$FX/code8"; mkdir -p "$R8/p/.git" "$R8/q/.git" "$R8/w/.git"
 pcard() { # <repo> <slug> [frontmatter 行…]

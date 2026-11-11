@@ -19,5 +19,5 @@ coordinate_kick() {
     printf '%s ?? coordinate --kick 起不來：寫不了 %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$out" | opsx_append "$OPSX_STATE_DIR/coordinator.log"
     return 0
   fi
-  HERDR_ENV=1 nohup bash "$OPSX_ROOT/bin/opsx" coordinate < /dev/null >> "$out" 2>&1 &
+  ( trap '' HUP; HERDR_ENV=1 exec bash "$OPSX_ROOT/bin/opsx" coordinate ) < /dev/null >> "$out" 2>&1 &
 }

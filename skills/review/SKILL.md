@@ -15,13 +15,15 @@ compatibility: Spawns three Agent subagents (A and B on claude-sonnet-5-5, C on 
 
 # /review
 
+**Steps in TodoWrite.** First action after loading: put this skill's steps into TodoWrite verbatim; a step you will not do stays in the list as `skip: <reason>`, never deleted.
+
 Three readers who do not share context, one lead who decides. The report they leave is what `/opsx-workflow:pr` and the board build on.
 
 ## Step 0: the gate
 
 Read `openspec/changes/<slug>/tasks.md` and `status.json`. For every checked task, the `測試：` file must exist (or the line says `測試：無 · <reason>`), and `status.json.tests` must be `green`. If either fails, do not review: say which tasks lack tests or that the suite is red, and that `/opsx-workflow:apply <slug>` has to finish first. A review of untested code is a review of a guess.
 
-A main change with `subs/`: also run `opsx check <slug>`. Any line it prints is a sub-change shell that is incomplete; stop the same way and name the lines.
+A main change with `subs/`: also run `opsx check <slug>`. Any line it prints is a sub-change shell that is incomplete; stop the same way and name the lines. A `Must-fix 候選` line is not an incomplete shell: leave it for Step 3. A line starting `explore.md 步驟` goes back to `/opsx-workflow:explore <slug>`, not to `/opsx-workflow:apply`.
 
 Read the round from report.md: its title is `# Review · <slug> · 第 <N> 輪 · …`; no report.md means N is 0, and this run is round N+1. When N is already 2 or more, two rounds are done (the confirm pass in Step 4 edits report.md in place, keeps the 第 2 輪 title and is not a round): review does not start a reviewer. If report.md still lists items under `### 待修（範圍內）` and their `R` tasks in tasks.md are not all checked, send them back to `/opsx-workflow:apply <slug>` (Step 4). If those tasks are checked, run the confirm pass in Step 4. Write a gate in `gates.md` (`type: decision`) only for an item that needs a user decision and cannot be fixed; if nothing is open, say the review budget is used up and continue to the next node.
 
@@ -80,6 +82,8 @@ Read `../interrogate/references/lead-judgment.md`. Merge: same file:line from tw
 Evidence you cannot verify downgrades the finding one level, so an unverifiable finding in scope goes to Consider, not back to apply.
 
 Then scope every BUG and MUST_FIX left in Act on. 範圍內 = the failure scenario cannot happen on main (a caller this change broke counts); run the scenario on main when you can. When it cannot be run, 範圍內 = the cited file:line is inside the added or changed lines of `git diff -U0 main...HEAD` (take `main` as the remote default branch, `origin/main` after `git fetch`; a stale local main pulls already-merged code into scope, and the "on main" scenario runs on the same base). 範圍外 = the scenario happens on main too. Only 範圍內 BUG and MUST_FIX are sent back to `/opsx-workflow:apply`.
+
+Run `opsx check <slug>` and read every `Must-fix 候選` line it prints: the card's explore.md wrote 影響範圍 as skip, yet the diff touches a file other files reference. A candidate is a grep hit, not proof: it misses shell variables and config keys, and it flags files only their own tests reference. Read the cited reference yourself; a candidate you confirm is a Must-fix, and review sends it back to explore (the `## R<N>. review 退回` group in tasks.md, so `/opsx-workflow:apply` and explore's 影響範圍 step redo it); one you cannot confirm goes to Consider.
 
 Seed the report's D 對照 table from Agent A's `D_TABLE` (followed → 照做, violated → 偏離) and keep every row, followed ones included. After bucketing, a row whose finding you dismissed becomes 照做, and a row that a B or C finding in Act on or Consider contradicts becomes 偏離. Cite file:line, not a finding number. Agents B and C write `d_id: none`.
 

@@ -10,6 +10,8 @@ compatibility: Requires openspec CLI.
 
 # /archive
 
+**Steps in TodoWrite.** First action after loading: put this skill's steps into TodoWrite verbatim; a step you will not do stays in the list as `skip: <reason>`, never deleted.
+
 Archive a completed change.
 
 **Input**: Optionally specify a change name. If omitted, check if it can be inferred from conversation context. If vague or ambiguous you MUST prompt for available changes.
@@ -22,7 +24,7 @@ If `openspec/workplan.yaml` exists, silently verify it matches reality before pr
 
 1. For each PR where status ≠ `merged`:
    - Find the forge from `git remote get-url gitlab` (else `origin`). A GitLab host: `glab mr list --source-branch <branch> --merged -F json`. `github.com`: `gh pr list --head <branch> --state merged --json number`. Any other host: skip this check and say so.
-   - If the list is not empty (merged on the forge) but workplan says `pending`/`in-progress` → auto-update to `merged`
+   - If the list is not empty (merged on the forge) but workplan says `pending`/`in-progress` → auto-update to `merged`, except the PR that holds the change you are archiving: step 6 marks that one, after step 4b's `opsx late` has passed (marking it here would release the cards that depend on it while commits pushed after the merge are still not in main)
 2. For each change where status ≠ `done`:
    - Check if `openspec/changes/<name>/` still exists
    - If missing (archived or deleted) → auto-update to `done`
@@ -76,6 +78,10 @@ Check for delta specs at `openspec/changes/<name>/specs/`. If none exist, procee
 **Prompt options:**
 - If changes needed: "Sync now (recommended)", "Archive without syncing"
 - If already synced: "Archive now", "Sync anyway", "Cancel"
+
+### 4b. Check the branch for commits pushed after the merge
+
+Run `opsx late <name>`. Exit 0 (`none` or `acked <sha>`): continue. Exit 1 (`late <N> <sha> <branch>` and one line per commit): those commits are on the remote branch but not in main, since the PR merged without them. Show the output and stop: do not archive, do not touch the workplan. Exit 2: it could not tell (the message names the missing field); show it and stop. A card with no MR yet has nothing merged, so skip this step.
 
 ### 5. Perform the archive
 

@@ -698,7 +698,7 @@ opsx-workflow/
 | 7 寫待決 | 永遠 | — | 「待決」：只有人能答的題，每題附推薦答案；空就寫「無」 |
 | 8 | 永遠 | `explore/references/investigation.md` 的輸出格式、`unslop` | explore.md 完成 |
 
-產出：`explore.md`（八段固定標題）。hook：inbox.md 有、explore.md 沒 → 注入。
+產出：`explore.md`（已知 / 待決 / 不做 / 步驟 四段；步驟段每步一行，含 §3 的「查資料」共九行，格式與條件見 `skills/explore/SKILL.md` 的 Steps）。hook：inbox.md 有、explore.md 沒 → 注入。
 
 ### teach（explore 之後，人叫才跑，不是節點）
 
