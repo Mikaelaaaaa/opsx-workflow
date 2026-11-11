@@ -39,10 +39,16 @@ opsx_merge-card() {
   [ -n "$source" ] || die "merge-card: 來源 $src 的 inbox.md frontmatter 沒有 source:：$s_inbox"
   url="$(frontmatter_field "$s_inbox" upstream_url)"
 
-  # 事實欄位先併：來源的 impact 沒有 evidence 這類不合格會在這裡失敗，來源還沒被捨棄
-  "$OPSX_PY" -I "$OPSX_ROOT/bin/lib/inboxmerge.py" carry "$ch/$into" "$ch/$src" || die "merge-card: 來源 $src 的 kind_of_work / impact / evidence 併不進 $into，兩張卡都沒動"
+  # 事實欄位：捨棄之前只驗（來源的 impact 沒有 evidence、目標沒有 frontmatter 會在這裡失敗，兩張卡都沒動），
+  # 捨棄成功之後才寫進目標；來源 inbox 先複製出來，因為捨棄會把它歸檔
+  MERGE_CARD_COPY="$(mktemp "${TMPDIR:-/tmp}/opsx-merge-card.XXXXXX")" || die "merge-card: 開不了暫存檔"
+  trap 'rm -f "$MERGE_CARD_COPY"' EXIT   # opsx_drop 拒絕時走 die 離開，暫存檔也要收
+  cp "$s_inbox" "$MERGE_CARD_COPY" || die "merge-card: 複製來源 inbox 失敗：$s_inbox"
+  "$OPSX_PY" -I "$OPSX_ROOT/bin/lib/inboxmerge.py" carry-check "$ch/$into" "$MERGE_CARD_COPY" "$src" || die "merge-card: 來源 $src 的事實欄位併不進 $into，兩張卡都沒動"
 
   opsx_drop "$src" --repo "$top" -- "併入 $repo/$into"
+  "$OPSX_PY" -I "$OPSX_ROOT/bin/lib/inboxmerge.py" carry "$ch/$into" "$MERGE_CARD_COPY" "$src" \
+    || die "merge-card: $repo/$src 已歸檔，但事實欄位寫不進 ${t_inbox}；請手動把來源的 kind_of_work / impact / evidence 補進去"
 
   local line="- 併進：$repo/$src · source: $source"
   [ -z "$url" ] || line="$line · $url"

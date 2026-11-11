@@ -179,6 +179,47 @@ fm_before="$(awk 'NR>1 && /^---/{exit} {print}' "$CH/carry-dst5/inbox.md" | shas
 assert_rc 0 opsx merge-card carry-src5 --into carry-dst5 --repo "$A"
 assert_eq "$(awk 'NR>1 && /^---/{exit} {print}' "$CH/carry-dst5/inbox.md" | shasum)" "$fm_before" "frontmatter 不變"
 
+# --- 捨棄被拒絕（來源還派著）：目標位元組不變，來源還在；停掉後重試成功，證據只一份 ---
+mk_card carry-src7 incident data "log7"; mk_card carry-dst7 planned "" ""
+printf '{"a/carry-src7":{"mode":"autopilot","pane":"p4"}}' > "$OPSX_STATE_DIR/dispatch.json"
+before="$(snap)"
+assert_rc 2 opsx merge-card carry-src7 --into carry-dst7 --repo "$A"
+assert_eq "$(snap)" "$before" "drop 拒絕時兩張卡都不能動"
+rm -f "$OPSX_STATE_DIR/dispatch.json"
+assert_rc 0 opsx merge-card carry-src7 --into carry-dst7 --repo "$A"
+assert_eq "$(fm_value carry-dst7 evidence)" "log7" "重試後證據只一份"
+
+# --- 來源有 priority 覆寫：目標不能比它低 ---
+mk_card carry-src8 planned "" ""; mk_card carry-dst8 planned "" ""
+printf -- '---\ntype: bug\nsource: agent:t\nfound: 2026-11-10\nrelated:\nkind_of_work: planned\npriority: P0\npriority_reason: 人判定\n---\n\n## 一句話\n\ncarry-src8\n\n## 證據\n\n- 原有\n' > "$CH/carry-src8/inbox.md"
+assert_eq "$(level_of carry-dst8)" P2
+assert_rc 0 opsx merge-card carry-src8 --into carry-dst8 --repo "$A"
+assert_eq "$(level_of carry-dst8)" P0 "來源的 priority 覆寫要帶過去"
+
+# --- 兩張卡有同一條證據併進同一個目標：證據不重複 ---
+mk_card carry-s9a incident data "same"; mk_card carry-s9b incident data "same"; mk_card carry-dst9 planned "" ""
+assert_rc 0 opsx merge-card carry-s9a --into carry-dst9 --repo "$A"
+assert_rc 0 opsx merge-card carry-s9b --into carry-dst9 --repo "$A"
+assert_eq "$(fm_value carry-dst9 evidence)" "same"
+
+# --- 目標用巢狀的 impact 寫法：併完是同一行的寫法、證據保留 ---
+mk_card carry-s10 incident security "洩漏"
+mkdir -p "$CH/carry-d10"; printf 'schema: opsx\n' > "$CH/carry-d10/.openspec.yaml"
+printf -- '---\ntype: bug\nsource: agent:t\nfound: 2026-11-10\nrelated:\nkind_of_work: incident\nimpact:\n  data: true\n  evidence: 原證據\n---\n\n## 一句話\n\nd10\n\n## 證據\n\n- 原有\n' > "$CH/carry-d10/inbox.md"
+assert_rc 0 opsx merge-card carry-s10 --into carry-d10 --repo "$A"
+assert_eq "$(fm_value carry-d10 impact)" "data, security"
+assert_eq "$(fm_value carry-d10 evidence)" "原證據 ; 洩漏"
+assert_eq "$(level_of carry-d10)" P0
+
+# --- 目標沒有 frontmatter：退出非零，兩張卡都不動 ---
+mk_card carry-s11 incident data "x11"
+mkdir -p "$CH/carry-d11"; printf 'schema: opsx\n' > "$CH/carry-d11/.openspec.yaml"
+printf '# 沒有 frontmatter\n\n## 證據\n\n- 原有\n' > "$CH/carry-d11/inbox.md"
+before="$(snap)"
+err="$(opsx merge-card carry-s11 --into carry-d11 --repo "$A" 2>&1)" && fail "目標沒有 frontmatter 要退出非零"
+case "$err" in *carry-d11*) ;; *) fail "stderr 要指名目標卡：$err" ;; esac
+assert_eq "$(snap)" "$before"
+
 # --- 來源的事實欄位不合格：退出非零，兩張卡都不動 ---
 mk_card carry-src6 incident data ""; mk_card carry-dst6 planned "" ""
 before="$(snap)"
