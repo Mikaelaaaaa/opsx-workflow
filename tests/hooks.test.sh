@@ -233,13 +233,8 @@ out="$(gg Bash "$(cmdj 'pnpm db:migrate && glab mr create -F desc.md')")"; asser
 out="$(gg Bash "$(cmdj 'glab mr merge 212')")"; assert_eq "$(decision "$out")" deny "grant: merge 第三級"
 reason "$out" | grep -q '第三級' || fail "grant: merge 要說第三級"
 out="$(gg Bash "$(cmdj 'git push --force gitlab main')")"; assert_eq "$(decision "$out")" deny "grant: force push"
-# 合併策略旗標能讓合過 main 的分支保留自己的樹，推上去後人一合 MR 就倒回 main 的改動
-out="$(gg Bash "$(cmdj 'git merge -s ours origin/main')")"; assert_eq "$(decision "$out")" deny "grant: git merge -s ours 第三級"
-reason "$out" | grep -q '第三級' || fail "grant: 合併策略旗標要說第三級"
-for c in 'git merge origin/main -Xours' 'git merge --strategy=ours origin/main' 'git merge -X theirs origin/main' 'git merge --strategy-option ours origin/main' 'git merge -sours origin/main'; do
-  out="$(gg Bash "$(cmdj "$c")")"; assert_eq "$(decision "$out")" deny "grant: $c 第三級"
-done
-for c in 'git merge origin/main' 'git merge --no-edit origin/main' 'git merge --abort' 'git merge --continue' 'git merge --squash origin/main'; do
+# 把 main 合進自己的分支是直接做，閘門不分級；倒回 main 的合併靠人合 MR 前看 diff，旗標比對擋不住（merge --no-commit 後 checkout 也做得到）
+for c in 'git merge origin/main' 'git merge --no-edit origin/main' 'git merge --abort' 'git merge --continue' 'git merge --squash origin/main' 'git merge origin/main -m "fix -s flag"'; do
   out="$(gg Bash "$(cmdj "$c")")"; [ "$(decision "$out")" != deny ] || fail "grant: $c 不擋"
 done
 out="$(gg Bash "$(cmdj 'pnpm add left-pad')")"; assert_eq "$(decision "$out")" deny "grant: 裝套件第二級沒授權"

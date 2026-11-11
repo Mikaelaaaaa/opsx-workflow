@@ -107,8 +107,6 @@ if [ "$tool" = "Bash" ]; then
   fi
   printf '%s' "$l3" | grep -qE 'git\s+push.*(--force|-f\b|\+[a-zA-Z])' && level3 "force-push"
   printf '%s' "$l3" | grep -qE 'git\s+push.*\b(main|master)\b' && level3 "push main"
-  # 策略旗標能讓合過 main 的分支保留自己的樹，MR 看似無衝突，人一合就倒回 main 的改動
-  printf '%s' "$l3" | grep -qE 'git\s+merge\s([^;&|]*\s)?(-[sX]|--strategy)' && level3 "git merge 合併策略旗標"
   printf '%s' "$l3" | grep -qiE '(^|\s|/)deploy(\.sh)?(\s|$)' && level3 "deploy"
   printf '%s' "$l3" | grep -qiE 'drop\s+(table|database|schema)|truncate\s+table|db:reset' && level3 "刪資料"
   printf '%s' "$l3" | grep -qE 'sops\s+(-e|--encrypt|edit)|\.gitlab-ci\.yml|\.github/workflows' && level3 "改 CI / secrets"
