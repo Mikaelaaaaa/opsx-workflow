@@ -11,7 +11,7 @@ GET /api/collect 回上一次 `opsx collect` 的結果（成功或失敗），�
 GET /api/log[?since=<iso>] 回 `opsx timeline [--since …]` 的輸出（紀錄 tab、抽屜、banner 用，開才拉，不快取）。
 GET /api/output?pane=<id> 跑 `herdr agent read <id> --lines 10 --format text`，回 {ok, text} 或 {ok: false, error}（抽屜「最後輸出」）。
 POST /api/seen {at} 把 at 寫進 <state>/last-seen（banner 按「關閉」時送）。
-POST /api/{answer,dispatch,merge,stop,new,file,drop,merge-card,sync,note} 轉呼叫對應的 `opsx` 子命令，POST /api/focus 跑 herdr agent focus <slug>；都回 {ok, stdout, stderr}。
+POST /api/{answer,dispatch,merge,stop,new,file,drop,merge-card,split-out,sync,note} 轉呼叫對應的 `opsx` 子命令，POST /api/focus 跑 herdr agent focus <slug>；都回 {ok, stdout, stderr}。
 POST /api/priority {repo, slug, level, reason} 轉 `opsx priority <slug> --set <level> --reason <理由> --repo <repo>`；
                  level 不是 P0/P1/P2 或理由空白回 400，不叫 opsx。
 POST /api/paste {text, repo?, files: [{name, data(base64)}]} 把檔寫進暫存資料夾，轉呼叫 `opsx new [--repo] --attach <檔>… -- <一句話>`，
@@ -61,6 +61,7 @@ NAME_MAX_BYTES = 255   # 多數檔案系統的單一檔名上限是 255 bytes，
 ONE_LINER_MAX = 200
 
 # 每個動作：有沒有 slug（有就是第一個位置參數）、必填欄位、選填 flag、尾端文字。
+# arg：第二個位置參數取哪個欄位（照 slug 的格式檢查）；有它的動作把 slug 與它放在 flag 之後，因為 split-out 的參數迴圈遇到第一個非選項就停。
 ACTIONS = {
     "answer": {"slug": True, "required": ("gate", "text"), "flags": ("sub", "gate", "grant", "repo"), "trailing": "text"},
     "merge": {"slug": True, "required": (), "flags": ("repo",), "trailing": None},
@@ -70,6 +71,7 @@ ACTIONS = {
     "file": {"slug": True, "required": ("repo",), "flags": ("repo",), "trailing": None},
     "drop": {"slug": True, "required": ("text",), "flags": ("repo",), "trailing": "text"},
     "merge-card": {"slug": True, "required": ("into", "repo"), "flags": ("into", "repo"), "trailing": None},
+    "split-out": {"slug": True, "required": ("id", "repo"), "flags": ("repo",), "trailing": None, "arg": "id"},
     "sync": {"slug": False, "required": (), "flags": ("source",), "trailing": None},
     "note": {"slug": True, "required": ("text",), "flags": ("repo",), "trailing": "text"},
     "reap": {"slug": False, "required": (), "flags": ("pane",), "trailing": None},
@@ -94,7 +96,7 @@ LEVELS = ("P0", "P1", "P2")
 
 class Config:
     def __init__(self, state: pathlib.Path, collect_file: pathlib.Path | None):
-        self.state = state
+        self.state = state.absolute()   # 子行程的 cwd 是 state，相對路徑會在 state 底下再解析一次
         self.collect_file = collect_file
         self.token = load_token(state / "board-token")
         self.cond = threading.Condition()
@@ -182,11 +184,20 @@ def build_args(action: str, body: dict) -> list[str]:
     for k in (("slug",) if spec["slug"] else ()) + spec["required"]:
         if not isinstance(body.get(k), str) or not body[k].strip():
             raise ValueError("缺 %s" % k)
-    args = [action, "--source", "me"] if action == "new" else [action]   # 看板是使用者按的，不因 server 從 agent worktree 啟動就變 agent
+    args = [action, "--source", "me"] if action == "new" else [action]   # 看板是使用者按的；opsx new 在 agent worktree 裡拒絕 --source me，所以呼叫端用 state 目錄當 cwd
+    positional = []
     if spec["slug"]:
         if not SLUG_RE.match(body["slug"]):
             raise ValueError("slug 不合格：%r" % body["slug"])
-        args.append(body["slug"])
+        positional.append(body["slug"])
+    if "arg" in spec:
+        v = body[spec["arg"]]
+        if not SLUG_RE.match(v):
+            raise ValueError("%s 不合格：%r" % (spec["arg"], v))
+        positional.append(v)
+    else:
+        args += positional
+        positional = []
     for flag in spec["flags"]:
         v = body.get(flag)
         if v is None or v == "":
@@ -196,6 +207,7 @@ def build_args(action: str, body: dict) -> list[str]:
         if flag == "repo" and not repo_ok(v):
             raise ValueError("repo 不是 opsx repo 的根目錄：%r" % v)
         args += ["--%s" % flag, v]
+    args += positional
     if spec["trailing"]:
         text = body[spec["trailing"]]
         if "\n" in text or "\r" in text or "\0" in text:
@@ -276,10 +288,10 @@ def priority_args(body: dict) -> list[str]:
     return ["priority", slug, "--set", level, "--reason", reason, "--repo", repo]
 
 
-def run(argv: list[str], timeout: int, env: dict) -> dict:
+def run(argv: list[str], timeout: int, env: dict, cwd: pathlib.Path | None = None) -> dict:
     """跑一個子行程；逾時殺整個 process group（collect 底下掛著幾百支 stage_of / python，只殺 bash 會留孤兒）。"""
     try:
-        p = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, errors="replace", env=env, start_new_session=True)
+        p = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, errors="replace", env=env, cwd=cwd, start_new_session=True)
     except FileNotFoundError:
         return {"ok": False, "stdout": "", "stderr": "%s 不存在" % argv[0], "rc": 127}
     try:
@@ -455,10 +467,10 @@ class Handler(BaseHTTPRequestHandler):
         if action == "paste":
             with tempfile.TemporaryDirectory(prefix="opsx-paste.") as d:
                 attach = write_attachments(pathlib.Path(d), files)
-                r = run(["bash", str(OPSX), "new", "--source", "me", *repo_args, *attach, "--", one_liner], ACTION_TIMEOUT, self.opsx_env())
+                r = run(["bash", str(OPSX), "new", "--source", "me", *repo_args, *attach, "--", one_liner], ACTION_TIMEOUT, self.opsx_env(), self.cfg.state)
             self.invalidate()
             self.send_json(200, r); return
-        r = run(["bash", str(OPSX), *args], ACTION_TIMEOUT, self.opsx_env())
+        r = run(["bash", str(OPSX), *args], ACTION_TIMEOUT, self.opsx_env(), self.cfg.state if action == "new" else None)
         self.invalidate()
         # sync 的退出碼 3 是已有一支在跑；reap 的退出碼 2 是指定的 pane 不是孤兒
         self.send_json(409 if action == "sync" and r["rc"] == 3 else 422 if action == "reap" and r["rc"] == 2 else 200, r)

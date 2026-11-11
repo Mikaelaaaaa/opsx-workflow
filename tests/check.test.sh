@@ -9,7 +9,7 @@ R="$(mk_repo r)"; cd "$R"; git branch main   # check_blast 拿 main...HEAD 當 d
 mk_main() { # <m>
   local m="$R/openspec/changes/$1" s="$R/openspec/changes/$1/subs/a"
   mkdir -p "$s/specs/cap"
-  printf 'schema: opsx\nkind: dev\n' > "$m/.openspec.yaml"
+  printf 'schema: opsx\nkind: dev\nspec_format: when-then\n' > "$m/.openspec.yaml"   # 這些測試驗子殼齊不齊，不驗 Gherkin
   printf '## Decisions\n\n- D1 x\n- D2 y\n' > "$m/design.md"
   printf 'schema: opsx\nkind: dev\nparent: %s\n' "$1" > "$s/.openspec.yaml"
   printf '## Why\n\nx\n' > "$s/proposal.md"
@@ -231,7 +231,7 @@ out="$(chk f-m)" && fail "子殼 subagent 開的卡缺 kind 要非零"
 printf '%s' "$out" | grep -q 'f-m-child/inbox.md: ' || fail "要指出子殼開的卡: $out"
 # 子殼的 subagent 在跑：事實欄位不擋（只在 subagent 條件被拿掉時才會紅）
 mk_main f-sub >/dev/null; mk_inbox f-sub 'source: agent:q'   # mk_inbox 重寫 .openspec.yaml，子殼仍齊全
-printf 'schema: opsx\nkind: dev\n' > "$R/openspec/changes/f-sub/.openspec.yaml"
+printf 'schema: opsx\nkind: dev\nspec_format: when-then\n' > "$R/openspec/changes/f-sub/.openspec.yaml"   # 驗事實欄位，不驗 Gherkin
 printf '## 1. x\n\n- [ ] 1.1 `a`：子殼\n' > "$R/openspec/changes/f-sub/tasks.md"
 printf '{"phase":"apply","step":1,"total":3,"worker":"subagent-a","at":"%s"}' "$(date -u '+%Y-%m-%dT%H:%M:%S+00:00')" > "$R/openspec/changes/f-sub/subs/a/status.json"
 git -C "$R" checkout -q -b feat/f-sub/mikaela
@@ -264,4 +264,226 @@ out="$(chk mg-ok)" || fail "tasks.md 提到 id 就過：$out"
 mk_merged mg-drop ""; printf 'outcome: declined\n' >> "$R/openspec/changes/mg-drop/.openspec.yaml"
 out="$(chk mg-drop)" && fail "捨棄的卡還有併入要退出 1：$out"
 case "$out" in *mg-drop-m1*) ;; *) fail "要列出 id：$out" ;; esac
+
+# --- gherkin-check：spec 的 Gherkin 四條（驗收：openspec/changes/gherkin-check/subs/check-rules/specs/spec-gherkin-check/spec.md）---
+G="$(mk_repo gh)"
+mkdir -p "$G/openspec/schemas/opsx"
+NEW_SCHEMA='instruction: |\n  禁用模糊詞：正確的、適當的\n'
+printf "$NEW_SCHEMA" > "$G/openspec/schemas/opsx/schema.yaml"
+REF="$FX/ref-spec.md"
+awk '/^## 對應到 openspec/ { on = 1 } inb && /^```$/ { exit } inb { print } on && /^```markdown$/ { inb = 1 }' "$OPSX_ROOT/skills/propose/references/gherkin.md" > "$REF"
+grep -q '（Scenario Outline，正例＋反例）' "$REF" || fail "reference「對應到 openspec / opsx」範例抽不出來: $(cat "$REF")"
+mk_g() { # <slug> <spec 檔>：只有主殼 specs/cap/spec.md 的卡
+  local c="$G/openspec/changes/$1"; mkdir -p "$c/specs/cap"
+  printf 'schema: opsx\nkind: dev\n' > "$c/.openspec.yaml"; cp "$2" "$c/specs/cap/spec.md"
+}
+gchk() { (cd "$G" && opsx check "$1" 2>&1); }
+SP="$FX/spec.md"
+ok_req() { # <名稱>：一正一反都齊的 Requirement
+  printf '### Requirement: %s\nx SHALL y\n\n#### Scenario: a（正例）\n- **WHEN** a\n- **THEN** b\n\n#### Scenario: b（反例）\n- **WHEN** c\n- **THEN** d\n\n' "$1"
+}
+
+# Scenario：合格的 Gherkin spec 通過（正例）——reference 範例與本卡自己的 spec
+mk_g g-ref "$REF"
+out="$(gchk g-ref)" || fail "reference 範例要回 0: $out"
+printf '%s' "$out" | grep -q 'spec.md' && fail "reference 範例不該有指向 spec.md 的行: $out"
+cat > "$SP" <<'EOF'
+## ADDED Requirements
+
+### Requirement: opsx check 擋不合 Gherkin 寫法的 spec
+`opsx check <slug>` SHALL 對卡的主殼與每個子殼的 `specs/**/spec.md` 檢查四條。
+
+#### Scenario: 合格的 Gherkin spec 通過（正例）
+- **GIVEN** 卡的 spec 是 reference「對應到 openspec / opsx」一節的範例
+- **WHEN** 執行 `opsx check <slug>`
+- **THEN** exit code 為 0
+
+#### Scenario: Requirement 缺反例被擋（反例）
+- **GIVEN** 卡的 spec 有一個 Requirement "R1"，底下只有 `（正例）` 結尾的 Scenario
+- **WHEN** 執行 `opsx check <slug>`
+- **THEN** exit code 為 1
+
+#### Scenario: 檢查一條規則（Scenario Outline，正例＋反例）
+- **GIVEN** 卡的 spec 除了 "<寫法>" 之外都合格
+- **WHEN** 執行 `opsx check <slug>`
+- **THEN** exit code 為 <exit>
+- **AND** 輸出含 "<訊息>"
+
+Examples: 一般場景
+| 寫法 | exit | 訊息 |
+|---|---|---|
+| Requirement 只有反例 | 1 | 沒有正例 |
+| Scenario 名稱帶 `（Scenario Outline，正例）` 但沒有 `Examples:` | 1 | 沒有 Examples |
+| THEN 步驟寫 "回傳正確的價格" 但不加引號 | 1 | 模糊詞 |
+| Background 底下有 `- **THEN**` | 1 | Background 含 THEN |
+EOF
+mk_g g-own "$SP"
+out="$(gchk g-own)" || fail "本卡自己的 spec 要回 0: $out"
+
+# Scenario：Requirement 缺反例被擋（反例）
+printf '## ADDED Requirements\n\n### Requirement: R1\nx SHALL y\n\n#### Scenario: a（正例）\n- **WHEN** a\n- **THEN** b\n' > "$SP"; mk_g g-noneg "$SP"
+out="$(gchk g-noneg)" && fail "缺反例要退出 1: $out"
+printf '%s' "$out" | grep 'specs/cap/spec.md: ' | grep 'R1' | grep -q '沒有反例' || fail "要指出 R1 沒有反例: $out"
+printf '%s' "$out" | grep -q '沒有正例' && fail "R1 有正例不該報: $out"
+
+# Scenario Outline「檢查一條規則」各列
+printf '## ADDED Requirements\n\n### Requirement: R1\nx SHALL y\n\n#### Scenario: b（反例）\n- **WHEN** c\n- **THEN** d\n' > "$SP"; mk_g g-nopos "$SP"
+out="$(gchk g-nopos)" && fail "只有反例要退出 1: $out"
+printf '%s' "$out" | grep 'R1' | grep -q '沒有正例' || fail "要指出 R1 沒有正例: $out"
+
+printf '## ADDED Requirements\n\n%s\n\n### Requirement: R2\nx SHALL y\n\n#### Scenario: o（Scenario Outline，正例）\n- **WHEN** "<a>"\n- **THEN** "<b>"\n\n#### Scenario: n（反例）\n- **WHEN** c\n- **THEN** d\n' "$(ok_req R1)" > "$SP"; mk_g g-noex "$SP"
+out="$(gchk g-noex)" && fail "Outline 沒有 Examples 要退出 1: $out"
+printf '%s' "$out" | grep 'specs/cap/spec.md: ' | grep -q '沒有 Examples' || fail "要指出沒有 Examples: $out"
+
+printf '## ADDED Requirements\n\n### Requirement: R1\nx SHALL y\n\n#### Scenario: o（Scenario Outline，正例）\n- **WHEN** "<a>"\n- **THEN** "<b>"\n\n#### Scenario: n（反例）\n- **WHEN** c\n- **THEN** d\n\nExamples:\n| a | b |\n|---|---|\n| 1 | 2 |\n' > "$SP"; mk_g g-exlate "$SP"
+out="$(gchk g-exlate)" && fail "Examples 在下一個 Scenario 之後要退出 1: $out"
+printf '%s' "$out" | grep -q '沒有 Examples' || fail "Examples 不在自己底下要報: $out"
+
+printf '## ADDED Requirements\n\n### Requirement: R1\nx SHALL y\n\n#### Scenario: a（正例）\n- **WHEN** a\n- **THEN** 回傳正確的價格\n\n#### Scenario: b（反例）\n- **WHEN** c\n- **THEN** d\n' > "$SP"; mk_g g-vague "$SP"
+out="$(gchk g-vague)" && fail "含模糊詞要退出 1: $out"
+printf '%s' "$out" | grep 'specs/cap/spec.md: ' | grep '第 8 行' | grep '模糊詞' | grep -q '正確的' || fail "要指出第 8 行的模糊詞「正確的」: $out"
+
+printf '## ADDED Requirements\n\n### Requirement: R1\nx SHALL y\n\nBackground:\n- **GIVEN** g\n- **THEN** t\n\n#### Scenario: a（正例）\n- **WHEN** a\n- **THEN** b\n\n#### Scenario: b（反例）\n- **WHEN** c\n- **THEN** d\n' > "$SP"; mk_g g-bg "$SP"
+out="$(gchk g-bg)" && fail "Background 有 THEN 要退出 1: $out"
+printf '%s' "$out" | grep '第 8 行' | grep -q 'Background 含 THEN' || fail "要指出第 8 行 Background 含 THEN: $out"
+assert_eq "$(printf '%s\n' "$out" | grep -c 'Background')" 1 "Scenario 裡的 THEN 不算 Background: $out"
+
+printf '## ADDED Requirements\n\n### Requirement: R1\nx SHALL y\n\n#### Scenario: o（Scenario Outline，正例＋反例）\n- **WHEN** "<a>"\n- **THEN** "<b>"\n\nExamples:\n| a | b |\n|---|---|\n| 1 | 2 |\n' > "$SP"; mk_g g-both "$SP"
+out="$(gchk g-both)" || fail "唯一的 Scenario 標正例＋反例且有 Examples 要回 0: $out"
+
+printf '## ADDED Requirements\n\n### Requirement: R1\nx SHALL y\n\n#### Scenario: a（正例）\n- **WHEN** a\n- **THEN** 輸出含 "回傳正確的價格" 與 `適當的`\n\n#### Scenario: b（反例）\n- **WHEN** c\n- **THEN** d\n' > "$SP"; mk_g g-quoted "$SP"
+out="$(gchk g-quoted)" || fail "模糊詞只在引號裡要回 0: $out"
+
+# ```區塊與 REMOVED Requirements 不查
+printf '## ADDED Requirements\n\n%s\n\n```\n#### Scenario: 正確的（正例）\n```\n\n## REMOVED Requirements\n\n### Requirement: Old\n**Reason**: x\n' "$(ok_req R1)" > "$SP"; mk_g g-fence "$SP"
+out="$(gchk g-fence)" || fail "程式碼區塊內與 REMOVED Requirement 不查: $out"
+
+# 子殼 spec 缺反例，主殼 spec 合格
+printf '## ADDED Requirements\n\n%s' "$(ok_req R1)" > "$SP"; mk_g g-sub "$SP"
+GS="$G/openspec/changes/g-sub/subs/a"; mkdir -p "$GS/specs/cap"
+printf 'schema: opsx\nkind: dev\nparent: g-sub\n' > "$GS/.openspec.yaml"
+printf '## Why\n\nx\n' > "$GS/proposal.md"; printf '## Decisions\n\nx\n' > "$GS/design.md"
+printf '## 1. x\n\n- [ ] 1.1 a\n  - 驗收：s1\n  - 測試：tests/a.test.sh\n' > "$GS/tasks.md"
+printf '## ADDED Requirements\n\n### Requirement: S1\nx SHALL y\n\n#### Scenario: a（正例）\n- **WHEN** a\n- **THEN** b\n' > "$GS/specs/cap/spec.md"
+out="$(gchk g-sub)" && fail "子殼 spec 缺反例要退出 1: $out"
+printf '%s' "$out" | grep '^subs/a/specs/cap/spec.md: ' | grep 'S1' | grep -q '沒有反例' || fail "要指出子殼 S1 沒有反例: $out"
+assert_eq "$(printf '%s\n' "$out" | grep -c 'spec.md')" 1 "主殼合格不該報: $out"
+
+# Requirement：標了舊寫法的卡跳過；沒標就擋（子殼跟主殼）
+printf '## ADDED Requirements\n\n### Requirement: R1\nx SHALL y\n\n#### Scenario: s1\n- **WHEN** a\n- **THEN** b\n\n### Requirement: R2\nz\n\n#### Scenario: s2\n- **WHEN** a\n- **THEN** b\n' > "$SP"
+mk_g g-old "$SP"
+out="$(gchk g-old)" && fail "沒標記的舊寫法卡要退出 1: $out"
+assert_eq "$(printf '%s\n' "$out" | grep -c '沒有正例')" 2 "每個 Requirement 一行沒有正例: $out"
+assert_eq "$(printf '%s\n' "$out" | grep -c '沒有反例')" 2 "每個 Requirement 一行沒有反例: $out"
+printf 'spec_format: when-then \n' >> "$G/openspec/changes/g-old/.openspec.yaml"
+out="$(gchk g-old)" || fail "標了 spec_format: when-then 要跳過: $out"
+mkdir -p "$G/openspec/changes/g-old/subs/a"; cp -R "$GS/." "$G/openspec/changes/g-old/subs/a/"
+printf 'schema: opsx\nkind: dev\nparent: g-old\n' > "$G/openspec/changes/g-old/subs/a/.openspec.yaml"
+out="$(gchk g-old)" || fail "子殼跟主殼的豁免: $out"
+
+# Requirement：repo schema 是舊版時提示 init
+out="$(gchk g-noneg)"
+printf '%s' "$out" | grep -q 'opsx init' && fail "新版 schema 不提示 init: $out"
+printf 'instruction: |\n  寫 WHEN/THEN\n' > "$G/openspec/schemas/opsx/schema.yaml"
+out="$(gchk g-noneg)" && fail "舊 schema 有問題仍要退出 1: $out"
+printf '%s\n' "$out" | tail -1 | grep -q 'opsx init' || fail "舊 schema 最後一行要提示 opsx init: $out"
+out="$(gchk g-ref)" || fail "舊 schema 但沒有問題要回 0: $out"
+printf '%s' "$out" | grep -q 'opsx init' && fail "沒有問題不提示 init: $out"
+printf "$NEW_SCHEMA" > "$G/openspec/schemas/opsx/schema.yaml"
+
+# --- check-wiring：Stop hook 在 propose 之後跑 Gherkin 四條（驗收：openspec/changes/gherkin-check/subs/check-wiring/specs/spec-gherkin-check/spec.md）---
+gstop() { printf '{"cwd":"%s","stop_hook_active":false}' "$G" | bash "$H/openspec-stop-gate.sh" 2>"$FX/gstop.err"; }
+printf '## ADDED Requirements\n\n### Requirement: R1\nx SHALL y\n\n#### Scenario: a（正例）\n- **WHEN** a\n- **THEN** b\n' > "$SP"
+
+# Scenario：Stop hook 擋不合格的 spec（正例）——有 tasks.md、沒有 subs/
+mk_g g-stop "$SP"; printf '## 1. x\n\n- [ ] 1.1 a\n' > "$G/openspec/changes/g-stop/tasks.md"
+git -C "$G" checkout -q -b feat/g-stop/mikaela
+out="$(gstop)"
+assert_eq "$(printf '%s' "$out" | jq -r '.decision // ""')" block "stop: spec 缺反例要擋（stderr: $(cat "$FX/gstop.err")）"
+printf '%s' "$out" | jq -r '.reason' | grep 'spec.md: ' | grep -q '沒有反例' || fail "stop: 理由要含沒有反例: $out"
+printf '%s' "$out" | jq -r '.reason' | grep -q 'opsx check g-stop' || fail "stop: 理由要含 opsx check g-stop: $out"
+printf '%s' "$out" | jq -r '.reason' | grep -q 'task 沒勾' && fail "stop: spec 的問題排在未勾 task 之前: $out"
+# 有會擋的 open gate 時不查 spec
+printf '## g1\ntype: decision\nstatus: open\n' > "$G/openspec/changes/g-stop/gates.md"
+out="$(gstop)"
+printf '%s' "$out" | grep -q '沒有反例' && fail "stop: 有 open gate 時不查 spec: $out"
+rm "$G/openspec/changes/g-stop/gates.md"
+# 標了 spec_format: when-then 的卡照舊判斷
+printf 'spec_format: when-then\n' >> "$G/openspec/changes/g-stop/.openspec.yaml"
+out="$(gstop)"
+printf '%s' "$out" | jq -r '.reason' | grep -q 'task 沒勾' || fail "stop: 豁免的卡照舊擋未勾: $out"
+
+# Scenario：還沒有 tasks.md 時 Stop hook 不查 spec（反例）
+mk_g g-prop "$SP"
+git -C "$G" checkout -q -b feat/g-prop/mikaela
+out="$(gstop)"
+printf '%s' "$out" | grep -q '沒有反例' && fail "stop: 沒有 tasks.md 不查 spec: $out"
+
+# R1.1 card_dir 在 <主>--<子> branch 給的是子殼目錄：check_gherkin 拿到子殼目錄時豁免與 schema 版本都看主殼
+printf '## ADDED Requirements\n\n### Requirement: R1\nx SHALL y\n\n#### Scenario: s1\n- **WHEN** a\n- **THEN** b\n' > "$SP"
+mk_g g-sx "$SP"
+GX="$G/openspec/changes/g-sx/subs/a"; mkdir -p "$GX/specs/cap"
+printf 'schema: opsx\nkind: dev\nparent: g-sx\n' > "$GX/.openspec.yaml"
+cp "$SP" "$GX/specs/cap/spec.md"
+gfn() { (source "$OPSX_ROOT/bin/lib/common.sh"; source "$OPSX_ROOT/bin/lib/check.sh"; check_gherkin "$1") 2>&1; }
+out="$(gfn "$GX")"
+printf '%s' "$out" | grep -q '沒有正例' || fail "子殼目錄沒豁免要報: $out"
+printf '%s' "$out" | grep -q 'opsx init' && fail "repo schema 是新版，子殼目錄也不該提示 init: $out"
+printf 'spec_format: when-then\n' >> "$G/openspec/changes/g-sx/.openspec.yaml"
+out="$(gfn "$GX")"
+assert_eq "$out" "" "主殼豁免時子殼目錄也跳過"
+
+# R1.2 插件缺「禁用模糊詞：」那行：Stop hook 不以 2 結束（2 是擋停），opsx check 以 2 結束
+BR="$FX/broken-root"; mkdir -p "$BR/schemas/opsx"
+for e in "$OPSX_ROOT"/*; do [ "$(basename "$e")" = schemas ] || ln -s "$e" "$BR/$(basename "$e")"; done
+grep -v '禁用模糊詞：' "$OPSX_ROOT/schemas/opsx/artifacts-specs.yaml" > "$BR/schemas/opsx/artifacts-specs.yaml"
+printf '## ADDED Requirements\n\n### Requirement: R1\nx SHALL y\n\n#### Scenario: a（正例）\n- **WHEN** a\n- **THEN** b\n' > "$SP"
+mk_g g-br "$SP"; printf '## 1. x\n\n- [ ] 1.1 a\n' > "$G/openspec/changes/g-br/tasks.md"
+git -C "$G" checkout -q -b feat/g-br/mikaela
+rc=0; printf '{"cwd":"%s","stop_hook_active":false}' "$G" | CLAUDE_PLUGIN_ROOT="$BR" bash "$BR/hooks/openspec-stop-gate.sh" >/dev/null 2>"$FX/br.err" || rc=$?
+[ "$rc" -ne 0 ] && [ "$rc" -ne 2 ] || fail "stop: 插件壞掉要以非 0 非 2 結束，拿到 $rc: $(cat "$FX/br.err")"
+grep -q 'artifacts-specs.yaml' "$FX/br.err" || fail "stop: stderr 要指出檔案: $(cat "$FX/br.err")"
+rc=0; (cd "$G" && OPSX_ROOT="$BR" opsx check g-br) >/dev/null 2>&1 || rc=$?
+assert_eq "$rc" 2 "opsx check 插件壞掉要 exit 2"
+
+# R1.3 縮排的 Background 與 Examples
+printf '## ADDED Requirements\n\n### Requirement: R1\nx SHALL y\n\n  Background:\n  - **GIVEN** g\n  - **THEN** t\n\n#### Scenario: a（正例）\n- **WHEN** a\n- **THEN** b\n\n#### Scenario: b（反例）\n- **WHEN** c\n- **THEN** d\n' > "$SP"; mk_g g-ibg "$SP"
+out="$(gchk g-ibg)" && fail "縮排 Background 有 THEN 要退出 1: $out"
+printf '%s' "$out" | grep '第 8 行' | grep -q 'Background 含 THEN' || fail "要指出縮排 Background 含 THEN: $out"
+printf '## ADDED Requirements\n\n### Requirement: R1\nx SHALL y\n\n#### Scenario: o（Scenario Outline，正例＋反例）\n- **WHEN** "<a>"\n- **THEN** "<b>"\n\n  Examples:\n  | a | b |\n  |---|---|\n  | 1 | 2 |\n' > "$SP"; mk_g g-iex "$SP"
+out="$(gchk g-iex)" || fail "縮排 Examples 要算: $out"
+
+# R1.4 英文模糊詞有字邊界、不分大小寫；表格列與 docstring 不查
+printf '## ADDED Requirements\n\n### Requirement: R1\nx SHALL y\n\n#### Scenario: a（正例）\n- **WHEN** a\n- **THEN** it fails incorrectly and is inappropriate\n\n#### Scenario: b（反例）\n- **WHEN** c\n- **THEN** d\n' > "$SP"; mk_g g-sub-word "$SP"
+out="$(gchk g-sub-word)" || fail "incorrectly / inappropriate 不是模糊詞: $out"
+printf '## ADDED Requirements\n\n### Requirement: R1\nx SHALL y\n\n#### Scenario: a（正例）\n- **WHEN** a\n- **THEN** Properly done\n\n#### Scenario: b（反例）\n- **WHEN** c\n- **THEN** d\n' > "$SP"; mk_g g-case "$SP"
+out="$(gchk g-case)" && fail "Properly 要報: $out"
+printf '%s' "$out" | grep '第 8 行' | grep -q 'properly' || fail "要指出第 8 行的 properly: $out"
+printf '## ADDED Requirements\n\n### Requirement: R1\nx SHALL y\n\n#### Scenario: o（Scenario Outline，正例＋反例）\n- **WHEN** "<a>"\n- **THEN** "<b>"\n\nExamples:\n| a | b |\n|---|---|\n| 正確的 | appropriate |\n\n#### Scenario: d（正例）\n- **WHEN** 送出\n  """\n  回傳正確的價格\n  """\n- **THEN** d\n' > "$SP"; mk_g g-data "$SP"
+out="$(gchk g-data)" || fail "表格列與 docstring 裡的模糊詞不查: $out"
+
+# R1.5 ``` 沒收尾要報，不能讓後半整段靜默通過
+printf '## ADDED Requirements\n\n```\nx\n\n### Requirement: R1\nx SHALL y\n\n#### Scenario: a（正例）\n- **WHEN** a\n- **THEN** b\n' > "$SP"; mk_g g-openfence "$SP"
+out="$(gchk g-openfence)" && fail "程式碼區塊沒收尾要退出 1: $out"
+printf '%s' "$out" | grep 'specs/cap/spec.md: ' | grep -q '沒有收尾' || fail "要指出程式碼區塊沒有收尾: $out"
+
+# R1.6 引號排除不能貪婪：兩組引號中間的模糊詞要報
+printf '## ADDED Requirements\n\n### Requirement: R1\nx SHALL y\n\n#### Scenario: a（正例）\n- **WHEN** a\n- **THEN** "a" 正確的 "b"\n\n#### Scenario: b（反例）\n- **WHEN** c\n- **THEN** d\n' > "$SP"; mk_g g-greedy "$SP"
+out="$(gchk g-greedy)" && fail "引號之間的模糊詞要退出 1: $out"
+printf '%s' "$out" | grep -q '正確的' || fail "要指出正確的: $out"
+
+# R2.1 """ 沒收尾要報；同一行 """x""" 不是區塊開頭，之後照查
+printf '## ADDED Requirements\n\n%s\n"""\nx\n' "$(ok_req R1)" > "$SP"; mk_g g-opendoc "$SP"
+out="$(gchk g-opendoc)" && fail "docstring 沒收尾要退出 1: $out"
+printf '%s' "$out" | grep 'specs/cap/spec.md: ' | grep -q '沒有收尾' || fail "要指出 docstring 沒有收尾: $out"
+printf '## ADDED Requirements\n\n### Requirement: R1\nx SHALL y\n\n#### Scenario: a（正例）\n- **WHEN** a\n  """x"""\n- **THEN** b\n\n#### Scenario: b（反例）\n- **WHEN** c\n- **THEN** d\n\n### Requirement: R2\nx SHALL y\n\n#### Scenario: c（正例）\n- **WHEN** a\n- **THEN** b\n' > "$SP"; mk_g g-inlinedoc "$SP"
+out="$(gchk g-inlinedoc)" && fail "一行 docstring 之後缺反例要退出 1: $out"
+printf '%s' "$out" | grep 'R2' | grep -q '沒有反例' || fail "要指出 R2 沒有反例: $out"
+printf '%s' "$out" | grep 'R1' && fail "R1 正反例都有不該報: $out"
+
+# R2.2 只有不會擋的「要不要接」open gate 時 Stop hook 照查 spec（g-br：有 tasks.md、spec 缺反例，branch 還在 feat/g-br）
+printf '## 要不要接 /apply？\ntype: decision\nstatus: open\n問題: 要不要接 /apply？\n' > "$G/openspec/changes/g-br/gates.md"
+out="$(gstop)"
+printf '%s' "$out" | jq -r '.reason' | grep -q '沒有反例' || fail "stop: 不會擋的 gate 不關掉 Gherkin 檢查: $out"
+rm "$G/openspec/changes/g-br/gates.md"
 echo ok

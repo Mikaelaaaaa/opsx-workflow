@@ -37,6 +37,12 @@ assert_not_fixed 'always Consider, never Act on' "$STEP3"
 assert_fixed 'BUG = task checked and the diff has no code for it' "$STEP2"
 assert_fixed 'Review never implements a task' "$GUARD"
 
+# --- review-examples-rows：Agent A 逐列對照 Examples 表，缺列是 MUST_FIX ---
+assert_fixed 'Scenario with an Examples table' "$STEP2"
+assert_fixed 'every row needs a matching case in the `測試：` file' "$STEP2"
+assert_fixed 'a missing row is MUST_FIX' "$STEP2"
+assert_fixed 'the finding names the missing row' "$STEP2"
+
 # --- 2.2 step 4：範圍內寫成 task 回 apply，範圍外開卡，驗不了的降 Consider ---
 assert_fixed '## R<N>. review 退回' "$STEP4"
 assert_fixed '待修（範圍內）' "$STEP4"
@@ -53,6 +59,8 @@ assert_fixed '確認: <sha>' "$STEP5"
 grep -F -- '- **範圍外.**' "$STEP4" > "$FX/oos"; [ -s "$FX/oos" ] || fail "Step 4 找不到範圍外段"
 for k in 'opsx new' '--area' 'openspec/areas.txt' 'existing card'; do assert_fixed "$k" "$FX/oos"; done
 assert_not_fixed 'openspec new change' "$FX/oos"
+# me-20261111-1326：開卡步驟不教 agent 帶 --source
+assert_fixed '不要帶 `--source`' "$FX/oos"
 assert_fixed '併進' "$FX/oos"; assert_fixed '--evidence' "$FX/oos"
 assert_fixed 'before you know whether it merges' "$FX/oos"; assert_fixed 'opsx split-out' "$FX/oos"
 grep -q '^| `area` |' "$OPSX_ROOT/references/priority.md" || fail "references/priority.md 事實欄位表缺 area 列"
@@ -67,3 +75,9 @@ assert_fixed 'Must-fix 候選' "$STEP3"
 assert_fixed 'sends it back to explore' "$STEP3"
 assert_fixed 'A `Must-fix 候選` line is not an incomplete shell: leave it for Step 3.' "$SK"
 assert_fixed 'A line starting `explore.md 步驟` goes back to `/opsx-workflow:explore <slug>`, not to `/opsx-workflow:apply`.' "$SK"
+
+# --- gherkin-check / check-wiring：前置對每張卡跑 opsx check，spec 的行退回 apply（specs/spec-gherkin-check）---
+STEP0="$FX/step0"; section "Step 0" > "$STEP0"; [ -s "$STEP0" ] || fail "section missing: Step 0"
+assert_fixed 'Every card: also run `opsx check <slug>`.' "$STEP0"
+assert_not_fixed 'A main change with `subs/`: also run `opsx check' "$STEP0"
+assert_fixed 'A line pointing at a `spec.md` is a spec that breaks the Gherkin rules: stop the same way, list those lines, and send it back to `/opsx-workflow:apply <slug>`.' "$STEP0"

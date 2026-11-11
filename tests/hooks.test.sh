@@ -179,6 +179,23 @@ cg "git -C $FX/wt2 commit -m 'x [no-change] y'" >/dev/null
 assert_grep 'feat/no-such-card/mikaela' "$OPSX_STATE_DIR/bypass.log"
 rm -f "$OPSX_STATE_DIR/bypass.log"
 git -C "$R" worktree remove --force "$FX/wt2"; git -C "$R" branch -q -D feat/no-such-card/mikaela
+# me-20261111-1326：子殼 branch 只要求 tasks.md 存在，不要求有勾；主殼與一般卡照舊
+mkdir -p "$R/openspec/changes/m/subs/s"
+printf 'schema: opsx\ncreated: 2026-11-11\n' > "$R/openspec/changes/m/.openspec.yaml"
+printf '## 1. x\n\n- [ ] 1.1 a\n' > "$R/openspec/changes/m/tasks.md"
+git -C "$R" worktree add -q -b 'fix/m--s/u' "$FX/wt-sub"
+git -C "$R" worktree add -q -b 'fix/m/u' "$FX/wt-main"
+printf '## 1. x\n\n- [ ] 1.1 a\n' > "$R/openspec/changes/m/subs/s/tasks.md"
+out="$(cg "git -C $FX/wt-sub commit -m x")"; assert_eq "$(decision "$out")" allow "commit: 子殼 branch、tasks.md 全未勾要放行: $(reason "$out")"
+rm "$R/openspec/changes/m/subs/s/tasks.md"
+out="$(cg "git -C $FX/wt-sub commit -m x")"; assert_eq "$(decision "$out")" deny "commit: 子殼沒有 tasks.md 要擋"
+reason "$out" | grep -q '沒有 tasks.md' || fail "commit: 子殼 deny 要指出沒有 tasks.md: $(reason "$out")"
+out="$(cg "git -C $FX/wt-main commit -m x")"; assert_eq "$(decision "$out")" deny "commit: 主殼 branch、tasks 全未勾仍擋"
+reason "$out" | grep -q '還沒有任何勾' || fail "commit: 主殼 deny 要帶「還沒有任何勾」: $(reason "$out")"
+git -C "$R" worktree remove --force "$FX/wt-sub"; git -C "$R" branch -q -D 'fix/m--s/u'
+git -C "$R" worktree remove --force "$FX/wt-main"; git -C "$R" branch -q -D 'fix/m/u'
+# 子殼放寬的捷徑要留 shortcut: 註解，sync 的 debt 掃描才掃得到
+grep -q 'shortcut:' "$OPSX_ROOT/hooks/openspec-commit-gate.sh" || fail "commit 閘門的子殼分支要留 shortcut: 註解"
 git -C "$R" worktree remove --force "$FX/wt"
 out="$(cg 'ls -la')"; assert_eq "$out" "" "commit: 非 commit 指令不出聲"
 out="$(cg 'echo "之後再 git commit -m x"')"; assert_eq "$out" "" "commit: 引號內的 git commit 不出聲"
@@ -192,9 +209,11 @@ EOF')"; assert_eq "$out" "" "commit: 寫檔 heredoc 內提到 git commit 不觸�
 mkdir -p "$C/subs/s1"; printf '## 1. x\n\n- [ ] 1.1 a\n' > "$C/subs/s1/tasks.md"
 printf '## 1. x\n\n- [ ] 1.1 s1\n' > "$C/tasks.md"
 git -C "$R" checkout -q -b feat/eval-core--s1/mikaela
-out="$(cg 'git commit -m "feat: x"')"; assert_eq "$(decision "$out")" deny "commit: 子殼全未勾要擋"
+out="$(cg 'git commit -m "feat: x"')"; assert_eq "$(decision "$out")" allow "commit: 子殼全未勾放行（只要求 tasks.md 存在）"
+printf '## 1. x\n\n- [x] 1.1 s1\n' > "$C/tasks.md"; rm "$C/subs/s1/tasks.md"
+out="$(cg 'git commit -m "feat: x"')"; assert_eq "$(decision "$out")" deny "commit: 子殼沒有 tasks.md 要擋（主殼有勾也不算）"
 reason "$out" | grep -q 'subs/s1' || fail "commit: 子殼的 deny 要寫子殼路徑: $(reason "$out")"
-printf '## 1. x\n\n- [x] 1.1 a\n' > "$C/subs/s1/tasks.md"
+printf '## 1. x\n\n- [x] 1.1 a\n' > "$C/subs/s1/tasks.md"; printf '## 1. x\n\n- [ ] 1.1 s1\n' > "$C/tasks.md"
 out="$(cg 'git commit -m "feat: x"')"; assert_eq "$(decision "$out")" allow "commit: 子殼有勾放行（主殼全未勾）"
 printf '## 1. x\n\n- [x] 1.1 a\n- [ ] 1.2 b\n' > "$C/tasks.md"; rm -rf "$C/subs"
 git -C "$R" checkout -q feat/eval-core/mikaela
@@ -233,6 +252,10 @@ out="$(gg Bash "$(cmdj 'pnpm db:migrate && glab mr create -F desc.md')")"; asser
 out="$(gg Bash "$(cmdj 'glab mr merge 212')")"; assert_eq "$(decision "$out")" deny "grant: merge 第三級"
 reason "$out" | grep -q '第三級' || fail "grant: merge 要說第三級"
 out="$(gg Bash "$(cmdj 'git push --force gitlab main')")"; assert_eq "$(decision "$out")" deny "grant: force push"
+# 把 main 合進自己的分支是直接做，閘門不分級；倒回 main 的合併靠人合 MR 前看 diff，旗標比對擋不住（merge --no-commit 後 checkout 也做得到）
+for c in 'git merge origin/main' 'git merge --no-edit origin/main' 'git merge --abort' 'git merge --continue' 'git merge --squash origin/main' 'git merge origin/main -m "fix -s flag"'; do
+  out="$(gg Bash "$(cmdj "$c")")"; [ "$(decision "$out")" != deny ] || fail "grant: $c 不擋"
+done
 out="$(gg Bash "$(cmdj 'pnpm add left-pad')")"; assert_eq "$(decision "$out")" deny "grant: 裝套件第二級沒授權"
 out="$(gg Bash "$(cmdj 'pnpm test:ring0')")"; assert_eq "$(decision "$out")" allow "grant: 跑測試直接做"
 out="$(gg Bash "$(cmdj 'curl -s http://localhost:3000/api/health')")"; assert_eq "$(decision "$out")" allow "grant: localhost 不算外部"
@@ -249,6 +272,21 @@ drop table users; deploy.sh; curl https://api.example.com/x; rm -rf /
 EOF')")"; assert_eq "$out" "" "grant: heredoc 內的字樣不觸發"
 out="$(gg Bash "$(cmdj 'git push gitlab "main"')")"; assert_eq "$(decision "$out")" deny "grant: 引號包住的 main 仍是 push main"
 out="$(gg Bash "$(cmdj "git push --force gitlab 'feat/x'")")"; assert_eq "$(decision "$out")" deny "grant: 單引號分支名不讓 force-push 漏掉"
+# push main 只看 refspec 目標：分支名的片段、push 以外的 main 字樣不算
+for br in feat/babysit-merge-main/mikaela-lin fix/main-tasks-backtick/mikaela feat/main main-fix; do
+  out="$(gg Bash "$(cmdj "git push -u gitlab $br")")"; assert_eq "$(decision "$out")" allow "grant: 分支 $br 不是 push main"
+done
+out="$(gg Bash "$(cmdj 'cd /x/babysit-main && git push gitlab feat/a/b')")"; assert_eq "$(decision "$out")" allow "grant: push 以外的 main 字樣不算"
+for tgt in main '"main"' "'master'" HEAD:main HEAD:refs/heads/main refs/heads/main +feat/x:main 'feat/a main'; do
+  out="$(gg Bash "$(cmdj "git push gitlab $tgt")")"; assert_eq "$(decision "$out")" deny "grant: refspec 目標 $tgt 是 push main"
+done
+out="$(gg Bash "$(cmdj 'git push -u gitlab main && echo done')")"; assert_eq "$(decision "$out")" deny "grant: push main 後面串指令仍擋"
+reason "$out" | grep -q 'push main' || fail "grant: deny 要說 push main：$(reason "$out")"
+# main 後面緊接運算子、--delete、push option 都還是 push main；目標是別的遠端分支則不是
+for cmd in 'git push gitlab main&&echo ok' 'git push gitlab main||true' 'git push gitlab main|cat' 'git push gitlab main&' 'git push gitlab main>/dev/null' 'git push --delete gitlab main' 'git push -o ci.skip gitlab main'; do
+  out="$(gg Bash "$(cmdj "$cmd")")"; assert_eq "$(decision "$out")" deny "grant: $cmd 是 push main"
+done
+out="$(gg Bash "$(cmdj 'git push gitlab main:feat/x')")"; assert_eq "$(decision "$out")" allow "grant: 目標是別的遠端分支不算 push main"
 out="$(gg Bash "$(cmdj 'bash -c "glab mr merge 212"')")"; assert_eq "$(decision "$out")" deny "grant: bash -c 內的 merge 仍擋"
 out="$(gg Bash "$(cmdj 'git push gitlab feat/eval-core/mikaela && bash <<EOF
 git push --force gitlab main
@@ -792,6 +830,17 @@ out="$(sd 'echo "git push origin main"')"; assert_eq "$(decision "$out")" allow 
 out="$(sd 'opsx answer s g1 -- "git add .env 之後再說"')"; assert_eq "$(decision "$out")" allow "guard: 引號內的 git add .env"
 out="$(sd 'bash -c "git push origin main"')"; assert_eq "$(decision "$out")" deny "guard: bash -c 內的 push main 仍擋"
 out="$(sd 'git push origin "main"')"; assert_eq "$(decision "$out")" deny "guard: 引號包住的 main 仍擋"
+out="$(sd 'git push gitlab feat/x-main')"; assert_eq "$(decision "$out")" allow "guard: 分支名含 main 片段不擋"
+out="$(sd 'git push -u gitlab feat/babysit-merge-main/mikaela-lin')"; assert_eq "$(decision "$out")" allow "guard: -u 推含 main 片段的分支"
+out="$(sd 'git push gitlab main')"; assert_eq "$(decision "$out")" deny "guard: refspec 目標 main 擋"
+out="$(sd 'git push -u gitlab main')"; assert_eq "$(decision "$out")" deny "guard: -u 不讓 main 目標放行"
+out="$(sd 'git push gitlab HEAD:refs/heads/master')"; assert_eq "$(decision "$out")" deny "guard: HEAD:refs/heads/master 擋"
+out="$(sd 'git push gitlab main&&echo ok')"; assert_eq "$(decision "$out")" deny "guard: main 後面緊接 && 擋"
+out="$(sd 'git push gitlab main|cat')"; assert_eq "$(decision "$out")" deny "guard: main 後面緊接 | 擋"
+out="$(sd 'git push --delete gitlab main')"; assert_eq "$(decision "$out")" deny "guard: --delete main 擋"
+out="$(sd 'git push gitlab \
+  HEAD:main')"; assert_eq "$(decision "$out")" deny "guard: 續行後的 HEAD:main 擋"
+out="$(sd 'git push gitlab main:feat/x')"; assert_eq "$(decision "$out")" allow "guard: 目標是別的遠端分支不擋"
 # 三種容器（grill D2）：提到 push main、claude 不擋；真的署名寫在 heredoc 餵給 commit 的訊息裡仍擋
 out="$(sd 'git commit -m "docs: git push origin main 與 git add .env 的說明"')"; assert_eq "$(decision "$out")" allow "guard: commit 訊息提到 push main / add .env"
 out="$(sd 'opsx answer s g1 -- "git push origin main，Co-Authored-By: Claude 都只是文字"')"; assert_eq "$(decision "$out")" allow "guard: answer 答案文字提到 push main 與署名字樣"
@@ -928,6 +977,7 @@ mk_sub() { # <子> <worker> <at> [step]
   printf '{"phase":"apply","step":%s,"total":4,"label":"x","tests":"unknown","at":"%s","worker":"%s"}' "${4:-0}" "$3" "$2" > "$s/status.json"
 }
 FRESH="$( source "$OPSX_ROOT/bin/lib/common.sh"; now_iso )"
+printf 'spec_format: when-then\n' >> "$C/.openspec.yaml"   # 子殼 spec 是 WHEN/THEN 舊寫法：這段驗 subagent 等待，不驗 Gherkin
 printf '## 1. x\n\n- [ ] 1.1 `attach-cli`：a\n- [x] 1.2 `attach-board`：b\n' > "$C/tasks.md"
 mk_sub attach-cli subagent-attach-cli "$FRESH"
 out="$(KEEP=1 sg)"; out="$(KEEP=1 sg)"; out="$(KEEP=1 sg)"; out="$(KEEP=1 sg)"; out="$(KEEP=1 sg)"
@@ -970,7 +1020,32 @@ out="$(sg)"; assert_eq "$(decision "$out")" block "stop: step 不是數字照擋
 mk_sub attach-cli subagent-attach-cli "$FRESH"
 printf '## 1. x\n\n- [ ] 1.1 `attach-cli`：a\n- [x] 1.2 `attach-board`：b\n' > "$C/tasks.md"
 printf '## 1. x\n\n- [ ] 1.1 `attach-cli`：a\n- [x] 1.2 `attach-board`：b\n' > "$C/tasks.md"
+# propose 寫的主殼（references/work-split.md 的格式、驗收與測試子行）：兩項都未勾、只有 1.1 有 subagent，仍放行
+printf '## 1. attach-cli\n\n- [ ] 1.1 `attach-cli`：a\n  - 驗收：specs/x/spec.md · Requirement: r / Scenario: s\n  - 測試：tests/x.test.sh\n\n## 2. attach-board\n\n- [ ] 1.2 `attach-board`：b\n  - 驗收：specs/x/spec.md · Requirement: r / Scenario: s\n  - 測試：tests/x.test.sh\n' > "$C/tasks.md"
+out="$(KEEP=1 sg)"; out="$(KEEP=1 sg)"; out="$(KEEP=1 sg)"; out="$(KEEP=1 sg)"; out="$(KEEP=1 sg)"
+assert_eq "$out" "" "stop: propose 寫的主殼、1.1 有 subagent、1.2 沒有，連停五次都放行"
+assert_eq "$([ -e "$C/gates.md" ] && echo y || echo n)" n "stop: propose 寫的主殼放行不寫「卡在接 /apply」gate"
+# hook 與 opsx stack 認同一行：反引號項目兩邊都找得到，裸名兩邊都找不到
+assert_eq "$( source "$OPSX_ROOT/bin/lib/stack.sh"; task_line "$C/tasks.md" attach-cli '\[ \]' && echo y || echo n )" y "stack: 反引號項目 task_line 找得到"
+printf '## 1. x\n\n- [ ] 1.1 attach-cli：a\n- [ ] 1.2 attach-board：b\n' > "$C/tasks.md"
+assert_eq "$( source "$OPSX_ROOT/bin/lib/stack.sh"; task_line "$C/tasks.md" attach-cli '\[ \]' && echo y || echo n )" n "stack: 裸名項目 task_line 找不到"
+out="$(sg)"; assert_eq "$(decision "$out")" block "stop: 裸名項目 hook 也認不到，照擋（與 stack 一致）"
+# 子殼的 open gate 與主殼的一樣放行；answered 與只問「要不要接」的照擋
+rm -rf "$C/subs"; rm -f "$C/gates.md"
+mk_sub s1 session "$FRESH"
+printf '## eval-run\ntype: decision\nstatus: open\n問題: 要跑 eval 嗎\n' > "$C/subs/s1/gates.md"
+out="$(sg)"; assert_eq "$out" "" "stop: 子殼有 open gate 放行"
+assert_no_file "$C/gates.md"
+printf '## eval-run\ntype: decision\nstatus: answered\n問題: 要跑 eval 嗎\n' > "$C/subs/s1/gates.md"
+out="$(sg)"; assert_eq "$(decision "$out")" block "stop: 子殼 gate 已答照擋"; reason "$out" | grep -q '個 task 沒勾' || fail "stop: 子殼 gate 已答要說 task 沒勾: $(reason "$out")"
+printf '## ask\ntype: decision\nstatus: open\n問題: 要不要接 /apply\n' > "$C/subs/s1/gates.md"
+out="$(sg)"; assert_eq "$(decision "$out")" block "stop: 子殼 gate 只問要不要接照擋"
+printf '## main-q\ntype: decision\nstatus: open\n問題: 選哪個\n' > "$C/gates.md"
+printf '## sub-q\ntype: decision\nstatus: open\n問題: 選哪個\n' > "$C/subs/s1/gates.md"
+assert_eq "$( source "$OPSX_ROOT/bin/lib/stage.sh"; st_open_gates "$C" )" 2 "stop: st_open_gates 加總主殼與子殼"
+assert_eq "$( source "$OPSX_ROOT/bin/lib/stage.sh"; st_open_gates_blocking "$C" )" 2 "stop: st_open_gates_blocking 加總主殼與子殼"
 rm -rf "$C/subs"; rm -f "$C/gates.md"; rm -rf "$STOP_STATE"
+assert_eq "$( source "$OPSX_ROOT/bin/lib/stage.sh"; st_open_gates "$C" )" 0 "stop: 沒有 subs 也沒有 gates.md 是 0"
 # hook 自己寫的「卡在接」gate：建議是選項之一，不是 hook 內部說明
 printf '## 1. x\n\n- [ ] 1.1 a\n' > "$C/tasks.md"
 out="$(KEEP=1 sg)"; out="$(KEEP=1 sg)"; out="$(KEEP=1 sg)"; out="$(KEEP=1 sg)"

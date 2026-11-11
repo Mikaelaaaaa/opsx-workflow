@@ -27,11 +27,11 @@ def b64(data: bytes) -> str:
     return base64.b64encode(data).decode("ascii")
 
 
-def start_server(env: dict, fixture: pathlib.Path | None) -> tuple[subprocess.Popen, str, int]:
+def start_server(env: dict, fixture: pathlib.Path | None, cwd: pathlib.Path | None = None) -> tuple[subprocess.Popen, str, int]:
     """起一支 server（--port 0），回 (proc, host, port)；等到 /healthz 回應。fixture 是 None 就不帶 --collect，collect 走 opsx。"""
     proc = subprocess.Popen(
         [sys.executable, "-I", str(SERVER), "--port", "0", *(["--collect", str(fixture)] if fixture else [])],
-        stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env, text=True,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env, text=True, cwd=cwd,
     )
     line = proc.stdout.readline()
     m = re.search(r"http://(127\.0\.0\.1):(\d+)/", line)
@@ -58,6 +58,7 @@ class ServerTest(unittest.TestCase):
         shim_dir = cls.tmp / "bin"
         shim_dir.mkdir()
         cls.env_log = cls.tmp / "env.log"
+        cls.cwd_log = cls.tmp / "cwd.log"
         cls.herdr_log = cls.tmp / "herdr.log"
         cls.attached = cls.tmp / "attached"   # shim 執行當下把 --attach 的檔複製到這裡，server 回應後暫存檔已刪
         cls.attached.mkdir()
@@ -69,8 +70,9 @@ class ServerTest(unittest.TestCase):
             f'printf "%s\\n" "$*" >> "{cls.log}"\n'
             f'prev=; for a in "$@"; do if [ "$prev" = --attach ]; then cp "$a" "{cls.attached}/"; base64 < "$a" | tr -d "\\n" >> "{cls.contents}"; echo >> "{cls.contents}"; fi; prev="$a"; done\n'
             f'printf "OPSX_STATE_DIR=%s\\n" "${{OPSX_STATE_DIR:-}}" >> "{cls.env_log}"\n'
+            f'pwd -P >> "{cls.cwd_log}"\n'
             f'if [ -f "{cls.fail_flag}" ]; then echo "opsx: 假的失敗" >&2; exit 2; fi\n'
-            f'if [ -f "{cls.rc_file}" ]; then echo "opsx: 假的退出碼" >&2; exit "$(cat "{cls.rc_file}")"; fi\n'
+            f'if [ -f "{cls.rc_file}" ]; then echo "opsx: 假的退出碼 $*" >&2; exit "$(cat "{cls.rc_file}")"; fi\n'
             'if [ "$1" = timeline ]; then echo \'{"generated_at": "g", "last_seen": null, "events": [], "errors": []}\'; exit 0; fi\n'
             'echo "ok: $1"\n'
         )
@@ -117,6 +119,7 @@ class ServerTest(unittest.TestCase):
 
     def setUp(self):
         self.log.write_text("")
+        self.cwd_log.write_text("")
         if self.fail_flag.exists():
             self.fail_flag.unlink()
         if self.rc_file.exists():
@@ -310,6 +313,33 @@ class ServerTest(unittest.TestCase):
         self.assertEqual(status, 200, body)
         self.assertEqual(self.log.read_text().strip().split("\n"), ["new --source me -- 試試看", "new --source me --repo %s -- 試試看" % r])
 
+    def test_new_and_paste_run_outside_any_worktree(self):
+        # server 可能從 agent worktree 啟動；opsx new 在 dispatch 的 worktree 裡會拒絕 --source me，所以看板的 new 與 paste 要在 state 目錄跑
+        status, _, body = self.req("/api/new", {"text": "試試看"}, token=self.token)
+        self.assertEqual(status, 200, body)
+        status, _, body = self.req("/api/paste", {"text": "貼上", "files": []}, token=self.token)
+        self.assertEqual(status, 200, body)
+        want = str(self.state.resolve())
+        self.assertEqual(self.cwd_log.read_text().split("\n")[:-1], [want, want])
+
+    def test_relative_state_dir_reaches_opsx_as_absolute_path(self):
+        # opsx new 的 cwd 是 state 目錄；state 給相對路徑時 OPSX_STATE_DIR 要先解成絕對路徑，不然 opsx 會在 state 底下再解析一次
+        base = self.tmp / "rel"
+        (base / "st").mkdir(parents=True)
+        env = dict(os.environ, HERDR_ENV="1", OPSX_STATE_DIR="st", OPSX_TEST_OPSX=str(self.tmp / "bin" / "opsx"), PATH=f"{self.tmp / 'bin'}:{os.environ['PATH']}")
+        proc, _, port = start_server(env, self.fixture, cwd=base)
+        try:
+            token = (base / "st" / "board-token").read_text().strip()
+            r = urllib.request.Request("http://127.0.0.1:%d/api/new" % port, data=json.dumps({"text": "相對 state"}).encode(), method="POST")
+            r.add_header("Content-Type", "application/json")
+            r.add_header("X-Opsx-Token", token)
+            with urllib.request.urlopen(r, timeout=5) as resp:
+                self.assertEqual(resp.status, 200)
+        finally:
+            proc.kill()
+            proc.wait()
+        self.assertEqual(self.env_log.read_text().split("\n")[-2], "OPSX_STATE_DIR=%s" % (base / "st").resolve())
+
     def test_new_rejects_empty_or_multiline_text(self):
         for text in ("", "a\nb"):
             status, _, body = self.req("/api/new", {"text": text}, token=self.token)
@@ -382,6 +412,37 @@ class ServerTest(unittest.TestCase):
             status, _, body = self.req("/api/merge-card", b, token=self.token)
             self.assertEqual(status, 400, "%r: %s" % (b, body))
         self.assertEqual(self.log.read_text(), "")
+
+    def test_split_out_forwards_to_opsx(self):
+        # specs/board-actions「拆出來呼叫 split-out」：--repo 在兩個位置參數之前，split-out 的參數迴圈遇到非選項就停
+        r = str(self.repo)
+        status, _, body = self.req("/api/split-out", {"slug": "x", "id": "agent-20261111-1040", "repo": r}, token=self.token)
+        self.assertEqual(status, 200, body)
+        self.assertTrue(json.loads(body)["ok"], body)
+        self.assertEqual(self.log.read_text().strip(), "split-out --repo %s x agent-20261111-1040" % r)
+
+    def test_split_out_rejects_bad_fields(self):
+        # specs/board-actions「id 格式不對回 400」
+        r = str(self.repo)
+        for b in ({"slug": "x", "id": "../etc", "repo": r}, {"slug": "x", "repo": r}, {"slug": "x", "id": "", "repo": r},
+                  {"slug": "x", "id": "-rf", "repo": r}, {"slug": "x", "id": 7, "repo": r},
+                  {"slug": "x", "id": "agent-1"}, {"id": "agent-1", "repo": r},
+                  {"slug": "x", "id": "agent-1", "repo": "/nonexistent-opsx-repo"}):
+            status, _, body = self.req("/api/split-out", b, token=self.token)
+            self.assertEqual(status, 400, "%r: %s" % (b, body))
+        self.assertEqual(self.log.read_text(), "")
+        status, _, _ = self.req("/api/split-out", token=self.token)
+        self.assertEqual(status, 405)
+
+    def test_split_out_failure_passes_through(self):
+        # specs/board-actions「split-out 失敗照實回」
+        self.rc_file.write_text("2")
+        status, _, body = self.req("/api/split-out", {"slug": "x", "id": "agent-20261111-1040", "repo": str(self.repo)}, token=self.token)
+        self.assertEqual(status, 200, body)
+        out = json.loads(body)
+        self.assertFalse(out["ok"], body)
+        self.assertEqual(out["rc"], 2, body)
+        self.assertIn("agent-20261111-1040", out["stderr"])
 
     def test_sync_with_and_without_source(self):
         status, _, body = self.req("/api/sync", {}, token=self.token)

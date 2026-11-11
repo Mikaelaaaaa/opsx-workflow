@@ -288,6 +288,25 @@ NE="$(printf '%s' "$J" | python3 -I -c 'import json,sys;print(json.dumps([e for 
 assert_eq "$(printf '%s' "$NE" | python3 -I -c 'import json,sys;print(len(json.load(sys.stdin)))')" 1 "壞行一筆 error：$(q "$J" errors)"
 printf '%s' "$NE" | grep -q 'n3.*隨手寫的一行' || fail "error 要有 slug 與那一行：$NE"
 case "$(q "$J" errors)" in *n1*|*n2*|*n4*) fail "好卡不該進 errors：$(q "$J" errors)" ;; esac
+# ---------- 併入項目（specs/board-collect「併入項目」） ----------
+RM="$FX/code-merged"; mkdir -p "$RM/rm/.git" "$RM/rm/openspec/changes/archive"
+mkmerged() { # <changes 底下的路徑> <inbox 內容>
+  local d="$RM/rm/openspec/changes/$1"; mkdir -p "$d"
+  printf 'schema: opsx\ncreated: 2026-11-05\nkind: dev\n' > "$d/.openspec.yaml"; printf '%s' "$2" > "$d/inbox.md"
+}
+mkmerged x $'## 一句話\n\n收了兩項\n\n## 證據\n\n- e\n\n## 併入：2026-11-11T10:40:00+08:00 agent:foo\n\n- id: agent-20261111-1040\n- kind_of_work: planned\n- area: hooks\n\nhook 漏擋\n\n## 併入：2026-11-11T11:00:00+08:00 me\n\n- id: me-20261111-1100\n- kind_of_work: unplanned\n- evidence: tests/x.sh\n- area: hooks\n\n第二項\n'
+mkmerged y $'## 一句話\n\n沒有併入\n'
+mkmerged z $'## 一句話\n\n手動搬入\n\n## 併入：me-20261110-1614（全文）\n\n隨手貼的一段\n'
+mkmerged archive/2026-11-01-old $'## 一句話\n\n歸檔的\n\n## 併入：me-20261101-0900（全文）\n\n隨手貼的一段\n'
+J="$(opsx collect --root "$RM")"; assert_eq "$?" 0 "merged collect rc: $J"
+assert_eq "$(q "$(card "$J" rm x)" merged)" '[{"area": "hooks", "id": "agent-20261111-1040", "kind_of_work": "planned", "source": "agent:foo", "text": "hook 漏擋", "when": "2026-11-11T10:40:00+08:00"}, {"area": "hooks", "evidence": "tests/x.sh", "id": "me-20261111-1100", "kind_of_work": "unplanned", "source": "me", "text": "第二項", "when": "2026-11-11T11:00:00+08:00"}]'
+assert_eq "$(q "$(card "$J" rm y)" merged)" '[]'
+assert_eq "$(q "$(card "$J" rm z)" merged)" '[]'
+assert_eq "$(q "$(card "$J" rm old)" merged)" '[]' "歸檔的卡 merged 是空的"
+ME="$(printf '%s' "$J" | python3 -I -c 'import json,sys;print(json.dumps([e for e in json.load(sys.stdin)["errors"] if e["source"].endswith("/z/inbox.md")],ensure_ascii=False))')"
+assert_eq "$(printf '%s' "$ME" | python3 -I -c 'import json,sys;print(len(json.load(sys.stdin)))')" 1 "壞併入段一筆 error：$(q "$J" errors)"
+printf '%s' "$ME" | grep -q 'z.*## 併入：me-20261110-1614（全文）' || fail "error 要有 slug 與標題行：$ME"
+case "$(q "$J" errors)" in *old*|*/x/inbox.md*|*/y/inbox.md*) fail "歸檔卡與好卡不該進 errors：$(q "$J" errors)" ;; esac
 
 # ---------- generated_at 在讀任何來源之前取：卡片迴圈裡的 glab 慢 4 秒也不會往後（banner-same-second） ----------
 # 慢的是迴圈裡的 mr_json：它比 herdr 早讀，取時點放在迴圈之後的實作會被抓到
@@ -396,8 +415,12 @@ assert_eq "$(q "$(card "$J" w w1)" priority)" null
 WE="$(printf '%s' "$J" | python3 -I -c 'import json,sys;print(json.dumps([e for e in json.load(sys.stdin)["errors"] if e["source"].endswith("/w/openspec/workplan.yaml")],ensure_ascii=False))')"
 case "$WE" in *9.9*) ;; *) fail "壞 workplan 要記進 errors 並指名值：$(q "$J" errors)" ;; esac
 assert_eq "$(q "$(card "$J" q q1)" priority.level)" P2
-# 還差幾張；沒設目前 milestone 的 repo 沒有 key
-assert_eq "$(q "$J" milestones)" '{"p": {"current": "1.0", "goal": "能開單出貨", "remaining": 2}}'
+# 進度取代 milestones：p 的 1.0 只有 workplan 排了沒殼的 p-order；q 沒設 current、w 的 workplan 不合法，都退成數全部活卡
+assert_eq "$(q "$J" milestones 2>/dev/null)" "" "不再輸出 milestones"
+assert_eq "$(q "$J" progress.p.milestone) $(q "$J" progress.p.goal) $(q "$J" progress.p.remaining) $(q "$J" progress.p.not_dispatched_planned)" '1.0 能開單出貨 1 ["p-order"]'
+assert_eq "$(q "$(card "$J" p plain)" progress_class)" null "不在 workplan 的卡在有 milestone 時沒有分類"
+assert_eq "$(q "$J" progress.q.milestone) $(q "$J" progress.q.remaining) $(q "$(card "$J" q q1)" progress_class)" "null 1 not_dispatched"
+assert_eq "$(q "$J" progress.w.milestone) $(q "$J" progress.w.remaining) $(q "$J" progress.w.not_dispatched_planned)" "null 1 []"
 
 # ---------- 孤兒 pane：cwd 在 opsx worktree 底下，且卡已歸檔 / split / stopped / 目錄不在（specs/opsx-reap「孤兒 pane 的判定」、board-collect「orphans 清單」） ----------
 RP6="$FX/code-reap6"; mkdir -p "$RP6/o/.git" "$RP6/o/openspec/changes/archive"
@@ -667,4 +690,130 @@ E="$(printf '%s' "$J" | python3 -I -c 'import json,sys;print(json.dumps([e for e
 assert_eq "$(printf '%s' "$E" | python3 -I -c 'import json,sys;print(len(json.load(sys.stdin)))')" 1 "重複 slug 一筆 errors：$E"
 printf '%s' "$E" | grep -q 'bt' || fail "重複 slug 的 error 要指名 bt：$E"
 ROOT="$ROOT_SAVED"
+
+# ---------- 進度與卡的分類（progress-collect，specs/board-collect「卡的進度分類」「每個 repo 的進度」） ----------
+R10="$FX/code10"; S10="$FX/state10"; mkdir -p "$R10/r/.git" "$R10/n/.git" "$S10" "$R10/r/openspec/changes/archive/2026-11-01-arch-x"
+pc10() { # <repo> <slug> [frontmatter 行…]：建殼，印目錄
+  local d="$R10/$1/openspec/changes/$2"; shift 2; mkdir -p "$d"
+  printf 'schema: opsx\ncreated: 2026-11-11\nkind: dev\n' > "$d/.openspec.yaml"
+  { printf -- '---\ntype: 功能\nsource: me\nfound: 2026-11-11\nrelated:\n'; printf '%s\n' "$@"; printf -- '---\n\n## 一句話\n\n%s\n' "$(basename "$d")"; } > "$d/inbox.md"
+  printf '%s' "$d"
+}
+printf 'schema: opsx\n' > "$R10/r/openspec/changes/archive/2026-11-01-arch-x/.openspec.yaml"
+# m-merge：MR 五條件綠
+D=$(pc10 r m-merge); printf '## 1\n\n- [x] 1.1 a\n' > "$D/tasks.md"
+printf '# report\n\n## MR\nhttps://gitlab.tsg-navigator.com/agentory/r/-/merge_requests/7\n' > "$D/report.md"
+# m-gate：派出，needs: run 的 gate（純函式說留給人）
+D=$(pc10 r m-gate); printf '## 1\n\n- [ ] 1.1 a\n' > "$D/tasks.md"
+printf '## g1\ntype: decision\nstatus: open\nneeds: run\n問題: 跑 x？\n建議: bash x.sh\n' > "$D/gates.md"
+# m-free：沒派出，會被代答的 gate：沒人會答，算等你
+D=$(pc10 r m-free); printf '## 1\n\n- [ ] 1.1 a\n' > "$D/tasks.md"
+printf '## g1\ntype: decision\nstatus: open\n問題: 哪個？\n選項: 用 A (Recommended) | 用 B\n' > "$D/gates.md"
+# m-review：tasks 全勾、tests 綠
+D=$(pc10 r m-review); printf '## 1\n\n- [x] 1.1 a\n' > "$D/tasks.md"
+printf '{"phase":"apply","tests":"green","at":"2026-11-11T10:00:00+08:00"}' > "$D/status.json"
+# m-apply：派出、apply 中；m-auto：派出、apply 中、gate 會被代答，照 stage 歸
+D=$(pc10 r m-apply); printf '## 1\n\n- [ ] 1.1 a\n' > "$D/tasks.md"
+D=$(pc10 r m-auto); printf '## 1\n\n- [ ] 1.1 a\n' > "$D/tasks.md"
+printf '## g1\ntype: decision\nstatus: open\n問題: 哪個？\n建議: 用 A\n' > "$D/gates.md"
+# m-park：dispatch stopped，waits-on 的 gate（建議含合併字，仍是 park）
+D=$(pc10 r m-park); printf '## 1\n\n- [ ] 1.1 a\n' > "$D/tasks.md"
+printf '## g1\ntype: decision\nstatus: open\nwaits-on: m-apply\n問題: 等 m-apply\n建議: 等 m-apply 合併後繼續\n' > "$D/gates.md"
+# m-ready-gate：派出、MR 全綠、另有會代答的 gate：照 D3 看 mr.state，算可合併
+D=$(pc10 r m-ready-gate); printf '## 1\n\n- [x] 1.1 a\n' > "$D/tasks.md"
+printf '# report\n\n## MR\nhttps://gitlab.tsg-navigator.com/agentory/r/-/merge_requests/7\n' > "$D/report.md"
+printf '## g1\ntype: decision\nstatus: open\n問題: 哪個？\n建議: 用 A\n' > "$D/gates.md"
+# m-pr-run：派出、stage pr、needs: run 的 gate：等你排在測試中之前
+D=$(pc10 r m-pr-run); printf '## 1\n\n- [x] 1.1 a\n' > "$D/tasks.md"; printf '# report\n' > "$D/report.md"
+printf '## g1\ntype: decision\nstatus: open\nneeds: run\n問題: 跑 x？\n建議: bash x.sh\n' > "$D/gates.md"
+# m-block：派出、沒 gate、herdr 說 pane p9 blocked：終端機等待輸入算等你
+D=$(pc10 r m-block); printf '## 1\n\n- [ ] 1.1 a\n' > "$D/tasks.md"
+# m-idle：只有 inbox、沒派；m-later：在 1.1；loose：不在 workplan；m-split：已拆，底下的子殼不是卡
+pc10 r m-idle >/dev/null; pc10 r m-later >/dev/null; pc10 r loose >/dev/null
+D=$(pc10 r m-split 'split_into: m-idle'); mkdir -p "$D/subs/a"; printf 'schema: opsx\nkind: dev\nparent: m-split\n' > "$D/subs/a/.openspec.yaml"
+cat > "$R10/r/openspec/workplan.yaml" <<'EOF'
+milestones:
+  - name: "1.0"
+    goal: "能開單出貨"
+  - name: "1.1"
+    goal: "能退貨"
+current_milestone: "1.0"
+features:
+  - name: cur
+    milestone: "1.0"
+    prs:
+      - name: m-merge
+        status: in-progress
+      - name: m-gate
+        status: in-progress
+      - name: m-free
+        status: pending
+      - name: m-review
+        status: in-progress
+      - name: m-apply
+        status: in-progress
+      - name: m-auto
+        status: in-progress
+      - name: m-park
+        status: in-progress
+      - name: m-idle
+        status: pending
+      - name: m-split
+        status: pending
+      - name: web-x
+        status: pending
+      - name: done-x
+        status: merged
+      - name: arch-x
+        status: pending
+      - name: m-ready-gate
+        status: in-progress
+      - name: m-pr-run
+        status: in-progress
+      - name: m-block
+        status: in-progress
+  - name: later
+    milestone: "1.1"
+    prs:
+      - name: m-later
+        status: pending
+EOF
+# n：沒有 workplan 的 repo
+pc10 n solo >/dev/null
+# nc：有 milestones 沒有 current_milestone，兩張活卡，一張不在 workplan
+mkdir -p "$R10/nc/.git"; pc10 nc nc-a >/dev/null; pc10 nc nc-loose >/dev/null
+cat > "$R10/nc/openspec/workplan.yaml" <<'EOF'
+milestones:
+  - name: "1.0"
+    goal: "能開單出貨"
+features:
+  - name: f
+    milestone: "1.0"
+    prs:
+      - name: nc-a
+        status: pending
+EOF
+printf '{"r/m-merge":{"pane":"q1","mode":"autopilot"},"r/m-gate":{"pane":"q2","mode":"autopilot"},"r/m-review":{"pane":"q3","mode":"autopilot"},"r/m-apply":{"pane":"q4","mode":"autopilot"},"r/m-auto":{"pane":"q5","mode":"autopilot"},"r/m-park":{"pane":"q6","mode":"stopped"},"r/m-ready-gate":{"pane":"q7","mode":"autopilot"},"r/m-pr-run":{"pane":"q8","mode":"autopilot"},"r/m-block":{"pane":"p9","mode":"autopilot"}}' > "$S10/dispatch.json"
+J="$(opsx collect --root "$R10" --state "$S10")"; assert_eq "$?" 0 "progress collect rc: $J"
+pclass() { q "$(card "$J" r "$1")" progress_class; }
+# 五類各一張
+assert_eq "$(pclass m-merge) $(pclass m-gate) $(pclass m-review) $(pclass m-apply) $(pclass m-idle)" "mergeable waiting_on_you testing developing not_dispatched"
+# 沒派出的卡有 gate 算等你；會代答的 gate 照 stage 歸；waits-on 停著的卡算還沒派
+assert_eq "$(pclass m-free) $(pclass m-auto) $(pclass m-park)" "waiting_on_you developing not_dispatched"
+# MR ready 有 open gate 仍是可合併；stage pr 的留給人 gate 排在測試中之前；終端機等待輸入算等你
+assert_eq "$(pclass m-ready-gate) $(pclass m-pr-run) $(pclass m-block)" "mergeable waiting_on_you waiting_on_you"
+assert_eq "$(q "$(card "$J" r m-pr-run)" stage) $(q "$(card "$J" r m-block)" waiting.type)" "pr 終端機等待輸入" "fixture 真的走到 pr 與 blocked"
+# 不在 current milestone 的卡沒有分類；子 change 與拆過的母卡不算
+assert_eq "$(pclass m-later) $(pclass loose) $(pclass m-split)" "null null null"
+assert_eq "$(card "$J" r a)" null "子殼不是卡"
+# 相加等於剩幾張；workplan 排了沒殼的項目（merged 與已歸檔的不算）
+P="$(q "$J" progress.r)"
+assert_eq "$(q "$P" mergeable) $(q "$P" waiting_on_you) $(q "$P" testing) $(q "$P" developing) $(q "$P" not_dispatched)" "2 4 1 2 3"
+assert_eq "$(q "$P" not_dispatched_planned)" '["web-x"]'
+assert_eq "$(q "$P" remaining) $(q "$P" milestone) $(q "$P" goal)" "12 1.0 能開單出貨"
+# 沒設 current milestone：milestone、goal 為 null，兩張活卡都算（含不在 workplan 的）
+assert_eq "$(q "$J" progress.nc.milestone) $(q "$J" progress.nc.goal) $(q "$J" progress.nc.remaining)" "null null 2"
+assert_eq "$(q "$P" at)" "$(q "$J" generated_at)"
+# 沒有 workplan 的 repo：milestone null、數全部活卡
+assert_eq "$(q "$J" progress.n.milestone) $(q "$J" progress.n.remaining) $(q "$J" progress.n.not_dispatched_planned) $(q "$(card "$J" n solo)" progress_class)" "null 1 [] not_dispatched"
 echo ok

@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # 讓一題情境在獨立的 claude -p session 裡跑，看不到本 repo、題目、答案與使用者層設定。
-# 用法：run-candidate.sh <skill> <eval-id> <new|old> <results-dir>
+# 用法：run-candidate.sh <skill> <eval-id> <new|old|without> <results-dir>
 # 在 sandbox 外的終端機跑，認證用平常的登入。--setting-sources project,local 讓 user 層的 plugin、skill、hooks 不載入。
 # 工作 repo 建在 $TMPDIR 底下；跑完（含 claude 失敗）搬到 <results-dir>/<session id>/<fixture> 給 grader 看，transcript 複製到 <results-dir>/<session id>.jsonl。
 set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
-skill="${1:?usage: run-candidate.sh <skill> <eval-id> <new|old> <results-dir>}"
+skill="${1:?usage: run-candidate.sh <skill> <eval-id> <new|old|without> <results-dir>}"
 eval_id="${2:?eval-id}"
-variant="${3:?new|old}"
+variant="${3:?new|old|without}"
 results="${4:?results-dir}"
 banned='claude|eval|test|judge|experiment|rubric|score|compare|benchmark|candidate|arena'
 

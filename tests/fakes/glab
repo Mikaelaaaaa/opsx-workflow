@@ -19,6 +19,8 @@ case "$1 $2" in
     cat "$OPSX_TEST_ISSUES/$name.json" 2>/dev/null || echo '[]' ;;
   "issue view")
     case " $* " in *" -R "*) ;; *) echo "fake glab: 沒帶 -R" >&2; exit 1 ;; esac
+    # $OPSX_TEST_GLAB_VIEW_HOOK：回傳前先跑這條命令，測試用它在「sync 查上游狀態期間」併入新段或改卡，不靠 sleep
+    [ -z "${OPSX_TEST_GLAB_VIEW_HOOK:-}" ] || bash -c "$OPSX_TEST_GLAB_VIEW_HOOK" >/dev/null || exit 1
     cat "${OPSX_TEST_ISSUES:?}/view-$3.json" ;;
   *) echo '{}' ;;
 esac

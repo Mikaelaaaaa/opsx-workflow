@@ -53,10 +53,25 @@ st_mr_url() {
   return 0
 }
 st_mr_in_report() { [ -n "$(st_mr_url "$1")" ]; }
-st_open_gates() { [ -f "$1/gates.md" ] || { printf 0; return; }; grep -cE '^status:[[:space:]]*open[[:space:]]*$' "$1/gates.md" || true; }
-# 會擋 Stop 的 open gate 數：標題或「問題:」行問「要不要接 /apply」「要不要繼續？」這類接站問題的不算（接站不用問，continue.md）
+# 一張卡的 open gate 數：主殼加每個子殼（subs/<子>/gates.md，apply 把 NEEDS-USER 寫在那）
+st_open_gates() {
+  local f n=0
+  for f in "$1/gates.md" "$1"/subs/*/gates.md; do
+    [ -f "$f" ] || continue
+    n=$((n + $(grep -cE '^status:[[:space:]]*open[[:space:]]*$' "$f" || true)))
+  done
+  printf '%s' "$n"
+}
+# 會擋 Stop 的 open gate 數：標題或「問題:」行問「要不要接 /apply」「要不要繼續？」這類接站問題的不算（接站不用問，continue.md）。主殼加每個子殼
 st_open_gates_blocking() {
-  [ -f "$1/gates.md" ] || { printf 0; return; }
+  local f n=0
+  for f in "$1/gates.md" "$1"/subs/*/gates.md; do
+    [ -f "$f" ] || continue
+    n=$((n + $(st_gates_file_blocking "$f")))
+  done
+  printf '%s' "$n"
+}
+st_gates_file_blocking() { # <gates.md>
   awk '
     function flush() { if (open && (!ask || appr)) n++; open = 0; ask = 0; appr = 0 }
     /^## / { flush() }
@@ -64,7 +79,7 @@ st_open_gates_blocking() {
     /^type:[ \t]*approval[ \t]*$/ { appr = 1 }   # 核准只有人能答，不管問法
     /^(## |問題:).*要不要(接|派|繼續)([ ]*\/|[ ]*下一|\?|？|：|$)/ { ask = 1 }
     END { flush(); print n + 0 }
-  ' "$1/gates.md"
+  ' "$1"
 }
 # slug 是 PR 名或 PR 底下的 change 名，印該 PR 的 <field>（branch、status）；對不到印空。
 # 用 awk 不用 chain.py 的 load_workplan：collect 每張卡都判 stage，router 每句 prompt 都判，不能每次 fork python。
@@ -72,18 +87,28 @@ wp_pr_field() { # <top> <slug> <field>
   [ -f "$1/openspec/workplan.yaml" ] || return 0
   awk -v s="$2" -v k="$3" '
     function ind() { match($0, /^ */); return RLENGTH }
-    function val(  v) { v = $0; sub(/^ *(- )?[A-Za-z_-]+: */, "", v); sub(/ +#.*$/, "", v); gsub(/^["\047]|["\047]$/, "", v); return v }
-    BEGIN { pi = -1; ci = -1 }
-    /^ *prs:/ { pi = ind(); ci = -1; pr = ""; next }
-    /^ *changes:/ { ci = ind(); next }
+    function val(  v) { v = $0; sub(/^ *(- )?[A-Za-z_-]+: */, "", v); sub(/ +#.*$/, "", v); if (v == "null" || v == "~") return ""; gsub(/^["\047]|["\047]$/, "", v); return v }
+    # 項目縮排取該層第一個 `- name:` 的縮排：YAML 序列可以和 `prs:` / `changes:` 同縮排，也可以更深
+    BEGIN { pi = -1; pii = -1; ci = -1; cii = -1 }
+    /^ *prs:/ { pi = ind(); pii = -1; ci = -1; cii = -1; pr = ""; next }
+    /^ *changes:/ { ci = ind(); cii = -1; next }
     /^ *- name:/ {
       i = ind()
-      if (ci >= 0 && i > ci) { if (hit == "" && val() == s) hit = pr; next }
-      ci = -1
-      if (pi >= 0 && i > pi) { pr = val(); ki = i + 2; if (hit == "" && pr == s) hit = pr; next }
-      pi = -1; pr = ""; next
+      if (ci >= 0) {
+        if (cii < 0 && i >= ci) cii = i
+        if (i == cii) { if (hit == "" && val() == s) hit = pr; next }
+        if (cii >= 0 && i > cii) next
+        ci = -1; cii = -1
+      }
+      if (pi >= 0) {
+        if (pii < 0 && i >= pi) pii = i
+        if (i == pii) { pr = val(); ki = i + 2; if (hit == "" && pr == s) hit = pr; next }
+        if (pii >= 0 && i > pii) next
+      }
+      pi = -1; pii = -1; pr = ""; next
     }
-    ci >= 0 && $0 !~ /^ *(#|$)/ && ind() <= ci && $0 !~ /^ *- / { ci = -1 }
+    ci >= 0 && $0 !~ /^ *(#|$)/ && ind() <= ci && $0 !~ /^ *- / { ci = -1; cii = -1 }
+    pi >= 0 && $0 !~ /^ *(#|$)/ && ind() <= pi && $0 !~ /^ *- / { pi = -1; pii = -1; pr = "" }
     pr != "" && ci < 0 && ind() == ki && index($0, k ":") == ki + 1 { f[pr] = val() }
     END { if (hit != "") print f[hit] }
   ' "$1/openspec/workplan.yaml"

@@ -17,7 +17,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import chain  # noqa: E402
-import grantactions  # noqa: E402
+import gaterule  # noqa: E402
 import jsonfile  # noqa: E402
 import priority  # noqa: E402
 import safefile  # noqa: E402
@@ -37,19 +37,18 @@ ARCHIVE_GRACE_MINUTES = 30
 COORDINATOR = "opsx-coordinator"
 # herdr 收不下這則 prompt 的兩種情形：沒有這個 agent、或它卡在對話框。兩種都改發桌面通知，人才收得到
 COORDINATOR_UNAVAILABLE = ("agent_not_found", "agent_blocked")
-AGENT_NAME = re.compile(r"^[a-z][a-z0-9_-]{0,31}$")
-VERIFY_WORDS = ("真機", "實測", "瀏覽器", "herdr 驗", "resume", "真的 claude", "真 herdr", "量測")
-GRANT_WORDS = ("授權", "開 PR", "開 / 改 MR", "gh pr create", "push", "推到 origin", "rebase")
-# 建議或選項裡有這些字，代表要人動手；不替人承諾
-HUMAN_WORDS = ("你", "使用者", "沙盒外", "自己跑", "本人", "人工", "跑指令", "跑腳本", "錄", "貼路徑")
-HUMAN_QUESTION = ("只有你能做", "誰來跑")
-MERGE_WORDS = ("合併", "merge")
-# explore 寫的拆法確認 gate 的 id：要人決定，永遠不代答
-SPLIT_GATE = "split"
-# drive 與 Stop hook 卡住時寫的 gate 標題（drive-<站>-<n>、卡在接 /<站> [#<n>]）：建議欄是給人看的提示，不是答案，永遠不代答
-STUCK_GATE = re.compile(r"drive-[a-z]+-[0-9]+|卡在接 /[a-z]+( #[0-9]+)?")
-VERIFY_ANSWER = "這個要真機跑的驗證使用者之後自己做：把它標成「等使用者驗」寫進 report.md 的 Consider，不要再開 gate，繼續做完剩下的 task 到 /opsx-workflow:review、/opsx-workflow:pr。"
-GRANT_ANSWER = "允許。長期授權在 grants.toml，直接做。"
+AGENT_NAME = chain.AGENT_NAME
+# gaterule.decide 回「留給人」時，各理由代碼寫進 log 的那行與通知標題後半
+GATE_HUMAN = {
+    "stuck": ("?? %(key)s gate %(gate)s 是 drive 或 Stop hook 卡住時寫的，建議欄是給人看的提示，不代答：%(q100)s", "卡住了，要你看"),
+    "run": ("?? %(key)s gate %(gate)s 要人在終端機跑指令再貼結果，不代答：%(rec100)s", "要你在終端機跑指令"),
+    "merge-grant": ("?? %(key)s gate %(gate)s 要合併授權，不代答：合併由人在板上按", "要合併授權"),
+    "type": ("?? %(key)s gate %(gate)s 的 type 沒寫或不在 approval | decision，不代答，要人看：%(q100)s", "的 type 不明"),
+    "split": ("?? %(key)s gate %(gate)s 是拆法確認，只有使用者能答，不代答、不停 pane：%(q100)s", "要你確認拆法"),
+    "merge": ("?? %(key)s gate %(gate)s 是合併類決定題，不代答：%(q100)s → %(pick60)s", "是合併的決定"),
+    "no-pick": ("?? %(key)s gate %(gate)s 沒有選項也沒有建議，要人看：%(q120)s", "沒有選項也沒有建議"),
+    "hands": ("?? %(key)s gate %(gate)s 要人動手，不代答：%(q100)s → %(pick60)s", "要你動手"),
+}
 
 
 class CoordinateError(Exception):
@@ -74,6 +73,7 @@ class Round:
         self.woken_cards = set()
         self.max_working = None
         self.woken = 0
+        self.worktrees = {}
 
     def log(self, msg):
         line = "%s %s" % (self.now.strftime("%Y-%m-%d %H:%M:%S"), msg)
@@ -200,6 +200,22 @@ class Round:
             if rc != 0:
                 self.log("?? %s 主 checkout pull --ff-only 失敗：%s" % (top, err[:200]))
 
+    def unpushed(self, top, branch, head_sha=None):
+        """本機分支上有只存在本機的 commit，或查不出來，回一句說明；沒有回 None。刪分支前叫它：-D 之後那些 commit 就沒了。
+        排除 head_sha（MR 合併當下的分支 head）以前的 commit 與所有 remote ref 上的 commit；
+        關 session 的路徑沒有 head_sha，只排除 remote ref（remote 分支被 forge 刪掉時會保守地留著分支）。"""
+        args = ["git", "-C", top, "rev-list", "--count", "refs/heads/" + branch, "--not"]
+        if head_sha:
+            args.append(head_sha)
+        rc, out, err = self.run(args + ["--remotes"])
+        if rc != 0:
+            return "查不出有沒有未推的 commit：%s" % err[:200]
+        if not out.isdigit():
+            return "rev-list --count 的輸出不是整數：%r" % out[:200]
+        if int(out) != 0:
+            return "有 %s 個只在本機的 commit" % out
+        return None
+
     def archive_card(self, top, c):
         key = card_key(c)
         entry = self.dispatch_file.get(key)
@@ -228,6 +244,11 @@ class Round:
             return True
         # 沒記 worktree 的是早期派的卡，當時 worktree 一律開在這裡
         wt = entry["worktree"] if entry and entry.get("worktree") else os.path.join(top, ".claude", "worktrees", c["slug"])
+        if entry and entry.get("branch"):
+            why = self.unpushed(top, entry["branch"], c["mr"]["head_sha"])
+            if why:
+                self.log("?? %s 分支 %s %s，分支與 worktree 都不刪，留給人" % (key, entry["branch"], why))
+                return True
         if os.path.isdir(wt):
             # 不 --force：worktree 裡有沒 commit 的東西就刪不掉，留給人
             rc, _, err = self.act(["git", "-C", top, "worktree", "remove", wt])
@@ -329,6 +350,11 @@ class Round:
             if rc != 0:
                 self.log("?? %s 查不了分支 %s，session 條目留給人：%s" % (session_key, v["branch"], err[:200]))
                 return
+            why = self.unpushed(top, v["branch"])
+            if why:
+                # session 條目要拿掉：留著它會停在 stopped，dispatch_features 當成人停的，同 feature 剩下的 PR 不再開 session
+                self.log("?? %s 分支 %s %s，不刪，留給人" % (session_key, v["branch"], why))
+                continue
             rc, _, err = self.act(["git", "-C", top, "branch", "-D", v["branch"]])
             if rc != 0:
                 self.log("?? %s 分支 %s 刪不掉，session 條目留給人：%s" % (session_key, v["branch"], err[:200]))
@@ -422,6 +448,19 @@ class Round:
             for key in [k for k in self.memo["_notified"] if k.startswith(scope + "/blocked/") and k not in still]:
                 del self.memo["_notified"][key]
 
+    def notify_sub_gates(self, sessions):
+        """session 裡子 change 的 open gate。子 change 由主 change 的 session 轉給 subagent，協調者不代答；
+        記 ?? 並通知，人才看得到（卡本身的 waiting 只帶主 change 的 gate）。"""
+        for s in sessions:
+            for m in s.get("mains") or []:
+                for sub in m.get("subs") or []:
+                    w = sub.get("waiting")
+                    if not w:
+                        continue
+                    c = {"repo": s["repo"], "slug": "%s/%s" % (m["slug"], sub["slug"])}
+                    self.log("?? %s 子 change 的 gate %s 要人看：%s" % (card_key(c), w["gate_id"], one_line(w.get("question") or "")[:100]))
+                    self.notify_gate(c, w, "要人看（子 change）")
+
     def notify_gate(self, c, w, why):
         self.notify(c, "gate", w["gate_id"], "gate %s %s" % (w["gate_id"], why), "看板：" + one_line(w.get("question") or ""))
 
@@ -479,69 +518,31 @@ class Round:
         return False
 
     def handle_gate(self, c, top):
-        """派出去的卡的第一個 open gate，照固定規則答、停、或留給人。"""
+        """派出去的卡的第一個 open gate，照 gaterule.decide 的處置答、停、或留給人。"""
         w, key = c["waiting"], card_key(c)
-        if w["gate_id"] and STUCK_GATE.fullmatch(w["gate_id"]):
-            self.log("?? %s gate %s 是 drive 或 Stop hook 卡住時寫的，建議欄是給人看的提示，不代答：%s" % (key, w["gate_id"], (w.get("question") or "")[:100]))
-            self.notify_gate(c, w, "卡住了，要你看")
-            return
-        if w.get("needs") == "run":
-            self.log("?? %s gate %s 要人在終端機跑指令再貼結果，不代答：%s" % (key, w["gate_id"], (w.get("recommended") or "")[:100]))
-            self.notify_gate(c, w, "要你在終端機跑指令")
-            return
-        if w["type"] == "等待授權":
-            # 合併永遠由人按：action 不一定剛好寫成 merge（mr-merge、external 打合併 API），題目也要看
-            if any(k in ((w["action"] or "") + " " + (w.get("question") or "")).lower() for k in MERGE_WORDS):
-                self.log("?? %s gate %s 要合併授權，不代答：合併由人在板上按" % (key, w["gate_id"]))
-                self.notify_gate(c, w, "要合併授權")
-                return
-            self.answer(c, top, w["gate_id"], "允許", grant=w["action"] in grantactions.ACTIONS)
-            return
-        if w["type"] == "終端機等待輸入":
-            pane = c["dispatch"].get("pane")
-            self.log("?? %s 在 pane %s 等終端機輸入（autopilot 不該問 pane），要人看" % (key, pane))
-            self.notify(c, "blocked", pane, "在終端機等輸入", "pane %s：%s" % (pane, one_line(w.get("question") or "")),
-                        scope=session_scope(c))
-            return
-        if w["type"] == "type 不明":
-            self.log("?? %s gate %s 的 type 沒寫或不在 approval | decision，不代答，要人看：%s" % (key, w["gate_id"], (w.get("question") or "")[:100]))
-            self.notify_gate(c, w, "的 type 不明")
-            return
-        if w["gate_id"] == SPLIT_GATE:
-            self.log("?? %s gate %s 是拆法確認，只有使用者能答，不代答、不停 pane：%s" % (key, w["gate_id"], (w.get("question") or "")[:100]))
-            self.notify_gate(c, w, "要你確認拆法")
+        verdict = gaterule.decide(w)
+        if verdict[0] == "answer":
+            self.answer(c, top, w["gate_id"], verdict[1], grant=verdict[2])
             return
         q = w.get("question") or ""
-        pick = w.get("recommended") or (w.get("options") or [None])[0]
-        text = q + " " + (pick or "")
-        # gate 明寫 waits-on 才算等別張卡：不答，答了它查完又會開一個 gate。要先認，不然會被下面的合併類規則吃掉
-        if w.get("waits_on"):
-            self.log("⏳ %s gate %s 等 %s，先停 pane，有卡合進 main 那輪再派：%s" % (key, w["gate_id"], w["waits_on"], q[:100]))
+        if verdict[0] == "park":
+            self.log("⏳ %s gate %s 等 %s，先停 pane，有卡合進 main 那輪再派：%s" % (key, w["gate_id"], verdict[1], q[:100]))
             rc, _, _ = self.act(["opsx", "stop", c["slug"], "--repo", top])
             if rc == 0:
                 self.memo["_parked"][key] = {"at": self.now.isoformat(timespec="seconds"), "gate": w["gate_id"],
                                              "merged": merged_prs(self.workplan(top))}
             return
-        # merge 永遠人：合併授權綁 head sha，代答「重試合併」這類題就等於替人決定合併
-        if any(k in text.lower() for k in MERGE_WORDS):
-            self.log("?? %s gate %s 是合併類決定題，不代答：%s → %s" % (key, w["gate_id"], q[:100], (pick or "")[:60]))
-            self.notify_gate(c, w, "是合併的決定")
+        if verdict[1] == "terminal":
+            pane = c["dispatch"].get("pane")
+            self.log("?? %s 在 pane %s 等終端機輸入（autopilot 不該問 pane），要人看" % (key, pane))
+            self.notify(c, "blocked", pane, "在終端機等輸入", "pane %s：%s" % (pane, one_line(q)),
+                        scope=session_scope(c))
             return
-        if any(k in q for k in VERIFY_WORDS):
-            self.answer(c, top, w["gate_id"], VERIFY_ANSWER)
-            return
-        if any(k in q for k in GRANT_WORDS):
-            self.answer(c, top, w["gate_id"], GRANT_ANSWER)
-            return
-        if not pick:
-            self.log("?? %s gate %s 沒有選項也沒有建議，要人看：%s" % (key, w["gate_id"], q[:120]))
-            self.notify_gate(c, w, "沒有選項也沒有建議")
-            return
-        if any(k in pick for k in HUMAN_WORDS) or any(k in q for k in HUMAN_QUESTION):
-            self.log("?? %s gate %s 要人動手，不代答：%s → %s" % (key, w["gate_id"], q[:100], pick[:60]))
-            self.notify_gate(c, w, "要你動手")
-            return
-        self.answer(c, top, w["gate_id"], pick)
+        pick = w.get("recommended") or (w.get("options") or [None])[0] or ""
+        line, why = GATE_HUMAN[verdict[1]]
+        self.log(line % {"key": key, "gate": w["gate_id"], "q100": q[:100], "q120": q[:120], "pick60": pick[:60],
+                         "rec100": (w.get("recommended") or "")[:100]})
+        self.notify_gate(c, w, why)
 
     def session_siblings(self, key, top):
         """同 feature 還活著的其他卡的 key（chain.session_siblings）。"""
@@ -639,7 +640,8 @@ class Round:
                 continue   # 人在板上停掉的
             if not os.path.isfile(os.path.join(c["path"], "tasks.md")) or c["mr"]:
                 continue
-            owner = self.session_feature_of(top, c["slug"])
+            # parked 的卡是這裡自己停下的，重派是接回原本那個 pane 的工作；交給 session 的話，它的 worktree 會擋住 session
+            owner = None if parked else self.session_feature_of(top, c["slug"])
             if owner:
                 self.log("-- %s 屬於 feature %s，由那個 session 做，不單獨派" % (key, owner))
                 continue
@@ -649,6 +651,16 @@ class Round:
                 continue
             if not AGENT_NAME.match(c["slug"]):
                 self.log("-- %s 不是合法的 agent 名，跳過" % key)
+                continue
+            # 排在等級與額度之前：已經有 pane 在做的卡不該吃掉這輪的額度
+            holder = self.branch_holder(top, c["slug"])
+            if holder:
+                live = self.live_entry(holder)
+                if live:
+                    self.log("-- %s 的分支已經 checkout 在 %s，%s（pane %s）在做，不派" % (key, holder, live[0], live[1].get("pane")))
+                else:
+                    self.notify(c, "held", holder, "分支被 %s 佔著，沒有活的 pane" % holder, "收掉那棵 worktree，或手動派進去")
+                    self.log("-- %s 的分支已經 checkout 在 %s，那棵 worktree 沒有活的 pane，不派，等人處理" % (key, holder))
                 continue
             got = self.level(top, c["slug"])
             if "error" in got:
@@ -683,6 +695,31 @@ class Round:
             self.memo["_parked"].pop(key, None)
         return n
 
+    def branch_holder(self, top, slug):
+        """workplan 裡這張卡的 PR 分支被別的 worktree checkout 時，回那棵 worktree 的路徑。
+        卡自己的 .claude/worktrees/<slug> 不算；不在 workplan 或 PR 沒寫 branch 不查（分支名要 dispatch.sh 才推得出來，它自己會擋）。"""
+        pr = pr_of(self.workplan(top), slug)
+        if pr is None or not pr.get("branch"):
+            return None
+        if top not in self.worktrees:
+            rc, out, err = self.run(["git", "-C", top, "worktree", "list", "--porcelain"])
+            if rc != 0:
+                # 這輪不擋；真的被佔時 dispatch.sh 開 worktree 前的檢查會擋下
+                self.log("?? %s 的 git worktree list 失敗，這輪不查分支被誰佔：%s" % (top, err[:200]))
+            self.worktrees[top] = worktree_branches(out) if rc == 0 else {}
+        wt = self.worktrees[top].get(pr["branch"])
+        if wt is None or os.path.realpath(wt) == os.path.realpath(os.path.join(top, ".claude", "worktrees", slug)):
+            return None
+        return wt
+
+    def live_entry(self, wt):
+        """dispatch.json 裡 worktree 指向 wt、pane 還活著的條目 (key, entry)；沒有就是 None。路徑兩邊都 realpath。"""
+        real = os.path.realpath(wt)
+        for k, v in self.dispatch_file.items():
+            if v.get("worktree") and os.path.realpath(v["worktree"]) == real and chain.session_alive(v):
+                return k, v
+        return None
+
     def session_feature_of(self, top, slug):
         pr = pr_of(self.workplan(top), slug)
         for f in session_features(read_features(os.path.join(top, "openspec", "workplan.yaml"))):
@@ -697,11 +734,15 @@ class Round:
         for repo, top in sorted(repo_paths.items()):
             prs = self.workplan(top)
             status = {p.get("name"): p.get("status") for p in prs}
-            for f in session_features(read_features(os.path.join(top, "openspec", "workplan.yaml"))):
+            features = read_features(os.path.join(top, "openspec", "workplan.yaml"))
+            for f in features:
+                if not chain.session_managed(f) and len(f.get("prs") or []) >= 2:
+                    self.log("?? %s 的 feature %s 不是合法的 agent 名，開不了 session，它的卡照單卡派" % (repo, f.get("name")))
+            for f in session_features(features):
                 name = f.get("name")
                 if all(p.get("status") == "merged" for p in f.get("prs") or []):
                     continue
-                missing = [d for d in f["depends-on"] if status.get(d) != "merged"]
+                missing = [d for d in f.get("depends-on") or [] if status.get(d) != "merged"]
                 if missing:
                     self.log("⏳ %s 的 feature %s 等 %s merged 才開 session" % (repo, name, "、".join(missing)))
                     continue
@@ -725,11 +766,15 @@ class Round:
                     continue
                 # 單卡派過的卡（上線前派的、人手動派的）只要 worktree 還在就佔著它的分支，dispatch --feature 會在 worktree add 撞上
                 single = [p[0] for p in plan if self.holds_branch(repo, p[0], name)]
-                if single:
-                    self.log("-- %s 的 feature %s 不開 session：%s 已經單卡派著（或停了但 worktree 還在）" % (repo, name, "、".join(single)))
+                live = [s for s in single if self.dispatch_file["%s/%s" % (repo, s)].get("mode") != "stopped"]
+                if live:
+                    self.log("-- %s 的 feature %s 不開 session：%s 已經單卡派著" % (repo, name, "、".join(live)))
                     continue
+                # 停了的單卡不會自己合併，擋整個 feature 就永遠不開；只把它從 --only 拿掉，它的分支留給它自己
+                if single:
+                    self.log("-- %s 的 feature %s 不交 %s：單卡派過、停了但 worktree 還在" % (repo, name, "、".join(single)))
                 # 人停的成員 dispatch --feature 會跳過，等級也不算它
-                slugs = [p[0] for p in plan if not chain.human_stopped(self.dispatch_file.get("%s/%s" % (repo, p[0])), name)]
+                slugs = [p[0] for p in plan if p[0] not in single and not chain.human_stopped(self.dispatch_file.get("%s/%s" % (repo, p[0])), name)]
                 levels = [(s, self.level(top, s)) for s in slugs]
                 held = ["%s %s" % (s, got["error"] if "error" in got else got["reason"]) for s, got in levels if "error" in got or got["level"] == "P2"]
                 ready = [(priority.LEVELS.index(got["level"]), i, s) for i, (s, got) in enumerate(levels) if "error" not in got and got["level"] != "P2"]
@@ -856,6 +901,17 @@ def plan_order(path):
     return out
 
 
+def worktree_branches(porcelain):
+    """git worktree list --porcelain 的輸出轉成 {分支名: worktree 路徑}；detached 的 worktree 沒有分支，不列。"""
+    out, wt = {}, None
+    for line in porcelain.splitlines():
+        if line.startswith("worktree "):
+            wt = line[len("worktree "):]
+        elif line.startswith("branch refs/heads/"):
+            out[line[len("branch refs/heads/"):]] = wt
+    return out
+
+
 def merged_prs(prs):
     return [p.get("name") for p in prs if p.get("status") == "merged"]
 
@@ -866,8 +922,8 @@ def pr_of(prs, slug):
 
 
 def session_features(features):
-    """有 depends-on 的 feature 由一個 session 代管：依賴合了才由 coordinate 開 session，它的卡不單獨派。"""
-    return [f for f in features if f.get("depends-on")]
+    """由 session 代管的 feature（chain.session_managed）：依賴合了才由 coordinate 開 session，它的卡不單獨派。"""
+    return [f for f in features if chain.session_managed(f)]
 
 
 def deps_unmerged(slug, prs):
@@ -992,6 +1048,8 @@ def one_round(state, dry):
         if c["mr"] and c["mr"]["state"] == "ready":
             # 推了新 commit 再全綠是新的一次可以合併，所以綁 head sha
             r.notify(c, "ready", c["mr"]["head_sha"], "可以合併", "看板按「合併」：" + c["mr"]["url"])
+    if not paused:
+        r.notify_sub_gates(data.get("sessions") or [])
     for c in live:
         if paused or not c["dispatch"] or card_key(c) in r.memo["_parked"]:
             continue
