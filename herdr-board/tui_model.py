@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import curses
 import unicodedata
+from datetime import datetime
 
 SECTIONS = ("待處理", "進行中", "待指派", "收件匣", "已完成")
 MARK = {"待處理": "▲", "進行中": "●", "待指派": "○", "收件匣": "·", "已完成": "—"}
@@ -87,6 +88,27 @@ def top_line(data: dict, scope: str | None) -> str:
     n_wait = sum(1 for c in data.get("cards") or [] if c.get("section") == "待處理")
     stale = "  ⚠ collect 失敗，顯示上一份" if data.get("stale") else ""
     return " opsx  待處理 %d  範圍 %s%s" % (n_wait, scope_label(scope), stale)
+
+
+def progress_text(repo: str, p: dict, with_repo: bool) -> str:
+    """一個 repo 的進度行，跟網頁 progressLine 去掉 HTML 後逐字相同（兩邊測試比同一個預期字串）。"""
+    hhmm = datetime.fromisoformat(p["at"]).astimezone().strftime("%H:%M")
+    head = "進行中 %d 張" % p["remaining"] if p["milestone"] is None else "%s：剩 %d 張" % (p["milestone"], p["remaining"])
+    line = "進度 %s · %s · 可合併 %d · 測試中 %d · 開發中 %d · 等你 %d · 還沒派 %d" % (
+        hhmm, head, p["mergeable"], p["testing"], p["developing"], p["waiting_on_you"], p["not_dispatched"])
+    return "%s %s" % (repo, line) if with_repo else line
+
+
+def progress_lines(data: dict, scope: str | None) -> list[str]:
+    """頂列下的進度行：範圍內有 progress 的 repo 照 scopes[] 順序各一行，超過 3 個收成前 3 行加一行提示。"""
+    progress = data.get("progress") or {}
+    repos = scope_repos(data, scope)
+    order = [r for s in data.get("scopes") or [] for r in s["repos"]] if repos is None else repos
+    shown = [r for r in order if r in progress]
+    lines = [progress_text(r, progress[r], len(shown) > 1) for r in shown[:3]]
+    if len(shown) > 3:
+        lines.append("另 %d 個 repo，⇥ 切範圍" % (len(shown) - 3))
+    return lines
 
 
 def rows(data: dict, done_open: bool, inbox_open: bool = False, scope: str | None = None) -> list[dict]:
