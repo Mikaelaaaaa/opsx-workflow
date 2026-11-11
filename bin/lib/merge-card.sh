@@ -43,19 +43,7 @@ opsx_merge-card() {
 
   local line="- 併進：$repo/$src · source: $source"
   [ -z "$url" ] || line="$line · $url"
-  # 插在證據段最後一行非空內容之後，跟 sync.py 的 append_to_section 同一個位置
-  awk -v line="$line" '
-    { buf[NR] = $0 }
-    /^## 證據$/ { sec = NR; next }
-    sec && !end && /^## / { end = NR }
-    sec && !end && NF { last = NR }
-    END {
-      for (i = 1; i <= NR; i++) {
-        print buf[i]
-        if (last && i == last) print line
-        if (!last && i == sec) { print ""; print line }
-      }
-    }' "$t_inbox" | opsx_replace "$t_inbox" \
+  "$OPSX_PY" -I "$OPSX_ROOT/bin/lib/inboxmerge.py" evidence "$ch/$into" "$line" \
     || die "merge-card: $repo/$src 已併進並歸檔，但寫不進 ${t_inbox}；請手動在 ## 證據 段補上：$line"
   log_row "$ch/$into" 你 已決定 "併進：$repo/$src"
   say "merge-card: $repo/$src 已併進 $repo/$into"
