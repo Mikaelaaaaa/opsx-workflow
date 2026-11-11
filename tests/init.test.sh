@@ -272,7 +272,7 @@ case "$outk" in *"$CCS/skills/tdd 跟 opsx 插件的 skills/tdd 同名"*) ;; *) 
 case "$outk" in *搬走*|*改名*) ;; *) fail "警告要說怎麼處理：$outk" ;; esac
 case "$outk" in *不受影響*|*已帶前綴*) fail "stage-cmd-prefix 未合時不能說 opsx 送的指令已帶前綴：$outk" ;; esac
 # 有別的同名命中（tdd）時，review 的內建撞名警告仍要出現
-case "$outk" in *"插件 skill review 與內建 /code-review 撞名"*) ;; *) fail "有 tdd 同名時 review 的內建撞名警告不能被壓掉：$outk" ;; esac
+case "$outk" in *"插件 skill review 與內建指令「code-review」撞名"*) ;; *) fail "有 tdd 同名時 review 的內建撞名警告不能被壓掉：$outk" ;; esac
 case "$outk" in *"$CCS/skills/pr"*) fail "沒有 SKILL.md 的 pr 資料夾不算同名：$outk" ;; esac
 case "$outk" in *"$CCS/skills/mine"*) fail "不同名的 mine 不該警告：$outk" ;; esac
 case "$outk" in *"$CCS/skills/explore"*) fail "指回插件的 symlink 不該警告：$outk" ;; esac
@@ -289,8 +289,8 @@ mkdir -p "$R/.claude/skills/review"; printf -- '---\nname: review\n---\n' > "$R/
 outk="$(CLAUDE_CONFIG_DIR="$CCS" opsx init --check 2>&1)"; assert_eq "$?" 0 "專案層同名不改 rc：$outk"
 case "$outk" in *"$R/.claude/skills/review"*) ;; *) fail "repo 裡 --check 要警告專案層的 review：$outk" ;; esac
 # 同名且撞內建：不能同時說「會跑到這份」和「會跑到內建」；搬走的後果要講
-case "$outk" in *"與內建 /code-review 撞名"*) fail "已有同名 review 時不該再說會跑到內建：$outk" ;; esac
-case "$outk" in *"搬走後手打 /review 會跑到內建 /code-review，一律打 /opsx-workflow:review"*) ;; *) fail "同名且撞內建時要說搬走後的後果：$outk" ;; esac
+case "$outk" in *"與內建指令「code-review」撞名"*) fail "已有同名 review 時不該再說會跑到內建：$outk" ;; esac
+case "$outk" in *"搬走後手打斜線加短名「review」會跑到內建指令「code-review」，一律打 /opsx-workflow:review"*) ;; *) fail "同名且撞內建時要說搬走後的後果：$outk" ;; esac
 cd "$FX"
 outk="$(CLAUDE_CONFIG_DIR="$CCS" opsx init --check 2>&1)"
 case "$outk" in *"$R/.claude/skills/review"*) fail "repo 外不掃專案層：$outk" ;; esac
@@ -301,12 +301,12 @@ outk="$(CLAUDE_CONFIG_DIR="$CCS" opsx init --check 2>&1)"
 assert_eq "$(grep -c '的 skills/review 同名' <<< "$outk")" 1 "兩層各一份 review 只警告一行：$outk"
 case "$outk" in *"$CCS/skills/review"*"$R/.claude/skills/review"*) ;; *) fail "那一行要列出兩個路徑：$outk" ;; esac
 case "$outk" in *會跑到這份*) fail "兩層並存時不能說會跑到這份：$outk" ;; esac
-case "$outk" in *"與內建 /code-review 撞名"*) fail "兩層各一份時不該另印內建撞名：$outk" ;; esac
+case "$outk" in *"與內建指令「code-review」撞名"*) fail "兩層各一份時不該另印內建撞名：$outk" ;; esac
 cd "$FX"
 # 只有使用者層有 review（stage-cmd-prefix 事故的情境）：說搬走後的後果，不另印內建撞名
 outk="$(CLAUDE_CONFIG_DIR="$CCS" opsx init --check 2>&1)"
-case "$outk" in *"搬走後手打 /review 會跑到內建 /code-review"*) ;; *) fail "使用者層的 review 要說搬走後的後果：$outk" ;; esac
-case "$outk" in *"與內建 /code-review 撞名"*) fail "使用者層有同名 review 時不該另印內建撞名：$outk" ;; esac
+case "$outk" in *"搬走後手打斜線加短名「review」會跑到內建指令「code-review」"*) ;; *) fail "使用者層的 review 要說搬走後的後果：$outk" ;; esac
+case "$outk" in *"與內建指令「code-review」撞名"*) fail "使用者層有同名 review 時不該另印內建撞名：$outk" ;; esac
 rm -r "$CCS/skills/review"
 # 去重：使用者層與專案層是同一個目錄時，同名警告只出一次
 cd "$R"
@@ -324,10 +324,10 @@ case "$outk" in *"$FX/cc7/skills/tdd 跟 opsx 插件的 skills/tdd 同名"*) ;; 
 assert_eq "$( source "$OPSX_ROOT/bin/lib/common.sh"; source "$OPSX_ROOT/bin/lib/init.sh"; builtin_command_for review )" "code-review" "review 撞內建 code-review"
 assert_eq "$( source "$OPSX_ROOT/bin/lib/common.sh"; source "$OPSX_ROOT/bin/lib/init.sh"; builtin_command_for explore )" "" "表外的名字回空"
 outk="$(CLAUDE_CONFIG_DIR="$CCS" opsx init --check 2>&1)"
-case "$outk" in *"插件 skill review 與內建 /code-review 撞名"*"/opsx-workflow:review"*) ;; *) fail "--check 要警告 review 撞 /code-review 並說用 /opsx-workflow:review：$outk" ;; esac
+case "$outk" in *"插件 skill review 與內建指令「code-review」撞名"*"/opsx-workflow:review"*) ;; *) fail "--check 要警告 review 撞 /code-review 並說用 /opsx-workflow:review：$outk" ;; esac
 case "$outk" in *"插件 skill explore 與內建"*) fail "表外的 explore 不該警告：$outk" ;; esac
 outk="$(CLAUDE_CONFIG_DIR="$CCS" opsx init --global 2>&1)"; assert_eq "$?" 0 "內建撞名不讓 --global 失敗：$outk"
-case "$outk" in *"插件 skill review 與內建 /code-review 撞名"*) ;; *) fail "--global 也要警告內建撞名：$outk" ;; esac
+case "$outk" in *"插件 skill review 與內建指令「code-review」撞名"*) ;; *) fail "--global 也要警告內建撞名：$outk" ;; esac
 case "$outk" in *不受影響*|*已帶前綴*) fail "--global 也不能說 opsx 送的指令已帶前綴：$outk" ;; esac
 
 # --- 每日同步 launchd：第一次安裝 ---

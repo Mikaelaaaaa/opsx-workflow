@@ -138,15 +138,15 @@ warn_skill_clashes() {
   for name in $hit; do
     builtin="$(builtin_command_for "$name")"
     advice="要用插件的就把它們搬走或改名"
-    [ -z "$builtin" ] || advice="把這些都搬走後手打 /${name} 會跑到內建 /${builtin}，一律打 /opsx-workflow:${name}"
+    [ -z "$builtin" ] || advice="把這些都搬走後手打斜線加短名「${name}」會跑到內建指令「${builtin}」，一律打 /opsx-workflow:${name}"
     paths="$(awk -F'\t' -v n="$name" '$1 == n { printf "%s%s", sep, $2; sep = "、" }' <<< "$found")"
-    warn "skill 同名：${paths} 跟 opsx 插件的 skills/${name} 同名，手打 /${name} 可能跑到其中一份，模型也可能選錯。${advice}；刻意留的就忽略這行"
+    warn "skill 同名：${paths} 跟 opsx 插件的 skills/${name} 同名，手打斜線加短名「${name}」可能跑到其中一份，模型也可能選錯。${advice}；刻意留的就忽略這行"
   done
   for skill in "$OPSX_ROOT"/skills/*/; do
     name="$(basename "$skill")"
     case "$hit" in *$'\n'"$name"$'\n'*) continue ;; esac
     builtin="$(builtin_command_for "$name")"
-    [ -z "$builtin" ] || warn "插件 skill ${name} 與內建 /${builtin} 撞名：手打 /${name} 會跑到內建指令，要用 /opsx-workflow:${name}"
+    [ -z "$builtin" ] || warn "插件 skill ${name} 與內建指令「${builtin}」撞名：手打斜線加短名「${name}」會跑到內建指令，要用 /opsx-workflow:${name}"
   done
 }
 
