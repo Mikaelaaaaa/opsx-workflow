@@ -17,11 +17,11 @@ PY
 }
 
 # dispatch.json 的 drive_pid 在 drive 被 SIGKILL 或重開機後會留著，pid 之後可能被別的行程重用，所以 kill 前要確認它是這張卡的 drive。
-# 回 0：是這張卡的 drive；1：pid 不在；2：活著但不是（命令列放在 DRIVE_PID_CMD）。slug 後面接空格，retry 才不會中 retry-backoff
+# 回 0：是這張卡的 drive；1：pid 不在；2：活著但不是（命令列放在 DRIVE_PID_CMD）。slug 後面接空格或結尾，retry 才不會中 retry-backoff；手動跑的 opsx drive <slug> 沒有 --repo，所以不比對它
 drive_pid_state() { # <pid> <slug>
   kill -0 "$1" 2>/dev/null || return 1
   DRIVE_PID_CMD="$(ps -p "$1" -o command= 2>/dev/null)" || DRIVE_PID_CMD="（ps 讀不到）"
-  case "$DRIVE_PID_CMD" in *"/bin/opsx drive $2 --repo "*) return 0 ;; esac
+  case "$DRIVE_PID_CMD " in *"/opsx drive $2 "*) return 0 ;; esac
   return 2
 }
 

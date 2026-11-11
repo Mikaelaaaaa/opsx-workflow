@@ -164,7 +164,7 @@ assert_eq "$(cat "$FX/drive-at-esc")" dead "送 esc 之前 drive 要已經被 ki
 n=0; until grep -q '跑滿 0 輪' "$DL" 2>/dev/null; do n=$((n+1)); [ $n -lt 50 ] || fail "relaunch 成功後要在背景起 drive：$(cat "$DL" 2>&1)"; sleep 0.1; done
 python3 -I -c 'import json,sys;e=json.load(open(sys.argv[1]))["Agentory-CS/retry-backoff"];assert e["drive_pid"]!=int(sys.argv[2]),e' "$J" "$OLD" || fail "被 kill 的 drive pid 不能留在條目上"
 # pid 被別的行程重用：command 不是這張卡的 drive 就不 kill（spec 的 Scenario Outline 四列），relaunch 照樣接回 session 並起 drive
-for row in "bash /x/bin/opsx drive retry-backoff --repo $R|dead" "/usr/bin/vim notes.md|alive" "bash /x/bin/opsx drive retry --repo $R|alive" "bash /x/bin/opsx drive retry-backoff-2 --repo $R|alive"; do
+for row in "bash /x/bin/opsx drive retry-backoff --repo $R|dead" "bash /x/bin/opsx drive retry-backoff|dead" "/usr/bin/vim notes.md|alive" "bash /x/bin/opsx drive retry --repo $R|alive" "bash /x/bin/opsx drive retry-backoff-2 --repo $R|alive"; do
   ( sleep 300 < /dev/null > /dev/null 2>&1 & echo $! > "$FX/row.pid" ); ROWPID="$(cat "$FX/row.pid")"
   export OPSX_TEST_PS_CMD="${row%|*}"; want="${row##*|}"
   put_entry Agentory-CS/retry-backoff "$(printf '%s' "$CARD" | sed "s/\"drive_pid\":null/\"drive_pid\":$ROWPID/")"

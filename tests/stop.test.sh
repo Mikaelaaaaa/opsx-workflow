@@ -30,6 +30,13 @@ dies "$PID" || fail "是 drive 的 pid 要被 kill：$out"
 case "$out" in *"已 kill"*) ;; *) fail "訊息要說已 kill: $out" ;; esac
 assert_stopped
 
+# --- 正例：手動跑的 opsx drive <slug> 沒有 --repo，也是這張卡的 drive ---
+PID="$(spawn)"
+put_pid "$PID"; export OPSX_TEST_PS_CMD="/bin/bash /home/u/.local/bin/opsx drive retry-backoff"
+out="$(opsx stop retry-backoff 2>&1)"; assert_eq "$?" 0 "stop: $out"
+dies "$PID" || fail "沒有 --repo 的手動 drive 也要被 kill：$out"
+assert_stopped
+
 # --- 反例：pid 被別的行程重用，不 kill，印 pid 與 command，其餘照做 ---
 PID="$(spawn)"
 put_pid "$PID"; export OPSX_TEST_PS_CMD="/usr/bin/vim notes.md"; : > "$OPSX_FAKE_LOG"
