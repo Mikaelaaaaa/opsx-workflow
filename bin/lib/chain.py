@@ -118,6 +118,9 @@ def children(top: str, repo: str, parent: str, dispatch_path: str) -> list:
     feature_of = {pr.get("name"): f.get("name") for f in features for pr in f.get("prs") or []}
     mine = find_pr(prs, parent)
     if mine is None:
+        split = split_into(top, parent)
+        if split:
+            return split_next(top, repo, prs, split, dispatch)
         return [("skip", "workplan 裡沒有 %s" % parent)]
     session = me.get("feature")
     gated = {f.get("name") for f in features if f.get("depends-on")}   # 有自己依賴的 feature，由 coordinate 照 feature 依賴派
@@ -148,6 +151,43 @@ def children(top: str, repo: str, parent: str, dispatch_path: str) -> list:
     if not out:
         return [("skip", "沒有可以接的子卡")]
     return _by_level(top, out)
+
+
+def split_into(top: str, card: str) -> list:
+    """卡 inbox.md frontmatter 的 split_into，照寫的順序。空值、[]、""、''、~、null 算沒拆，跟 stage.sh 的 st_split_into 一致。"""
+    fm, _ = priority.frontmatter(priority.read_text(os.path.join(top, "openspec", "changes", card, "inbox.md")))
+    v = re.sub(r"\s+#.*$", "", fm.get("split_into") or "")
+    if v in ("~", "null"):
+        return []
+    if v.startswith("[") and v.endswith("]"):
+        v = v[1:-1]
+    return [s for s in (priority.unquote(x.strip()) for x in v.split(",")) if s]
+
+
+def split_next(top: str, repo: str, prs: list, split: list, dispatch: dict) -> list:
+    """被拆的原卡只接一張：split_into 順序裡第一個 PR 沒合、依賴都合了、沒有活的條目、不是 P2 的主 change。
+    剛拆出來的殼只有 inbox.md，所以不看 tasks.md。"""
+    status = {pr.get("name"): pr.get("status") for pr in prs}
+    rows = []
+    for name in split:
+        pr = next((p for p in prs if p.get("name") == name), None)
+        if pr is None or pr.get("status") == "merged":
+            continue
+        if any(status.get(dep) != "merged" for dep in pr.get("depends-on") or []):
+            continue
+        entry = dispatch.get("%s/%s" % (repo, name))
+        if entry and entry.get("mode") != "stopped":
+            continue
+        if not pr.get("branch"):
+            sys.exit("chain: workplan 的 PR「%s」沒有 branch，續接不知道要開哪條 branch；在 workplan 補上 branch" % name)
+        rows.append(("child", name, pr["branch"], _kind(os.path.join(top, "openspec", "changes", name))))
+    if not rows:
+        return [("skip", "split_into（%s）裡沒有可以接的主 change" % "、".join(split))]
+    kept = _by_level(top, rows)
+    if kept[0][0] == "skip":
+        return kept
+    ok = {row[1] for row in kept}
+    return [next(row for row in rows if row[1] in ok)]
 
 
 def _by_level(top: str, rows: list) -> list:
