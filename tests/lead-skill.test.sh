@@ -25,6 +25,10 @@ for s in \
   grep -qF -- "$s" "$F" || fail "skill 缺：$s"
 done
 
+# 可合併只看 agent 的回報（review 完、全套綠、跟 main 無衝突）；多張一起合時只用 git merge-tree 查依序疊起來無衝突，不重跑全套
+grep -qF 'git merge-tree' "$F" || fail "skill 要寫多張一起合時用 git merge-tree 查依序疊起來無衝突"
+! grep -qiE 'run the full suite yourself|自己.*跑全套' "$F" || fail "協調者列可合併前不自己重跑全套（使用者 2026-11-11 更正）"
+
 # frontmatter 的 name 是 lead（/opsx-workflow:lead）
 assert_eq "$(sed -n 2p "$F")" "name: lead" "frontmatter name"
 echo ok
