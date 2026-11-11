@@ -186,7 +186,7 @@ assert_file "$CO"
 assert_eq "$(cj "$CO" sandbox.network.allowUnixSockets)" "[\"$HOME/.config/herdr/herdr.sock\"]" "主控 session 的設定要開 herdr socket"
 case "$outg" in *"claude --settings $CO"*) ;; *) fail "要印主控 session 的啟動方式：$outg" ;; esac
 co_before="$(cat "$CO")"
-assert_eq "$(cj "$CS" sandbox.excludedCommands)" '["gh pr *"]' "只排除 gh pr *，不是整個 gh *"
+assert_eq "$(cj "$CS" sandbox.excludedCommands)" '["gh pr *", "gh issue comment *"]' "只排除 gh pr * 與 gh issue comment *，不是整個 gh *"
 assert_eq "$(cj "$CS" sandbox.filesystem.denyWrite)" "[\"$OPSX_STATE_DIR/grants.toml\", \"$OPSX_STATE_DIR/python\", \"$OPSX_STATE_DIR/coordinator-settings.json\"]" "grants.toml、hook 的 interpreter 路徑、主控 session 的設定檔要拒絕沙盒寫入；dispatch.json 不能列（沙盒內的 chain / dispatch 要寫它）"
 assert_eq "$(cj "$CS" sandbox.enabled)" MISSING "不替使用者開關沙盒"
 assert_no_file "$CS.opsx-bak"        # 第一次裝，原檔不存在，沒有東西可備份

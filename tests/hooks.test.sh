@@ -142,6 +142,13 @@ out="$(gg Bash "$(cmdj 'glab mr create -F desc.md')")"; assert_eq "$(decision "$
 reason "$out" | grep -q 'gates.md' || fail "grant: deny 要叫它寫 gate"
 reason "$out" | grep -qF 'approval | decision' || fail "grant: deny 要寫合法 type：$(reason "$out")"
 reason "$out" | grep -qF 'needs: run' || fail "grant: deny 要寫 needs: run：$(reason "$out")"
+# 回 issue 留 MR 連結歸在 mr 底下，不另開 action
+out="$(gg Bash "$(cmdj 'glab issue note 12 -m x')")"; assert_eq "$(decision "$out")" deny "grant: glab issue note 沒 mr 授權"
+reason "$out" | grep -qF 'action: mr' || fail "grant: issue note 的 deny 要帶 action: mr：$(reason "$out")"
+out="$(gg Bash "$(cmdj 'gh issue comment https://github.com/o/r/issues/3 --body x')")"; assert_eq "$(decision "$out")" deny "grant: gh issue comment 沒 mr 授權"
+reason "$out" | grep -qF 'action: mr' || fail "grant: issue comment 的 deny 要帶 action: mr：$(reason "$out")"
+out="$(gg Bash "$(cmdj 'glab issue view 12')")"; assert_eq "$out" "" "grant: glab issue view 不是第二級"
+out="$(gg Bash "$(cmdj 'gh issue list')")"; assert_eq "$out" "" "grant: gh issue list 不是第二級"
 out="$(gg Bash "$(cmdj 'pnpm db:migrate')")"; assert_eq "$(decision "$out")" allow "grant: 這張卡的 migrate"
 # dontAsk 下不明說 allow 就會被 Claude 拒：有授權的動作要回 permissionDecision allow，不是空輸出
 assert_eq "$(printf '%s' "$out" | jq -r '.hookSpecificOutput.permissionDecision')" allow "grant: 有授權要明說 allow"
@@ -390,6 +397,8 @@ out="$(gg Bash "$(cmdj 'git push gitlab feat/eval-core/mikaela')")"; assert_eq "
 assert_eq "$(jq -c '."Agentory-AI/eval-core".once' "$PD/authz.json")" '[]' "once 用掉就刪"
 printf '{"Agentory-AI/eval-core":{"grants":["mr"]}}' > "$PD/authz.json"
 out="$(gg Bash "$(cmdj 'glab mr create -F desc.md')")"; assert_eq "$(decision "$out")" allow "grant: 受保護位置的卡授權放行"
+out="$(gg Bash "$(cmdj 'glab issue note 12 -m x')")"; assert_eq "$(decision "$out")" allow "grant: mr 授權放行 glab issue note"
+out="$(gg Bash "$(cmdj 'gh issue comment https://github.com/o/r/issues/3 --body x')")"; assert_eq "$(decision "$out")" allow "grant: mr 授權放行 gh issue comment"
 out="$(gg Bash "$(cmdj 'git push gitlab feat/eval-core/mikaela')")"; assert_eq "$(decision "$out")" deny "grant: once 第二次 deny"
 # grants.toml 壞掉：當成沒授權，不是放行
 printf 'this is not toml ===\n' > "$OPSX_STATE_DIR/grants.toml"
