@@ -224,7 +224,7 @@ case "$err" in *robot*) ;; *) fail "stderr 要含 robot：$err" ;; esac
 assert_rc 2 opsx new --source agent: --repo "$A" -- x
 assert_rc 2 opsx new --source --repo "$A" -- x
 assert_eq "$(snap)" "$before"; assert_eq "$(find "$OPSX_STATE_DIR/unfiled" | sort)" "$ub"
-# agent 已離開 worktree：OPSX_CARD 在，cwd 是 repo 根目錄，仍是 agent 開的卡（agent-20261111-1646）
+# agent 已離開 worktree：OPSX_CARD 在，cwd 是 repo 根目錄，仍是 agent 開的卡
 out="$(cd "$A" && export OPSX_CARD=foo && opsx new --kind-of-work planned --repo "$A" -- 離開後開的卡)"; assert_eq "$?" 0 "OPSX_CARD: $out"
 case "$out" in agent-*) ;; *) fail "slug 要以 agent- 開頭：$out" ;; esac
 assert_eq "$(src "$out")" agent:foo
@@ -275,6 +275,11 @@ out="$(cd "$A/.claude/worktrees/agent-d4e5f6" && opsx new --kind-of-work planned
 mkdir -p "$A/openspec/changes/m/subs/s"; printf 'schema: opsx\n' > "$A/openspec/changes/m/.openspec.yaml"
 git -C "$A" worktree add -q -b feat/m--s/mikaela "$A/.claude/worktrees/agent-7a8b9c" || fail "第四棵 worktree 建不起來"
 out="$(cd "$A/.claude/worktrees/agent-7a8b9c" && opsx new --kind-of-work planned --repo "$A" -- 子殼 subagent 發現的)"; assert_eq "$(src "$out")" agent:m--s
+# worktree 裡又開一棵 worktree（toplevel 是 .../worktrees/x/.claude/worktrees/y）：路徑不算 dispatch 的 worktree，只有 OPSX_CARD 能讓它成為 agent
+N="$W/.claude/worktrees/y"; mkdir -p "$W/.claude/worktrees"
+git -C "$A" worktree add -q -b scratch/nested/mikaela "$N" || fail "巢狀 worktree 建不起來"
+out="$(cd "$N" && opsx new --repo "$A" -- 巢狀沒有變數)"; assert_eq "$(src "$out")" me
+out="$(cd "$N" && export OPSX_CARD=foo && opsx new --kind-of-work planned --repo "$A" -- 巢狀有變數)"; assert_eq "$(src "$out")" agent:foo
 
 # --- agent- 前綴與待分類的原子保留（main #92）---
 # 同一分鐘兩張：第二張加 -2，前綴不變、兩張內容各自完整

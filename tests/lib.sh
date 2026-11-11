@@ -7,7 +7,7 @@ FX="$(mktemp -d "${TMP_BASE%/}/opsx-test.XXXXXX")"
 export OPSX_STATE_DIR="$FX/state"
 export OPSX_BIN_DIR="$FX/bin"
 unset OPSX_CARD              # dispatch 的 agent 帶著它跑測試；opsx new 會因此把每張卡當成 agent 開的
-export HERDR_ENV=""        # status.sh 的 pane metadata 鏡像認它；collect 不看它
+export HERDR_ENV=""          # status.sh 的 pane metadata 鏡像認它；collect 不看它
 # 測試裡永遠不碰真 herdr：PATH 最前放一支一定失敗的；要成功的測試自己 use_fakes herdr（放得更前）
 mkdir -p "$FX/failbin"; printf '#!/usr/bin/env bash\necho "herdr: test isolation, no real herdr" >&2\nexit 1\n' > "$FX/failbin/herdr"; chmod +x "$FX/failbin/herdr"
 # 每個測試的 nohup 都是假的、一律失敗：agent 沙盒 pane 裡的真 nohup 就是這樣，產品程式不能靠它起背景程序

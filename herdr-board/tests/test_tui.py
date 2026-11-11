@@ -4,6 +4,7 @@
 """
 import curses
 import importlib.util
+import os
 import pathlib
 import subprocess
 import threading
@@ -367,9 +368,11 @@ class Runs:
 
     def __init__(self):
         self.argvs = []
+        self.kws = []
 
     def __call__(self, argv, **kw):
         self.argvs.append(argv)
+        self.kws.append(kw)
         return proc(argv, out="me-1\n")
 
 
@@ -377,9 +380,9 @@ def curs_set(n):
     pass
 
 
-def drive(feed, scr):
-    """跑 tui.main 直到按鍵用完；回 main 跑過的外部指令。main 自己 return（被某個鍵關掉）時 assert 失敗。"""
-    runs = Runs()
+def drive(feed, scr, runs=None):
+    """跑 tui.main 直到按鍵用完；回 main 跑過的外部指令。main 自己 return（被某個鍵關掉）時 assert 失敗。runs 給了就由呼叫端讀它記下的 kwargs。"""
+    runs = runs or Runs()
     with mock.patch.object(tui, "Feed", return_value=feed), mock.patch.object(tui.subprocess, "run", runs), \
             mock.patch.object(tui.curses, "curs_set", curs_set), mock.patch.object(tui.curses, "flushinp", scr.flushinp):
         try:
@@ -394,6 +397,13 @@ class MainLoopTest(unittest.TestCase):
         argvs = drive(FakeFeed(WDATA), FakeScr(["+", "a", "b", "\n", "o", "q"]))
         self.assertEqual(argvs, [["bash", str(HERE.parent.parent / "bin" / "opsx"), "new", "--", "ab"]],
                          "只送出第一行；換行後的 o 不開網頁、q 不關 TUI")
+
+    def test_new_does_not_pass_opsx_card_to_opsx(self):
+        runs = Runs()
+        with mock.patch.dict(os.environ,{"OPSX_CARD": "foo"}):
+            drive(FakeFeed(WDATA), FakeScr(["+", "a", "\n"]), runs)
+        self.assertEqual(len(runs.kws), 1)
+        self.assertNotIn("OPSX_CARD", runs.kws[0]["env"])
 
     def test_queued_keys_after_cancel_are_not_hotkeys(self):
         self.assertEqual(drive(FakeFeed(WDATA), FakeScr(["+", "a", "\x1b", "z", "\x1b"])), [], "Esc 取消後排隊的 z、Esc 不執行")
