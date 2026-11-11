@@ -680,9 +680,10 @@ class NoHerdrTest(unittest.TestCase):
 class CacheInvalidationTest(unittest.TestCase):
     """不帶 --collect：動作後的 collect 不用舊快取（specs/board-web「動作後的 collect 不用舊快取」）。
 
-    每個測試起一支新 server，快取從空的開始。shim 每次 collect 記一行到 collect.log；
+    每個測試起一支新 server，快取從空的開始。shim 每次 collect 開始時記一行到 collect.begun、結束時記一行到 collect.log；
     collect 一開始就建 collect.started（測試等它，不靠固定的 sleep 猜 server 什麼時候開始跑）；
-    有 collect.sleep 檔就先睡檔裡的秒數；有 opsx.fail 檔就讓 collect 以外的子命令退出 2；
+    有 collect.sleep 檔就先睡檔裡的秒數；有 collect.rc 檔就往 stderr 寫一行、以檔裡的退出碼結束；
+    有 collect.out 檔就印它，沒有就印固定的空看板；有 opsx.fail 檔就讓 collect 以外的子命令退出 2；
     有 action.sleep 檔就讓 collect 以外的子命令先建 action.started、再睡檔裡的秒數。
     """
 
@@ -694,6 +695,10 @@ class CacheInvalidationTest(unittest.TestCase):
         cls.collect_log = cls.tmp / "collect.log"
         cls.sleep_file = cls.tmp / "collect.sleep"
         cls.started = cls.tmp / "collect.started"
+        cls.begun_log = cls.tmp / "collect.begun"
+        cls.rc_file = cls.tmp / "collect.rc"
+        cls.out_file = cls.tmp / "collect.out"
+        cls.bad_bytes = cls.tmp / "collect.bad"
         cls.fail_flag = cls.tmp / "opsx.fail"
         cls.action_sleep = cls.tmp / "action.sleep"
         cls.action_started = cls.tmp / "action.started"
@@ -703,9 +708,13 @@ class CacheInvalidationTest(unittest.TestCase):
         shim.write_text(
             "#!/usr/bin/env bash\n"
             'if [ "$1" = collect ]; then\n'
+            f'  echo collect >> "{cls.begun_log}"\n'
             f'  : > "{cls.started}"\n'
             f'  if [ -f "{cls.sleep_file}" ]; then sleep "$(cat "{cls.sleep_file}")"; fi\n'
             f'  echo collect >> "{cls.collect_log}"\n'
+            f'  if [ -f "{cls.bad_bytes}" ]; then printf \'collect: \\377 壞掉的位元組\\n\' >&2; exit 1; fi\n'
+            f'  if [ -f "{cls.rc_file}" ]; then echo "collect: 假的失敗" >&2; exit "$(cat "{cls.rc_file}")"; fi\n'
+            f'  if [ -f "{cls.out_file}" ]; then cat "{cls.out_file}"; exit 0; fi\n'
             '  echo \'{"generated_at": "g", "scopes": [], "cards": [], "unmatched_agents": [], "errors": []}\'\n'
             "  exit 0\n"
             "fi\n"
@@ -722,7 +731,9 @@ class CacheInvalidationTest(unittest.TestCase):
 
     def setUp(self):
         self.collect_log.write_text("")
-        for f in (self.sleep_file, self.fail_flag, self.started, self.action_sleep, self.action_started):
+        self.begun_log.write_text("")
+        for f in (self.sleep_file, self.fail_flag, self.started, self.action_sleep, self.action_started,
+                  self.rc_file, self.out_file, self.bad_bytes):
             if f.exists():
                 f.unlink()
         self.proc, _, port = start_server(self.env, None)
@@ -734,6 +745,8 @@ class CacheInvalidationTest(unittest.TestCase):
         self.proc.wait()
         self.proc.stdout.close()
         self.proc.stderr.close()
+        # collect 跑在自己的 session，server 被殺後還會跑完；等它寫完 log，免得算進下一個測試
+        self.wait_lines(self.collect_log, self.begun())
 
     def req(self, path, body=None):
         data = json.dumps(body).encode() if body is not None else None
@@ -761,6 +774,112 @@ class CacheInvalidationTest(unittest.TestCase):
             if time.monotonic() > deadline:
                 raise AssertionError("10 秒內沒等到 %s" % path)
             time.sleep(0.02)
+
+    def wait_lines(self, path: pathlib.Path, n: int) -> None:
+        deadline = time.monotonic() + 10
+        while len(path.read_text().splitlines()) < n:
+            if time.monotonic() > deadline:
+                raise AssertionError("10 秒內 %s 沒到 %d 行" % (path, n))
+            time.sleep(0.02)
+
+    def get_json(self) -> tuple[int, dict, float]:
+        """GET /api/collect，回 (status, body, 花了幾秒)。"""
+        r = urllib.request.Request(self.base + "/api/collect")
+        r.add_header("X-Opsx-Token", self.token)
+        t0 = time.monotonic()
+        try:
+            with urllib.request.urlopen(r, timeout=10) as resp:
+                return resp.status, json.loads(resp.read().decode()), time.monotonic() - t0
+        except urllib.error.HTTPError as e:
+            return e.code, json.loads(e.read().decode()), time.monotonic() - t0
+
+    def get_until_changed(self, old: dict) -> tuple[int, dict]:
+        """shim 寫完 log 到 server 寫進快取之間有一小段，輪詢到回的內容不再是 old。"""
+        deadline = time.monotonic() + 10
+        while True:
+            status, body, _ = self.get_json()
+            if body != old:
+                return status, body
+            if time.monotonic() > deadline:
+                raise AssertionError("10 秒內 GET 一直回 %r" % old)
+            time.sleep(0.02)
+
+    def begun(self) -> int:
+        return len(self.begun_log.read_text().splitlines())
+
+    def test_first_get_waits_for_collect(self):
+        self.sleep_file.write_text("1")
+        self.out_file.write_text('{"n": 1}')
+        status, body, took = self.get_json()
+        self.assertEqual((status, body), (200, {"n": 1}))
+        self.assertGreaterEqual(took, 0.9, "server 還沒有結果時，第一個 GET 要等 collect 跑完")
+
+    def test_later_get_serves_last_result_and_refreshes_in_background(self):
+        self.out_file.write_text('{"n": 1}')
+        self.assertEqual(self.get_json()[:2], (200, {"n": 1}))
+        time.sleep(3.2)   # 超過 CACHE_S
+        self.sleep_file.write_text("1")
+        self.out_file.write_text('{"n": 2}')
+        status, body, took = self.get_json()
+        self.assertEqual((status, body), (200, {"n": 1}), "有結果可回就回上一份，不等 collect")
+        self.assertLess(took, 0.5)
+        self.wait_lines(self.begun_log, 2)
+        for _ in range(5):
+            status, body, took = self.get_json()
+            self.assertEqual((status, body), (200, {"n": 1}))
+            self.assertLess(took, 0.5)
+        self.assertEqual(self.begun(), 2, "背景刷新同一時間只跑一支")
+        self.assertEqual(self.get_until_changed({"n": 1}), (200, {"n": 2}), "背景跑完後的 GET 拿到新結果")
+        self.assertEqual(self.begun(), 2)
+
+    def test_failed_background_collect_is_502_on_next_get(self):
+        status, ok_body, _ = self.get_json()
+        self.assertEqual(status, 200)
+        time.sleep(3.2)
+        self.rc_file.write_text("1")
+        self.assertEqual(self.get_json()[:2], (200, ok_body), "背景刷新開跑時先回上一份成功的結果")
+        status, body = self.get_until_changed(ok_body)
+        self.assertEqual(status, 502, "背景刷新失敗後不能再回之前那份成功的結果")
+        self.assertIn("error", body)
+        self.assertIn("collect: 假的失敗", body["stderr"])
+
+    def test_collect_output_that_is_not_utf8_is_502_and_does_not_wedge(self):
+        self.bad_bytes.write_text("")
+        status, body, _ = self.get_json()
+        self.assertEqual(status, 502, "collect 的輸出解不開也要回錯誤，不能讓 GET 卡住")
+        self.assertIn("壞掉的位元組", body["stderr"])
+        self.bad_bytes.unlink()
+        self.out_file.write_text('{"n": 1}')
+        self.assertEqual(self.req("/api/stop", {"slug": "x"}), 200)
+        self.assertEqual(self.get_json()[:2], (200, {"n": 1}), "之後的 collect 照常跑，動作後的 GET 不卡")
+
+    def test_no_requests_no_collect(self):
+        self.assertEqual(self.get_json()[0], 200)
+        time.sleep(10)
+        self.assertEqual(self.begun(), 1, "沒有請求時 server 不自己跑 collect")
+
+    def test_action_starts_a_collect_in_background(self):
+        self.assertEqual(self.get_json()[0], 200)
+        self.assertEqual(self.req("/api/stop", {"slug": "x"}), 200)
+        self.wait_lines(self.begun_log, 2)
+
+    def test_action_during_a_collect_starts_another_after_it(self):
+        self.sleep_file.write_text("1")
+        results = []
+        t = threading.Thread(target=self.get_into, args=(results,))
+        t.start()
+        self.wait_for(self.started)
+        self.assertEqual(self.req("/api/stop", {"slug": "x"}), 200)
+        t.join()
+        self.assertEqual(results, [200])
+        self.wait_lines(self.begun_log, 2)
+
+    def test_get_right_after_action_gets_post_action_result(self):
+        self.out_file.write_text('{"n": 1}')
+        self.assertEqual(self.get_json()[:2], (200, {"n": 1}))
+        self.out_file.write_text('{"n": 2}')
+        self.assertEqual(self.req("/api/stop", {"slug": "x"}), 200)
+        self.assertEqual(self.get_json()[:2], (200, {"n": 2}))
 
     def test_get_after_action_reruns_collect(self):
         self.assertEqual(self.req("/api/collect"), 200)
