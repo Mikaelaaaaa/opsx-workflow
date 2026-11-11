@@ -304,9 +304,27 @@ class ProgressLinesTest(unittest.TestCase):
         tui.draw(scr, rows, cur, FIVE, "", None, None)
         self.assertEqual(len(scr.reversed), 1, "游標在最後一張卡時反白列仍要畫出來：%s" % scr.lines)
 
-    def test_tiny_terminal_does_not_write_outside(self):
+    def test_cursor_row_shown_with_one_line_footer(self):
+        scr = DrawScr(h=9)
         rows = tm.rows(FIVE, done_open=False)
-        tui.draw(DrawScr(h=4), rows, tm.Cursor(rows), FIVE, "", None, None)
+        cur = tm.Cursor(rows)
+        cur.move(99)
+        tui.draw(scr, rows, cur, FIVE, "", None, tm.LineInput())
+        self.assertEqual(len(scr.reversed), 1, "輸入框開著（底列 1 行）時反白列要畫出來：%s" % scr.lines)
+
+    def test_cursor_row_shown_with_three_line_footer(self):
+        scr = DrawScr(h=12)
+        rows = tm.rows(FIVE, done_open=False)
+        cur = tm.Cursor(rows)
+        cur.move(99)
+        tui.draw(scr, rows, cur, FIVE, "x" * 300, None, None)
+        self.assertEqual(len(scr.reversed), 1, "底列折成 3 行時反白列要畫出來：%s" % scr.lines)
+
+    def test_tiny_terminal_does_not_write_outside(self):
+        scr = DrawScr(h=4)
+        rows = tm.rows(FIVE, done_open=False)
+        tui.draw(scr, rows, tm.Cursor(rows), FIVE, "", None, None)
+        self.assertEqual([t for _, t in scr.lines if "進度" in t or "另 2 個 repo" in t], [], "放不下卡片時不畫進度行")
 
 
 def typed(*keys):

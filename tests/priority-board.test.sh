@@ -118,8 +118,10 @@ const home = [
 assert.deepStrictEqual(progressSect(home, 'developing', '進行中').map(c => c.slug), ['run', 'in-session'], '收進 session 的卡篩選中要出現');
 assert.deepStrictEqual(progressSect(home, 'not_dispatched', '待指派').map(c => c.slug), ['ready']);
 assert.deepStrictEqual(progressSect(home, 'not_dispatched', '收件匣').map(c => c.slug), ['fresh'], '收件匣裡還沒派的卡要畫');
+assert.ok(html.includes("const cards=data.cards.filter(inScope)"), '篩選中範圍篩選照舊同時套用');
 assert.ok(html.includes("pc?{sessions:[],cards:progressSect(cards,pc,name)}:homeSect(cards,"), '首頁各區篩選中走 progressSect');
-assert.ok(html.includes("progressSect(cards,pc,'收件匣')"), '篩選中首頁多畫收件匣裡符合的卡');
+assert.ok(html.includes("const inb=pc?progressSect(cards,pc,'收件匣'):[]"), '篩選中取收件匣裡符合的卡');
+assert.ok(html.includes("h+=panel('收件匣',inb.length,"), '篩選中首頁畫出收件匣那一區');
 
 // 篩選標記接到 counter
 assert.ok(text(counterTail('mergeable')).includes('篩選：可合併 ×'), `有篩選時 counter 帶標記：${counterTail('mergeable')}`);
