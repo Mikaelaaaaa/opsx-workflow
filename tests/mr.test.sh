@@ -160,10 +160,19 @@ rmdir "$CACHE.lock"
 ENVBIN="$FX/env-glab"; mkdir -p "$ENVBIN"
 printf '#!/usr/bin/env bash\n[ "$1 $2" = "mr view" ] && echo "timeout=${OPSX_MR_TIMEOUT:-}" >> "%s/refresh-env"\nexec bash "%s/tests/fakes/glab" "$@"\n' "$FX" "$OPSX_ROOT" > "$ENVBIN/glab"; chmod +x "$ENVBIN/glab"
 stale_cache; rm -f "$FX/refresh-env"
-PATH="$ENVBIN:$PATH" OPSX_MR_CACHE_TTL=60 OPSX_MR_STALE_OK=1 mr_json "$C" >/dev/null
+# 呼叫端沒設 OPSX_MR_TIMEOUT：上限要是 mr.sh 自己帶的，不是從呼叫端繼承來的
+(unset OPSX_MR_TIMEOUT; PATH="$ENVBIN:$PATH" OPSX_MR_CACHE_TTL=60 OPSX_MR_STALE_OK=1 mr_json "$C" >/dev/null)
 wait_unlock "$CACHE.lock"
 t="$(sed -n 's/^timeout=//p' "$FX/refresh-env")"
-[ -n "$t" ] && [ "$t" -gt 0 ] && [ "$t" -lt 120 ] || fail "背景重抓的 OPSX_MR_TIMEOUT 要介於 0 和 120 秒之間，實際是「$t」"
+[ -n "$t" ] && [ "$t" -gt 0 ] && [ "$t" -lt 120 ] || fail "背景重抓的 OPSX_MR_TIMEOUT 要介於 0 和 120 秒之間，實際是「${t}」"
+# 帶著鎖的 --refresh 碰上掛住的 forge：時限內殺掉、放掉鎖、快取不動
+stale_cache; mkdir "$CACHE.lock"
+t0="$(date +%s)"
+OPSX_TEST_GLAB_SLEEP=30 OPSX_MR_TIMEOUT=1 OPSX_MR_CACHE_TTL=60 opsx mr "$C" --refresh "$CACHE.lock" || fail "逾時的 --refresh 要退出 0"
+elapsed=$(( $(date +%s) - t0 ))
+[ "$elapsed" -lt 5 ] || fail "掛住的 forge 要在時限內被殺，花了 ${elapsed} 秒"
+assert_no_file "$CACHE.lock"
+assert_eq "$(cat "$CACHE")" "$OLD" "逾時抓不到時保留舊快取"
 printf '%s' "$GREEN" > "$OPSX_TEST_GLAB_JSON"
 
 # --- forge 查詢的時間上限：OPSX_MR_TIMEOUT 沒設就不限時，設了逾時要殺掉、錯誤文字說逾時 ---
