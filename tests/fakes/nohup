@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# 假 nohup：agent 沙盒的 pane 裡真 nohup 一律印這行並失敗。macOS 的 nohup 會呼叫 launchd 的 __vprocmgr_detach_from_console
+# （nm -u /usr/bin/nohup 看得到），沙盒擋這個 IPC；跟 tty、stdin 都無關，所以重導 stdin 救不了。
+# 測試裡每個 nohup 都這樣，所以只要有呼叫點用了 nohup，走到它的測試就紅。
+echo "nohup: can't detach from console" >&2
+exit 1

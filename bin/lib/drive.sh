@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# opsx drive <slug> --repo <top>：「開到可合併」的迴圈。dispatch 用 nohup 跑它，pid 記在 dispatch.json。
+# opsx drive <slug> --repo <top>：「開到可合併」的迴圈。dispatch 在背景跑它，pid 記在 dispatch.json。
 # 每一輪：看卡的狀態（跟 hook 同一張表）→ 該丟哪句就丟哪句 `herdr agent prompt … --wait` → 等 settled。
 # 有開著的 gate → `herdr agent wait --until working` 阻塞到人在板上回；絕不定時 prompt 問「好了沒」。
 # MR 開了 → 查 glab 五條件；全綠就停（merge 永遠人）；沒綠就 /babysit 一次，然後 sleep 等 CI。

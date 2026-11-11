@@ -1178,6 +1178,18 @@ sleep 1
 assert_eq "$(cat "$FX/victim")" "keep me" "queue: drive log 不能附加到 symlink 的目標"
 assert_file "$QD/Agentory-AI-qc.tsv.failed"
 rm -f "$DL" "$QD/Agentory-AI-qc.tsv.failed"
+# drive 成功起來：dispatch.json 的 drive_pid 是被起的那支程序本身（假 opsx drive 把自己的 $$ 寫進檔），不是等它的子 shell
+mkdir -p "$FX/fake-root/bin"; ln -s "$OPSX_ROOT/hooks" "$FX/fake-root/hooks"; ln -s "$OPSX_ROOT/bin/lib" "$FX/fake-root/bin/lib"
+printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$$" > "%s/drive-self.pid"\nsleep 2\n' "$FX" > "$FX/fake-root/bin/opsx"
+printf '{"Agentory-AI/qc":{"mode":"autopilot","drive_pid":null}}\n' > "$OPSX_STATE_DIR/dispatch.json"
+printf 'drive\tqc\t%s\n' "$R" > "$QD/Agentory-AI-qc.tsv"
+out="$(CLAUDE_PLUGIN_ROOT="$FX/fake-root" post "opsx chain p")"
+n=0; until [ -s "$FX/drive-self.pid" ]; do n=$((n+1)); [ $n -lt 30 ] || fail "假 drive 沒在背景起來"; sleep 0.1; done
+assert_eq "$(jq -r '."Agentory-AI/qc".drive_pid' "$OPSX_STATE_DIR/dispatch.json")" "$(cat "$FX/drive-self.pid")" "queue: drive_pid 要是起出來的程序本身"
+# pane 關掉時 process group 收到 SIGHUP：背景起的 drive 要活著
+kill -HUP "$(cat "$FX/drive-self.pid")"; sleep 0.3
+kill -0 "$(cat "$FX/drive-self.pid")" 2>/dev/null || fail "queue: drive 收到 SIGHUP 死了"
+assert_no_file "$QD/Agentory-AI-qc.tsv.failed"
 
 # ---------- 當前卡：dispatch worktree 根優先，否則 branch 第二段 ----------
 K="$(mk_repo Cards)"

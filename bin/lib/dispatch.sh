@@ -285,7 +285,7 @@ PY
     local drivelog="$OPSX_STATE_DIR/drive-$repo-$slug.log"
     # shortcut: 檢查到開檔之間有空窗，沙盒內要在毫秒內換成 symlink 才打得中，且只能附加 drive 的輸出；要補就改成 O_NOFOLLOW 的 wrapper
     [ ! -L "$drivelog" ] || die "dispatch: refuse to write through symlink: ${drivelog}（卡已派出，drive 沒起）"
-    nohup bash "$OPSX_ROOT/bin/opsx" drive "$slug" --repo "$top" >> "$drivelog" 2>&1 &
+    ( trap '' HUP; exec bash "$OPSX_ROOT/bin/opsx" drive "$slug" --repo "$top" ) < /dev/null >> "$drivelog" 2>&1 &
     say "dispatch: drive 跑起來了（pid $!），log 在 $drivelog"
   fi
 }
