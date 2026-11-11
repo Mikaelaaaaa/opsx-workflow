@@ -130,11 +130,7 @@ def children(top: str, repo: str, parent: str, dispatch_path: str) -> list:
     if mine is None:
         split = split_into(top, parent)
         if split:
-            managed = {pr.get("name") for f in features if session_managed(f) for pr in f.get("prs") or []}
-            single = [s for s in split if s not in managed]
-            if not single:
-                return [("skip", "split_into（%s）都由 session 代管，交給 coordinate 開 session" % "、".join(split))]
-            return split_next(top, repo, prs, single, dispatch)
+            return split_next(top, repo, prs, split, dispatch)
         return [("skip", "workplan 裡沒有 %s" % parent)]
     session = me.get("feature")
     gated = {f.get("name") for f in features if session_managed(f)}
