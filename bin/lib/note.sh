@@ -16,22 +16,23 @@ note_append() { # <卡目錄> <已壓成一行的文字>：追加一條 `- <時�
 import os, re, sys
 sys.path.insert(0, os.path.join(os.environ["OPSX_ROOT"], "bin", "lib")); import safefile
 path, line = os.environ["OPSX_N_FILE"], os.environ["OPSX_N_LINE"]
-try:
-    lines = open(path, encoding="utf-8").read().splitlines()
-except FileNotFoundError:
-    lines = []
-head = next((i for i, l in enumerate(lines) if re.fullmatch(r"## 派工指示\s*", l)), None)
-if head is None:
-    while lines and not lines[-1].strip():
-        lines.pop()
-    lines += ([""] if lines else []) + ["## 派工指示", "", line]
-else:
-    end = next((i for i in range(head + 1, len(lines)) if lines[i].startswith("## ")), len(lines))
-    last = max([i for i in range(head + 1, end) if lines[i].strip()] or [head])
-    lines.insert(last + 1, line)
-    if last == head:
-        lines.insert(last + 1, "")
-safefile.write_atomic(path, "\n".join(lines) + "\n")
+with safefile.CardLock(os.path.dirname(path)):
+    try:
+        lines = open(path, encoding="utf-8").read().splitlines()
+    except FileNotFoundError:
+        lines = []
+    head = next((i for i, l in enumerate(lines) if re.fullmatch(r"## 派工指示\s*", l)), None)
+    if head is None:
+        while lines and not lines[-1].strip():
+            lines.pop()
+        lines += ([""] if lines else []) + ["## 派工指示", "", line]
+    else:
+        end = next((i for i in range(head + 1, len(lines)) if lines[i].startswith("## ")), len(lines))
+        last = max([i for i in range(head + 1, end) if lines[i].strip()] or [head])
+        lines.insert(last + 1, line)
+        if last == head:
+            lines.insert(last + 1, "")
+    safefile.write_atomic(path, "\n".join(lines) + "\n")
 PY
 }
 

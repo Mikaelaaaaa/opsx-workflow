@@ -14,7 +14,6 @@
 """
 from __future__ import annotations
 
-import fcntl
 import os
 import re
 import sys
@@ -32,20 +31,6 @@ DATE = re.compile(r"^\d{4}-\d{2}-\d{2}")
 
 class SectionNotFound(LookupError):
     pass
-
-
-class CardLock:
-    def __init__(self, card_dir: str):
-        self.card_dir = card_dir
-        self.fd = -1
-
-    def __enter__(self) -> "CardLock":
-        self.fd = os.open(self.card_dir, os.O_RDONLY)
-        fcntl.flock(self.fd, fcntl.LOCK_EX)
-        return self
-
-    def __exit__(self, *exc) -> None:
-        os.close(self.fd)
 
 
 def merged_ids(text: str) -> set:
@@ -79,7 +64,7 @@ def section(mid: str, when: str, source: str, kind: str, evidence: str, area: st
 
 def append(card_dir: str, base: str, when: str, source: str, kind: str, evidence: str, area: str, text: str) -> str:
     inbox = os.path.join(card_dir, "inbox.md")
-    with CardLock(card_dir):
+    with safefile.CardLock(card_dir):
         with open(inbox, encoding="utf-8") as f:
             cur = f.read()
         mid = free_id(base, merged_ids(cur))
@@ -130,6 +115,21 @@ def parse(block: list) -> dict:
     return out
 
 
+def sections(text: str) -> list:
+    """每段 `## 併入：` 依檔案順序回 (標題行, parse 的結果或它丟的 ValueError)；看板列項目、報格式錯誤用。"""
+    lines = [x.rstrip("\n") for x in text.splitlines(keepends=True)]
+    heads = [i for i, x in enumerate(lines) if HEAD.match(x)] + [len(lines)]
+    out = []
+    for a, b in zip(heads, heads[1:]):
+        if not MERGED.match(lines[a]):
+            continue
+        try:
+            out.append((lines[a], parse(lines[a:b])))
+        except ValueError as e:
+            out.append((lines[a], e))
+    return out
+
+
 def card_body(fields: dict) -> str:
     lines = ["---", "type: 功能", "source: " + fields["source"], "found: " + fields["when"][:10], "related:", "kind_of_work: " + fields["kind_of_work"]]
     if "evidence" in fields:
@@ -139,7 +139,7 @@ def card_body(fields: dict) -> str:
 
 
 def card(card_dir: str, mid: str) -> str:
-    with CardLock(card_dir):
+    with safefile.CardLock(card_dir):
         with open(os.path.join(card_dir, "inbox.md"), encoding="utf-8") as f:
             cur = f.read()
     start, end = find(cur, mid)
@@ -148,7 +148,7 @@ def card(card_dir: str, mid: str) -> str:
 
 def remove(card_dir: str, mid: str) -> None:
     inbox = os.path.join(card_dir, "inbox.md")
-    with CardLock(card_dir):
+    with safefile.CardLock(card_dir):
         with open(inbox, encoding="utf-8") as f:
             cur = f.read()
         start, end = find(cur, mid)

@@ -4,6 +4,7 @@
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 R="$(mk_repo demo)"          # 真 git 建好 fixture 之後才換成 fake git
 mkdir -p "$R/openspec/changes"
+REAL_GIT="$(command -v git)"
 use_fakes opsx git openspec gh herdr
 export OPSX_FAKE_LOG="$FX/fake.log" OPSX_TEST_COLLECT_JSON="$FX/collect.json"
 LOG="$OPSX_STATE_DIR/coordinator.log"; MEMO="$OPSX_STATE_DIR/coordinator-memo.json"; DISP="$OPSX_STATE_DIR/dispatch.json"
@@ -201,6 +202,7 @@ want="git -C $R rev-parse --abbrev-ref HEAD
 git -C $R status --porcelain
 git -C $R pull -q --ff-only
 openspec archive g -y
+git -C $R rev-list --count refs/heads/feat/g/m --not def --remotes
 git -C $R worktree remove $R/.claude/worktrees/g-wt
 git -C $R branch -D feat/g/m
 git -C $R worktree prune"
@@ -224,6 +226,25 @@ cp "$WP0" "$R/openspec/workplan.yaml"
 OPSX_TEST_GIT_FAIL=remove round || fail "rc: $(cat "$FX/out")"
 assert_eq "$(count 'branch -D')" 0 "worktree 刪不掉不刪分支"
 grep '??' "$LOG" | grep -q g || fail "要記 ??：$(cat "$LOG")"
+cp "$WP0" "$R/openspec/workplan.yaml"
+
+# --- 收尾：分支上有只在本機的 commit，不刪分支與 worktree，卡照常歸檔 ---
+OPSX_TEST_GIT_UNPUSHED=1 round || fail "rc: $(cat "$FX/out")"
+assert_grep '^openspec archive g -y$' "$OPSX_FAKE_LOG"
+assert_eq "$(grep -cE '^git .*(worktree remove|branch -D)' "$OPSX_FAKE_LOG")" 0 "有未推的 commit 不刪：$(cat "$OPSX_FAKE_LOG")"
+grep '??' "$LOG" | grep g | grep -q 'feat/g/m' || fail "要記 ?? 含分支名：$(cat "$LOG")"
+cp "$WP0" "$R/openspec/workplan.yaml"
+
+# --- 收尾：查不出有沒有未推的 commit，當成有，不刪，log 帶 stderr ---
+OPSX_TEST_GIT_FAIL=--count round || fail "rc: $(cat "$FX/out")"
+assert_eq "$(grep -cE '^git .*(worktree remove|branch -D)' "$OPSX_FAKE_LOG")" 0 "查不出來不刪：$(cat "$OPSX_FAKE_LOG")"
+grep '??' "$LOG" | grep -q 'fake 失敗' || fail "log 要帶 git 的 stderr：$(cat "$LOG")"
+cp "$WP0" "$R/openspec/workplan.yaml"
+
+# --- 收尾：rev-list 的輸出不是整數，也當成查不出來，不刪 ---
+OPSX_TEST_GIT_UNPUSHED=garbage round || fail "rc: $(cat "$FX/out")"
+assert_eq "$(grep -cE '^git .*(worktree remove|branch -D)' "$OPSX_FAKE_LOG")" 0 "輸出不是整數不刪：$(cat "$OPSX_FAKE_LOG")"
+grep '??' "$LOG" | grep -q 'garbage' || fail "log 要帶那段輸出：$(cat "$LOG")"
 cp "$WP0" "$R/openspec/workplan.yaml"
 
 # --- 收尾：合併後分支又多了 commit，不收尾、通知一次；gate 答過（acked）才收尾 ---
@@ -1625,6 +1646,16 @@ assert_eq "$(jq -r '."demo/@g" | type' "$DISP")" object "git 出錯 session 條�
 grep '??' "$LOG" | grep -q 'feat/m3/u' || fail "要記 ?? 含分支名：$(cat "$LOG")"
 cards "[$(merged m4 2026-11-07T12:30:00Z "$GM" '"idle"')]"
 
+# 成員分支上有只在本機的 commit：只跳過那個分支，記 ??，其他成員照處理，session 條目照拿掉（留著會被 dispatch_features 當成人停的，剩下的 PR 不再開 session）
+wake_wp merged; close_disp
+OPSX_TEST_GIT_UNPUSHED=1 round || fail "rc: $(cat "$FX/out")"
+assert_eq "$(count 'branch -D')" 0 "有未推的 commit 不刪：$(cat "$OPSX_FAKE_LOG")"
+assert_grep "^git -C $R rev-list --count refs/heads/feat/m3/u --not --remotes\$" "$OPSX_FAKE_LOG"
+assert_grep "^git -C $R rev-list --count refs/heads/feat/m4/u --not --remotes\$" "$OPSX_FAKE_LOG"
+assert_eq "$(jq -r '."demo/@g"' "$DISP")" null "有未推的 commit 也拿掉 session 條目：$(cat "$LOG")"
+grep '??' "$LOG" | grep -q 'feat/m3/u' || fail "要記 ?? 含分支名：$(cat "$LOG")"
+grep '??' "$LOG" | grep -q 'feat/m4/u' || fail "每個未推的分支都要記 ??：$(cat "$LOG")"
+
 # worktree 移不掉時留給人
 wake_wp merged; close_disp
 OPSX_TEST_GIT_FAIL=remove round || fail "rc: $(cat "$FX/out")"
@@ -1684,4 +1715,64 @@ opsx dispatch --feature g --agent claude --mode autopilot --repo $R" "人停 m4 
 assert_eq "$(jq -r '."demo/m4".mode' "$DISP")" stopped "人停的 m4 仍是 stopped"
 rm -f "$MEMO"
 cp "$WP0" "$R/openspec/workplan.yaml"; printf '{}' > "$DISP"
+
+# --- 分支被別的 worktree 佔著（held-branch-guard/worktree-held-check）---
+export OPSX_TEST_REAL_GIT="$REAL_GIT"
+cat >> "$R/openspec/workplan.yaml" <<'EOF'
+  - name: demo-m
+    prs:
+      - name: m
+        branch: feat/m/u
+        status: pending
+        depends-on: []
+        changes:
+          - name: m
+            status: pending
+  - name: demo-n
+    prs:
+      - name: n
+        branch: feat/n/u
+        status: pending
+        depends-on: []
+        changes:
+          - name: n
+            status: pending
+EOF
+mkcard m n
+"$REAL_GIT" -C "$R" worktree add -q "$R/.claude/worktrees/c" -b feat/m/u
+"$REAL_GIT" -C "$R" branch -q feat/n/u
+# 被活的 pane 佔著：不派、不記 ??；沒被佔的 n 照派；這輪 git worktree list 只跑一次
+printf '{"demo/c":{"mode":"autopilot","agent":"claude","pane":"w1:pc","drive_pid":null,"worktree":"%s"}}' "$R/.claude/worktrees/c" > "$DISP"
+rm -f "$MEMO"
+cards '[{"slug":"m"},{"slug":"n"}]'
+round || fail "rc: $(cat "$FX/out")"
+assert_eq "$(count '^opsx dispatch m ')" 0 "分支被活的 pane 佔著不派：$(cat "$OPSX_FAKE_LOG")"
+assert_grep "^opsx dispatch n " "$OPSX_FAKE_LOG"
+grep -- ' -- ' "$LOG" | grep 'demo/m' | grep -q '\.claude/worktrees/c' || fail "log 要有含 m 與佔著的 worktree 的 -- 行：$(cat "$LOG")"
+grep 'demo/m' "$LOG" | grep -q '??' && fail "被活的 pane 佔著不記 ??：$(cat "$LOG")"
+assert_eq "$(count 'worktree list')" 1 "每個 repo 每輪只跑一次 git worktree list：$(cat "$OPSX_FAKE_LOG")"
+assert_eq "$(notes)" 0 "被活的 pane 佔著不通知"
+# 佔著的 pane 停了：兩輪都不派，通知只送一次，第二輪只記 --
+printf '{"demo/c":{"mode":"stopped","agent":"claude","pane":"w1:pc","drive_pid":null,"worktree":"%s"}}' "$R/.claude/worktrees/c" > "$DISP"
+cards '[{"slug":"m"}]'
+round || fail "rc: $(cat "$FX/out")"
+assert_eq "$(count '^opsx dispatch')" 0 "沒有活的 pane 也不派：$(cat "$OPSX_FAKE_LOG")"
+assert_eq "$(notes)" 1 "沒有活的 pane 通知一次：$(cat "$OPSX_FAKE_LOG")"
+grep '^notification show \[demo/m\]' "$OPSX_FAKE_LOG" | grep -q '\.claude/worktrees/c' || fail "通知要寫出佔著的 worktree：$(cat "$OPSX_FAKE_LOG")"
+round || fail "rc: $(cat "$FX/out")"
+assert_eq "$(count '^opsx dispatch')" 0 "第二輪也不派"
+assert_eq "$(notes)" 0 "第二輪不重送"
+assert_eq "$(grep 'demo/m' "$LOG" | grep -vc ' -- ')" 0 "第二輪只記 --：$(cat "$LOG")"
+grep 'demo/m' "$LOG" | grep -q ' -- ' || fail "第二輪要記 --：$(cat "$LOG")"
+# 卡自己的 worktree 不算被佔：parked、已答過的 m，分支在 .claude/worktrees/m 照樣重派
+"$REAL_GIT" -C "$R" worktree remove "$R/.claude/worktrees/c"
+"$REAL_GIT" -C "$R" worktree add -q "$R/.claude/worktrees/m" feat/m/u
+printf '{"demo/m":{"mode":"stopped","agent":"claude","pane":"w1:pm","drive_pid":null,"worktree":"%s"}}' "$R/.claude/worktrees/m" > "$DISP"
+printf '{"_parked":{"demo/m":{"at":"2026-11-10T10:00:00+08:00","gate":"g9","merged":[],"answered":true}}}' > "$MEMO"
+cards '[{"slug":"m","section":"待指派"}]'
+round || fail "rc: $(cat "$FX/out")"
+assert_grep "^opsx dispatch m " "$OPSX_FAKE_LOG"
+"$REAL_GIT" -C "$R" worktree remove "$R/.claude/worktrees/m"
+unset OPSX_TEST_REAL_GIT
+rm -f "$MEMO"; cp "$WP0" "$R/openspec/workplan.yaml"; printf '{}' > "$DISP"
 echo "coordinate: ok"

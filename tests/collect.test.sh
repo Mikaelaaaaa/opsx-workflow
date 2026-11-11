@@ -288,6 +288,25 @@ NE="$(printf '%s' "$J" | python3 -I -c 'import json,sys;print(json.dumps([e for 
 assert_eq "$(printf '%s' "$NE" | python3 -I -c 'import json,sys;print(len(json.load(sys.stdin)))')" 1 "壞行一筆 error：$(q "$J" errors)"
 printf '%s' "$NE" | grep -q 'n3.*隨手寫的一行' || fail "error 要有 slug 與那一行：$NE"
 case "$(q "$J" errors)" in *n1*|*n2*|*n4*) fail "好卡不該進 errors：$(q "$J" errors)" ;; esac
+# ---------- 併入項目（specs/board-collect「併入項目」） ----------
+RM="$FX/code-merged"; mkdir -p "$RM/rm/.git" "$RM/rm/openspec/changes/archive"
+mkmerged() { # <changes 底下的路徑> <inbox 內容>
+  local d="$RM/rm/openspec/changes/$1"; mkdir -p "$d"
+  printf 'schema: opsx\ncreated: 2026-11-05\nkind: dev\n' > "$d/.openspec.yaml"; printf '%s' "$2" > "$d/inbox.md"
+}
+mkmerged x $'## 一句話\n\n收了兩項\n\n## 證據\n\n- e\n\n## 併入：2026-11-11T10:40:00+08:00 agent:foo\n\n- id: agent-20261111-1040\n- kind_of_work: planned\n- area: hooks\n\nhook 漏擋\n\n## 併入：2026-11-11T11:00:00+08:00 me\n\n- id: me-20261111-1100\n- kind_of_work: unplanned\n- evidence: tests/x.sh\n- area: hooks\n\n第二項\n'
+mkmerged y $'## 一句話\n\n沒有併入\n'
+mkmerged z $'## 一句話\n\n手動搬入\n\n## 併入：me-20261110-1614（全文）\n\n隨手貼的一段\n'
+mkmerged archive/2026-11-01-old $'## 一句話\n\n歸檔的\n\n## 併入：me-20261101-0900（全文）\n\n隨手貼的一段\n'
+J="$(opsx collect --root "$RM")"; assert_eq "$?" 0 "merged collect rc: $J"
+assert_eq "$(q "$(card "$J" rm x)" merged)" '[{"area": "hooks", "id": "agent-20261111-1040", "kind_of_work": "planned", "source": "agent:foo", "text": "hook 漏擋", "when": "2026-11-11T10:40:00+08:00"}, {"area": "hooks", "evidence": "tests/x.sh", "id": "me-20261111-1100", "kind_of_work": "unplanned", "source": "me", "text": "第二項", "when": "2026-11-11T11:00:00+08:00"}]'
+assert_eq "$(q "$(card "$J" rm y)" merged)" '[]'
+assert_eq "$(q "$(card "$J" rm z)" merged)" '[]'
+assert_eq "$(q "$(card "$J" rm old)" merged)" '[]' "歸檔的卡 merged 是空的"
+ME="$(printf '%s' "$J" | python3 -I -c 'import json,sys;print(json.dumps([e for e in json.load(sys.stdin)["errors"] if e["source"].endswith("/z/inbox.md")],ensure_ascii=False))')"
+assert_eq "$(printf '%s' "$ME" | python3 -I -c 'import json,sys;print(len(json.load(sys.stdin)))')" 1 "壞併入段一筆 error：$(q "$J" errors)"
+printf '%s' "$ME" | grep -q 'z.*## 併入：me-20261110-1614（全文）' || fail "error 要有 slug 與標題行：$ME"
+case "$(q "$J" errors)" in *old*|*/x/inbox.md*|*/y/inbox.md*) fail "歸檔卡與好卡不該進 errors：$(q "$J" errors)" ;; esac
 
 # ---------- generated_at 在讀任何來源之前取：卡片迴圈裡的 glab 慢 4 秒也不會往後（banner-same-second） ----------
 # 慢的是迴圈裡的 mr_json：它比 herdr 早讀，取時點放在迴圈之後的實作會被抓到

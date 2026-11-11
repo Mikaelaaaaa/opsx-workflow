@@ -132,6 +132,8 @@ PY
   # worktree：一卡一棵
   local wt="$top/.claude/worktrees/$slug"
   if [ ! -d "$wt" ]; then
+    local used; used="$(git -C "$top" worktree list --porcelain | awk -v b="branch refs/heads/$branch" '/^worktree /{w=substr($0, 10)} $0 == b {print w}')"
+    [ -z "$used" ] || die "dispatch: 分支 $branch 已經 checkout 在 ${used}$(held_by "$used")，不另開 worktree。那張卡在做就不用派；沒人在做就先收掉那棵 worktree"
     ensure_dir "$top/.claude/worktrees"
     if git -C "$top" show-ref --verify --quiet "refs/heads/$branch"; then git -C "$top" worktree add -q "$wt" "$branch"
     else
@@ -200,38 +202,9 @@ PY
     # 卡的檔在主 repo 的 openspec/，不在 worktree；沒有這兩個，規則叫它寫的 gates.md / status.json 寫不進
     aargs+=(--add-dir "$top/openspec" --add-dir "$OPSX_STATE_DIR")
   fi
-  # 剛開的 pane 的 shell 還沒到 prompt 時 herdr 回 agent_pane_busy，同一個 pane 最多試六次；起不來就收掉剛開的 tab，不留空 tab 給人收
-  local out try=1 screen
-  until out="$(herdr agent start "$slug" --kind "$agent" --pane "$pane" -- "${aargs[@]}" 2>&1)"; do
-    case "$out" in
-      *agent_pane_busy*)
-        if [ "$try" -lt 6 ]; then try=$((try + 1)); sleep "${OPSX_DISPATCH_RETRY_SLEEP:-1}"; continue; fi
-        # pane 已壞時 pane read 會失敗，當成沒輸出，不讓診斷擋住錯誤回報
-        screen="$(herdr pane read "$pane" 2>/dev/null | tail -20)" || screen=""
-        [ -n "${screen//[[:space:]]/}" ] || screen="pane 沒有任何輸出"
-        # 間隔可以是小數（sleep 吃 0.5），shell 算術只吃整數
-        out="${out}
-新 pane 的 shell 超過 $(awk -v n="$((try - 1))" -v s="${OPSX_DISPATCH_RETRY_SLEEP:-1}" 'BEGIN { print n * s }') 秒沒有出現提示字元，可能是 shell 啟動卡住。常見原因：pyenv 鎖檔 ~/.pyenv/shims/.pyenv-shim 殘留（opsx init --check 會檢查）
-pane 畫面：
-${screen}" ;;
-      *agent_name_taken*)
-        # dispatch.json 沒記著（手動開的、或 stop 時 pane 沒關成）但 herdr 還有同名 agent：指出它在哪
-        out="herdr 已經有叫 ${slug} 的 agent，dispatch.json 沒記：$(printf '%s' "$out" | grep -oE '(workspace_id|tab_id|pane_id|status)=[^ "]*' | tr '\n' ' ')。關掉那個 pane 再派" ;;
-      *agent_not_ready*)
-        # Claude Code 在沒信任過的目錄（每棵新 worktree）先問 trust，herdr 判成 blocked；名字已記下，按 Yes 等到 idle 就等於 start 成功
-        if herdr pane wait-output --match "trust this folder" --timeout 3000 "$pane" >/dev/null 2>&1; then
-          herdr pane send-keys "$pane" down enter >/dev/null
-          if herdr agent wait "$slug" --until idle --timeout 60000 >/dev/null 2>&1; then break; fi
-          out="trust 按了但 agent 沒到 idle"
-        else
-          out="${out}
-pane 畫面：
-$(herdr pane read "$pane" 2>/dev/null | tail -20)"
-        fi ;;
-    esac
-    herdr tab close "$tab" >/dev/null 2>&1 || true
-    die "dispatch: herdr agent start 失敗（第 ${try} 次）：${out}"
-  done
+  # 名字被占用：dispatch.json 沒記著（手動開的、或 stop 時 pane 沒關成）但 herdr 還有同名 agent，指出它在哪
+  herdr_start_agent dispatch "$slug" "$agent" "$pane" "$tab" "${aargs[@]}" \
+    || die "dispatch: herdr agent start 失敗：herdr 已經有叫 ${slug} 的 agent，dispatch.json 沒記：${HERDR_TAKEN_AT}。關掉那個 pane 再派"
 
   # dispatch.json
   # 一般卡一筆。feature session 另有自己的條目 <repo>/@<feature>（pane 層的欄位），每個能開工的主 change 再各一筆：
@@ -326,6 +299,17 @@ PY
 }
 
 workplan_branch() { wp_pr_field "$1" "$2" branch; } # <top> <slug>：印 workplan 裡這張卡所屬 PR 的 branch，沒有就空
+held_by() { # <worktree>：印 dispatch.json 裡 worktree 指向它的條目（「（key · pane …）」），沒有就空。兩邊路徑先 realpath 再比
+  [ -f "$OPSX_STATE_DIR/dispatch.json" ] || return 0
+  OPSX_WT="$1" OPSX_LIB="$OPSX_ROOT/bin/lib" "$OPSX_PY" -I - "$OPSX_STATE_DIR/dispatch.json" <<'PY'
+import os, sys
+sys.path.insert(0, os.environ["OPSX_LIB"]); import jsonfile
+wt = os.path.realpath(os.environ["OPSX_WT"])
+hits = ["%s · pane %s" % (k, v.get("pane")) for k, v in jsonfile.load(sys.argv[1]).items() if v.get("worktree") and os.path.realpath(v["worktree"]) == wt]
+if hits:
+    print("（%s）" % "；".join(hits))
+PY
+}
 workspace_for() { # <repo>：印 workspaces.toml 記的 label（或 id），沒有就空
   [ -f "$OPSX_STATE_DIR/workspaces.toml" ] || return 0
   OPSX_REPO="$1" "$OPSX_PY" -I - "$OPSX_STATE_DIR/workspaces.toml" <<'PY'
@@ -349,7 +333,7 @@ allow=["Read","Edit","Write","Glob","Grep","Bash(git status:*)","Bash(git diff:*
        "Bash(pnpm test:*)","Bash(pnpm vitest:*)","Bash(pnpm build:*)","Bash(pnpm lint:*)","Bash(pnpm typecheck:*)","Bash(npx vitest:*)","Bash(pytest:*)","Bash(uv run:*)","Bash(ruff:*)","Bash(go test:*)",
        "Bash(openspec:*)","Bash(opsx:*)","Bash(ls:*)","Bash(cat:*)","Bash(grep:*)","Bash(rg:*)","Bash(find:*)","Bash(node:*)","Bash(python3:*)",
        "Bash(jq:*)","Bash(head:*)","Bash(tail:*)","Bash(wc:*)","Bash(sed -n:*)","Bash(diff:*)","Bash(sort:*)","Bash(bash tests/:*)","Bash(herdr agent:*)","Bash(herdr pane read:*)",
-       "Bash(git show:*)","Bash(git branch:*)","Bash(git rev-parse:*)","Bash(git fetch:*)","Bash(git merge-base:*)","Bash(git remote:*)","Bash(mkdir:*)",
+       "Bash(git show:*)","Bash(git branch:*)","Bash(git rev-parse:*)","Bash(git fetch:*)","Bash(git merge-base:*)","Bash(git merge:*)","Bash(git remote:*)","Bash(mkdir:*)",
        "Bash(glab mr view:*)","Bash(glab mr list:*)","Bash(glab mr diff:*)","Bash(glab ci:*)","Bash(gh pr view:*)","Bash(gh pr checks:*)","Bash(gh pr list:*)"]
 # merge 不在 deny：settings 的 deny 蓋得過 hook 的放行，所以 merge 交給 opsx-grant-gate.sh 的 merge_gate 單獨把關；
 # 放進 allow 是為了閘門放行那一次不再跳 Claude Code 自己的權限框。

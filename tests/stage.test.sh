@@ -174,4 +174,168 @@ assert_bytes 'feat/archive-pr/mikaela\n' wp_pr_field "$R" archive-child branch
 assert_bytes 'merged\n' wp_pr_field "$R" archive-pr status
 assert_bytes 'in-progress\n' wp_pr_field "$R" x status
 assert_bytes '' wp_pr_field "$R" nope branch
+# 序列不縮排（PyYAML `sort_keys=False` 的輸出，`name` 是每個項目的第一個 key；`prs:` 與 `- name:` 同縮排，`changes:` 亦同）
+FLAT="$FX/flat"; mkdir -p "$FLAT/openspec"
+cat > "$FLAT/openspec/workplan.yaml" <<'EOF'
+features:
+- name: f
+  prs:
+  - name: p1
+    branch: feat/p1/u
+    status: merged
+    depends-on: []
+    changes:
+    - name: c1
+      status: done
+      depends-on: []
+  - name: p2
+    branch: feat/p2/u
+    status: pending
+    depends-on:
+    - p1
+    changes:
+    - name: c2
+      status: pending
+      depends-on: []
+EOF
+assert_bytes 'feat/p1/u\n' wp_pr_field "$FLAT" p1 branch
+assert_bytes 'merged\n' wp_pr_field "$FLAT" c1 status
+assert_bytes 'feat/p2/u\n' wp_pr_field "$FLAT" p2 branch
+assert_bytes 'pending\n' wp_pr_field "$FLAT" c2 status
+assert_bytes 'feat/p1/u\n' wp_pr_field "$FLAT" c1 branch
+assert_bytes '' wp_pr_field "$FLAT" nope branch
+# change 底下有更深的 `- name:` 清單，後面還有 change 與 PR；空 `changes: []`；第二個 feature（兩種縮排）
+DEEP="$FX/deep"; mkdir -p "$DEEP/openspec"
+cat > "$DEEP/openspec/workplan.yaml" <<'EOF'
+features:
+  - name: f
+    prs:
+      - name: p1
+        branch: b1
+        status: merged
+        changes:
+          - name: c1
+            status: done
+            steps:
+              - name: s
+          - name: c2
+            status: done
+      - name: p2
+        branch: b2
+        status: pending
+        changes: []
+      - name: p3
+        branch: b3
+        status: done
+  - name: g
+    prs:
+      - name: p4
+        branch: b4
+        status: pending
+EOF
+assert_bytes 'b1\n' wp_pr_field "$DEEP" c2 branch
+assert_bytes 'merged\n' wp_pr_field "$DEEP" c2 status
+assert_bytes 'b2\n' wp_pr_field "$DEEP" p2 branch
+assert_bytes 'done\n' wp_pr_field "$DEEP" p3 status
+assert_bytes 'b4\n' wp_pr_field "$DEEP" p4 branch
+DEEPF="$FX/deepflat"; mkdir -p "$DEEPF/openspec"
+cat > "$DEEPF/openspec/workplan.yaml" <<'EOF'
+features:
+- name: f
+  prs:
+  - name: p1
+    branch: b1
+    status: merged
+    changes:
+    - name: c1
+      status: done
+      steps:
+      - name: s
+    - name: c2
+      status: done
+  - name: p2
+    branch: b2
+    status: pending
+    changes: []
+  - name: p3
+    branch: b3
+    status: done
+- name: g
+  prs:
+  - name: p4
+    branch: b4
+    status: pending
+EOF
+assert_bytes 'b1\n' wp_pr_field "$DEEPF" c2 branch
+assert_bytes 'merged\n' wp_pr_field "$DEEPF" c2 status
+assert_bytes 'b2\n' wp_pr_field "$DEEPF" p2 branch
+assert_bytes 'done\n' wp_pr_field "$DEEPF" p3 status
+assert_bytes 'b4\n' wp_pr_field "$DEEPF" p4 branch
+# YAML 的 null 與 ~ 是空值，引號包住的 "null" 與 nullable 是字串；PR 底下的 `- name:` 清單（reviewers）不離開 PR 層；
+# feature 層在 `prs:` 之後的清單（follow-ups）不是 PR（兩種縮排）
+SIB="$FX/sib"; mkdir -p "$SIB/openspec"
+cat > "$SIB/openspec/workplan.yaml" <<'EOF'
+features:
+  - name: f
+    prs:
+      - name: p1
+        branch: null
+        status: ~
+      - name: p2
+        branch: nullable
+        status: pending
+      - name: p3
+        reviewers:
+          - name: alice
+        branch: b3
+        status: merged
+      - name: p5
+        branch: "null"
+    follow-ups:
+      - name: fu1
+        status: merged
+        branch: bfu
+  - name: g
+    prs:
+      - name: p4
+        branch: b4
+EOF
+SIBF="$FX/sibflat"; mkdir -p "$SIBF/openspec"
+cat > "$SIBF/openspec/workplan.yaml" <<'EOF'
+features:
+- name: f
+  prs:
+  - name: p1
+    branch: null
+    status: ~
+  - name: p2
+    branch: nullable
+    status: pending
+  - name: p3
+    reviewers:
+    - name: alice
+    branch: b3
+    status: merged
+  - name: p5
+    branch: "null"
+  follow-ups:
+  - name: fu1
+    status: merged
+    branch: bfu
+- name: g
+  prs:
+  - name: p4
+    branch: b4
+EOF
+for W in "$SIB" "$SIBF"; do
+  assert_bytes '\n' wp_pr_field "$W" p1 branch
+  assert_bytes '\n' wp_pr_field "$W" p1 status
+  assert_bytes 'nullable\n' wp_pr_field "$W" p2 branch
+  assert_bytes 'b3\n' wp_pr_field "$W" p3 branch
+  assert_bytes 'merged\n' wp_pr_field "$W" p3 status
+  assert_bytes 'null\n' wp_pr_field "$W" p5 branch
+  assert_bytes '' wp_pr_field "$W" fu1 status
+  assert_bytes '' wp_pr_field "$W" fu1 branch
+  assert_bytes 'b4\n' wp_pr_field "$W" p4 branch
+done
 echo "ok stage"

@@ -163,6 +163,14 @@ case "$stage" in
 esac
 
 state="$OPSX_STATE_DIR/stop-chain/$(repo_name)-$slug"
+
+# 啟動參數丟了：這個 claude 寫不了檔，逼它接站只會空轉到開「卡在接」gate。只有判出遺失才放行，認不得照舊擋
+lost_rc=0; lost_why="$(args_lost_status "$(repo_name)" "$slug" "$(card_mode "$(repo_name)" "$slug" 2>/dev/null || true)")" || lost_rc=$?
+case "$lost_rc" in
+  1) rm -f "$state"; say_once "[$slug] 停住：參數遺失，跑 opsx relaunch $slug"; exit 0 ;;
+  2) say_once "[$slug] 無法判斷啟動參數：$lost_why" ;;
+esac
+
 out="$(stop_reason "$d" "$slug" "$stage")"
 if [ -z "$out" ]; then
   rm -f "$state"

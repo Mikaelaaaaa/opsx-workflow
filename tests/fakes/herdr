@@ -12,7 +12,9 @@ case "$1 $2" in
   # 真格式見 herdr-samples/workspace-create.json（2026-11-06 實跑）：result.workspace.workspace_id；這裡只回用到的欄位
   "workspace create") echo '{"id":"cli:workspace:create","result":{"workspace":{"workspace_id":"w9","label":"'"${4:-}"'"},"type":"workspace_created"}}' ;;
   "workspace list") cat "$(dirname "${BASH_SOURCE[0]}")/herdr-samples/workspace-list.json" ;;
-  "tab create") cat "$(dirname "${BASH_SOURCE[0]}")/herdr-samples/tab-create.json" ;;   # 真格式：result.root_pane.pane_id / result.tab.tab_id
+  # 真格式：result.root_pane.pane_id / result.tab.tab_id。OPSX_TEST_TAB_NO_TAB 設了就只回 root_pane
+  "tab create") if [ -n "${OPSX_TEST_TAB_NO_TAB:-}" ]; then echo '{"result":{"root_pane":{"pane_id":"w1:pE"},"type":"tab_created"}}'
+                else cat "$(dirname "${BASH_SOURCE[0]}")/herdr-samples/tab-create.json"; fi ;;
   # OPSX_TEST_BUSY_LEFT 指到一個計數檔：>0 時回 herdr 的 agent_pane_busy（真格式）並遞減，模擬 shell 還沒到 prompt
   "agent start")
     if [ -n "${OPSX_TEST_BUSY_LEFT:-}" ] && [ "$(cat "$OPSX_TEST_BUSY_LEFT")" -gt 0 ]; then
@@ -28,12 +30,26 @@ case "$1 $2" in
       rm -f "$OPSX_TEST_NOT_READY_ONCE"
       echo '{"error":{"code":"agent_not_ready","message":"agent '"$3"' is blocked during startup and is not ready for prompts"},"id":"cli:agent:start"}' >&2; exit 1
     fi
+    [ "$3" = opsx-coordinator ] && : > "$OPSX_FAKE_LOG.coordinator-up"
     echo '{"result":{"ok":true}}' ;;
+  # 格式沒在真 herdr 上存過樣本：只放 opsx lead 用到的三個欄位。OPSX_TEST_AGENT_GET_ERR 設了就回那個錯誤碼；
+  # OPSX_TEST_AGENT_GET_RAW 設了就原樣印它、成功結束（模擬讀不出位置的輸出）
+  "agent get")
+    [ -z "${OPSX_TEST_AGENT_GET_ERR:-}" ] || herdr_err "$OPSX_TEST_AGENT_GET_ERR" get
+    if [ -n "${OPSX_TEST_AGENT_GET_RAW:-}" ]; then printf '%s\n' "$OPSX_TEST_AGENT_GET_RAW"; exit 0; fi
+    if [ "$3" = opsx-coordinator ] && { [ -n "${OPSX_TEST_COORDINATOR_UP:-}" ] || [ -f "$OPSX_FAKE_LOG.coordinator-up" ]; }; then
+      echo '{"id":"cli:agent:get","result":{"agent":{"pane_id":"w3:p7","tab_id":"w3:t2","workspace_id":"w3","agent_status":"idle"}}}'; exit 0
+    fi
+    herdr_err agent_not_found get ;;
   "tab close") echo '{"id":"cli:tab:close","result":{"type":"ok"}}' ;;
   # pane 畫面用 OPSX_TEST_PANE_TEXT 當內容：wait-output 找得到 --match 的字就成功，否則 rc 1
   "pane wait-output") case "${OPSX_TEST_PANE_TEXT:-}" in *"$4"*) echo '{"result":{"matched":true}}' ;; *) echo '{"error":{"code":"timeout"}}' >&2; exit 1 ;; esac ;;
   # OPSX_TEST_PANE_READ_FAIL 設了就非 0 結束（模擬 pane 已死）
-  "pane read") [ -z "${OPSX_TEST_PANE_READ_FAIL:-}" ] || herdr_err pane_not_found read; printf '%s\n' "${OPSX_TEST_PANE_TEXT:-}" ;;
+  # OPSX_TEST_PANE_ONCE 指向的檔存在時，第一次讀回它的內容並刪掉，之後回 OPSX_TEST_PANE_TEXT
+  "pane read")
+    [ -z "${OPSX_TEST_PANE_READ_FAIL:-}" ] || herdr_err pane_not_found read
+    if [ -n "${OPSX_TEST_PANE_ONCE:-}" ] && [ -f "$OPSX_TEST_PANE_ONCE" ]; then cat "$OPSX_TEST_PANE_ONCE"; rm -f "$OPSX_TEST_PANE_ONCE"
+    else printf '%s\n' "${OPSX_TEST_PANE_TEXT:-}"; fi ;;
   "pane send-keys") echo '{"result":{"type":"ok"}}' ;;
   # 真格式（2026-11-06 在 pane 裡實跑存下來）：{"id":"cli:agent:list","result":{"agents":[{pane_id:"w1:p2",agent_status,…}],"type":"agent_list"}}
   "agent list")
@@ -45,10 +61,10 @@ case "$1 $2" in
   # OPSX_TEST_AGENT_READ 指到一個檔：當畫面內容（coordinate 偵測用量上限用）
   "agent read") cat "${OPSX_TEST_AGENT_READ:-$(dirname "${BASH_SOURCE[0]}")/herdr-samples/agent-read.txt}" ;;
   # OPSX_TEST_PROMPT_ERR / OPSX_TEST_WAIT_ERR 指到一個檔，每行一個 herdr 錯誤碼：每次呼叫取走第一行，是 ok 或檔空了就照常成功
-  # opsx-coordinator 預設不存在（agent_not_found）；OPSX_TEST_COORDINATOR_UP 設了才在，OPSX_TEST_COORD_ERR 指到一個檔時每次取走一行錯誤碼
+  # opsx-coordinator 預設不存在（agent_not_found）；OPSX_TEST_COORDINATOR_UP 設了、或 agent start 起過它才在，OPSX_TEST_COORD_ERR 指到一個檔時每次取走一行錯誤碼
   "agent prompt")
     if [ "$3" = opsx-coordinator ]; then
-      [ -n "${OPSX_TEST_COORDINATOR_UP:-}" ] || herdr_err agent_not_found prompt
+      [ -n "${OPSX_TEST_COORDINATOR_UP:-}" ] || [ -f "$OPSX_FAKE_LOG.coordinator-up" ] || herdr_err agent_not_found prompt
       code="$(pop_err "${OPSX_TEST_COORD_ERR:-}")"; [ -n "$code" ] && herdr_err "$code" prompt
       echo '{"result":{"submitted":true}}'; exit 0
     fi

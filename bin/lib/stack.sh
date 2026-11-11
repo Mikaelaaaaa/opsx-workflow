@@ -21,7 +21,7 @@ opsx_stack() {
     task_line "$d/tasks.md" "$dep" '\[x\]' || missing="$missing $dep"
   done
   [ -z "$missing" ] || die "stack: $sub 依賴的子 change 還沒疊回：${missing# }"
-  task_line "$d/tasks.md" "$sub" '\[ \]' || die "stack: 主殼 tasks.md 沒有未勾的「\`$sub\`」那一項"
+  task_line "$d/tasks.md" "$sub" '\[ \]' || die "stack: 主殼 tasks.md 沒有未勾的「\`$sub\`」那一項；項目要寫成「- [ ] <編號> \`$sub\`：…」，子名用反引號包住"
   git cat-file -e "$sha^{commit}" 2>/dev/null || die "stack: 沒有這個 commit：$sha"
   [ -z "$(git status --porcelain)" ] || die "stack: $branch 有未 commit 的改動，先收乾淨再疊"
 
