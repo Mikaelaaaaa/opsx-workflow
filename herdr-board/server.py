@@ -11,7 +11,7 @@ GET /api/collect 回 `opsx collect` 的輸出；--collect 給了檔就回那個�
 GET /api/log[?since=<iso>] 回 `opsx timeline [--since …]` 的輸出（紀錄 tab、抽屜、banner 用，開才拉，不快取）。
 GET /api/output?pane=<id> 跑 `herdr agent read <id> --lines 10 --format text`，回 {ok, text} 或 {ok: false, error}（抽屜「最後輸出」）。
 POST /api/seen {at} 把 at 寫進 <state>/last-seen（banner 按「關閉」時送）。
-POST /api/{answer,dispatch,merge,stop,new,file,drop,sync,note} 轉呼叫對應的 `opsx` 子命令，POST /api/focus 跑 herdr agent focus <slug>；都回 {ok, stdout, stderr}。
+POST /api/{answer,dispatch,merge,stop,new,file,drop,merge-card,sync,note} 轉呼叫對應的 `opsx` 子命令，POST /api/focus 跑 herdr agent focus <slug>；都回 {ok, stdout, stderr}。
 POST /api/priority {repo, slug, level, reason} 轉 `opsx priority <slug> --set <level> --reason <理由> --repo <repo>`；
                  level 不是 P0/P1/P2 或理由空白回 400，不叫 opsx。
 POST /api/paste {text, repo?, files: [{name, data(base64)}]} 把檔寫進暫存資料夾，轉呼叫 `opsx new [--repo] --attach <檔>… -- <一句話>`，
@@ -69,6 +69,7 @@ ACTIONS = {
     "new": {"slug": False, "required": ("text",), "flags": ("repo",), "trailing": "text"},
     "file": {"slug": True, "required": ("repo",), "flags": ("repo",), "trailing": None},
     "drop": {"slug": True, "required": ("text",), "flags": ("repo",), "trailing": "text"},
+    "merge-card": {"slug": True, "required": ("into", "repo"), "flags": ("into", "repo"), "trailing": None},
     "sync": {"slug": False, "required": (), "flags": ("source",), "trailing": None},
     "note": {"slug": True, "required": ("text",), "flags": ("repo",), "trailing": "text"},
     "reap": {"slug": False, "required": (), "flags": ("pane",), "trailing": None},
@@ -76,6 +77,7 @@ ACTIONS = {
 PANE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9:_-]{0,31}$")   # 不能以 - 開頭，免得被 herdr 當成旗標
 FLAG_RE = {
     "sub": SLUG_RE,   # 會拼進 changes/<slug>/subs/<sub> 路徑，不能有 / 或 ..
+    "into": SLUG_RE,   # 會拼進 changes/<into> 路徑
     "gate": re.compile(r"^[A-Za-z0-9_.-]{1,64}$"),
     "grant": re.compile(r"^(this|card|repo)$"),
     "agent": re.compile(r"^(claude|codex)$"),
