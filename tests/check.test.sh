@@ -471,4 +471,19 @@ printf '%s' "$out" | grep 'specs/cap/spec.md: ' | grep -q '沒有收尾' || fail
 printf '## ADDED Requirements\n\n### Requirement: R1\nx SHALL y\n\n#### Scenario: a（正例）\n- **WHEN** a\n- **THEN** "a" 正確的 "b"\n\n#### Scenario: b（反例）\n- **WHEN** c\n- **THEN** d\n' > "$SP"; mk_g g-greedy "$SP"
 out="$(gchk g-greedy)" && fail "引號之間的模糊詞要退出 1: $out"
 printf '%s' "$out" | grep -q '正確的' || fail "要指出正確的: $out"
+
+# R2.1 """ 沒收尾要報；同一行 """x""" 不是區塊開頭，之後照查
+printf '## ADDED Requirements\n\n%s\n"""\nx\n' "$(ok_req R1)" > "$SP"; mk_g g-opendoc "$SP"
+out="$(gchk g-opendoc)" && fail "docstring 沒收尾要退出 1: $out"
+printf '%s' "$out" | grep 'specs/cap/spec.md: ' | grep -q '沒有收尾' || fail "要指出 docstring 沒有收尾: $out"
+printf '## ADDED Requirements\n\n### Requirement: R1\nx SHALL y\n\n#### Scenario: a（正例）\n- **WHEN** a\n  """x"""\n- **THEN** b\n\n#### Scenario: b（反例）\n- **WHEN** c\n- **THEN** d\n\n### Requirement: R2\nx SHALL y\n\n#### Scenario: c（正例）\n- **WHEN** a\n- **THEN** b\n' > "$SP"; mk_g g-inlinedoc "$SP"
+out="$(gchk g-inlinedoc)" && fail "一行 docstring 之後缺反例要退出 1: $out"
+printf '%s' "$out" | grep 'R2' | grep -q '沒有反例' || fail "要指出 R2 沒有反例: $out"
+printf '%s' "$out" | grep 'R1' && fail "R1 正反例都有不該報: $out"
+
+# R2.2 只有不會擋的「要不要接」open gate 時 Stop hook 照查 spec（g-br：有 tasks.md、spec 缺反例，branch 還在 feat/g-br）
+printf '## 要不要接 /apply？\ntype: decision\nstatus: open\n問題: 要不要接 /apply？\n' > "$G/openspec/changes/g-br/gates.md"
+out="$(gstop)"
+printf '%s' "$out" | jq -r '.reason' | grep -q '沒有反例' || fail "stop: 不會擋的 gate 不關掉 Gherkin 檢查: $out"
+rm "$G/openspec/changes/g-br/gates.md"
 echo ok

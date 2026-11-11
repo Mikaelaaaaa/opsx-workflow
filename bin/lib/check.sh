@@ -63,11 +63,12 @@ check_gherkin() { # <卡目錄，主殼或子殼>：一個問題一行「<相對
     }
     function flushfence() {
       if (fence) printf "%s: 第 %d 行的 ``` 沒有收尾，之後整段沒檢查\n", rel, fenceat
+      if (doc) printf "%s: 第 %d 行的 \"\"\" 沒有收尾，之後整段沒檢查\n", rel, docat
     }
     FNR == 1 { flushfence(); flushoutline(); flushreq(); rel =substr(FILENAME, length(base) + 1); fence = 0; doc = 0; bg = 0; skip = 0 }
     /^```/ { fence = !fence; fenceat = FNR; next }
     fence { next }
-    /^[ \t]*"""/ { doc = !doc; next }
+    /^[ \t]*"""[ \t\r]*$/ { doc = !doc; docat = FNR; next }
     doc { next }
     !/^[ \t]*\|/ {
       line = $0; gsub(/"[^"]*"/, "", line); gsub(/`[^`]*`/, "", line); low = tolower(line)
