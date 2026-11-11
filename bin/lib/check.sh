@@ -21,10 +21,13 @@ opsx_check() {
 
 # 主殼與子殼 specs 的 Gherkin 四條：Requirement 有正例與反例、Scenario Outline 底下有 Examples:、沒有禁用模糊詞、Background 沒有 THEN。
 # 正反例與 Outline 認 Scenario 名稱結尾的五種標記（schemas/opsx/artifacts-specs.yaml 的 specs instruction）。
-# 引號與反引號內是資料，不比對模糊詞；```區塊整段不查；REMOVED / RENAMED 段的 Requirement 沒有 Scenario，不查。
-# 主殼 .openspec.yaml 有 spec_format: when-then 就整張卡（含子殼）跳過。
-check_gherkin() { # <卡目錄>：一個問題一行「<相對路徑>: <問題>」；有問題且 repo schema 是舊版時，最後多一行叫人跑 opsx init
-  grep -qE '^[[:space:]]*spec_format:[[:space:]]*when-then[[:space:]]*$' "$1/.openspec.yaml" 2>/dev/null && return 0
+# 引號、反引號、表格列與 """ 區塊裡是資料，不比對模糊詞；英文模糊詞要整個字出現，不分大小寫。
+# ```區塊整段不查，到檔尾還沒收尾就報；REMOVED / RENAMED 段的 Requirement 沒有 Scenario，不查。
+# 主殼 .openspec.yaml 有 spec_format: when-then 就整張卡（含子殼）跳過；傳進來的是子殼目錄時也看主殼。
+check_gherkin() { # <卡目錄，主殼或子殼>：一個問題一行「<相對路徑>: <問題>」；有問題且 repo schema 是舊版時，最後多一行叫人跑 opsx init
+  local main="$1"
+  [ "$(basename "$(dirname "$1")")" = subs ] && main="$(dirname "$(dirname "$1")")"
+  grep -qE '^[[:space:]]*spec_format:[[:space:]]*when-then[[:space:]]*$' "$main/.openspec.yaml" 2>/dev/null && return 0
   local f specs=() words out list="$OPSX_ROOT/schemas/opsx/artifacts-specs.yaml"
   for f in "$1"/specs/*/spec.md "$1"/subs/*/specs/*/spec.md; do
     [ -f "$f" ] && specs+=("$f")
@@ -42,19 +45,36 @@ check_gherkin() { # <卡目錄>：一個問題一行「<相對路徑>: <問題>�
       if (req != "" && !neg) printf "%s: Requirement「%s」沒有反例\n", rel, req
       req = ""
     }
+    # 英文詞要整個字出現：incorrectly 裡的 correctly 不算
+    function hasword(s, x,   p, off, b, a) {
+      off = 0
+      while ((p = index(substr(s, off + 1), x)) > 0) {
+        p += off
+        b = (p == 1) ? "" : substr(s, p - 1, 1)
+        a = substr(s, p + length(x), 1)
+        if (b !~ /[A-Za-z0-9_]/ && a !~ /[A-Za-z0-9_]/) return 1
+        off = p
+      }
+      return 0
+    }
     BEGIN {
       nw = split(words, w, "、")
-      for (i = 1; i <= nw; i++) gsub(/^[ \t\r]+|[ \t\r]+$/, "", w[i])
+      for (i = 1; i <= nw; i++) { gsub(/^[ \t\r]+|[ \t\r]+$/, "", w[i]); ascii[i] = (w[i] ~ /^[A-Za-z.]+$/); lw[i] = tolower(w[i]) }
     }
-    FNR == 1 { flushoutline(); flushreq(); rel = substr(FILENAME, length(base) + 1); fence = 0; bg = 0; skip = 0 }
-    /^```/ { fence = !fence; next }
+    function flushfence() {
+      if (fence) printf "%s: 第 %d 行的 ``` 沒有收尾，之後整段沒檢查\n", rel, fenceat
+    }
+    FNR == 1 { flushfence(); flushoutline(); flushreq(); rel =substr(FILENAME, length(base) + 1); fence = 0; doc = 0; bg = 0; skip = 0 }
+    /^```/ { fence = !fence; fenceat = FNR; next }
     fence { next }
-    {
-      line = $0; gsub(/"[^"]*"/, "", line); gsub(/`[^`]*`/, "", line)
-      for (i = 1; i <= nw; i++) if (index(line, w[i])) printf "%s: 第 %d 行有模糊詞「%s」\n", rel, FNR, w[i]
+    /^[ \t]*"""/ { doc = !doc; next }
+    doc { next }
+    !/^[ \t]*\|/ {
+      line = $0; gsub(/"[^"]*"/, "", line); gsub(/`[^`]*`/, "", line); low = tolower(line)
+      for (i = 1; i <= nw; i++) if (ascii[i] ? hasword(low, lw[i]) : index(line, w[i])) printf "%s: 第 %d 行有模糊詞「%s」\n", rel, FNR, w[i]
     }
     /^#/ { bg = 0 }
-    /^Background:/ { bg = 1; next }
+    /^[ \t]*Background:/ { bg = 1; next }
     bg && /^[ \t]*- \*\*THEN\*\*/ { printf "%s: 第 %d 行 Background 含 THEN\n", rel, FNR; next }
     /^## / { flushoutline(); flushreq(); skip = ($0 ~ /^## (REMOVED|RENAMED) /); next }
     /^### / {
@@ -71,12 +91,12 @@ check_gherkin() { # <卡目錄>：一個問題一行「<相對路徑>: <問題>�
       if (name ~ /（Scenario Outline，(正例|反例|正例＋反例)）$/) { outline = name; examples = 0 }
       next
     }
-    outline != "" && /^Examples:/ { examples = 1 }
-    END { flushoutline(); flushreq() }
+    outline != "" && /^[ \t]*Examples:/ { examples = 1 }
+    END { flushfence(); flushoutline(); flushreq() }
   ' "${specs[@]}")"
   [ -n "$out" ] || return 0
   printf '%s\n' "$out"
-  grep -q '禁用模糊詞：' "$1/../../schemas/opsx/schema.yaml" 2>/dev/null \
+  grep -q '禁用模糊詞：' "$main/../../schemas/opsx/schema.yaml" 2>/dev/null \
     || printf '%s\n' "spec 規則是舊版：先跑 opsx init 拿插件版 specs instruction，再照它改 spec"
 }
 

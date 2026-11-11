@@ -418,4 +418,57 @@ mk_g g-prop "$SP"
 git -C "$G" checkout -q -b feat/g-prop/mikaela
 out="$(gstop)"
 printf '%s' "$out" | grep -q '沒有反例' && fail "stop: 沒有 tasks.md 不查 spec: $out"
+
+# R1.1 card_dir 在 <主>--<子> branch 給的是子殼目錄：check_gherkin 拿到子殼目錄時豁免與 schema 版本都看主殼
+printf '## ADDED Requirements\n\n### Requirement: R1\nx SHALL y\n\n#### Scenario: s1\n- **WHEN** a\n- **THEN** b\n' > "$SP"
+mk_g g-sx "$SP"
+GX="$G/openspec/changes/g-sx/subs/a"; mkdir -p "$GX/specs/cap"
+printf 'schema: opsx\nkind: dev\nparent: g-sx\n' > "$GX/.openspec.yaml"
+cp "$SP" "$GX/specs/cap/spec.md"
+gfn() { (source "$OPSX_ROOT/bin/lib/common.sh"; source "$OPSX_ROOT/bin/lib/check.sh"; check_gherkin "$1") 2>&1; }
+out="$(gfn "$GX")"
+printf '%s' "$out" | grep -q '沒有正例' || fail "子殼目錄沒豁免要報: $out"
+printf '%s' "$out" | grep -q 'opsx init' && fail "repo schema 是新版，子殼目錄也不該提示 init: $out"
+printf 'spec_format: when-then\n' >> "$G/openspec/changes/g-sx/.openspec.yaml"
+out="$(gfn "$GX")"
+assert_eq "$out" "" "主殼豁免時子殼目錄也跳過"
+
+# R1.2 插件缺「禁用模糊詞：」那行：Stop hook 不以 2 結束（2 是擋停），opsx check 以 2 結束
+BR="$FX/broken-root"; mkdir -p "$BR/schemas/opsx"
+for e in "$OPSX_ROOT"/*; do [ "$(basename "$e")" = schemas ] || ln -s "$e" "$BR/$(basename "$e")"; done
+grep -v '禁用模糊詞：' "$OPSX_ROOT/schemas/opsx/artifacts-specs.yaml" > "$BR/schemas/opsx/artifacts-specs.yaml"
+printf '## ADDED Requirements\n\n### Requirement: R1\nx SHALL y\n\n#### Scenario: a（正例）\n- **WHEN** a\n- **THEN** b\n' > "$SP"
+mk_g g-br "$SP"; printf '## 1. x\n\n- [ ] 1.1 a\n' > "$G/openspec/changes/g-br/tasks.md"
+git -C "$G" checkout -q -b feat/g-br/mikaela
+rc=0; printf '{"cwd":"%s","stop_hook_active":false}' "$G" | CLAUDE_PLUGIN_ROOT="$BR" bash "$BR/hooks/openspec-stop-gate.sh" >/dev/null 2>"$FX/br.err" || rc=$?
+[ "$rc" -ne 0 ] && [ "$rc" -ne 2 ] || fail "stop: 插件壞掉要以非 0 非 2 結束，拿到 $rc: $(cat "$FX/br.err")"
+grep -q 'artifacts-specs.yaml' "$FX/br.err" || fail "stop: stderr 要指出檔案: $(cat "$FX/br.err")"
+rc=0; (cd "$G" && OPSX_ROOT="$BR" opsx check g-br) >/dev/null 2>&1 || rc=$?
+assert_eq "$rc" 2 "opsx check 插件壞掉要 exit 2"
+
+# R1.3 縮排的 Background 與 Examples
+printf '## ADDED Requirements\n\n### Requirement: R1\nx SHALL y\n\n  Background:\n  - **GIVEN** g\n  - **THEN** t\n\n#### Scenario: a（正例）\n- **WHEN** a\n- **THEN** b\n\n#### Scenario: b（反例）\n- **WHEN** c\n- **THEN** d\n' > "$SP"; mk_g g-ibg "$SP"
+out="$(gchk g-ibg)" && fail "縮排 Background 有 THEN 要退出 1: $out"
+printf '%s' "$out" | grep '第 8 行' | grep -q 'Background 含 THEN' || fail "要指出縮排 Background 含 THEN: $out"
+printf '## ADDED Requirements\n\n### Requirement: R1\nx SHALL y\n\n#### Scenario: o（Scenario Outline，正例＋反例）\n- **WHEN** "<a>"\n- **THEN** "<b>"\n\n  Examples:\n  | a | b |\n  |---|---|\n  | 1 | 2 |\n' > "$SP"; mk_g g-iex "$SP"
+out="$(gchk g-iex)" || fail "縮排 Examples 要算: $out"
+
+# R1.4 英文模糊詞有字邊界、不分大小寫；表格列與 docstring 不查
+printf '## ADDED Requirements\n\n### Requirement: R1\nx SHALL y\n\n#### Scenario: a（正例）\n- **WHEN** a\n- **THEN** it fails incorrectly and is inappropriate\n\n#### Scenario: b（反例）\n- **WHEN** c\n- **THEN** d\n' > "$SP"; mk_g g-sub-word "$SP"
+out="$(gchk g-sub-word)" || fail "incorrectly / inappropriate 不是模糊詞: $out"
+printf '## ADDED Requirements\n\n### Requirement: R1\nx SHALL y\n\n#### Scenario: a（正例）\n- **WHEN** a\n- **THEN** Properly done\n\n#### Scenario: b（反例）\n- **WHEN** c\n- **THEN** d\n' > "$SP"; mk_g g-case "$SP"
+out="$(gchk g-case)" && fail "Properly 要報: $out"
+printf '%s' "$out" | grep '第 8 行' | grep -q 'properly' || fail "要指出第 8 行的 properly: $out"
+printf '## ADDED Requirements\n\n### Requirement: R1\nx SHALL y\n\n#### Scenario: o（Scenario Outline，正例＋反例）\n- **WHEN** "<a>"\n- **THEN** "<b>"\n\nExamples:\n| a | b |\n|---|---|\n| 正確的 | appropriate |\n\n#### Scenario: d（正例）\n- **WHEN** 送出\n  """\n  回傳正確的價格\n  """\n- **THEN** d\n' > "$SP"; mk_g g-data "$SP"
+out="$(gchk g-data)" || fail "表格列與 docstring 裡的模糊詞不查: $out"
+
+# R1.5 ``` 沒收尾要報，不能讓後半整段靜默通過
+printf '## ADDED Requirements\n\n```\nx\n\n### Requirement: R1\nx SHALL y\n\n#### Scenario: a（正例）\n- **WHEN** a\n- **THEN** b\n' > "$SP"; mk_g g-openfence "$SP"
+out="$(gchk g-openfence)" && fail "程式碼區塊沒收尾要退出 1: $out"
+printf '%s' "$out" | grep 'specs/cap/spec.md: ' | grep -q '沒有收尾' || fail "要指出程式碼區塊沒有收尾: $out"
+
+# R1.6 引號排除不能貪婪：兩組引號中間的模糊詞要報
+printf '## ADDED Requirements\n\n### Requirement: R1\nx SHALL y\n\n#### Scenario: a（正例）\n- **WHEN** a\n- **THEN** "a" 正確的 "b"\n\n#### Scenario: b（反例）\n- **WHEN** c\n- **THEN** d\n' > "$SP"; mk_g g-greedy "$SP"
+out="$(gchk g-greedy)" && fail "引號之間的模糊詞要退出 1: $out"
+printf '%s' "$out" | grep -q '正確的' || fail "要指出正確的: $out"
 echo ok

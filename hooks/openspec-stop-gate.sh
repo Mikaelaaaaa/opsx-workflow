@@ -41,8 +41,9 @@ $missing
   fi
   if [ -f "$d/tasks.md" ]; then
     if [ "$(st_open_gates "$d")" -eq 0 ]; then
-      # check_gherkin die 時（插件的 artifacts-specs.yaml 沒有禁用模糊詞那行）hook 以 2 結束，stderr 帶原因
-      missing="$(check_gherkin "$d")" || exit 2
+      # 插件的 artifacts-specs.yaml 沒有禁用模糊詞那行時 check_gherkin 會 die。Stop hook 的 exit 2 是擋停且不受 MAX_BLOCKS 限制，
+      # agent 會停不下來，所以用 1：Claude Code 只顯示 stderr，照樣放行
+      missing="$(check_gherkin "$d")" || exit 1
       if [ -n "$missing" ]; then
         printf '%s' "apply|opsx：${slug} 的 spec 不合 Gherkin 寫法（opsx check ${slug}）：
 $missing
