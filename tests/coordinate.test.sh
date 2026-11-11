@@ -2211,6 +2211,14 @@ round || fail "rc: $(cat "$FX/out")"
 grep -F '?? demo/a' "$LOG" | grep -qF drive_pid || fail "第二輪 log 仍要有 ??：$(cat "$LOG")"
 assert_eq "$(bad_prompts)" 0 "同一個壞值不通知第二次"
 
+# agent 不在 herdr 的卡也先驗 drive_pid：壞值不重派、記 ??、通知一次（review R1.1）
+rm -f "$MEMO"
+cards '[{"slug":"a","section":"進行中","dispatch":{"mode":"autopilot","agent":"claude","pane":"w1:p1","drive_pid":"x"},"agent_status":"unknown"}]'
+round || fail "agent 不在且 drive_pid 壞，整輪要跑完：$(cat "$FX/out")"
+grep -F '?? demo/a' "$LOG" | grep -qF drive_pid || fail "agent 不在也要有 ?? 含 drive_pid：$(cat "$LOG")"
+assert_eq "$(ecount '^opsx (stop|dispatch)')" 0 "agent 不在但 drive_pid 壞不重派：$(cat "$OPSX_FAKE_LOG")"
+assert_eq "$(bad_prompts)" 1 "agent 不在但 drive_pid 壞通知一次"
+
 # 合格的 drive_pid：死掉的 pid 照常重派，null 不動，也沒有 ?? 提到 drive_pid
 rm -f "$MEMO"
 cards '[{"slug":"a","section":"進行中","dispatch":{"mode":"autopilot","agent":"claude","pane":"w1:p1","drive_pid":'"$dead"'},"agent_status":"idle"},{"slug":"b","section":"進行中","dispatch":{"mode":"autopilot","agent":"claude","pane":"w1:p2","drive_pid":null},"agent_status":"idle"}]'

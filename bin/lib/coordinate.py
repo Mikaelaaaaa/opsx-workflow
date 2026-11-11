@@ -1250,9 +1250,10 @@ def one_round(state, dry):
         if paused or not c["dispatch"] or card_key(c) in r.memo["_parked"]:
             continue
         try:
+            dead = drive_dead(card_key(c), c["dispatch"])
             if c["agent_status"] == "unknown":
                 r.redispatch(c, repo_paths[c["repo"]], "agent 不在 herdr 裡（pane %s）" % c["dispatch"].get("pane"))
-            elif drive_dead(card_key(c), c["dispatch"]):
+            elif dead:
                 r.redispatch(c, repo_paths[c["repo"]], "drive pid %s 已經不在" % c["dispatch"]["drive_pid"])
             else:
                 r.check_args(c, repo_paths[c["repo"]])
