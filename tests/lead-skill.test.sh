@@ -38,7 +38,7 @@ case "$D4" in *"run the full suite"*|*"rerun the suite against"*) fail "職責 4
 DUTIES="$(sed -n '/^## Duties/,/^## Report format/p' "$F")"
 DEDUP="$(printf '%s\n' "$DUTIES" | grep -F 'opsx merge-card')"
 [ -n "$DEDUP" ] || fail "Duties 缺 opsx merge-card 的去重職責"
-for s in '同一件事' '只併小事' 'decisions.tsv' '④'; do
+for s in '同一件事' '只併小事' 'decisions.tsv' '④' 'kind_of_work' 'impact'; do
   case "$DEDUP" in *"$s"*) ;; *) fail "去重職責缺：$s — $DEDUP" ;; esac
 done
 

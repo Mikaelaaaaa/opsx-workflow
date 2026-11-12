@@ -13,6 +13,7 @@ use FindBin;
 require "$FindBin::Bin/cmd-lex.pl";    # skip_dq、paren_body
 
 use constant MAX_DEPTH => 3;
+use constant MAX_BYTES => 32768;
 my $SQ = "'";
 my $RUNS_STRING = qr/(?:\b(?:bash|sh|zsh|dash|ksh)(?:\s+-\S+)*?\s+-\w*c\w*\s+|\beval\s+)$/;
 my $EXECUTOR = qr/\b(?:bash|sh|zsh|dash|ksh|eval|source|psql|mysql|sqlite3|ssh|python[0-9]?|node|perl|ruby)\b/;
@@ -52,10 +53,54 @@ sub heredoc {
     return $out;
 }
 
+# heredoc 的分隔字照 bash：整個字去掉引號與反斜線之後的樣子（'E'F、E\OF 都是 EF 與 EOF，EOF-X 就是 EOF-X）
+sub unquote_word {
+    my ($w) = @_;
+    my ($out, $i) = ('', 0);
+    while ($i < length $w) {
+        my $c = substr $w, $i, 1;
+        if ($c eq '\\') { $out .= substr($w, $i + 1, 1); $i += 2; next }
+        if ($c eq '$' && substr($w, $i + 1, 1) =~ /^[\x27"]$/) { $i++; next }   # $'EOF'、$"EOF"：$ 不算分隔字的一部分
+        if ($c eq $SQ || $c eq '"') {
+            my $end = index $w, $c, $i + 1;
+            $end = length $w if $end < 0;
+            $out .= substr $w, $i + 1, $end - $i - 1;
+            $i = $end + 1;
+            next;
+        }
+        $out .= $c;
+        $i++;
+    }
+    return $out;
+}
+
+my $HEREDOC_WORD = qr/(?>(?:\$?'[^']*'|\$?"[^"]*"|[^\s;&|<>()\\'"]|\\.)+)/;
+
+# 由左到右把每一段 heredoc 換成 heredoc() 的結果；開頭沒有結尾行的原樣留下，繼續找後面的
+sub strip_heredocs {
+    my ($s, $depth) = @_;
+    my ($out, $rest) = ('', $s);
+    while ($rest =~ /(^|\n)([^\n]*?)(?<!<)(<<-?[ \t]*($HEREDOC_WORD)[^\n]*)\n/s) {
+        my ($pre, $lead, $prefix, $opener, $word, $after) = ($`, $1, $2, $3, $4, $');
+        my $delim = unquote_word($word);
+        # $'…\x41…' 的跳脫 bash 會展開，這裡不展開：算不準分隔字就不剝本體（fail-closed）
+        my $ansi_c = $word =~ /\$['"]/ && $word =~ /\\/;
+        if (!$ansi_c && $after =~ /\A(.*?)\n[ \t]*\Q$delim\E[ \t]*(?:\n|\z)/s) {
+            my ($body, $tail) = ($1, $');
+            $out .= $pre . heredoc($lead, $prefix, $opener, $word =~ /[\x27"\\]/ ? $SQ : '', $body, $depth);
+            $rest = $tail;
+        } else {
+            $out .= "$pre$lead$prefix$opener\n";
+            $rest = $after;
+        }
+    }
+    return $out . $rest;
+}
+
 sub skeleton {
     my ($s, $depth) = @_;
     return $s if $depth > MAX_DEPTH;
-    $s =~ s/(^|\n)([^\n]*?)(?<!<)(<<-?\s*([\x27"]?)(\w+)\4[^\n]*)\n(.*?)\n[ \t]*\5[ \t]*(?:\n|\z)/heredoc($1, $2, $3, $4, $6, $depth)/sge;
+    $s = strip_heredocs($s, $depth);
     my ($out, $i, $n) = ('', 0, length $s);
     while ($i < $n) {
         my $c = substr $s, $i, 1;
@@ -97,4 +142,5 @@ sub skeleton {
 
 local $/;
 my $cmd = <STDIN> // '';
-print skeleton($cmd, 0);
+# shortcut: 沒結尾的 heredoc 開頭每個都重掃後面全文（二次方），hook 逾時等於放行，所以超過上限就原樣輸出（引號與 heredoc 本體都不去除，比對只會更嚴）；真有超過 32KB 的指令，分次執行或請人放行
+print length($cmd) > MAX_BYTES ? $cmd : skeleton($cmd, 0);

@@ -550,6 +550,14 @@ class Round:
             del self.memo["_usage_limit"]
         return False
 
+    def merged_into_main(self, top, slug):
+        """waits-on 的卡合進 main 了：workplan 裡它所屬的 PR 是 merged，或它已歸檔（is_archived）而且不是被捨棄的。
+        workplan 與 archive 都沒有它（卡名寫錯、還沒進 workplan）算沒合，維持停 pane。"""
+        pr = pr_of(self.workplan(top), slug)
+        if pr is not None and pr.get("status") == "merged":
+            return True
+        return is_archived(top, slug) and not archived_declined(top, slug)
+
     def note_stuck_gates(self, live):
         """用量上限期間 Stop hook 開的「卡在接」gate：hook 跑在上限訊息寫進 transcript 之前，看不到上限。
         暫停期間代答的 prompt 會被上限吃掉，drive 看到「重做」階段沒動又開 gate，所以這時只記下，恢復後才答。"""
@@ -593,6 +601,10 @@ class Round:
             self.answer(c, top, w["gate_id"], verdict[1], grant=verdict[2])
             return
         q = w.get("question") or ""
+        if verdict[0] == "park" and self.merged_into_main(top, verdict[1]):
+            self.log("✓ %s gate %s 等的 %s 已合進 main，答掉，不停 pane" % (key, w["gate_id"], verdict[1]))
+            self.answer(c, top, w["gate_id"], "%s 已合進 main" % verdict[1])
+            return
         if verdict[0] == "park":
             self.log("⏳ %s gate %s 等 %s，先停 pane，有卡合進 main 那輪再派：%s" % (key, w["gate_id"], verdict[1], q[:100]))
             rc, _, _ = self.act(["opsx", "stop", c["slug"], "--repo", top])
@@ -1140,6 +1152,13 @@ def is_archived(top, name):
     """change 目錄不在了，而且 openspec archive 留下了 <日期>-<name>。"""
     changes = os.path.join(top, "openspec", "changes")
     return not os.path.isdir(os.path.join(changes, name)) and bool(glob.glob(os.path.join(changes, "archive", "????-??-??-" + glob.escape(name))))
+
+
+def archived_declined(top, name):
+    """最新一份同名歸檔是被捨棄的（opsx drop、opsx merge-card 會在 .openspec.yaml 寫 outcome: declined），不是合進 main。
+    名字被捨棄過又重做的卡，看最新那份。"""
+    dirs = sorted(glob.glob(os.path.join(top, "openspec", "changes", "archive", "????-??-??-" + glob.escape(name))))
+    return bool(dirs) and bool(re.search(r"^outcome:\s*declined\s*$", priority.read_text(os.path.join(dirs[-1], ".openspec.yaml")), re.M))
 
 
 def waiting_on(prs, slug):

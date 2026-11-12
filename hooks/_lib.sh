@@ -22,6 +22,8 @@ hook_prompt() { jqr '.prompt'; }
 cmd_skeleton() { printf '%s' "$1" | perl "$OPSX_ROOT/hooks/cmd-skeleton.pl"; }
 # 第三級比對用的文字：原文，只扣掉 commit 訊息、opsx answer 答案、寫檔 heredoc 三種容器的資料部分。認不得的寫法都留著。
 cmd_l3text() { printf '%s' "$1" | perl "$OPSX_ROOT/hooks/cmd-containers.pl"; }
+# push 的 force / main 檢查用：cmd_l3text 之後再照 shell 解析參數的方式去引號、併續行（hooks/cmd-normalize.pl）
+cmd_l3norm() { printf '%s' "$1" | perl "$OPSX_ROOT/hooks/cmd-containers.pl" | perl "$OPSX_ROOT/hooks/cmd-normalize.pl"; }
 hook_event() { jqr '.hook_event_name'; }
 
 # 主 repo 的根（linked worktree 裡也回主 repo：卡在主 repo 的 openspec/，dispatch.json 的 key 是主 repo 名）
