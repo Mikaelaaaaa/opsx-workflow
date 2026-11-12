@@ -183,6 +183,18 @@ printf '2026-11-05T09:00:00+08:00\tsync\t5\t新建 5 · 更新 0 · 沒變 0 · 
 J7="$(opsx collect --root "$ROOT")"
 assert_eq "$(q "$J7" last_sync)" '{"at": "2026-11-06T09:00:00+08:00", "created": 2, "errors": 0, "first_error": "", "unchanged": 3, "updated": 1}'
 mv "$OPSX_STATE_DIR/sync.log" "$FX/sync-done.log"
+# ---------- shortcut 快照 debt.json（debt-board-count）：沒有檔是 {}；有就帶出每筆的 file、line、limit、trigger；壞掉記 errors ----------
+assert_eq "$(q "$J7" debt)" '{}' "沒有 debt.json 時 debt 是空物件"
+printf '{"a":[{"file":"x.py","line":3,"comment":"單 worker, 量大再拆","limit":"單 worker","trigger":"量大再拆"},{"file":"y.py","line":9,"limit":"上限","trigger":""}],"b":[{"file":"z.py","line":1,"limit":"l","trigger":"t"}]}' > "$OPSX_STATE_DIR/debt.json"
+J8="$(opsx collect --root "$ROOT")"
+assert_eq "$(q "$J8" debt.a)" '[{"file": "x.py", "limit": "單 worker", "line": 3, "trigger": "量大再拆"}, {"file": "y.py", "limit": "上限", "line": 9, "trigger": ""}]'
+assert_eq "$(q "$J8" debt.b.0.file)" z.py
+assert_eq "$(q "$J8" errors)" '[]'
+printf '{' > "$OPSX_STATE_DIR/debt.json"
+J9="$(opsx collect --root "$ROOT")"
+assert_eq "$(q "$J9" debt)" '{}' "debt.json 壞掉時 debt 是空物件"
+case "$(q "$J9" errors.0.source)" in *debt.json) ;; *) fail "errors 要點名 debt.json：$(q "$J9" errors)" ;; esac
+mv "$OPSX_STATE_DIR/debt.json" "$FX/debt-done.json"
 
 # ---------- glab 讀不到：卡還在、errors 記 glab、exit 0 ----------
 printf '' > "$FX/mr-7.json"

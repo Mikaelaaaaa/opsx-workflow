@@ -4,6 +4,7 @@
 # herdr agent list（不看 HERDR_ENV，叫不通記 errors）與 glab / gh（經 mr_json）。specs/board-collect/spec.md。
 #
 # 輸出：{generated_at, scopes[{workspace, repos[]}], repo_paths{repo: 實體路徑}, cards[], unfiled[{slug, title, source, found}],
+#       debt{repo: [{file, line, limit, trigger}]}（<state>/debt.json，opsx sync 寫的 shortcut 快照；沒有檔時 {}），
 #       last_sync（sync.log 最後一行，沒有檔時 null）， unmatched_agents[], errors[{source,message}],
 #       progress{repo: {milestone, goal, remaining, mergeable, testing, developing, waiting_on_you, not_dispatched,
 #         not_dispatched_planned[], at}}（每個 repo 一份；沒設 current_milestone 或 workplan 壞了時 milestone、goal 為 null，數全部活的 main change）}
@@ -471,6 +472,17 @@ for line in reversed([l for l in read(os.path.join(state, "sync.log")).split("\n
         last_sync = {"at": cols[0], "created": int(m[1]), "updated": int(m[2]), "unchanged": int(m[3]), "errors": int(m[4]), "first_error": m[5] or ""}
         break
 
+# shortcut 快照：opsx sync --source debt 寫的 <state>/debt.json，{repo: [{file, line, limit, trigger, …}]}；
+# 看板只顯示各 repo 的數量與清單，不開卡。沒有檔是 {}；不是 {repo: [物件]} 的形狀記 errors 並當成 {}
+debt_path = os.path.join(state, "debt.json")
+debt_raw = load_json(debt_path, {})
+debt = {}
+if not isinstance(debt_raw, dict) or not all(isinstance(v, list) and all(isinstance(h, dict) for h in v) for v in debt_raw.values()):
+    errors.append({"source": debt_path, "message": "debt.json 要是 {repo: [shortcut 物件]}：%s" % json.dumps(debt_raw, ensure_ascii=False)[:100]})
+else:
+    keep = ("file", "line", "limit", "trigger")
+    debt = {r: [{k: h[k] for k in keep if k in h} for h in hits] for r, hits in debt_raw.items()}
+
 # 孤兒 pane：cwd（或 foreground_cwd）在 <repo>/.claude/worktrees/<slug>/ 底下（或 dispatch.json 記的 worktree），
 # 而且這張卡已歸檔、已拆（stage split）、dispatch.json 標 stopped、或卡目錄不在，而且這個 pane 就是 dispatch.json 該條記的 pane。
 # 三個都要：只看 cwd，人在同名 worktree 自己開的 pane 會被認領；只看 pane id，herdr 重用 id 時會指到別人的 pane。
@@ -536,7 +548,7 @@ unmatched = [{"name": a.get("terminal_title_stripped") or a.get("agent") or "", 
              for a in (agents or []) if str(a.get("pane_id")) not in matched_panes]
 reported = {e["source"] for e in errors}
 errors.extend({"source": p, "message": m} for p, m in unreadable.items() if p not in reported)
-print(json.dumps({"generated_at": now, "scopes": scopes, "repo_paths": repo_paths, "cards": cards, "sessions": sessions, "unfiled": unfiled, "last_sync": last_sync, "unmatched_agents": unmatched, "orphans": orphans, "errors": errors,
+print(json.dumps({"generated_at": now, "scopes": scopes, "repo_paths": repo_paths, "cards": cards, "sessions": sessions, "unfiled": unfiled, "debt": debt, "last_sync": last_sync, "unmatched_agents": unmatched, "orphans": orphans, "errors": errors,
                   "progress": progress, "legacy": legacy, "worktrees_skipped": worktrees}, ensure_ascii=False))
 PY
 }
