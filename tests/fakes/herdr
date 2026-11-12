@@ -21,6 +21,11 @@ case "$1 $2" in
       echo "$(( $(cat "$OPSX_TEST_BUSY_LEFT") - 1 ))" > "$OPSX_TEST_BUSY_LEFT"
       echo '{"error":{"code":"agent_pane_busy","message":"agent target pane '"$7"' is not an available shell"},"id":"cli:agent:start"}' >&2; exit 1
     fi
+    # OPSX_TEST_TAKEN_LEFT 指到一個計數檔：>0 時回 agent_name_taken 並遞減，模擬 /exit 後 herdr 還沒放掉名字
+    if [ -n "${OPSX_TEST_TAKEN_LEFT:-}" ] && [ "$(cat "$OPSX_TEST_TAKEN_LEFT")" -gt 0 ]; then
+      echo "$(( $(cat "$OPSX_TEST_TAKEN_LEFT") - 1 ))" > "$OPSX_TEST_TAKEN_LEFT"
+      echo '{"error":{"code":"agent_name_taken","message":"agent name '"$3"' is already used; candidates: terminal_id=term_1 pane_id=w1:pE workspace_id=w1 tab_id=w1:tB cwd=/x status=Working"},"id":"cli:agent:start"}' >&2; exit 1
+    fi
     if [ -n "${OPSX_TEST_START_FAIL:-}" ]; then
       msg=nope; [ "$OPSX_TEST_START_FAIL" = agent_name_taken ] && msg="agent name $3 is already used; candidates: terminal_id=term_1 pane_id=w9:p1 workspace_id=w9 tab_id=w9:t1 cwd=/x status=Working"
       echo '{"error":{"code":"'"$OPSX_TEST_START_FAIL"'","message":"'"$msg"'"},"id":"cli:agent:start"}' >&2; exit 1

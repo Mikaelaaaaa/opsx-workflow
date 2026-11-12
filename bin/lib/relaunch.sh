@@ -93,8 +93,8 @@ hit = [a for a in agents if a.get("pane_id") == pane]
 if not hit:
     sys.exit("relaunch: herdr agent list 裡沒有 pane %s 的 agent，拿不到 session id；到 pane 看" % pane)
 status = hit[0].get("agent_status")
-if status not in ("idle", "blocked"):
-    sys.exit("relaunch: pane %s 的 agent 是 %s，只對 idle 或 blocked 動手" % (pane, status))
+if status not in ("idle", "blocked", "done"):
+    sys.exit("relaunch: pane %s 的 agent 是 %s，只對 idle、blocked 或 done 動手" % (pane, status))
 session = hit[0].get("agent_session")
 if not session or not session.get("value"):
     sys.exit("relaunch: pane %s 的 agent 沒有 agent_session，拿不到 session id" % pane)
@@ -142,11 +142,12 @@ PY
   out="$(herdr pane send-text "$pane" /exit 2>&1)" || relaunch_fail "$d" "$pane" "send-text /exit 失敗：$out"
   out="$(herdr pane send-keys "$pane" enter 2>&1)" || relaunch_fail "$d" "$pane" "send-keys enter 失敗：$out"
 
-  # 跟 dispatch 一樣只重試 agent_pane_busy（/exit 後 shell 還沒回到提示字元），但失敗時不關 tab：那是原本的 pane
+  # /exit 後 shell 還沒回到提示字元（agent_pane_busy）、herdr 還沒放掉名字（agent_name_taken）都重試，共用一個計數；
+  # 失敗時不關 tab：那是原本的 pane。dispatch 的 name_taken 是真有人占著，所以這裡不共用 herdr_start_agent
   local try=1
   until out="$(herdr agent start "$name" --kind claude --pane "$pane" -- --resume "$sid" "${args[@]}" 2>&1)"; do
     case "$out" in
-      *agent_pane_busy*) if [ "$try" -lt 6 ]; then try=$((try + 1)); sleep "${OPSX_DISPATCH_RETRY_SLEEP:-1}"; continue; fi ;;
+      *agent_pane_busy*|*agent_name_taken*) if [ "$try" -lt 6 ]; then try=$((try + 1)); sleep "${OPSX_DISPATCH_RETRY_SLEEP:-1}"; continue; fi ;;
     esac
     relaunch_fail "$d" "$pane" "herdr agent start 失敗（第 ${try} 次）：$out"
   done
