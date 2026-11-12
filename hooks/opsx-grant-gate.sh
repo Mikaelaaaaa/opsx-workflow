@@ -96,7 +96,11 @@ level2() { # <action> <label>
 
 # 第二級的樣式：整串逐條查授權與逐段查涵蓋共用同一組
 CMD_START='(^|[[:space:];&|(`]|\$\()'   # 命令可以緊接在 ; & | ( ` $( 後面，不一定隔著空白
-RE_PUSH="${CMD_START}git\\s+push(\\s|;|&|\\||\$)"
+# git 與子命令之間可以夾全域選項（hooks/openspec-commit-gate.sh 同一份寫法）：-C <dir>、-c k=v、--git-dir[=]x、--work-tree[=]x、--no-pager 這類旗標
+GIT_TOK='([^[:space:]\\]|\\.)+'
+GIT_GOPT="(-C|-c|--git-dir|--work-tree|--namespace|--super-prefix|--config-env|--exec-path)[[:space:]]+${GIT_TOK}|--[a-z][a-z-]*(=${GIT_TOK})?|-[A-Za-z]"
+GIT_PUSH="git(([[:space:]]+(${GIT_GOPT}))*)[[:space:]]+push"
+RE_PUSH="${CMD_START}${GIT_PUSH}(\\s|;|&|\\||\$)"
 RE_MR='(glab mr (create|update)|gh pr (create|edit)|glab issue (note|comment)|gh issue comment)'
 RE_MIGRATE='db:migrate|drizzle-kit (migrate|push)|alembic upgrade'
 RE_DELETE="${CMD_START}rm\\s+-(r|f|rf|fr)\\b"
@@ -259,10 +263,14 @@ if [ "$tool" = "Bash" ]; then
     [ "$UNMAPPED" = 1 ] && level3 "merge"
     merge_gate && { GRANTED=1; MERGE_GATED=1; }
   fi
-  printf '%s' "$l3" | grep -qE 'git\s+push.*(--force|-f\b|\+[a-zA-Z])' && level3 "force-push"
+  printf '%s' "$l3" | grep -qE "${GIT_PUSH}.*(--force|-f\\b|\\+[a-zA-Z])" && level3 "force-push"
   # 同一段 push 內，refspec 目標是 main / master 才算；分支名只含 main 片段、push 以外的 main 字樣不算（hooks/security-guard.sh 同一條）
-  push_main='git\s+push\b[^;&|]*[[:space:]:+"'"'"'](refs/heads/)?(main|master)([^A-Za-z0-9._/:-]|$)'
+  push_main="${GIT_PUSH}\\b[^;&|]*[[:space:]:+\"']"'(refs/heads/)?(main|master)([^A-Za-z0-9._/:-]|$)'
   printf '%s' "$l3" | grep -qE "$push_main" && level3 "push main"
+  # push 帶別的程式（--receive-pack、--exec、帶程式的 ssh 指令）或推全部分支（--all、--mirror）：push 授權蓋不掉
+  printf '%s' "$l3" | grep -qE "${GIT_PUSH}[^;&|]*[[:space:]]--(receive-pack|exec)" && level3 "push --receive-pack"
+  printf '%s' "$l3" | grep -qE "${GIT_PUSH}[^;&|]*[[:space:]]--(all|mirror)\\b" && level3 "push --all / --mirror"
+  printf '%s' "$l3" | grep -qE "(GIT_SSH_COMMAND|GIT_SSH|core\\.sshCommand)=" && printf '%s' "$l3" | grep -qE "${GIT_PUSH}" && level3 "push 帶 ssh 指令"
   printf '%s' "$l3" | grep -qiE '(^|\s|/)deploy(\.sh)?(\s|$)' && level3 "deploy"
   printf '%s' "$l3" | grep -qiE 'drop\s+(table|database|schema)|truncate\s+table|db:reset' && level3 "刪資料"
   printf '%s' "$l3" | grep -qE 'sops\s+(-e|--encrypt|edit)|\.gitlab-ci\.yml|\.github/workflows' && level3 "改 CI / secrets"
