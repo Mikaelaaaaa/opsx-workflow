@@ -70,6 +70,13 @@ assert_eq "$(files_of)" "['f2.py', 'f4.py']" "只有行首與行尾的真註解�
 printf '%s\n' "# shortcut: [已評估] $REAL" > "$A/f2.py"
 sync_debt >/dev/null 2>&1
 assert_eq "$(files_of)" "['f4.py']" "改成已評估標記後離開快照"
+# 字串後面的行尾註解照進快照（標記前的引號成對）；標記本身在字串裡的不進
+printf '%s\n' 'URL = "http://10.0.0.1"  # shortcut: 字串後面的註解, 該進' > "$A/f6.py"
+printf '%s\n' "log.info('start')  # shortcut: 單引號字串後面, 該進" > "$A/f7.py"
+printf '%s\n' "print('# shortcut: 在字串裡, 不該進')" > "$A/f8.py"
+sync_debt >/dev/null 2>&1
+assert_eq "$(files_of)" "['f4.py', 'f6.py', 'f7.py']" "字串後面的真註解進快照，標記在字串裡的不進"
+: > "$A/f6.py"; : > "$A/f7.py"; : > "$A/f8.py"
 : > "$A/f1.sh"; : > "$A/f2.py"; : > "$A/f3.py"; : > "$A/f4.py"
 
 # --- debt.json 是 symlink：換成一般檔，目標不變 ---

@@ -42,9 +42,19 @@ for repo_dir in "$root"/*/; do
 	# The grep from ponytail-debt, run with the repo as cwd so paths are relative.
 	# --no-index --exclude-standard: respect .gitignore, skip .git.
 	# Agent worktrees under .claude/worktrees/ are copies of the same tree; skip them.
-	# Only a real comment counts: no quote or backtick before the marker, so an
-	# `echo "# shortcut: …"` inside a test fixture does not open a card.
-	(cd "$repo_dir" && git grep --no-index --exclude-standard -nE '^[^"'"'"'`]*(#|//|/[*]) ?(shortcut|ponytail):' -- . ':!.claude/worktrees' 2>/dev/null || true) |
+	# Only a real comment counts: the quotes before the marker must pair up, so a
+	# marker inside a string (`echo "# shortcut: …"` in a test fixture) is skipped
+	# while `x = "a"  # shortcut: …` is kept.
+	(cd "$repo_dir" && git grep --no-index --exclude-standard -nE '(#|//|/[*]) ?(shortcut|ponytail):' -- . ':!.claude/worktrees' 2>/dev/null || true) |
+	awk -v sq="'" '{
+		t = $0; sub(/^[^:]*:[0-9]+:/, "", t)
+		if (!match(t, /(#|\/\/|\/\*) ?(shortcut|ponytail):/)) next
+		p = substr(t, 1, RSTART - 1)
+		q = p; d = gsub(/"/, "", q)
+		q = p; s = gsub(sq, "", q)
+		q = p; b = gsub(/`/, "", q)
+		if (d % 2 == 0 && s % 2 == 0 && b % 2 == 0) print
+	}' |
 	while IFS= read -r hit; do
 		file="${hit%%:*}"
 		rest="${hit#*:}"
