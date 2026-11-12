@@ -254,9 +254,8 @@ PY
   elif [ "$mode" = autopilot ]; then
     # pid 由 drive 自己寫進 dispatch.json（手動 opsx drive 也一樣），這裡只負責起
     local drivelog="$OPSX_STATE_DIR/drive-$repo-$slug.log"
-    # shortcut: 檢查到開檔之間有空窗，沙盒內要在毫秒內換成 symlink 才打得中，且只能附加 drive 的輸出；要補就改成 O_NOFOLLOW 的 wrapper
-    [ ! -L "$drivelog" ] || die "dispatch: refuse to write through symlink: ${drivelog}（卡已派出，drive 沒起）"
-    ( trap '' HUP; exec bash "$OPSX_ROOT/bin/opsx" drive "$slug" --repo "$top" ) < /dev/null >> "$drivelog" 2>&1 &
+    : | opsx_append "$drivelog" 2>/dev/null || die "dispatch: refuse to write through symlink: ${drivelog}（卡已派出，drive 沒起）"
+    ( trap '' HUP; exec "$OPSX_PY" -I "$OPSX_ROOT/bin/lib/safefile.py" exec-append "$drivelog" bash "$OPSX_ROOT/bin/opsx" drive "$slug" --repo "$top" ) < /dev/null > /dev/null 2>&1 &
     say "dispatch: drive 跑起來了（pid $!），log 在 $drivelog"
   fi
 }

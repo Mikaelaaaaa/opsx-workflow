@@ -82,9 +82,24 @@ def write_atomic(path: str, text: str) -> None:
         raise
 
 
+def exec_append(path: str, argv: list[str]) -> int:
+    """以不跟 symlink 的方式開 log，stdout 與 stderr 都接到它，再 exec 指令（pid 不變，呼叫端的 $! 還是那個行程）。"""
+    try:
+        fd = _open_nofollow(path, os.O_WRONLY | os.O_APPEND)
+    except SymlinkRefused as e:
+        print("opsx: %s" % e, file=sys.stderr)
+        return 2
+    os.dup2(fd, 1)
+    os.dup2(fd, 2)
+    os.close(fd)
+    os.execvp(argv[0], argv)
+
+
 def main(argv: list[str]) -> int:
+    if len(argv) >= 4 and argv[1] == "exec-append":
+        return exec_append(argv[2], argv[3:])
     if len(argv) != 3 or argv[1] not in ("append", "replace"):
-        print("usage: safefile.py append|replace <path>（內容從 stdin）", file=sys.stderr)
+        print("usage: safefile.py append|replace <path>（內容從 stdin）· exec-append <path> <指令> [參數…]", file=sys.stderr)
         return 64
     cmd, path = argv[1], argv[2]
     text = sys.stdin.buffer.read().decode("utf-8")
