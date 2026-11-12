@@ -142,12 +142,14 @@ cat > "$OPSX_STATE_DIR/sources.toml" <<EOF
 kind = "gitlab"
 repo = "a"
 project = "g/a"
+assignee = "mika"
 path = "$A"
 
 [[source]]
 kind = "gitlab"
 repo = "Agentory-CS"
 project = "agentory/agentory-cs"
+assignee = "mika"
 path = "$CS"
 
 [[source]]
@@ -181,6 +183,19 @@ GI="$Z/openspec/changes/gh-z-3/inbox.md"
 assert_grep '^source: github:z#3$' "$GI"; assert_grep '^type: 功能$' "$GI"; assert_grep '^upstream_url: https://github.com/me/z/issues/3$' "$GI"
 assert_eq "$(find "$B/openspec/changes" -mindepth 1 -maxdepth 1 ! -name archive | wc -l | tr -d ' ')" 0 "沒登記在 sources.toml 的 repo 不撈"
 assert_eq "$(grep -c '^issue list' "$OPSX_FAKE_LOG")" 3 "兩個 gitlab、一個 github 各 list 一次：$(cat "$OPSX_FAKE_LOG")"
+# gitlab 來源用 sources.toml 的 assignee，不用 @me（@me 要打 /user，token 要有 User: Read；gitlab-assignee-source）
+assert_eq "$(grep -c -- '--assignee=mika' "$OPSX_FAKE_LOG")" 2 "兩個 gitlab 來源各帶 --assignee=mika：$(cat "$OPSX_FAKE_LOG")"
+assert_eq "$(grep '^issue list' "$OPSX_FAKE_LOG" | grep -c '@me')" 1 "只有 github 還用 @me"
+# 沒設 assignee 的 gitlab 來源：不呼叫 glab，sync 的錯誤訊息點名 assignee 與 sources.toml；其他來源照跑
+cp "$OPSX_STATE_DIR/sources.toml" "$FX/sources.bak"
+printf '\n[[source]]\nkind = "gitlab"\nrepo = "noasg"\nproject = "g/noasg"\npath = "%s"\n' "$FX/elsewhere" >> "$OPSX_STATE_DIR/sources.toml"
+: > "$OPSX_FAKE_LOG"
+opsx sync --root "$ROOT" --source gitlab >/dev/null 2>&1
+assert_eq "$(grep -c 'g/noasg' "$OPSX_FAKE_LOG" || true)" 0 "沒設 assignee 不能呼叫 glab：$(cat "$OPSX_FAKE_LOG")"
+assert_eq "$(grep -c -- '--assignee=mika' "$OPSX_FAKE_LOG")" 2 "其他 gitlab 來源照跑"
+lastsync | grep -q 'assignee' || fail "sync.log 的錯誤要點名 assignee：$(lastsync)"
+lastsync | grep -q 'sources.toml' || fail "sync.log 的錯誤要說去 sources.toml 設：$(lastsync)"
+cp "$FX/sources.bak" "$OPSX_STATE_DIR/sources.toml"
 
 # --- 重跑不長新卡 ---
 snap_all() { find "$A/openspec/changes" "$CS/openspec/changes" "$Z/openspec/changes" -mindepth 1 -maxdepth 1 | sort; }
@@ -307,7 +322,7 @@ logcols | cut -f5 | grep -q 'upstream_updated' || fail "要記錯：$(lastsync)"
 
 # --- sources.toml 的 path 不是 repo 根（linked worktree）：不建殼、記錯，不會每次多一張 ---
 WT="$FX/elsewhere/wt"; mkdir -p "$WT/openspec/changes"; printf 'gitdir: /nowhere\n' > "$WT/.git"
-printf '\n[[source]]\nkind = "gitlab"\nrepo = "wt"\nproject = "g/wt"\npath = "%s"\n' "$WT" >> "$OPSX_STATE_DIR/sources.toml"
+printf '\n[[source]]\nkind = "gitlab"\nrepo = "wt"\nproject = "g/wt"\nassignee = "mika"\npath = "%s"\n' "$WT" >> "$OPSX_STATE_DIR/sources.toml"
 printf '[%s]' "$(gl 7 worktree 2026-11-06T08:00:00Z)" > "$OPSX_TEST_ISSUES/wt.json"
 python3 -I -c 'import json,sys;d=json.load(open(sys.argv[1]));assert isinstance(d,list) and len(d)==1,d' "$OPSX_TEST_ISSUES/wt.json" || fail "wt.json 要是含一個 issue 的合法 JSON list"
 opsx sync --root "$ROOT" --source gitlab >/dev/null 2>&1

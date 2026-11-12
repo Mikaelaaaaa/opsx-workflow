@@ -1,6 +1,6 @@
 """gitlab.sh / github.sh 共用的兩件事：讀 sources.toml、把 glab / gh 的 issue JSON 轉成 opsx sync 的統一欄位。
 
-    sources.py <gitlab|github> <sources.toml>                          印 repo<TAB>project<TAB>path，一個來源一行
+    sources.py <gitlab|github> <sources.toml>                          印 repo<TAB>project<TAB>path，一個來源一行；gitlab 再加 <TAB>assignee
     sources.py normalize <gitlab|github> <repo> <project> <path>  < list 的 JSON 陣列，印 issue 行加一行 {"listed": …}
 """
 from __future__ import annotations
@@ -56,7 +56,9 @@ def main() -> None:
         sources = tomllib.load(fh).get("source", [])
     for s in sources:
         if s.get("kind") == kind:
-            print("%s\t%s\t%s" % (s["repo"], s["project"], s["path"]))
+            # gitlab 多一欄 assignee（GitLab 帳號名，沒設就是空字串）；github 沒有，仍用 @me
+            extra = "\t%s" % s.get("assignee", "") if kind == "gitlab" else ""
+            print("%s\t%s\t%s%s" % (s["repo"], s["project"], s["path"], extra))
 
 
 if __name__ == "__main__":
