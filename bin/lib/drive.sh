@@ -97,8 +97,8 @@ opsx_drive() {
         local gap
         if [ "$stage" = "$last_stage" ]; then
           gap=$((poll - ($(date +%s) - last_at)))
-          # 睡醒後階段、gate、歸檔都可能變了：回迴圈頂端重算，不送睡前算的站
-          if [ "$gap" -gt 0 ]; then sleep "$gap"; last_at=$(($(date +%s) - poll)); continue; fi
+          # 睡醒後 agent 的 turn 可能還在跑、階段、gate、歸檔也可能變了：重等 agent 閒下來，回迴圈頂端重算，不送睡前算的站
+          if [ "$gap" -gt 0 ]; then sleep "$gap"; last_at=$(($(date +%s) - poll)); settled=0; continue; fi
         fi
         say "drive: $slug → /opsx-workflow:$stage"
         local before sent_at; before="$(stage_fingerprint "$top" "$slug")"; sent_at="$(date +%s)"
@@ -159,17 +159,21 @@ herdr_step() { # <slug> <herdr args…>
   esac
 }
 
-# dispatch.json 該卡的 relaunching_at 不到 10 分鐘（與 coordinate.py 的 RELAUNCH_MINUTES 同值）才算 relaunch 進行中；缺、格式不合或過期都回 1
+# dispatch.json 該卡的 relaunching_at 不到 10 分鐘、不晚於現在 1 分鐘（與 coordinate.py 的 RELAUNCH_MINUTES、CLOCK_SKEW_MINUTES 同值）才算 relaunch 進行中。
+# 缺或過期回 1；格式不合在 stderr 印欄位名與原值再回 1（格式由 coordinate 驗證並通知，drive 照沒標記處理）
 drive_relaunching() { # <repo> <slug>
   [ -f "$OPSX_STATE_DIR/dispatch.json" ] || return 1
   OPSX_KEY="$1/$2" "$OPSX_PY" -I - "$OPSX_STATE_DIR/dispatch.json" <<'PY'
 import datetime, json, os, sys
-entry = json.load(open(sys.argv[1])).get(os.environ["OPSX_KEY"]) or {}
-try:
-    age = datetime.datetime.now(datetime.timezone.utc) - datetime.datetime.fromisoformat(entry.get("relaunching_at"))
-except (TypeError, ValueError):
+key = os.environ["OPSX_KEY"]
+at = (json.load(open(sys.argv[1])).get(key) or {}).get("relaunching_at")
+if at is None:
     sys.exit(1)
-sys.exit(0 if datetime.timedelta(0) <= age < datetime.timedelta(minutes=10) else 1)
+try:
+    age = datetime.datetime.now(datetime.timezone.utc) - datetime.datetime.fromisoformat(at)
+except (TypeError, ValueError) as e:
+    sys.exit("drive: %s 的 relaunching_at=%r 不是帶時區的 ISO 8601（%s），當成沒有標記" % (key, at, e))
+sys.exit(0 if datetime.timedelta(minutes=-1) <= age < datetime.timedelta(minutes=10) else 1)
 PY
 }
 

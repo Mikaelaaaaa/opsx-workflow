@@ -228,7 +228,7 @@ reset_apply; printf '{"Acmecorp-CS/retry-backoff":{"mode":"drive","pane":"p42","
 export OPSX_TEST_ON_PROMPT="$FX/noop.sh" OPSX_TEST_PANE_TEXT="API Error: HTTP 429 rate_limit"
 out="$(PATH="$FX/sleepbin:$PATH" OPSX_DRIVE_POLL=7 OPSX_DRIVE_MAX=2 opsx drive retry-backoff 2>&1)"; assert_eq "$?" 0 "drive 429: $out"
 assert_eq "$(grep -c '^agent prompt' "$OPSX_FAKE_LOG")" 1 "429 尾巴只送一次: $(cat "$OPSX_FAKE_LOG")"
-assert_grep '^sleep 7$' "$OPSX_FAKE_LOG"
+assert_eq "$(sed -n '/^agent prompt/,$p' "$OPSX_FAKE_LOG" | grep -c '^sleep 7$')" 1 "退避的 sleep 要在送出之後: $(cat "$OPSX_FAKE_LOG")"
 if [ -f "$C/gates.md" ]; then assert_not_grep '^## drive-' "$C/gates.md"; fi
 echo "$out" | grep -q "退避 7 秒" || fail "要說退避多久: $out"
 reset_apply
@@ -242,7 +242,7 @@ for t in "1 shell / 1 monitor still running" "general-purpose 8m"; do
   export OPSX_TEST_ON_PROMPT="$FX/noop.sh" OPSX_TEST_PANE_TEXT="$t"
   out="$(PATH="$FX/sleepbin:$PATH" OPSX_DRIVE_POLL=7 OPSX_DRIVE_MAX=2 opsx drive retry-backoff 2>&1)"; assert_eq "$?" 0 "drive 背景工作「${t}」: $out"
   assert_eq "$(grep -c '^agent prompt' "$OPSX_FAKE_LOG")" 1 "「${t}」只送一次: $(cat "$OPSX_FAKE_LOG")"
-  assert_grep '^sleep 7$' "$OPSX_FAKE_LOG"
+  assert_eq "$(sed -n '/^agent prompt/,$p' "$OPSX_FAKE_LOG" | grep -c '^sleep 7$')" 1 "「${t}」等 poll 秒的 sleep 要在送出之後: $(cat "$OPSX_FAKE_LOG")"
   if [ -f "$C/gates.md" ]; then assert_not_grep '^## drive-' "$C/gates.md"; fi
 done
 for t in "❯ " "● Bash(ls) Running…" "Plan 3 steps"; do
@@ -256,7 +256,7 @@ reset_apply; printf '{"Acmecorp-CS/retry-backoff":{"mode":"drive","pane":"p42","
 export OPSX_TEST_ON_PROMPT="$FX/noop.sh" OPSX_TEST_PANE_TEXT="1 shell / 1 monitor still running"
 out="$(PATH="$FX/sleepbin:$PATH" OPSX_DRIVE_POLL=7 OPSX_DRIVE_MAX=3 opsx drive retry-backoff 2>&1)"; assert_eq "$?" 0 "drive 背景工作兩輪: $out"
 assert_eq "$(grep -c '^agent prompt' "$OPSX_FAKE_LOG")" 1 "背景工作還在跑時第二輪不重送: $(cat "$OPSX_FAKE_LOG")"
-assert_eq "$(grep -c '^sleep 7$' "$OPSX_FAKE_LOG")" 3 "起來先睡下限，之後兩輪各等一次: $(cat "$OPSX_FAKE_LOG")"
+assert_eq "$(sed -n '/^agent prompt/,$p' "$OPSX_FAKE_LOG" | grep -c '^sleep 7$')" 2 "送出之後兩輪各等一次: $(cat "$OPSX_FAKE_LOG")"
 if [ -f "$C/gates.md" ]; then assert_not_grep '^## drive-' "$C/gates.md"; fi
 # 背景工作結束（第二次讀 pane 只剩輸入框）而指紋仍沒動：寫 gate，不重送
 reset_apply; printf '{"Acmecorp-CS/retry-backoff":{"mode":"drive","pane":"p42","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"
@@ -408,8 +408,15 @@ assert_not_grep 'opsx-workflow:apply' "$OPSX_FAKE_LOG"
 reset_apply; printf '%s' "$DISP_JSON" > "$OPSX_STATE_DIR/dispatch.json"
 out="$(PATH="$FX/sleepbin2:$PATH" OPSX_DRIVE_POLL=1000 OPSX_DRIVE_MAX=2 opsx drive retry-backoff 2>&1)"; assert_eq "$?" 0 "drive 階段沒動: $out"
 assert_eq "$(sed -n 2p "$OPSX_FAKE_LOG" | cut -d' ' -f1)" sleep "階段沒動也先睡下限: $(cat "$OPSX_FAKE_LOG")"
-assert_eq "$(sed -n 3p "$OPSX_FAKE_LOG" | sed 's/ --wait$//' | cut -d' ' -f1-3)" "agent prompt retry-backoff" "睡完照常送一次: $(cat "$OPSX_FAKE_LOG")"
+assert_eq "$(sed -n 3p "$OPSX_FAKE_LOG")" "agent wait retry-backoff" "睡完要先等 agent 閒下來（它的 turn 可能還在跑）: $(cat "$OPSX_FAKE_LOG")"
+assert_eq "$(sed -n 4p "$OPSX_FAKE_LOG" | sed 's/ --wait$//' | cut -d' ' -f1-3)" "agent prompt retry-backoff" "等完照常送一次: $(cat "$OPSX_FAKE_LOG")"
 assert_eq "$(grep -c '^agent prompt' "$OPSX_FAKE_LOG")" 1 "睡完只送一次: $(cat "$OPSX_FAKE_LOG")"
+# 睡眠期間出現 open gate：回迴圈頂端走 gate 分支，不送階段指令
+printf '#!/usr/bin/env bash\nprintf "## g\\nstatus: open\\ntype: decision\\n" > "%s/gates.md"\n' "$C" > "$FX/gate_on_sleep.sh"
+reset_apply; printf '%s' "$DISP_JSON" > "$OPSX_STATE_DIR/dispatch.json"
+out="$(PATH="$FX/sleepbin2:$PATH" OPSX_TEST_ON_SLEEP="$FX/gate_on_sleep.sh" OPSX_DRIVE_POLL=1000 OPSX_DRIVE_MAX=2 opsx drive retry-backoff 2>&1)"; assert_eq "$?" 0 "drive 睡眠期間出現 gate: $out"
+assert_not_grep '^agent prompt' "$OPSX_FAKE_LOG"; assert_grep 'agent wait retry-backoff --until working' "$OPSX_FAKE_LOG"
+rm -f "$C/gates.md"
 
 # --- relaunch 標記期間 wait 回 agent_not_running：結束，不送階段指令；沒標記或標記過期照舊（記一行、睡 poll、照送） ---
 rl_at() { python3 -I -c 'import datetime, sys; print((datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=8))) - datetime.timedelta(minutes=int(sys.argv[1]))).isoformat(timespec="seconds"))' "$1"; }
@@ -427,4 +434,16 @@ for ago in none 11; do
   echo "$out" | grep -q "回 agent_not_running，等 1 秒" || fail "標記 ${ago} 要照舊記錯誤碼與退避: $out"
   [ "$(grep -c '^agent prompt' "$OPSX_FAKE_LOG")" -ge 1 ] || fail "標記 ${ago} 要照舊送階段指令: $(cat "$OPSX_FAKE_LOG")"
 done
+# 標記格式不合（沒時區）：大聲說出欄位名與原值，仍照沒標記處理
+printf 'agent_not_running\n' > "$FX/werr"; reset_apply
+printf '{"Acmecorp-CS/retry-backoff":{"mode":"drive","pane":"p42","grants":[],"relaunching_at":"2026-11-12T13:00:00"}}' > "$OPSX_STATE_DIR/dispatch.json"
+out="$(PATH="$FX/sleepbin2:$PATH" OPSX_TEST_WAIT_ERR="$FX/werr" OPSX_DRIVE_POLL=1 OPSX_DRIVE_MAX=3 opsx drive retry-backoff 2>&1)"; assert_eq "$?" 0 "標記沒時區: $out"
+echo "$out" | grep -q "relaunching_at.*2026-11-12T13:00:00" || fail "要說出欄位名與原值: $out"
+[ "$(grep -c '^agent prompt' "$OPSX_FAKE_LOG")" -ge 1 ] || fail "格式不合照沒標記處理: $(cat "$OPSX_FAKE_LOG")"
+# 標記晚於現在 30 秒（時鐘差，coordinate 容許 1 分鐘）：算在 relaunch
+printf 'agent_not_running\n' > "$FX/werr"; reset_apply
+printf '{"Acmecorp-CS/retry-backoff":{"mode":"drive","pane":"p42","grants":[],"relaunching_at":"%s"}}' "$(python3 -I -c 'import datetime; print((datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(seconds=30)).isoformat(timespec="seconds"))')" > "$OPSX_STATE_DIR/dispatch.json"
+out="$(PATH="$FX/sleepbin2:$PATH" OPSX_TEST_WAIT_ERR="$FX/werr" OPSX_DRIVE_POLL=1 opsx drive retry-backoff 2>&1)"; assert_eq "$?" 0 "標記晚 30 秒: $out"
+echo "$out" | grep -q "relaunch" || fail "晚 30 秒的標記要算在 relaunch: $out"
+assert_not_grep '^agent prompt' "$OPSX_FAKE_LOG"
 echo ok
