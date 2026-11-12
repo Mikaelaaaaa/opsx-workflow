@@ -592,6 +592,8 @@ printf '{"demo/p1":{"mode":"stopped","agent":"codex","pane":"w1:p3","drive_pid":
 cards "[$P1]"
 round || fail "rc: $(cat "$FX/out")"
 assert_eq "$(count '^opsx dispatch')" 0 "沒東西合不重派 parked"; assert_eq "$(count '^opsx answer')" 0
+assert_eq "$(count '^notification show')" 0 "沒東西合不通知人回 gate：$(cat "$OPSX_FAKE_LOG")"
+assert_eq "$(jq -r '._parked."demo/p1".answered // "none"' "$MEMO")" none "沒東西合不記成已答：$(cat "$MEMO")"
 
 # --- parked：有東西合了（被等的卡由它自己的 agent /archive，workplan 的 PR 變 merged），只通知人回 gate，不答不派 ---
 sed -i '' '/- name: g$/,/status:/s/status: pending/status: merged/' "$R/openspec/workplan.yaml"

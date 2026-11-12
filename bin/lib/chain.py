@@ -8,6 +8,7 @@ specs/opsx-chain/spec.md「找出可以續接的子卡」。
 """
 from __future__ import annotations
 
+import glob
 import os
 import re
 import sys
@@ -92,6 +93,28 @@ def find_pr(prs: list, slug: str):
         if any(c.get("name") == slug for c in pr.get("changes") or []):
             return pr
     return None
+
+
+def is_archived(top: str, name: str) -> bool:
+    """change 目錄不在了，而且 openspec archive 留下了 <日期>-<name>。"""
+    changes = os.path.join(top, "openspec", "changes")
+    return not os.path.isdir(os.path.join(changes, name)) and bool(glob.glob(os.path.join(changes, "archive", "????-??-??-" + glob.escape(name))))
+
+
+def archived_declined(top: str, name: str) -> bool:
+    """最新一份同名歸檔是被捨棄的（opsx drop、opsx merge-card 會在 .openspec.yaml 寫 outcome: declined），不是合進 main。
+    名字被捨棄過又重做的卡，看最新那份。"""
+    dirs = sorted(glob.glob(os.path.join(top, "openspec", "changes", "archive", "????-??-??-" + glob.escape(name))))
+    return bool(dirs) and bool(re.search(r"^outcome:\s*declined\s*$", priority.read_text(os.path.join(dirs[-1], ".openspec.yaml")), re.M))
+
+
+def merged_into_main(top: str, prs: list, name: str) -> bool:
+    """waits-on 的卡合進 main 了：workplan 裡它所屬的 PR 是 merged，或它已歸檔而且不是被捨棄的。
+    workplan 與 archive 都沒有它（卡名寫錯、還沒進 workplan）算沒合。coordinate 與 collect 共用。"""
+    pr = find_pr(prs, name)
+    if pr is not None and pr.get("status") == "merged":
+        return True
+    return is_archived(top, name) and not archived_declined(top, name)
 
 
 def card_of(top: str, pr: dict, todo: list) -> str:

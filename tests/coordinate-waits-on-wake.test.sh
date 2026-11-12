@@ -61,6 +61,9 @@ wp pending merged; parked ',"waits_on":"x-pr"'; waiting '"x-pr"'
 round || fail "rc: $(cat "$FX/out")"
 assert_eq "$(count '^opsx dispatch')" 0 "y-pr 合了不該喚醒等 x-pr 的卡：$(cat "$OPSX_FAKE_LOG")"
 assert_eq "$(count '^opsx answer')" 0 "也不該答 gate"
+# 喚醒只剩通知：沒喚醒就不能通知人回 gate，也不能記成已答
+assert_eq "$(count '^notification show')" 0 "y-pr 合了不該通知人回等 x-pr 的 gate：$(cat "$OPSX_FAKE_LOG")"
+assert_eq "$(jq -r '._parked."demo/card-a".answered // "none"' "$MEMO")" none "沒喚醒不該記成已答：$(cat "$MEMO")"
 
 # 喚醒＝通知人回 gate：gate 由人答，這裡不答、gate 還開著也不派
 woken() { # <說明>

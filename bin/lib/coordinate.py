@@ -8,7 +8,6 @@
 import datetime
 import fcntl
 import functools
-import glob
 import json
 import os
 import re
@@ -412,7 +411,7 @@ class Round:
         else:
             # drop 與手動 openspec archive 只搬目錄、不改 workplan；只是目錄不在的可能還沒 propose，不算
             unfinished = [x.get("name") for x in pr.get("changes") or [] if x.get("name") != slug and x.get("status") != "done"]
-            archived = [n for n in unfinished if is_archived(top, n)]
+            archived = [n for n in unfinished if chain.is_archived(top, n)]
             pending = [n for n in unfinished if n not in archived]
             marks = [("changes", n, "done") for n in [slug] + archived] + ([] if pending else [("prs", pr["name"], "merged")])
         if self.dry:
@@ -538,20 +537,12 @@ class Round:
             del self.memo["_usage_limit"]
         return False
 
-    def merged_into_main(self, top, slug):
-        """waits-on 的卡合進 main 了：workplan 裡它所屬的 PR 是 merged，或它已歸檔（is_archived）而且不是被捨棄的。
-        workplan 與 archive 都沒有它（卡名寫錯、還沒進 workplan）算沒合，維持停 pane。"""
-        pr = pr_of(self.workplan(top), slug)
-        if pr is not None and pr.get("status") == "merged":
-            return True
-        return is_archived(top, slug) and not archived_declined(top, slug)
-
     def handle_gate(self, c, top):
         """派出去的卡的第一個 open gate：照 gaterule.decide 的處置停 pane 或通知人。gate 一律由人答，這裡不答。"""
         w, key = c["waiting"], card_key(c)
         verdict = gaterule.decide(w)
         q = w.get("question") or ""
-        if verdict[0] == "park" and self.merged_into_main(top, verdict[1]):
+        if verdict[0] == "park" and chain.merged_into_main(top, self.workplan(top), verdict[1]):
             self.log("?? %s gate %s 等的 %s 已合進 main，不停 pane，要你回 gate：%s" % (key, w["gate_id"], verdict[1], q[:100]))
             self.notify_gate(c, w, "等的 %s 已合進 main，要你回" % verdict[1])
             return
@@ -837,7 +828,7 @@ class Round:
             if not p0 and working + n >= self.max_working:
                 self.log("-- 同時在跑 %d 張，達上限 %d，%s 下輪" % (working + n, self.max_working, key))
                 continue
-            agent =entry["agent"] if entry and "agent" in entry else "claude"
+            agent = entry["agent"] if entry and "agent" in entry else "claude"
             rc, _, err = self.act(["opsx", "dispatch", c["slug"], "--agent", agent, "--mode", "autopilot", "--kind", c["kind"], "--repo", top])
             if not p0:
                 n += 1
@@ -1100,19 +1091,6 @@ def deps_unmerged(slug, prs, features):
     deps = list(pr.get("depends-on") or [])
     deps += [d for d in chain.feature_waits(features, prs).get(pr["name"], []) if d not in deps]
     return [d for d in deps if status.get(d) != "merged"]
-
-
-def is_archived(top, name):
-    """change 目錄不在了，而且 openspec archive 留下了 <日期>-<name>。"""
-    changes = os.path.join(top, "openspec", "changes")
-    return not os.path.isdir(os.path.join(changes, name)) and bool(glob.glob(os.path.join(changes, "archive", "????-??-??-" + glob.escape(name))))
-
-
-def archived_declined(top, name):
-    """最新一份同名歸檔是被捨棄的（opsx drop、opsx merge-card 會在 .openspec.yaml 寫 outcome: declined），不是合進 main。
-    名字被捨棄過又重做的卡，看最新那份。"""
-    dirs = sorted(glob.glob(os.path.join(top, "openspec", "changes", "archive", "????-??-??-" + glob.escape(name))))
-    return bool(dirs) and bool(re.search(r"^outcome:\s*declined\s*$", priority.read_text(os.path.join(dirs[-1], ".openspec.yaml")), re.M))
 
 
 def waiting_on(prs, slug):
