@@ -50,6 +50,14 @@ $missing
 改好 spec 再停。"
         return 0
       fi
+      # tasks.md 是 agent 寫的，併入發生在它讀完 inbox.md 之後、寫完 tasks.md 之前就會被漏掉；這裡補查
+      missing="$(check_merged "$d")"
+      if [ -n "$missing" ]; then
+        printf '%s' "apply|opsx：${slug} 有併入的項目沒有去處（opsx check ${slug}）：
+$missing
+補成 tasks.md 的 task，或 opsx split-out 拆出去，再停。"
+        return 0
+      fi
     fi
     if [ -d "$d/subs" ] && [ "$(st_open_gates "$d")" -eq 0 ]; then
       missing="$(check_subs "$d")"
