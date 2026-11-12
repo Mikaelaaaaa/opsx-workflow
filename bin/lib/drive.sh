@@ -56,6 +56,7 @@ opsx_drive() {
       case "$ans" in
         重做*)
           if [ "$(stage_fingerprint "$top" "$slug")" = "$watch_fp" ]; then
+            if drive_args_lost "$repo" "$slug"; then return 0; fi
             write_stuck_gate "$d" "$wstage" "$repo" "$slug"; say "drive: $slug 重做 /opsx-workflow:$wstage 之後階段還是沒動，寫了 gate 等人"
             coordinate_kick "$slug"; watch=""; continue   # 新 gate 開著，回頭走 gate 分支，不送階段指令
           fi
@@ -84,6 +85,7 @@ opsx_drive() {
           elif [ "$(pane_state "$repo" "$slug")" = busy ]; then
             say "drive: $slug 的 pane 還有背景工作或 subagent 在跑，不重送 /opsx-workflow:${stage}，等 $poll 秒"; sleep "$poll"; continue
           else
+            if drive_args_lost "$repo" "$slug"; then return 0; fi
             bg_fp=""; write_stuck_gate "$d" "$stage" "$repo" "$slug"; say "drive: $slug 背景工作結束後階段還是沒動，寫了 gate 等人"
             coordinate_kick "$slug"; continue
           fi
@@ -110,6 +112,7 @@ opsx_drive() {
               say "drive: $slug 送了 /opsx-workflow:$stage 之後階段沒動，但 pane 有背景工作或 subagent 在跑，不寫 gate、不重送，等 $poll 秒"
               sleep "$poll" ;;
             *)
+              if drive_args_lost "$repo" "$slug"; then return 0; fi
               write_stuck_gate "$d" "$stage" "$repo" "$slug"; say "drive: $slug 送了 /opsx-workflow:$stage 之後階段沒動，寫了 gate 等人"
               coordinate_kick "$slug" ;;   # shell 附加寫的 gate 不經過 gate-timestamp hook
           esac
@@ -143,6 +146,13 @@ herdr_step() { # <slug> <herdr args…>
     *)
       say "drive: herdr $1 $2 回 ${code:-$err}，等 $poll 秒"; sleep "$poll"; return 0 ;;
   esac
+}
+
+# agent 的 claude 沒帶這張卡的 --settings（hooks/_lib.sh args_lost_status 判出後留標記）：agent 寫不了檔，階段不會動，
+# 寫 gate 只會堆。回 0 並印一行說明，呼叫者就結束 drive。
+drive_args_lost() { # <repo> <slug>
+  [ -f "$OPSX_STATE_DIR/args-lost/$1-$2" ] || return 1
+  say "drive: $2 的 claude 啟動參數遺失（沒帶 --settings），階段不會動，不寫 gate、不 kick，結束；跑 opsx relaunch $2"
 }
 
 pane_tail() { # <repo> <slug>：pane 最後 20 行壓成一行；pane 讀不到印空

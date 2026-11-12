@@ -46,7 +46,7 @@ from urllib.parse import parse_qs
 HERE = pathlib.Path(__file__).resolve().parent
 OPSX = pathlib.Path(os.environ.get("OPSX_TEST_OPSX") or HERE.parent / "bin" / "opsx")   # 測試換成假的 opsx
 INDEX = HERE / "web" / "index.html"
-SLUG_RE = re.compile(r"^[a-z][a-z0-9_-]{0,31}$")
+SLUG_RE = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
 TOKEN_RE = re.compile(r"^[A-Za-z0-9_-]{32,}$")
 COLLECT_TIMEOUT = 60
 TIMELINE_TIMEOUT = 60
@@ -341,7 +341,9 @@ class Handler(BaseHTTPRequestHandler):
         return bool(TOKEN_RE.match(token)) and secrets.compare_digest(token, self.cfg.token)
 
     def opsx_env(self) -> dict:
-        return dict(os.environ, OPSX_STATE_DIR=str(self.cfg.state))
+        # 看板從 dispatch 的 agent pane 啟動時繼承 OPSX_CARD；留著，使用者按的 opsx new 會被當成 agent 開的卡
+        env = {k: v for k, v in os.environ.items() if k != "OPSX_CARD"}
+        return dict(env, OPSX_STATE_DIR=str(self.cfg.state))
 
     def collect(self) -> tuple[int, dict]:
         cfg = self.cfg

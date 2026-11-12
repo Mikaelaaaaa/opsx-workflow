@@ -130,7 +130,7 @@ split-crlf|split · split-crlf · dev · 已拆成 [a, b]，這張不再往下�
 split-crlf-empty|apply · split-crlf-empty · dev · skills/apply/SKILL.md · skills/apply/references/playbooks/dev.md · skills/tdd/SKILL.md
 split-noeol|split · split-noeol · dev · 已拆成 [z]，這張不再往下做
 split-hash|split · split-hash · dev · 已拆成 a#b，這張不再往下做
-split-onlyhash|split · split-onlyhash · dev · 已拆成 # 沒填，這張不再往下做
+split-onlyhash|explore · split-onlyhash · dev · skills/explore/SKILL.md
 split-twice|explore · split-twice · dev · skills/explore/SKILL.md
 TABLE
 # kind 欄位帶著 CRLF 的 \r，寫不進上面的表

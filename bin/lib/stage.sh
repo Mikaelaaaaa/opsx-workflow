@@ -126,7 +126,7 @@ st_split_into() {
     esac
     case "$line" in split_into:*) ;; *) continue ;; esac
     line="${line#split_into:}"; line="${line#"${line%%[! ]*}"}"; line="${line%$'\r'}"
-    case "$line" in *" #"*) line="${line%% #*}"; line="${line%"${line##*[! ]}"}" ;; esac
+    case "$line" in "#"*) line="" ;; *" #"*) line="${line%% #*}"; line="${line%"${line##*[! ]}"}" ;; esac
     [[ $line =~ $empty ]] || printf '%s\n' "$line"
     return 0
   done < "$1/inbox.md"
@@ -134,7 +134,8 @@ st_split_into() {
 
 # 印「階段 · slug · kind · Read 清單」。沒卡印 explore。
 stage_of() { # <top> <slug>
-  local top="$1" slug="$2" d="$1/openspec/changes/$2" kind
+  local top="$1" slug="$2" d kind
+  d="$(st_card_dir "$1" "$2")"
   if [ -z "$slug" ] || [ ! -d "$d" ]; then printf 'explore · （沒有對到卡，先建殼）· — · skills/explore/SKILL.md\n'; return; fi
   kind="$(st_card_kind "$d")"; kind="${kind:-dev}"
   local pb="skills/apply/references/playbooks" reads split

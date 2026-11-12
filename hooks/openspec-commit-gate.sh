@@ -6,31 +6,50 @@ source "$(dirname "${BASH_SOURCE[0]}")/_lib.sh"
 
 cmd="$(hook_cmd)"
 sk="$(cmd_skeleton "$cmd")" || deny "opsx commit 閘門：perl 執行失敗，讀不到指令骨架，先擋下。確認 perl 可用"
-printf '%s' "$sk" | grep -qE '(^|\s|&&|\|\||;)git\s+(-C\s+\S+\s+)?commit(\s|$)' || exit 0
+# git 與 commit 之間可以夾全域選項：-c k=v、-C <dir>（可重複）、--git-dir[=]<d>、--work-tree[=]<d>、--namespace[=]<n>、--no-pager 這類不帶值的長選項。
+# 值可以含反斜線跳脫的字元（\ 加任一字元算同一個字），這樣跳脫空白的路徑也讀得到、交給 unreadable_dir 擋。
+tok='(\\.|[^[:space:]\\])+'
+valued='-C|-c|--git-dir|--work-tree|--namespace|--super-prefix|--config-env|--exec-path'
+opt="(${valued})[[:space:]]+${tok}|--[a-z][a-z-]*(=${tok})?|-[A-Za-z]"
+commit_re="(^|[[:space:];&|(])git(([[:space:]]+(${opt}))*)[[:space:]]+commit([[:space:]]|\$)"
+[[ "$sk" =~ $commit_re ]] || exit 0
+m0="${BASH_REMATCH[0]}"; opts="${BASH_REMATCH[2]}"
 
 # commit 實際作用的目錄決定對卡，不是 session cwd；hook_cwd 認 OPSX_CWD
 join_dir() { case "$2" in /*) printf '%s' "$2" ;; *) printf '%s/%s' "$1" "$2" ;; esac; }
 unreadable_dir() { case "$1" in *[\"\'\$\`~\\]*|*[*?\[\{]*) return 0 ;; esac; return 1; }
+check_dir() { # <路徑>：讀不出來就記進 bad_dirs
+  case "$1" in
+    '""'|"''") bad_dirs="$bad_dirs 引號包住的路徑" ;;
+    *) if unreadable_dir "$1"; then bad_dirs="$bad_dirs '$1'"; fi ;;
+  esac
+}
 unset OPSX_CWD
 bad_dirs=''
-if [[ "$sk" =~ (^|[[:space:];\&\|\(])git[[:space:]]+(-C[[:space:]]+([^[:space:]]+)[[:space:]]+)?commit([[:space:]]|$) ]]; then
-  c_dir="${BASH_REMATCH[3]}"
-  before=" ${sk%%"${BASH_REMATCH[0]}"*}"
-  after_cd="${before##*[[:space:];&|(]cd[[:space:]]}"
-  cd_dir=''
-  [ "$after_cd" != "$before" ] && cd_dir="${after_cd%%[[:space:];&|)]*}"
-  for d in "$cd_dir" "$c_dir"; do
-    case "$d" in
-      '""'|"''") bad_dirs="$bad_dirs 引號包住的路徑" ;;
-      *) unreadable_dir "$d" && bad_dirs="$bad_dirs '$d'" ;;
-    esac
-  done
-  if [ -z "$bad_dirs" ]; then
-    target="$(hook_cwd)"
-    [ -n "$cd_dir" ] && target="$(join_dir "$target" "$cd_dir")"
-    [ -n "$c_dir" ] && target="$(join_dir "$target" "$c_dir")"
-    [ -d "$target" ] && export OPSX_CWD="$target"
-  fi
+before=" ${sk%%"$m0"*}"
+after_cd="${before##*[[:space:];&|(]cd[[:space:]]}"
+cd_dir=''
+[ "$after_cd" != "$before" ] && cd_dir="${after_cd%%[[:space:];&|)]*}"
+check_dir "$cd_dir"
+# 依序走過全域選項：-C 的目錄照順序收，--git-dir 的路徑只檢查讀不讀得出來（作用目錄仍看 -C 與 cd）
+c_dirs=()
+rest="$opts"
+while [ -n "${rest//[[:space:]]/}" ]; do
+  if [[ "$rest" =~ ^[[:space:]]+-C[[:space:]]+(${tok}) ]]; then
+    check_dir "${BASH_REMATCH[1]}"; c_dirs+=("${BASH_REMATCH[1]}")
+  elif [[ "$rest" =~ ^[[:space:]]+--git-dir(=|[[:space:]]+)(${tok}) ]]; then
+    check_dir "${BASH_REMATCH[2]}"
+  elif [[ "$rest" =~ ^[[:space:]]+(${valued})[[:space:]]+${tok} ]]; then :
+  elif [[ "$rest" =~ ^[[:space:]]+--[a-z][a-z-]*(=${tok})? ]]; then :
+  elif [[ "$rest" =~ ^[[:space:]]+-[A-Za-z] ]]; then :
+  else break; fi
+  rest="${rest:${#BASH_REMATCH[0]}}"
+done
+if [ -z "$bad_dirs" ]; then
+  target="$(hook_cwd)"
+  [ -n "$cd_dir" ] && target="$(join_dir "$target" "$cd_dir")"
+  for d in "${c_dirs[@]+"${c_dirs[@]}"}"; do target="$(join_dir "$target" "$d")"; done
+  [ -d "$target" ] && export OPSX_CWD="$target"
 fi
 
 top="$(repo_top)"

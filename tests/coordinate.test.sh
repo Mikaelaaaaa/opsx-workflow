@@ -2251,5 +2251,15 @@ rm -f "$MEMO"; a_disp '"not-a-time"'
 cards '[{"slug":"a","section":"待處理","dispatch":{"mode":"autopilot","agent":"claude","pane":"w1:p1","drive_pid":null},"agent_status":"idle","waiting":{"type":"等待授權","gate_id":"g1","action":"x","question":"允許嗎","recommended":null,"options":[]}}]'
 OPSX_TEST_FAIL_answer=agent_not_found round || fail "代答送不到遇壞的 relaunching_at 整輪要跑完：$(cat "$FX/out")"
 assert_eq "$(ecount '^opsx (stop|dispatch)')" 0 "代答路徑遇壞值不重派：$(cat "$OPSX_FAKE_LOG")"
+
+# 用量上限過後代答「卡在接」gate，送不到又遇壞的 relaunching_at：整輪跑完，不重派，記 ?? 並通知
+AR="$FX/agent-read.txt"; export OPSX_TEST_AGENT_READ="$AR"; printf 'ok\n' > "$AR"
+STUCK='卡在接 /apply #1'
+printf '{"_usage_limit":{"seen_at":"%s","resets_at":"%s"},"_limit_stuck":{"demo/a":["%s"]}}' "$(ago 70)" "$(ago 10)" "$STUCK" > "$MEMO"
+a_disp '"not-a-time"'
+cards '[{"slug":"a","section":"待處理","dispatch":{"mode":"autopilot","agent":"claude","pane":"w1:p1","drive_pid":null},"agent_status":"idle","open_gates":[{"id":"'"$STUCK"'","opened_at":null}]}]'
+OPSX_TEST_FAIL_answer=agent_not_found round || fail "卡在接代答遇壞的 relaunching_at 整輪要跑完：$(cat "$FX/out")"
+assert_eq "$(ecount '^opsx (stop|dispatch)')" 0 "卡在接代答路徑遇壞值不重派：$(cat "$OPSX_FAKE_LOG")"
+grep -F '?? demo/a' "$LOG" | grep -qF relaunching_at || fail "卡在接代答路徑也要有 ?? 含 relaunching_at：$(cat "$LOG")"
 rm -f "$MEMO"; printf '{}' > "$DISP"
 echo "coordinate: ok"

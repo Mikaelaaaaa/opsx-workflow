@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import curses
 import json
+import os
 import pathlib
 import subprocess
 import sys
@@ -119,7 +120,8 @@ def main(scr) -> None:
                 box = None; curses.curs_set(0); curses.flushinp(); note = ""
             if res is not None and res[0] == "submit":
                 argv = tm.new_argv(str(HERE.parent), data, scope, res[1])
-                r = subprocess.run(argv, capture_output=True, text=True)
+                env = {k: v for k, v in os.environ.items() if k != "OPSX_CARD"}   # 繼承 OPSX_CARD 的話，使用者按 + 開的卡會被當成 agent 開的
+                r = subprocess.run(argv, capture_output=True, text=True, env=env)
                 note = tm.outcome(argv, r, "收件匣 +1：%s" % r.stdout.strip())
             continue
         k = scr.getch()
