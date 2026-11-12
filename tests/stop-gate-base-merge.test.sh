@@ -22,11 +22,21 @@ printf '# report\n### 待修（範圍內）\n確認: %s\n' "$SHA0" > "$C/report.
 # 確認之後只合併了 base 分支（merge commit，帶進別人的 commit）：不用再 review
 git -C "$R" checkout -q -b base-side
 git -C "$R" commit -q --allow-empty -m "main: someone else's work"
+git -C "$R" update-ref refs/remotes/origin/main "$(git -C "$R" rev-parse base-side)"   # base 分支在遠端
 git -C "$R" checkout -q -
 git -C "$R" merge -q --no-ff base-side -m "Merge remote-tracking branch 'origin/main'"
 rm -rf "$STOP_STATE"
 out="$(sg)"
 case "$(reason "$out")" in *review*) fail "確認之後只合併 base 分支不能再要求 review：$(reason "$out")" ;; esac
+
+# 確認之後合進來的是本地側枝（那支的 commit 沒在任何 remote-tracking 分支）：沒審查過，要擋
+git -C "$R" checkout -q -b local-side
+git -C "$R" commit -q --allow-empty -m "unreviewed work on a local side branch"
+git -C "$R" checkout -q -
+git -C "$R" merge -q --no-ff local-side -m "Merge branch 'local-side'"
+rm -rf "$STOP_STATE"
+out="$(sg)"; assert_eq "$(decision "$out")" block "合併本地側枝要擋"
+case "$(reason "$out")" in */opsx-workflow:review*) ;; *) fail "要叫跑 review：$out" ;; esac
 
 # 確認之後這個 branch 自己又多一個一般 commit：要再 review
 git -C "$R" commit -q --allow-empty -m "fix: one more change after the confirm"

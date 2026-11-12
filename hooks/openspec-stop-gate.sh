@@ -23,7 +23,14 @@ confirmed_covers_head() { # <確認的 sha> <HEAD sha>
   c="$(git -C "$cwd" rev-parse "$1" 2>/dev/null)" || return 1
   [ "$c" = "$2" ] && return 0
   git -C "$cwd" merge-base --is-ancestor "$c" "$2" 2>/dev/null || return 1
-  [ -z "$(git -C "$cwd" rev-list --first-parent --no-merges "$c..$2")" ]
+  [ -z "$(git -C "$cwd" rev-list --first-parent --no-merges "$c..$2")" ] || return 1
+  # 第一父鏈上的每個 merge commit：它的第二父要已經在某個 remote-tracking 分支裡（合併的是 base 分支，不是本地沒審查過的側枝）
+  local m p2
+  while read -r m; do
+    p2="$(git -C "$cwd" rev-parse "$m^2" 2>/dev/null)" || return 1
+    [ -n "$(git -C "$cwd" branch -r --contains "$p2" 2>/dev/null)" ] || return 1
+  done < <(git -C "$cwd" rev-list --first-parent --merges "$c..$2")
+  return 0
 }
 
 # 印要擋的原因；空字串表示放行。
