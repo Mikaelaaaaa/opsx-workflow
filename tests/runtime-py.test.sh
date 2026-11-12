@@ -3,6 +3,7 @@
 # 驗收：openspec/changes/runtime-module/subs/runtime-py/specs/agent-runtime/spec.md
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 use_fakes herdr
+use_herdr_argv_log
 export OPSX_FAKE_LOG="$FX/herdr.log"; : > "$OPSX_FAKE_LOG"
 export OPSX_TEST_AGENT_GET_RAW='{}' OPSX_TEST_COORDINATOR_UP=1
 source "$OPSX_ROOT/bin/lib/common.sh"
@@ -10,7 +11,8 @@ source "$OPSX_ROOT/bin/lib/python.sh"
 opsx_python_load || fail "$OPSX_PY_ERR"
 J="$OPSX_STATE_DIR/dispatch.json"
 calls() { cat "$OPSX_FAKE_LOG"; }
-reset() { : > "$OPSX_FAKE_LOG"; }
+argv_calls() { cat "$OPSX_FAKE_LOG.sep"; }
+reset() { : > "$OPSX_FAKE_LOG"; : > "$OPSX_FAKE_LOG.sep"; }
 
 cat > "$J" <<'EOF'
 {"r/card-a": {"pane": "w1:p1", "tab": "w1:t1"},
@@ -21,26 +23,28 @@ cat > "$J" <<'EOF'
  "r/opsx-coordinator": {"pane": "w9:p9", "herdr_name": "zzz"}}
 EOF
 
-py() { # <python 運算式；rt 是 runtime 模組、D 是 dispatch.json 路徑> → 印 argv 去掉開頭的 herdr；raise 時非 0、訊息在 stderr
+py() { # <python 運算式；rt 是 runtime 模組、D 是 dispatch.json 路徑> → 印 argv 去掉開頭的 herdr，參數間用 \x1f 分隔（跟 $OPSX_FAKE_LOG.sep 同格式）；raise 時非 0、訊息在 stderr
   OPSX_EXPR="$1" OPSX_D="$J" OPSX_LIB="$OPSX_ROOT/bin/lib" python3 -I -c '
 import os, sys
 sys.path.insert(0, os.environ["OPSX_LIB"]); import runtime as rt
 D = os.environ["OPSX_D"]
 argv = eval(os.environ["OPSX_EXPR"])
 assert argv[0] == "herdr", argv
-print(" ".join(argv[1:]))' < /dev/null
+print("\x1f".join(argv[1:]))' < /dev/null
 }
 
 # 一列：期望 argv | bash 版呼叫 | python 版呼叫。bash 呼叫的參數不含空白（照空白切）。
+# 期望 argv 跟假 herdr 的單行記錄比；bash 與 python 之間逐個參數比（分得出參數邊界）。
 # python 版之後 herdr 的記錄要是空的：python 版不執行 herdr。
 table() { # <表格檔>
-  local want bcall pcall words
+  local want bcall pcall words bash_argv
   while IFS='|' read -r want bcall pcall; do
     [ -n "$want" ] || continue
     read -r -a words <<< "$bcall"
     reset; "${words[@]}" >/dev/null < /dev/null || fail "bash rc：$bcall"
     assert_eq "$(calls)" "$want" "bash：$bcall"
-    reset; assert_eq "$(py "$pcall")" "$want" "python：$pcall"
+    bash_argv="$(argv_calls)"
+    reset; assert_eq "$(py "$pcall")" "$bash_argv" "python 與 bash 逐個參數相同：$pcall"
     assert_eq "$(calls)" "" "python 版不叫 herdr：$pcall"
   done < "$1"
 }
@@ -58,7 +62,8 @@ pane close w1:p1|runtime_close r/card-a pane|rt.close("pane", card="r/card-a", d
 tab close w1:t1|runtime_close r/card-a tab|rt.close("tab", card="r/card-a", dispatch=D)
 agent wait card-a --until idle --timeout 60000|runtime_wait r/card-a --until idle --timeout 60000|rt.wait(card="r/card-a", dispatch=D, until="idle", timeout=60000)
 agent list|runtime_list|rt.list_agents()
-notification show t --body b --sound request|runtime_notify t b|rt.notify("t", "b")
+notification show t --body b|runtime_notify t b|rt.notify("t", "b")
+notification show t --body b --sound request|runtime_notify t b --sound request|rt.notify("t", "b", sound="request")
 EOF
 table "$FX/verbs"
 
@@ -77,7 +82,15 @@ agent prompt opsx-coordinator hi|runtime_prompt --agent opsx-coordinator hi|rt.p
 agent get opsx-coordinator|runtime_get --agent opsx-coordinator|rt.get(agent="opsx-coordinator")
 EOF
 table "$FX/lookup"
-reset; assert_eq "$(py 'rt.prompt("[x] 停住", agent="opsx-coordinator")')" "agent prompt opsx-coordinator [x] 停住" "含空白的一行原樣是一個參數"
+reset; runtime_prompt --agent opsx-coordinator "[x] 停住" >/dev/null || fail "含空白的一行 bash rc"
+assert_eq "$(argv_calls)" $'agent\x1fprompt\x1fopsx-coordinator\x1f[x] 停住' "bash：含空白的一行原樣是一個參數"
+reset; assert_eq "$(py 'rt.prompt("[x] 停住", agent="opsx-coordinator")')" $'agent\x1fprompt\x1fopsx-coordinator\x1f[x] 停住' "python：含空白的一行原樣是一個參數"
+reset; assert_eq "$(py 'rt.notify("[r/x] 併入", "a b 併進 x")')" $'notification\x1fshow\x1f[r/x] 併入\x1f--body\x1fa b 併進 x' "python：通知的標題與內文各是一個參數"
+
+# --agent 不讀 dispatch.json：檔案是壞的 JSON 也照樣產生 argv
+cp "$J" "$J.good"; printf '{"opsx-coordinator": {"herdr_name": "zzz"}' > "$J"
+reset; assert_eq "$(py 'rt.prompt("hi", agent="opsx-coordinator", dispatch=D)')" $'agent\x1fprompt\x1fopsx-coordinator\x1fhi' "python：--agent 在壞的 dispatch.json 下照樣產生 argv"
+mv "$J.good" "$J"
 
 # dispatch.json 不存在：名字照樣推得出來，要 pane 或 tab 的動詞 raise
 mv "$J" "$J.bak"

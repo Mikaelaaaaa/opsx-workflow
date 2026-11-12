@@ -153,15 +153,12 @@ PY
   # codex 沒有 router hook：把同一批規則放進 worktree。worktree 已在也寫（重派可能換模式）
   if [ "$agent" = codex ]; then place_agents_md "$wt" "$mode" || die "dispatch: AGENTS.md 放不進 $wt"; fi
 
-  # workspace：workspaces.toml 記的是 label（人看的，例 acmecorp-ai），開 agent 用 workspace list 換成 id；
-  # 沒掛就開一個以 repo 為 label 的。label 先記進 workspaces.toml：寫不進去時還沒開任何 workspace 或 tab
+  # workspace：workspaces.toml 記的是 label（人看的，例 acmecorp-ai），開 agent 用 workspace list 換成 id；沒掛就開一個以 repo 為 label 的
   local ws ws_arg; ws="$(workspace_for "$repo")"
   if [ -n "$ws" ]; then
     ws_arg=(--workspace-label "$ws")
   else
     ws="$repo"
-    grep -q '^\[repos\]' "$OPSX_STATE_DIR/workspaces.toml" 2>/dev/null || { printf '\n[repos]\n' | opsx_append "$OPSX_STATE_DIR/workspaces.toml" || die "dispatch: 寫不進 $OPSX_STATE_DIR/workspaces.toml"; }   # 第二台機器沒跑過 init 時檔案是空的
-    printf '"%s" = "%s"\n' "$repo" "$ws" | opsx_append "$OPSX_STATE_DIR/workspaces.toml" || die "dispatch: 寫不進 $OPSX_STATE_DIR/workspaces.toml"
     ws_arg=(--workspace-create "$repo" "$top")
   fi
 
@@ -170,7 +167,14 @@ PY
   runtime_open "$me_key" --kind "$agent" "${ws_arg[@]}" --cwd "$wt" --label "$slug" -- "${LAUNCH_ARGS[@]}" \
     || die "dispatch: herdr agent start 失敗：herdr 已經有叫 ${slug} 的 agent，dispatch.json 沒記：${HERDR_TAKEN_AT}。關掉那個 pane 再派"
   local pane="$RUNTIME_PANE" tab="$RUNTIME_TAB" ws_id="$RUNTIME_WORKSPACE_ID"
-  [ "${ws_arg[0]}" != --workspace-create ] || say "dispatch: 新 workspace ${ws}（${ws_id}）記進 workspaces.toml"
+  # 新 workspace 建成功才記 label：先記的話 create 失敗一次，之後每次派工都找不到這個 label。
+  # 記不下來時收掉剛開的 tab（dispatch.json 還沒有這張卡，只能直接叫 herdr），workspace 留著由人收
+  if [ "${ws_arg[0]}" = --workspace-create ]; then
+    { grep -q '^\[repos\]' "$OPSX_STATE_DIR/workspaces.toml" 2>/dev/null || printf '\n[repos]\n' | opsx_append "$OPSX_STATE_DIR/workspaces.toml"; } \
+      && printf '"%s" = "%s"\n' "$repo" "$ws" | opsx_append "$OPSX_STATE_DIR/workspaces.toml" \
+      || { herdr tab close "$tab" >/dev/null 2>&1 || true; die "dispatch: 寫不進 $OPSX_STATE_DIR/workspaces.toml；新 workspace ${ws}（${ws_id}）已開，tab 已收"; }
+    say "dispatch: 新 workspace ${ws}（${ws_id}）記進 workspaces.toml"
+  fi
 
   # dispatch.json
   # 一般卡一筆。feature session 另有自己的條目 <repo>/@<feature>（pane 層的欄位），每個能開工的主 change 再各一筆：

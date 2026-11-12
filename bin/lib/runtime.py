@@ -91,5 +91,8 @@ def close(mode, *, card=None, agent=None, dispatch=None):
     raise ValueError("runtime: %s 的關法只有 pane、tab（送 /exit 只有 bash 版），收到：%r" % (who, mode))
 
 
-def notify(title, body):
-    return ["herdr", "notification", "show", title, "--body", body, "--sound", "request"]
+def notify(title, body, *, sound=None):
+    argv = ["herdr", "notification", "show", title, "--body", body]
+    if sound is not None:
+        argv += ["--sound", sound]
+    return argv

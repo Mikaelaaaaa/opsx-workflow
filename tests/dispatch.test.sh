@@ -192,7 +192,19 @@ cp "$OPSX_STATE_DIR/workspaces.toml" "$FX/ws.real"; printf '[repos]\n' > "$FX/vi
 out="$(opsx dispatch rdap-timeout --agent claude --mode autopilot --kind dev 2>&1)"; [ $? -ne 0 ] || fail "workspaces.toml 是 symlink 要失敗：$out"
 case "$out" in *workspaces.toml*) ;; *) fail "訊息要含 workspaces.toml：$out" ;; esac
 assert_eq "$(cat "$FX/victim")" "[repos]" "workspaces.toml 不能附加到 symlink 的目標"
+assert_grep '^tab close w1:tB$' "$OPSX_FAKE_LOG"   # 記不下來就收掉剛開的 tab，不留沒人管的 agent
 rm "$OPSX_STATE_DIR/workspaces.toml"; cp "$FX/ws.real" "$OPSX_STATE_DIR/workspaces.toml"; : > "$OPSX_FAKE_LOG"
+# workspace create 沒回 id：dispatch 失敗、workspaces.toml 不記這個 repo，下次派工會再 create（不是卡在「herdr 沒有 workspace」）
+mkdir -p "$FX/wsfail"
+cat > "$FX/wsfail/herdr" <<'EOF'
+#!/usr/bin/env bash
+[ "$1 $2" = "workspace create" ] && { printf '%s\n' "$*" >> "$OPSX_FAKE_LOG"; exit 0; }
+exec bash "$OPSX_ROOT/tests/fakes/herdr" "$@"
+EOF
+chmod +x "$FX/wsfail/herdr"
+out="$(PATH="$FX/wsfail:$PATH" opsx dispatch rdap-timeout --agent claude --mode autopilot --kind dev 2>&1)"; [ $? -ne 0 ] || fail "workspace create 沒回 id 要失敗：$out"
+assert_not_grep '^"scam-guard"' "$OPSX_STATE_DIR/workspaces.toml"
+: > "$OPSX_FAKE_LOG"
 printf '[repos."scam-guard"]\nmr = true\n' >> "$OPSX_STATE_DIR/grants.toml"
 opsx dispatch rdap-timeout --agent claude --mode autopilot --kind dev >/dev/null 2>&1 || fail "dispatch unmapped repo"
 python3 -I -c 'import json,sys;a=json.load(open(sys.argv[1]))["permissions"]["allow"];miss=[x for x in ["Bash(glab mr create:*)","Bash(gh pr create:*)","Bash(glab issue note:*)","Bash(glab issue comment:*)","Bash(gh issue comment:*)"] if x not in a];assert not miss,miss' "$OPSX_STATE_DIR/settings/scam-guard-rdap-timeout-autopilot.json" || fail "mr 授權的 allow 要含 issue 留言"

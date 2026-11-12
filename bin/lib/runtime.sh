@@ -94,8 +94,12 @@ runtime_close() { # <對象> pane|tab|exit
   esac
 }
 
-runtime_notify() { # <標題> <內文>
-  herdr notification show "$1" --body "$2" --sound request
+runtime_notify() { # <標題> <內文> [--sound <名>]
+  case "$#:${3:-}" in
+    2:) herdr notification show "$1" --body "$2" ;;
+    4:--sound) herdr notification show "$1" --body "$2" --sound "$4" ;;
+    *) warn "runtime_notify: 標題與內文之後只收 --sound <名>，收到：${*:3}"; return 2 ;;
+  esac
 }
 
 # 開 agent：在 workspace 開一個 tab，在它的 root pane 起 agent。workspace 三選一：
@@ -113,6 +117,10 @@ runtime_open() { # <對象> --kind <kind> <workspace 旗標> --cwd <dir> --label
     *) die "runtime_open: 對象要是卡片身分 <repo>/<slug> 或 --agent <名>，收到：${1:-（空）}" ;;
   esac
   while [ $# -gt 0 ]; do
+    case "$1" in
+      --workspace-create) [ $# -ge 3 ] || die "${who}: runtime_open 的 --workspace-create 後面要有 <label> <cwd>" ;;
+      --kind|--cwd|--label|--workspace-id|--workspace-label) [ $# -ge 2 ] || die "${who}: runtime_open 的 $1 後面要有值" ;;
+    esac
     case "$1" in
       --kind) kind="$2"; shift 2 ;;
       --cwd) cwd="$2"; shift 2 ;;

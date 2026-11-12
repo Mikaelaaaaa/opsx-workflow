@@ -3,6 +3,7 @@
 # 驗收：openspec/changes/runtime-module/subs/runtime-sh/specs/agent-runtime/spec.md
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 use_fakes herdr
+use_herdr_argv_log
 export OPSX_FAKE_LOG="$FX/herdr.log"; : > "$OPSX_FAKE_LOG"
 export OPSX_DISPATCH_RETRY_SLEEP=0
 source "$OPSX_ROOT/bin/lib/common.sh"
@@ -10,7 +11,8 @@ source "$OPSX_ROOT/bin/lib/python.sh"
 opsx_python_load || fail "$OPSX_PY_ERR"
 J="$OPSX_STATE_DIR/dispatch.json"
 calls() { cat "$OPSX_FAKE_LOG"; }
-reset() { : > "$OPSX_FAKE_LOG"; }
+argv_calls() { cat "$OPSX_FAKE_LOG.sep"; }
+reset() { : > "$OPSX_FAKE_LOG"; : > "$OPSX_FAKE_LOG.sep"; }
 
 # --- 卡片身分查出 herdr agent 名與 pane（Examples 一般與邊界） ---
 cat > "$J" <<'EOF'
@@ -54,8 +56,14 @@ assert_eq "$(calls)" "" "對象不是卡片身分不叫 herdr"
 # --- 不是卡的 agent：--agent 指名，不讀 dispatch.json ---
 reset; OPSX_TEST_COORDINATOR_UP=1 runtime_prompt --agent opsx-coordinator "[x] 停住" >/dev/null || fail "--agent 傳話 rc"
 assert_eq "$(calls)" "agent prompt opsx-coordinator [x] 停住" "對協調者傳話"
+assert_eq "$(argv_calls)" $'agent\x1fprompt\x1fopsx-coordinator\x1f[x] 停住' "含空白的一行原樣是一個參數"
 reset; OPSX_TEST_COORDINATOR_UP=1 runtime_prompt --agent opsx-coordinator hi >/dev/null
 assert_eq "$(calls)" "agent prompt opsx-coordinator hi" "agent 參數不被當成卡片身分（r/opsx-coordinator 的 herdr_name 是 zzz）"
+# 壞的 JSON、又有 opsx-coordinator 這個 key：--agent 只要讀了 dispatch.json 就會失敗或改名
+cp "$J" "$J.good"; printf '{"opsx-coordinator": {"herdr_name": "zzz"}' > "$J"
+reset; OPSX_TEST_COORDINATOR_UP=1 runtime_prompt --agent opsx-coordinator hi >/dev/null || fail "--agent 在壞的 dispatch.json 下要 rc 0"
+assert_eq "$(argv_calls)" $'agent\x1fprompt\x1fopsx-coordinator\x1fhi' "--agent 不讀 dispatch.json"
+mv "$J.good" "$J"
 reset; (runtime_read --agent opsx-coordinator) >/dev/null 2>&1 && fail "--agent 沒有 pane，讀畫面要非 0"
 assert_eq "$(calls)" "" "--agent 讀畫面不叫 herdr"
 
@@ -79,15 +87,28 @@ verb "pane send-keys w1:p1 esc
 pane send-text w1:p1 /exit
 pane send-keys w1:p1 enter" runtime_close r/card-a exit
 verb "agent list" runtime_list
-verb "notification show t --body b --sound request" runtime_notify t b
+verb "notification show t --body b" runtime_notify t b
+verb "notification show t --body b --sound request" runtime_notify t b --sound request
 # 不認得的參數：非 0，不叫 herdr
 reset; (runtime_wait r/card-a --forever) >/dev/null 2>&1 && fail "wait 不認得的參數要非 0"
 reset; (runtime_close r/card-a window) >/dev/null 2>&1 && fail "close 不認得的模式要非 0"
+reset; (runtime_notify t b --volume 3) >/dev/null 2>&1 && fail "notify 不認得的參數要非 0"
+reset; (runtime_notify t b --sound) >/dev/null 2>&1 && fail "notify 的 --sound 沒有值要非 0"
 assert_eq "$(calls)" "" "參數不對不叫 herdr"
 # 有條目但沒有 tab：關 tab 非 0、訊息有卡片身分
 reset; err="$( (runtime_close r/card-b tab) 2>&1 >/dev/null)"; [ $? -ne 0 ] || fail "沒有 tab 的卡關 tab 要非 0"
 case "$err" in *r/card-b*) ;; *) fail "關 tab 的錯誤要有卡片身分：$err" ;; esac
 assert_eq "$(calls)" "" "沒有 tab 不叫 herdr"
+# 送 /exit：esc 送不出去就停，不再送 /exit 與 enter
+mkdir -p "$FX/escfail"
+cat > "$FX/escfail/herdr" <<'EOF'
+#!/usr/bin/env bash
+case "$*" in "pane send-keys "*" esc") printf '%s\n' "$*" >> "$OPSX_FAKE_LOG"; echo '{"error":{"code":"pane_not_found","message":"fake"}}' >&2; exit 1 ;; esac
+exec bash "$OPSX_ROOT/tests/fakes/herdr" "$@"
+EOF
+chmod +x "$FX/escfail/herdr"
+reset; (PATH="$FX/escfail:$PATH"; runtime_close r/card-a exit) >/dev/null 2>&1 && fail "esc 失敗時 exit 要非 0"
+assert_eq "$(calls)" "pane send-keys w1:p1 esc" "esc 失敗後不送 /exit 與 enter"
 
 # --- 傳話失敗時回傳 herdr 的錯誤 ---
 echo agent_not_found > "$FX/prompt-err"
@@ -171,6 +192,17 @@ assert_not_grep '^tab create' "$OPSX_FAKE_LOG"
 reset; (runtime_open r/card-a --kind claude --workspace-id w5 --workspace-label x --cwd /wt --label card-a) >/dev/null 2>&1 && fail "兩個 workspace 旗標要非 0"
 (runtime_open r/card-a --kind claude --cwd /wt --label card-a) >/dev/null 2>&1 && fail "沒有 workspace 旗標要非 0"
 assert_eq "$(calls)" "" "旗標不對不叫 herdr"
+# 收值的旗標缺值：非 0、說出旗標名、不叫 herdr、不卡住（在新的 bash 裡跑，5 秒沒結束就算卡住）
+open_missing() { # <runtime_open 的參數…>
+  perl -e 'alarm 5; exec @ARGV' bash -c 'source "$OPSX_ROOT/bin/lib/common.sh"; runtime_open "$@"' _ "$@" 2>&1
+}
+reset; out="$(open_missing r/x --kind claude --workspace-id w1 --cwd /x --label)"; rc=$?
+[ "$rc" -ne 0 ] && [ "$rc" -ne 142 ] || fail "--label 缺值要非 0 且不卡住（rc $rc）：$out"
+case "$out" in *--label*) ;; *) fail "缺值訊息要有旗標名：$out" ;; esac
+reset; out="$(open_missing r/x --kind claude --cwd /x --label x --workspace-create scam-guard)"; rc=$?
+[ "$rc" -ne 0 ] && [ "$rc" -ne 142 ] || fail "--workspace-create 少一個值要非 0 且不卡住（rc $rc）：$out"
+case "$out" in *--workspace-create*) ;; *) fail "缺值訊息要有 --workspace-create：$out" ;; esac
+assert_eq "$(calls)" "" "旗標缺值不叫 herdr"
 # tab create 沒回 tab id：非 0、不起 agent
 reset; out="$( (OPSX_TEST_TAB_NO_TAB=1 runtime_open r/card-a --kind claude --workspace-id w5 --cwd /wt --label card-a) 2>&1)"; [ $? -ne 0 ] || fail "沒有 tab id 要非 0"
 case "$out" in *r/card-a*) ;; *) fail "訊息要有卡片身分：$out" ;; esac
