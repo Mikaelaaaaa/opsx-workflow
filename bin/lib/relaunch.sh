@@ -143,7 +143,7 @@ PY
   out="$(herdr pane send-keys "$pane" enter 2>&1)" || relaunch_fail "$d" "$pane" "send-keys enter 失敗：$out"
 
   # /exit 後 shell 還沒回到提示字元（agent_pane_busy）、herdr 還沒放掉名字（agent_name_taken）都重試，共用一個計數；
-  # 失敗時不關 tab：那是原本的 pane。dispatch 的 name_taken 是真有人占著，所以這裡不共用 herdr_start_agent
+  # 失敗時不關 tab：那是原本的 pane。dispatch 的 name_taken 是真有人占著，所以這裡不共用 runtime_open
   local try=1
   until out="$(herdr agent start "$name" --kind claude --pane "$pane" -- --resume "$sid" "${args[@]}" 2>&1)"; do
     case "$out" in
