@@ -10,7 +10,7 @@
     "additionalDirectories": ["${OPSX_STATE_DIR}"]
   },
   "sandbox": {
-    "excludedCommands": ["gh pr *", "gh issue comment *"],
+    "excludedCommands": ["gh pr *", "gh issue comment *", "orca status *", "orca repo list *", "orca repo add *", "orca repo set *", "orca worktree list *", "orca tab create *", "orca terminal read *"],
     "filesystem": {
       "denyWrite": [
         "${OPSX_STATE_DIR}/grants.toml",

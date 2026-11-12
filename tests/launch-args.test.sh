@@ -46,6 +46,10 @@ assert_no_file "$SD/settings/Acmecorp-CS-codex-card-interactive.json"
 python3 -I -c 'import json,sys;a=json.load(open(sys.argv[1]))["permissions"]["allow"];assert "Bash(TEST_DATABASE_URL=* pnpm vitest:*)" in a and "Bash(TEST_DATABASE_URL=* pnpm test:*)" in a,a' "$S" || fail "autopilot allow 缺 TEST_DATABASE_URL 前綴規則"
 python3 -I -c 'import json,sys;a=[r for r in json.load(open(sys.argv[1]))["permissions"]["allow"] if r.startswith("Bash(TEST_DATABASE_URL=")];assert a and all(r.startswith("Bash(TEST_DATABASE_URL=* pnpm ") for r in a),a' "$S" || fail "TEST_DATABASE_URL 規則的值只能是 *"
 assert_eq "$(grep -c 'TEST_DATABASE_URL' "$SI")" 0 "interactive 不放行 ring3 測試指令"
+
+# --- orca-autopilot-allow：autopilot 放行 orca 子指令，interactive 不放行 ---
+python3 -I -c 'import json,sys;a=json.load(open(sys.argv[1]))["permissions"]["allow"];w=["Bash(orca status:*)","Bash(orca repo list:*)","Bash(orca repo add:*)","Bash(orca repo set:*)","Bash(orca worktree list:*)","Bash(orca tab create:*)","Bash(orca terminal read:*)"];assert [r for r in a if "orca" in r]==w,a' "$S" || fail "autopilot allow 的 orca 規則要剛好是七條子指令"
+python3 -I -c 'import json,sys;a=json.load(open(sys.argv[1]))["permissions"].get("allow",[]);assert not [r for r in a if "orca" in r],a' "$SI" || fail "interactive 不放行 orca"
 assert_eq "$(grep -c '://' "$S")" 0 "settings 不含連線字串（任何 scheme://）"
 
 # --- migrate 授權：filter 寫法只在 grants.toml 開 migrate 時出現 ---
