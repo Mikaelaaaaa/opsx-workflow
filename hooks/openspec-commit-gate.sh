@@ -18,10 +18,14 @@ alias_re="${git_word}([[:space:]]+[^;&|]*)?[[:space:]]-c[[:space:]]+alias\\."
 # 在 git 設定寫入別名（git config alias.ci …）：別名的值可以用 bash 與 git 的引號、跳脫寫成 commit（com\mit、'c""ommit'、!f() { git commit; }），
 # 之後用別名 commit 時骨架裡沒有 commit，閘門看不到，所以任何別名的寫入在設定當下就擋（--get、--unset、--list 這類讀取與刪除不擋）。
 # 看骨架：commit 訊息之類引號裡只是提到這串字，不是在命令位置，不算
-persist_re='(^|[[:space:];&|(])git[[:space:]]([^;&|]*[[:space:]])?config[[:space:]]([^;&|]*[[:space:]])?alias\.[[:alnum:]_.-]+'
-readonly_re='[[:space:]]--(get|get-all|get-regexp|unset|unset-all|list)([[:space:]]|$)'
+persist_re='(^|[[:space:];&|(])git[[:space:]]([^;&|]*[[:space:]])?config[[:space:]]([^;&|]*[[:space:]])?alias\.[[:alnum:]_.-]+[[:space:]]+[^[:space:];&|#]'
+readonly_re='(^|[[:space:]])--(get|get-all|get-regexp|unset|unset-all|list)([[:space:]]|$)'
 is_alias=0
-if [[ "$sk" =~ $persist_re ]] && ! [[ "$sk" =~ $readonly_re ]]; then is_alias=1; fi
+# 唯讀旗標只看 config 與 alias. 之間那一段（BASH_REMATCH[3]）；alias.<名> 後面沒有值就只是讀
+if [[ "$sk" =~ $persist_re ]]; then
+  alias_span="${BASH_REMATCH[3]}"
+  [[ "$alias_span" =~ $readonly_re ]] || is_alias=1
+fi
 m0=''; opts=''
 if [[ "$sk" =~ $commit_re ]]; then
   m0="${BASH_REMATCH[0]}"; opts="${BASH_REMATCH[3]}"
@@ -79,14 +83,16 @@ if [ -z "$bad_dirs" ]; then
   for d in "${c_dirs[@]+"${c_dirs[@]}"}"; do target="$(join_dir "$target" "$d")"; done
   # repo 由 --git-dir 決定（HEAD 在那裡）；只給 --work-tree 不改 repo，仍是 cwd 與 -C 找到的那個
   if [ -n "$gitdir_v" ]; then
-    gd="$(join_dir "$target" "$gitdir_v")"
+    base="$target"   # cd 與 -C 疊出來的目錄：相對的 --git-dir 與 --work-tree 都從這裡算
+    gitdir_v="${gitdir_v%/}"
+    gd="$(join_dir "$base" "$gitdir_v")"
     case "$gd" in
       */.git)
         target="${gd%/.git}"
         # work-tree 對不上時也要看得到 repo，deny 才出得來
         ! [ -d "$target" ] || export OPSX_CWD="$target"
         if [ -n "$wt_v" ]; then
-          wt="$(join_dir "$(hook_cwd)" "$wt_v")"
+          wt="$(join_dir "$base" "$wt_v")"
           [ "$(cd "$wt" 2>/dev/null && pwd -P)" = "$(cd "$target" 2>/dev/null && pwd -P)" ] \
             || bad_dirs="$bad_dirs '--work-tree ${wt_v}'（跟 --git-dir 不是同一個 repo）"
         fi ;;

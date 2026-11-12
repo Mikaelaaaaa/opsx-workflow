@@ -34,7 +34,7 @@ has_commit "$(printf 'echo "a <<b" ; cat <<EOF\ngit commit -m x\nEOF')" && fail 
 # --- R1.1：$'…\'…' 裡的 \' 是字面引號，<<EOF 還在字串裡，後一行的 commit 仍在骨架 ---
 has_commit $'echo $\'\\\'<<EOF\'\ngit commit -m x\nEOF' || fail "ANSI-C 引號內的 <<EOF 吞掉了 commit：$(skel $'echo $\'\\\'<<EOF\'\ngit commit -m x\nEOF')"
 # --- R1.1：一串沒有結尾的 <<a 不能讓骨架變慢（hook 逾時等於放行）---
-big="$(perl -e 'print "git commit -m x; :", "<<a " x 10900')"
+big="$(perl -e 'print "git commit -m x; :\n", "<<a\n" x 8000')"   # 換行讓每個開頭都走到 code_mask 查表
 t0=$SECONDS; skel "$big" >/dev/null; elapsed=$((SECONDS - t0))
 [ "$elapsed" -le 3 ] || fail "32KB 的一串 <<a 骨架花了 ${elapsed} 秒（要線性）"
 has_commit "$big" || fail "那串 <<a 之前的 git commit 不能不見"

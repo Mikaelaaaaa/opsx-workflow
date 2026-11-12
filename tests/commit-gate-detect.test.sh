@@ -62,7 +62,13 @@ out="$(cgin "$FX" "git --work-tree=$R --git-dir=$R/.git commit -m x")"; assert_e
 reason "$out" | grep -q 'work-tree' && fail "同一個 repo 不能說 work-tree 有問題: $(reason "$out")"
 out="$(cgin "$R" "git --git-dir=/abs/bare.git commit -m x")"; assert_eq "$(decision "$out")" deny "--git-dir 不是 <repo>/.git 讀不出作用的 repo，要 deny"
 # popd 之後的目錄讀不出來
-out="$(cgin "$R" "cd $R && pushd /tmp && popd && git commit -m x")"; assert_eq "$(decision "$out")" deny "popd 之後讀不出作用的目錄，要 deny: $(reason "$out")"
+out="$(cgin "$R" "popd && git commit -m x")"; assert_eq "$(decision "$out")" deny "popd 之後讀不出作用的目錄，要 deny: $(reason "$out")"
+reason "$out" | grep -q 'popd' || fail "deny 要點名 popd: $(reason "$out")"
+out="$(cgin "$FX/wt" "echo hi && git commit -m x")"; assert_eq "$(decision "$out")" allow "對照：沒有 popd 的同一條 commit 照 branch 放行: $(reason "$out")"
+# 相對的 --git-dir 與 --work-tree 照 cd 疊出來的目錄解析（同一個 repo，wt 在卡的 branch 上且 tasks 已勾）；--git-dir 結尾的 / 不擋
+out="$(cgin "$FX" "git --git-dir=wt/.git --work-tree=wt commit -m x")"; assert_eq "$(decision "$out")" allow "相對路徑的 git-dir 與 work-tree 是同一個 repo: $(reason "$out")"
+out="$(cgin "$R" "cd $FX && git --git-dir=wt/.git --work-tree=wt commit -m x")"; assert_eq "$(decision "$out")" allow "cd 之後的相對 git-dir 與 work-tree: $(reason "$out")"
+out="$(cgin "$FX" "git --git-dir=$FX/wt/.git/ commit -m x")"; assert_eq "$(decision "$out")" allow "--git-dir 結尾的 / 不能被拒: $(reason "$out")"
 # 指令位置的 \<字母> 還原：這些寫法 bash 都是 git commit，session 在 main（沒有卡）要擋
 for c in '/usr/bin/g\it commit -m x' 'echo hi;g\it commit -m x' 'echo hi&&g\it commit -m x'; do
   out="$(cgin "$R" "$c")"; assert_eq "$(decision "$out")" deny "反斜線切開的 git 要擋：${c}｜$(reason "$out")"
@@ -73,6 +79,11 @@ for c in 'git config alias.ci commit' 'git config --global alias.ci commit' 'git
   reason "$out" | grep -q '別名' || fail "deny 要說明別名: $(reason "$out")"
 done
 out="$(cgin "$R" 'git config --get alias.ci')"; assert_eq "$out" "" "讀別名不出聲"
+out="$(cgin "$R" 'git config alias.ci')"; assert_eq "$out" "" "沒有值的 alias.<名> 只是讀，不出聲"
+# 唯讀旗標只算在同一段：別的段或尾端註解帶 --list 不能關掉別名擋
+for c in 'git config alias.ci commit; git config --list' 'git config alias.ci commit # --list' 'git config alias.ci commit && ls --get'; do
+  out="$(cgin "$R" "$c")"; assert_eq "$(decision "$out")" deny "別的段帶唯讀旗標不能關掉別名擋：${c}｜$(reason "$out")"
+done
 # commit 訊息只是提到別名的字樣：不是設別名，照 branch 判斷（wt 在卡的 branch、tasks 已勾）
 out="$(cgin "$FX/wt" 'git commit -m "docs: never run git config alias.ci commit"')"; assert_eq "$(decision "$out")" allow "訊息提到別名字樣不能被當成設別名: $(reason "$out")"
 git -C "$R" worktree remove --force "$FX/wt"
