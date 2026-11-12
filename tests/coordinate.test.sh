@@ -2246,4 +2246,80 @@ ra unknown
 round || fail "via 繞圈也要跑完這一輪：$(cat "$FX/out")"
 assert_grep '^opsx stop ra ' "$OPSX_FAKE_LOG"
 rm -f "$MEMO"; printf '{}' > "$DISP"
+
+# --- dispatch.json 的 drive_pid 與 relaunching_at 先驗格式（dispatch-field-validate）---
+# 兩張卡：a 帶壞值，b 的 drive_pid 指向已不存在的行程。壞值只停 a，b 照常重派。
+sleep 0 & dead=$!; wait "$dead"
+rm -f "$MEMO"
+bad_prompts() { grep -cE -- "^agent prompt .*\[demo/a\] " "$OPSX_FAKE_LOG" || true; }
+two_cards() {   # two_cards <a 的 drive_pid JSON>
+  cards '[{"slug":"a","section":"進行中","dispatch":{"mode":"autopilot","agent":"claude","pane":"w1:p1","drive_pid":'"$1"'},"agent_status":"idle"},{"slug":"b","section":"進行中","dispatch":{"mode":"autopilot","agent":"claude","pane":"w1:p2","drive_pid":'"$dead"'},"agent_status":"idle"}]'
+}
+for v in '"x"' '"123"' 'true' '1.5' '[1]' '-1' '0' '1180591620717411303424'; do
+  rm -f "$MEMO"; two_cards "$v"
+  round || fail "drive_pid=$v 整輪要跑完（rc $?）：$(cat "$FX/out")"
+  grep -F '?? demo/a' "$LOG" | grep -F drive_pid | grep -qF -- "$v" || fail "drive_pid=$v：log 要有 ?? demo/a 含欄位名與原值：$(cat "$LOG")"
+  assert_eq "$(count '^opsx dispatch a ')" 0 "drive_pid=$v 的卡不重派：$(cat "$OPSX_FAKE_LOG")"
+  assert_eq "$(count '^opsx dispatch b ')" 1 "drive_pid=$v 不能拖累別張卡：$(cat "$OPSX_FAKE_LOG")"
+  assert_eq "$(bad_prompts)" 1 "drive_pid=$v 通知一次"
+done
+
+# 同一個壞值上一輪通知過：再跑一輪 log 仍有 ??，不再通知
+two_cards '"x"'; rm -f "$MEMO"
+round || fail "rc: $(cat "$FX/out")"
+round || fail "rc: $(cat "$FX/out")"
+grep -F '?? demo/a' "$LOG" | grep -qF drive_pid || fail "第二輪 log 仍要有 ??：$(cat "$LOG")"
+assert_eq "$(bad_prompts)" 0 "同一個壞值不通知第二次"
+
+# agent 不在 herdr 的卡也先驗 drive_pid：壞值不重派、記 ??、通知一次（review R1.1）
+rm -f "$MEMO"
+cards '[{"slug":"a","section":"進行中","dispatch":{"mode":"autopilot","agent":"claude","pane":"w1:p1","drive_pid":"x"},"agent_status":"unknown"}]'
+round || fail "agent 不在且 drive_pid 壞，整輪要跑完：$(cat "$FX/out")"
+grep -F '?? demo/a' "$LOG" | grep -qF drive_pid || fail "agent 不在也要有 ?? 含 drive_pid：$(cat "$LOG")"
+assert_eq "$(ecount '^opsx (stop|dispatch)')" 0 "agent 不在但 drive_pid 壞不重派：$(cat "$OPSX_FAKE_LOG")"
+assert_eq "$(bad_prompts)" 1 "agent 不在但 drive_pid 壞通知一次"
+
+# 合格的 drive_pid：死掉的 pid 照常重派，null 不動，也沒有 ?? 提到 drive_pid
+rm -f "$MEMO"
+cards '[{"slug":"a","section":"進行中","dispatch":{"mode":"autopilot","agent":"claude","pane":"w1:p1","drive_pid":'"$dead"'},"agent_status":"idle"},{"slug":"b","section":"進行中","dispatch":{"mode":"autopilot","agent":"claude","pane":"w1:p2","drive_pid":null},"agent_status":"idle"}]'
+round || fail "rc: $(cat "$FX/out")"
+assert_eq "$(count '^opsx dispatch a ')" 1 "合格的死 pid 照常重派"
+assert_eq "$(count '^opsx dispatch b ')" 0 "drive_pid null 不重派"
+assert_not_grep '?? .*drive_pid' "$LOG"
+
+# relaunching_at：卡 a 的 agent 不在 herdr，走重派判斷
+shift_at() { python3 -I -c 'import datetime,sys; print((datetime.datetime.now().astimezone()+datetime.timedelta(seconds=int(sys.argv[1]))).isoformat(timespec="seconds"))' "$1"; }
+a_unknown() { cards '[{"slug":"a","section":"進行中","dispatch":{"mode":"autopilot","agent":"claude","pane":"w1:p1","drive_pid":null},"agent_status":"unknown"}]'; }
+a_disp() { printf '{"demo/a":{"mode":"autopilot","agent":"claude","pane":"w1:p1","drive_pid":null,"relaunching_at":%s}}' "$1" > "$DISP"; }
+FUTURE="$(shift_at 120)"
+for v in "\"$FUTURE\"" '"not-a-time"' '"2026-11-11T10:00:00"' '1762826400' '""'; do
+  rm -f "$MEMO"; a_disp "$v"; a_unknown
+  round || fail "relaunching_at=$v 整輪要跑完（rc $?）：$(cat "$FX/out")"
+  grep -F '?? demo/a' "$LOG" | grep -F relaunching_at | grep -qF -- "$v" || fail "relaunching_at=$v：log 要有 ?? demo/a 含欄位名與原值：$(cat "$LOG")"
+  assert_eq "$(ecount '^opsx (stop|dispatch)')" 0 "relaunching_at=$v 不當成沒在 relaunch：$(cat "$OPSX_FAKE_LOG")"
+  assert_eq "$(bad_prompts)" 1 "relaunching_at=$v 通知一次"
+done
+
+# 稍微超前 30 秒仍算 relaunch 中：沒有 ??，不重派
+rm -f "$MEMO"; a_disp "\"$(shift_at 30)\""; a_unknown
+round || fail "rc: $(cat "$FX/out")"
+assert_not_grep '?? demo/a' "$LOG"
+assert_eq "$(ecount '^opsx (stop|dispatch)')" 0 "超前 30 秒仍是 relaunch 中，不重派：$(cat "$OPSX_FAKE_LOG")"
+
+# 壞的 relaunching_at 也不能讓代答送不到那條路徑拋例外
+rm -f "$MEMO"; a_disp '"not-a-time"'
+cards '[{"slug":"a","section":"待處理","dispatch":{"mode":"autopilot","agent":"claude","pane":"w1:p1","drive_pid":null},"agent_status":"idle","waiting":{"type":"等待授權","gate_id":"g1","action":"x","question":"允許嗎","recommended":null,"options":[]}}]'
+OPSX_TEST_FAIL_answer=agent_not_found round || fail "代答送不到遇壞的 relaunching_at 整輪要跑完：$(cat "$FX/out")"
+assert_eq "$(ecount '^opsx (stop|dispatch)')" 0 "代答路徑遇壞值不重派：$(cat "$OPSX_FAKE_LOG")"
+
+# 用量上限過後代答「卡在接」gate，送不到又遇壞的 relaunching_at：整輪跑完，不重派，記 ?? 並通知
+AR="$FX/agent-read.txt"; export OPSX_TEST_AGENT_READ="$AR"; printf 'ok\n' > "$AR"
+STUCK='卡在接 /apply #1'
+printf '{"_usage_limit":{"seen_at":"%s","resets_at":"%s"},"_limit_stuck":{"demo/a":["%s"]}}' "$(ago 70)" "$(ago 10)" "$STUCK" > "$MEMO"
+a_disp '"not-a-time"'
+cards '[{"slug":"a","section":"待處理","dispatch":{"mode":"autopilot","agent":"claude","pane":"w1:p1","drive_pid":null},"agent_status":"idle","open_gates":[{"id":"'"$STUCK"'","opened_at":null}]}]'
+OPSX_TEST_FAIL_answer=agent_not_found round || fail "卡在接代答遇壞的 relaunching_at 整輪要跑完：$(cat "$FX/out")"
+assert_eq "$(ecount '^opsx (stop|dispatch)')" 0 "卡在接代答路徑遇壞值不重派：$(cat "$OPSX_FAKE_LOG")"
+grep -F '?? demo/a' "$LOG" | grep -qF relaunching_at || fail "卡在接代答路徑也要有 ?? 含 relaunching_at：$(cat "$LOG")"
+rm -f "$MEMO"; printf '{}' > "$DISP"
 echo "coordinate: ok"

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# skills/pr/SKILL.md 步 5c：派 logic-map subagent 產表、貼成一則留言、更新時編輯同一則。
+# skills/pr/SKILL.md 步 5c：派 logic-map subagent 產表，只寫檔，report.md 記路徑與 head sha，不發留言。
 # skill 是文字，只能檢查 skill 寫了什麼；agent 守不守由 eval 驗。對應 openspec/changes/pr-logic-map/specs/pr-logic-map。
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 SK="$OPSX_ROOT/skills/pr/SKILL.md"
@@ -52,52 +52,30 @@ for k in 'spec' 'proposal' 'design' 'report' 'conversation' 'PR title or descrip
   grep -F 'Nothing else goes into the prompt' "$STEP" | grep -qF -- "$k" || fail "禁止清單缺 $k"
 done
 
-# --- 新開：GitHub 用 gh pr comment，GitLab 用 glab api POST，內文都從檔案讀 ---
-assert_fixed '`gh pr comment <n> --body-file <map path>`' "$STEP"
-assert_fixed '`glab api --method POST "projects/:id/merge_requests/<iid>/notes" --field body=@<map path>`' "$STEP"
-assert_fixed '#issuecomment-<id>' "$STEP"
-assert_fixed '#note_<id>' "$STEP"
+# --- 只產檔：不發留言、不改留言、不查字數上限 ---
+for k in 'comment' '留言' 'gh pr' 'glab api' '--edit-last' 'viewerDidAuthor' '65,536' '1,000,000'; do
+  assert_not_fixed "$k" "$STEP"
+done
 
-# --- R1.2 留言指令用絕對路徑：dispatch worktree 的 cwd 沒有 openspec/ ---
+# --- R1.2 路徑用絕對路徑：dispatch worktree 的 cwd 沒有 openspec/ ---
 assert_fixed '`<map path>` is the absolute path of `openspec/changes/<slug>/logic-map.md` in the checkout that holds `openspec/`' "$STEP"
-assert_not_fixed 'body-file openspec/' "$STEP"
-assert_not_fixed 'body=@openspec/' "$STEP"
 
-# --- report.md 的 ## 邏輯表 一行，重產時整行覆寫 ---
+# --- report.md 的 ## 邏輯表 一行：路徑加 head sha，重產時整行覆寫 ---
 assert_fixed '## 邏輯表' "$STEP"
-assert_fixed 'openspec/changes/<slug>/logic-map.md · 留言 <comment url> · <head sha 前 7 碼>[ · ' "$STEP"
+assert_fixed 'openspec/changes/<slug>/logic-map.md · <head sha 前 7 碼>' "$STEP"
 assert_fixed 'overwrite the whole line' "$STEP"
 
-# --- 失敗不擋 /pr ---
+# --- 失敗不擋 /pr；失敗行只記原因 ---
 assert_fixed '產表失敗：<' "$STEP"
 assert_fixed 'does not stop /pr' "$STEP"
-
-# --- R1.1 每種失敗都保留已記的留言 URL，下一輪才編輯得到同一則 ---
-assert_fixed '`產表失敗：<reason> · 留言 <recorded url>`' "$STEP"
-assert_fixed '`留言失敗：<reason> · 留言 <recorded url>`' "$STEP"
-assert_fixed 'Every failure line keeps the comment URL already recorded' "$STEP"
+assert_fixed '`產表失敗：<reason>`' "$STEP"
 assert_fixed 'never build the map in this session' "$STEP"
 assert_fixed '產表失敗：無 Agent 工具' "$STEP"
-assert_fixed 'returns 404' "$STEP"
 assert_not_fixed 'go on to step 6' "$STEP"
 assert_fixed "go on to the caller's next step" "$STEP"
 
-# --- 超過上限不截斷（Scenario「表超過留言上限」）；一行說明寫進另一個檔，不蓋掉表 ---
-assert_fixed '65,536' "$STEP"
-assert_fixed '1,000,000' "$STEP"
-assert_fixed 'never truncate' "$STEP"
-assert_fixed '超過留言上限' "$STEP"
-assert_fixed 'logic-map-comment.md' "$STEP"
-
-# --- 更新：GitHub 讀回比對後才 --edit-last，對不上發新的；GitLab PUT 同一則 ---
-assert_fixed '`gh pr view <n> --json comments`' "$STEP"
-assert_fixed '`gh pr comment <n> --edit-last --body-file <map path>`' "$STEP"
-assert_fixed 'post a new comment and replace the URL' "$STEP"
-assert_fixed 'never edit any other comment' "$STEP"
-assert_fixed '`glab api --method PUT "projects/:id/merge_requests/<iid>/notes/<note_id>" --field body=@<map path>`' "$STEP"
-
 # --- R2.1 派之前刪掉上一輪的表，產表失敗才看得出來；fetch 失敗也是產表失敗 ---
-assert_fixed 'Delete `<map path>` and `logic-map-comment.md` before spawning' "$STEP"
+assert_fixed 'Delete `<map path>` before spawning' "$STEP"
 python3 -I - "$STEP" <<'PY' || fail "刪檔不在派 subagent 之前"
 import sys
 text = open(sys.argv[1], encoding="utf-8").read()
@@ -106,27 +84,9 @@ if not text.index("Delete `<map path>`") < text.index("Spawn one fresh subagent"
 PY
 assert_fixed '產表失敗：fetch 失敗' "$STEP"
 
-# --- R2.2 失敗行整行取代 ## 邏輯表 那一行；兩種失敗都適用省略規則；403 跟 404 一樣；交叉引用寫子步編號 ---
+# --- R2.2 失敗行整行取代 ## 邏輯表 那一行；交叉引用寫子步編號 ---
 assert_fixed 'replaces the one line under `## 邏輯表`' "$STEP"
-assert_fixed 'This applies to both failure lines' "$STEP"
-assert_fixed 'returns 404 or 403' "$STEP"
-assert_fixed 'or its line has no comment URL: post a new comment' "$STEP"
 assert_not_fixed 'as in step 3' "$STEP"
-assert_not_fixed 'in step 5 in place' "$STEP"
-assert_fixed 'in 5c.5 in place of `<map path>`' "$STEP"
-assert_fixed 'Never write the one line into `<map path>` itself' "$STEP"
-
-# --- R2.3 超長原因是子步 6 範本的選填欄位；字元數用 UTF-8 讀檔算，不受 locale 影響 ---
-assert_fixed '<head sha 前 7 碼>[ · 邏輯表超過留言上限（<n> 字元）]' "$STEP"
-assert_not_fixed '`wc -m <' "$STEP"
-assert_fixed "encoding='utf-8'" "$STEP"
-
-# --- R1.3 `--edit-last` 動的是目前帳號：記的那則要是自己的，且之後沒有自己的留言 ---
-assert_fixed 'its `viewerDidAuthor` is true and no later comment has `viewerDidAuthor` true' "$STEP"
-assert_not_fixed 'gh api' "$STEP"
-
-# --- 每個 gh 呼叫單獨一個 Bash 指令 ---
-assert_fixed 'its own Bash command' "$STEP"
 
 # --- pr 與 babysit 用同一個段名與輸出路徑（Scenario「段名與路徑一致」）---
 BS="$OPSX_ROOT/skills/babysit/SKILL.md"
