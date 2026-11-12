@@ -6,10 +6,10 @@ use_fakes herdr glab
 export OPSX_FAKE_LOG="$FX/herdr.log"; : > "$OPSX_FAKE_LOG"
 export OPSX_USER=mikaela OPSX_DISPATCH_RETRY_SLEEP=0
 
-R="$(mk_repo Agentory-CS git@gitlab.tsg-navigator.com:agentory/Agentory-CS.git)"
+R="$(mk_repo Acmecorp-CS git@gitlab.example.com:acmecorp/Acmecorp-CS.git)"
 mkdir -p "$R/openspec/changes/nr-card" "$OPSX_STATE_DIR"
 printf 'schema: opsx\n' > "$R/openspec/changes/nr-card/.openspec.yaml"
-printf '[repos]\n"Agentory-CS" = "agnetory-ai"\n' > "$OPSX_STATE_DIR/workspaces.toml"
+printf '[repos]\n"Acmecorp-CS" = "acmecorp-ai"\n' > "$OPSX_STATE_DIR/workspaces.toml"
 cd "$R"
 
 # pane read 失敗

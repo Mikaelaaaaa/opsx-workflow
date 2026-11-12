@@ -1,7 +1,7 @@
 # opsx-workflow 改寫要求：融合 pstack 與 grill-me
 
 狀態：討論中，2026-11-04
-範圍：`~/code/sandbox/opsx-workflow/`（plugin source）與 `~/.claude/skills/{grill-me,grill-with-docs}/`
+範圍：`<opsx clone>/`（plugin source）與 `~/.claude/skills/{grill-me,grill-with-docs}/`
 來源：pstack v0.15.34（`~/.claude-work/plugins/cache/cursor-plugins/pstack/0.15.34/`）
 
 ## 1. 目標
@@ -236,12 +236,12 @@ tsk 的板：頂上一列範圍 `desk · <user> ▾ · projects`，下面分段 
 ▸ 完成                                  ← 摺疊
 ```
 
-**範圍兩層：workspace → repo（已定 2026-11-05）。** 卡的歸屬永遠是 repo + slug（殼在 `~/code/<repo>/openspec/changes/`，herdr 沒開卡還在）；人看板的單位是 herdr workspace，一個 workspace 可以掛好幾個 repo（例如 `develop` 掛 Agentory-AI、Agentory-CS、Agentory-Infrastructure）。選單：
+**範圍兩層：workspace → repo（已定 2026-11-05）。** 卡的歸屬永遠是 repo + slug（殼在 `~/code/<repo>/openspec/changes/`，herdr 沒開卡還在）；人看板的單位是 herdr workspace，一個 workspace 可以掛好幾個 repo（例如 `develop` 掛 Acmecorp-AI、Acmecorp-CS、Acmecorp-Infrastructure）。選單：
 
 ```
 全部
-develop ▾      Agentory-AI · Agentory-CS · Agentory-Infrastructure
-gmtc-rag       gmtc-rag
+develop ▾      Acmecorp-AI · Acmecorp-CS · Acmecorp-Infrastructure
+rag-demo       rag-demo
 沒掛的         scam-guard            ← 有 openspec/ 但沒掛到任何 workspace 的 repo
 ```
 
@@ -329,7 +329,7 @@ gmtc-rag       gmtc-rag
    |---|---|---|
    | `me` | 你按 + | 一句話 + 時間 |
    | `agent:<pr-name>` | worker 撈到 task 外的問題 | 自動，帶證據和它正在做的 PR |
-   | `gitlab:<repo>#<iid>` | 同步腳本 | `glab issue list`，AI / CS / Infra / evals / gmtc |
+   | `gitlab:<repo>#<iid>` | 同步腳本 | `glab issue list`，AI / CS / Infra / evals / rag-demo |
    | `github:<repo>#<n>` | 同步腳本 | `gh issue list`，scam-guard / Skills |
    | `obsidian:<path>` | 同步腳本 | 掃 `sources.toml` 指定的 vault 資料夾（`/opsx init` 時填，已定 2026-11-05） |
    | `customer:<id>` | 同步腳本 | 內部平台的客戶回報：base URL、token 的環境變數名、列表端點都在 `sources.toml`（`/opsx init` 時填）；沒填就不啟用這個來源 |
@@ -342,7 +342,7 @@ gmtc-rag       gmtc-rag
    - 註冊：`~/.local/state/opsx/sources.toml`，列哪些 gitlab / github repo、哪個 obsidian 資料夾、customer 平台的連線。沒註冊的不撈。**由 `/opsx init` 問答產生（已定 2026-11-05）**：plugin 第一次裝、或你打 `/opsx init` 時逐項問（gitlab / github 從 `~/code/*/.git` 的 remote 自動列、obsidian 資料夾路徑、customer 平台三個欄位），寫檔後印回來；改設定就再跑一次。
    - **沒有 repo 的來源（obsidian、customer）：同步時不建殼，先放 `~/.local/state/opsx/unfiled/<slug>.md`**（已定 2026-11-05，「我分類，它要問」）。收件匣多一組「待分類」，列上第一個動作是選 repo（下拉），選了才建殼搬進該 repo 的 `changes/`，之後跟別的卡一樣。指派、先 explore 對待分類的卡不可按。
    - 排程：每天一次（launchd，跟 `daily-obsidian-sync` 同一套做法），看板「同步」按鈕是手動觸發同一支。
-   - 去重：以 `source` id 為鍵（`gitlab:Agentory-CS#412`），已存在於任何 repo 的 `changes/`（含 archive/）就不再建殼；原 issue 有更新只改那張卡的 inbox.md，不開新卡。不同來源講同一件事（例如 GitLab issue 和 agent 撈到的是同一個 bug）不自動合，看板「併進既有的卡」由人按。
+   - 去重：以 `source` id 為鍵（`gitlab:Acmecorp-CS#412`），已存在於任何 repo 的 `changes/`（含 archive/）就不再建殼；原 issue 有更新只改那張卡的 inbox.md，不開新卡。不同來源講同一件事（例如 GitLab issue 和 agent 撈到的是同一個 bug）不自動合，看板「併進既有的卡」由人按。
 2. `changes/<slug>/gates.md`：worker 要問人時寫；關閉時在 decisions.tsv 補一行。
 3. `grants.toml`：`~/.local/state/opsx/`，每 repo × 動作（push / mr / migrate）一個布林，只收「這個 repo 永遠」那級；「這張卡」那級在 dispatch.json。見 §3.6 授權三級。
 4. `dispatch.json`：`~/.local/state/opsx/`，執行期。每張派出的卡一筆：card（repo/slug）、workspace、pane、agent_session、mode、這張卡層級的 grants。
@@ -427,7 +427,7 @@ herdr plugin（薄）：manifest 一個 action `open-board` + `collect.sh`（`he
 
 ### 4.5 位置
 
-已定：放 `opsx-workflow/skills/grill/`，隨 plugin 安裝。user-level 的 `grill-me`、`grill-with-docs` 刪掉；`/explore` description 的「grill me」trigger 詞拿掉。**opsx plugin 裝進所有開發中的 repo**（含 agentory-evals、gmtc-rag，不只 Agentory-Skills installer 蓋的三個），以後只用這個 plugin 做開發。
+已定：放 `opsx-workflow/skills/grill/`，隨 plugin 安裝。user-level 的 `grill-me`、`grill-with-docs` 刪掉；`/explore` description 的「grill me」trigger 詞拿掉。**opsx plugin 裝進所有開發中的 repo**（含 acmecorp-evals、rag-demo，不只 Acmecorp-Skills installer 蓋的三個），以後只用這個 plugin 做開發。
 
 ## 5. apply 改寫要求
 
@@ -459,7 +459,7 @@ herdr plugin（薄）：manifest 一個 action `open-board` + `collect.sh`（`he
 
 ## 7. pr 改寫要求
 
-現況：`~/.claude/skills/pr` 與 opsx `skills/pr` 是同一個檔（md5 相同），只會 `gh`，body 泛用。定案格式 mr-note 只存在 `Agentory-AI/.claude/skills/mr-note/`，`~/.claude/hooks/mr-note-reminder.sh` 只提醒不載入。pstack opening-a-pr 的 body 與 mr-note 衝突且內容已被涵蓋，一項不採。
+現況：`~/.claude/skills/pr` 與 opsx `skills/pr` 是同一個檔（md5 相同），只會 `gh`，body 泛用。定案格式 mr-note 只存在 `Acmecorp-AI/.claude/skills/mr-note/`，`~/.claude/hooks/mr-note-reminder.sh` 只提醒不載入。pstack opening-a-pr 的 body 與 mr-note 衝突且內容已被涵蓋，一項不採。
 
 拆成兩層後合併進 opsx：
 
@@ -467,11 +467,11 @@ herdr plugin（薄）：manifest 一個 action `open-board` + `collect.sh`（`he
 - **動作層**：`/pr` 只剩機制，步驟表：
   1. `Read references/mr-note.md`
   2. 收 commits：`git log --oneline <base>..HEAD`，撈測試檔：`git diff --name-only <base>..HEAD | grep -iE 'test|spec'`
-  3. 判斷 forge，一個 session 只判斷一次（pstack）：有 `gitlab` remote 或 origin 指向 gitlab.tsg-navigator.com → `glab mr create`，否則 `gh pr create`
+  3. 判斷 forge，一個 session 只判斷一次（pstack）：有 `gitlab` remote 或 origin 指向 gitlab.example.com → `glab mr create`，否則 `gh pr create`
   4. 標題 = 分支 commit subject，Conventional Commits
   5. 寫 description，寫完 GET 回來驗長度與表格
 - 不採 pstack「never draft」，draft 交給使用者
-- 收尾：刪 `~/.claude/skills/pr`；`Agentory-AI/.claude/skills/mr-note/` 改為指向 plugin 或刪除；hook 提醒文字改指 plugin 路徑
+- 收尾：刪 `~/.claude/skills/pr`；`Acmecorp-AI/.claude/skills/mr-note/` 改為指向 plugin 或刪除；hook 提醒文字改指 plugin 路徑
 
 ## 8. pstack 採用與不採用清單
 
@@ -579,8 +579,8 @@ opsx-workflow/
 | dev（預設） | 一般開發：新功能、改行為、加東西 | 測試綠、review 零 bug、MR | `dev.md`（pstack `feature.md`） | AI、CS |
 | bug-fix | 修一個錯 | 重現腳本紅 → 綠 | `bug-fix.md`（+ tdd） | AI、CS |
 | refactoring | 改結構不改行為 | 測試前後都綠 | `refactoring.md` | AI |
-| perf | 變慢、吃資源 | 基線 → 改後數字 | `perf-issue.md` + benchmark-checklist | AI、gmtc-rag |
-| experiment | 試方法、調參、跑 eval 比分數；產物是結論和數字，不一定有 code 進 MR | 結果表 + 結論（做 / 不做 / 再試） | `hillclimb.md` 或 `eval.md` | evals、gmtc-rag、scam-guard |
+| perf | 變慢、吃資源 | 基線 → 改後數字 | `perf-issue.md` + benchmark-checklist | AI、rag-demo |
+| experiment | 試方法、調參、跑 eval 比分數；產物是結論和數字，不一定有 code 進 MR | 結果表 + 結論（做 / 不做 / 再試） | `hillclimb.md` 或 `eval.md` | evals、rag-demo、scam-guard |
 | ops | 部署、compose、env、secrets | 部署後 healthcheck 綠 | 無；apply 步驟 + Infra deploy 流程 | Infra |
 | chore | docs、config、版本號 | 無驗證，直接 MR | 無 | 全部 |
 
@@ -612,7 +612,7 @@ opsx-workflow/
 | **dispatch** | 看板按「派」或打 `/dispatch` | opsx `dispatch.sh` + herdr worktree / agent start / prompt | 開一個 worker，worker 自己走主流程 |
 | **UI / 看板** | 「做畫面」「做看板」「做 artifact」 | Open Design `skills/frontend-design` → `impeccable-design-polish`，檢查 `craft/anti-ai-slop.md`；pstack 無此項 | 那個 change 的 apply |
 | **correct / reflect** | 「又犯了」「這次學到什麼」 | `skills/correct/`（修在最高能強制的層級）、`skills/reflect/` | 改 opsx 自己 → skill-creator |
-| **TypeScript** | 在 Agentory-AI 的 apply 讀寫 TS 時 | `skills/typescript-best-practices/` | apply 當下 |
+| **TypeScript** | 在 Acmecorp-AI 的 apply 讀寫 TS 時 | `skills/typescript-best-practices/` | apply 當下 |
 | **deepen** | 「找 shallow module」「這區太散」「架構體檢」 | `skills/deepen/`：Explore subagent 找摩擦 → deletion test → 候選清單（Files / Problem / Solution / Benefits）→ 人挑一個 → grill 走設計樹 → 依賴四類定怎麼跨 seam 測 | 每個選定的候選開一個 kind=refactoring 的殼 |
 
 ### Router 規則（hook 注入的那一行）
@@ -930,7 +930,7 @@ hook 放 plugin 自己的 `hooks/hooks.json`，用 `${CLAUDE_PLUGIN_ROOT}/hooks/
 |---|---|---|
 | SessionStart | `openspec-context.sh` | `[ -d openspec ] \|\| exit 0`；`openspec list --json` + `workplan.yaml` 擠成一行 additionalContext：active changes、目前 branch 對應的 change、**下一步該打哪個 skill**（tasks 全勾未 archive → `/review` 或 `/archive`；有 change 未勾完 → `/apply <name>`；沒 change → `/propose`）。等於把 `/status` 的 next action 每次自動出現 |
 | UserPromptSubmit | 同一腳本 | 只在 `openspec/` 的 mtime 比上次注入新時才重跑，否則零輸出 |
-| PreToolUse (Bash) | `openspec-commit-gate.sh` | `git commit` 時：repo 無 `workplan.yaml` → 不擋，印一行「閘門未啟用」（舊 repo 第一次 `/propose` 後自動生效）；有 workplan → branch 對到卡且 tasks 有勾才放行；對不到 → deny，message 帶 `[no-change]` 放行並記 `~/.local/state/opsx/bypass.log`。只看 commit 的 branch 不看 index，不逼人用 `git add`（Agentory-AI D131 的 pathspec commit 照用） |
+| PreToolUse (Bash) | `openspec-commit-gate.sh` | `git commit` 時：repo 無 `workplan.yaml` → 不擋，印一行「閘門未啟用」（舊 repo 第一次 `/propose` 後自動生效）；有 workplan → branch 對到卡且 tasks 有勾才放行；對不到 → deny，message 帶 `[no-change]` 放行並記 `~/.local/state/opsx/bypass.log`。只看 commit 的 branch 不看 index，不逼人用 `git add`（Acmecorp-AI D131 的 pathspec commit 照用） |
 | PreToolUse (Bash · Edit · Write) | `opsx-grant-gate.sh` | 自動模式下的授權閘門：指令或路徑落在「要授權」那級（push、開 MR、改 MR description、本機 migrate / reset、刪檔、裝套件、外部 API、寫 `.env.*`、rebase）→ 查 `grants.toml`（repo 永遠）與 dispatch.json（這張卡）；有授權 allow，沒有 deny，deny 訊息：「寫 gates.md（建議 · 證據 · 風險 · 沒回預設），然後做能做的」。「永遠要人」那級（merge、deploy、force-push、刪資料、對外發話、改 CI / secrets）一律 deny，訊息同上。互動模式不裝這支 |
 | PreToolUse (Bash) | `mr-format-gate.sh` | `glab mr create` / `gh pr create` 時檢查 description 檔含 `## Changes` 與表格列 `\| 編號 \|`，否則 deny。取代現在只提醒的 `mr-note-reminder.sh` |
 | Stop | `openspec-stop-gate.sh` | branch 對應的 `tasks.md` 仍有 `- [ ]`、`status.json` 的 `tests` 不是 green、或有新 commit 但 review 未跑 → block 並說原因 |
@@ -1003,7 +1003,7 @@ pstack 的 encode-lessons-in-structure 與 `/correct`：同一個錯誤修在最
 | 怎麼授 | 每動作每卡預設問；gate 上答 這次 / 這個 session / 這個 repo 永遠 | §3.6 |
 | commit 閘門 | deny，`[no-change]` 逃生口記 log；無 workplan 的 repo 不擋，第一次 propose 後自動生效 | §8.5 |
 | grill 放哪 | plugin 內 `skills/grill/`；刪 user-level 兩個；explore 的 trigger 詞拿掉 | §4.5 |
-| opsx 裝哪 | 所有開發中的 repo，含 evals、gmtc-rag；以後只用這個 plugin 開發 | §4.5 |
+| opsx 裝哪 | 所有開發中的 repo，含 evals、rag-demo；以後只用這個 plugin 開發 | §4.5 |
 | kind 七種 | dev（預設，一般開發）/ bug-fix / refactoring / perf / experiment / ops / chore，各有完成條件與 playbook | §8.1 |
 | inbox 來源八種 | me / agent / gitlab / github / obsidian / customer / paste / shortcut；單向同步 | §3.6 |
 | grill 的位置 | 不是主流程節點，是 explore → propose 的閘門；只在 explore.md 待決非空時有事；schema 鏈不含 grill | §3、§4 |

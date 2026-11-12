@@ -48,10 +48,10 @@ opsx_collect() {
   # bash 只掃目錄，每張卡寫一行 TSV（repo、slug、dir、archived、stage、mr 檔）給下面那段 python 組 JSON。
   # stage 用 stage_of，MR 用 mr_json，不另算；這裡不 fork python，1000 張卡就是 1000 次啟動。mr_json 只對有 MR 的卡跑。
   # repo 的判準：<root>/<name>/openspec/changes 存在，而且 <name>/.git 是目錄。linked worktree 的 .git 是檔案，跳過，
-  # 不然 Agentory-AI-langflow、*-wt-* 會被當成別的 repo。archive 只取最新 N 張，已完成不能無限長。
+  # 不然 Acmecorp-AI-langflow、*-wt-* 會被當成別的 repo。archive 只取最新 N 張，已完成不能無限長。
   local repo_dir repo d slug archived stage mrfile n=0 archive_cap="${OPSX_COLLECT_ARCHIVE_CAP:-30}" seen_archive real
   : > "$work/cards.tsv"; : > "$work/legacy"; : > "$work/seen"; mkdir -p "$work/mr"
-  # repo 清單（D1）：<root>/*/ 加上 sources.toml 登記的 path，init 過的 repo 不在 root 底下也算（opsx-workflow 在 ~/code/sandbox/）
+  # repo 清單（D1）：<root>/*/ 加上 sources.toml 登記的 path，init 過的 repo 不在 root 底下也算（opsx-workflow 在 ~/code/<子資料夾>/）
   local -a repo_dirs=()
   for repo_dir in "$root"/*/; do repo_dirs+=("${repo_dir%/}"); done
   if [ -f "$state/sources.toml" ]; then

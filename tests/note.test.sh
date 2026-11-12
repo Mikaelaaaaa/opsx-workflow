@@ -5,7 +5,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 use_fakes herdr
 export OPSX_FAKE_LOG="$FX/fake.log"; : > "$OPSX_FAKE_LOG"
 
-R="$(mk_repo Agentory-AI)"; C="$R/openspec/changes/x"; mk_change "$R" x; mkdir -p "$OPSX_STATE_DIR"
+R="$(mk_repo Acmecorp-AI)"; C="$R/openspec/changes/x"; mk_change "$R" x; mkdir -p "$OPSX_STATE_DIR"
 I="$C/inbox.md"
 printf -- '---\ntype: 功能\nsource: me\n---\n\n## 一句話\n\n做 x\n' > "$I"
 cd "$R"
@@ -54,31 +54,31 @@ out="$(opsx note zz "先跑 lint" 2>&1)"; [ $? -ne 0 ] || fail "沒有的卡要�
 echo "$out" | grep -q zz || fail "訊息要含 zz: $out"
 
 # --- stopped 的卡當成沒派出 ---
-printf '{"Agentory-AI/x":{"mode":"stopped","pane":"p4"}}' > "$OPSX_STATE_DIR/dispatch.json"
+printf '{"Acmecorp-AI/x":{"mode":"stopped","pane":"p4"}}' > "$OPSX_STATE_DIR/dispatch.json"
 out="$(opsx note x "停了" 2>&1)"; assert_eq "$?" 0 "note stopped: $out"
 assert_eq "$(cat "$OPSX_FAKE_LOG")" "" "stopped 不碰 herdr"
 
 # --- 已派出：送進 agent ---
-printf '{"Agentory-AI/x":{"mode":"autopilot","pane":"p4"}}' > "$OPSX_STATE_DIR/dispatch.json"
+printf '{"Acmecorp-AI/x":{"mode":"autopilot","pane":"p4"}}' > "$OPSX_STATE_DIR/dispatch.json"
 out="$(opsx note x "先跑 lint" 2>&1)"; assert_eq "$?" 0 "note dispatched: $out"
 assert_grep '^agent prompt x 有新的派工指示，Read inbox.md 的 ## 派工指示$' "$OPSX_FAKE_LOG"
 
 # --- 代管卡送到協調它的 pane，帶 [slug] ---
 : > "$OPSX_FAKE_LOG"
-printf '{"Agentory-AI/x":{"mode":"autopilot","pane":"p4","herdr_name":"p","via":"p"}}' > "$OPSX_STATE_DIR/dispatch.json"
+printf '{"Acmecorp-AI/x":{"mode":"autopilot","pane":"p4","herdr_name":"p","via":"p"}}' > "$OPSX_STATE_DIR/dispatch.json"
 out="$(opsx note x "先跑 lint" 2>&1)"; assert_eq "$?" 0 "note hosted: $out"
 assert_grep '^agent prompt p \[x\] 有新的派工指示，Read inbox.md 的 ## 派工指示$' "$OPSX_FAKE_LOG"
 
 # --- 已交接的卡：拒絕，不寫不送 ---
 : > "$OPSX_FAKE_LOG"; cp "$I" "$FX/before.md"
-printf '{"Agentory-AI/x":{"mode":"autopilot","pane":"p4","handed_to":["y"],"handed_at":"2026-11-10T12:00:00+08:00"}}' > "$OPSX_STATE_DIR/dispatch.json"
+printf '{"Acmecorp-AI/x":{"mode":"autopilot","pane":"p4","handed_to":["y"],"handed_at":"2026-11-10T12:00:00+08:00"}}' > "$OPSX_STATE_DIR/dispatch.json"
 out="$(opsx note x "先跑 lint" 2>&1)"; [ $? -ne 0 ] || fail "已交接要拒絕: $out"
 echo "$out" | grep -q 'y' || fail "訊息要含交接對象: $out"
 cmp -s "$I" "$FX/before.md" || fail "已交接不該寫 inbox.md"
 assert_eq "$(cat "$OPSX_FAKE_LOG")" "" "已交接不碰 herdr"
 
 # --- herdr 送不出去：檔已寫，退出非零並說明 ---
-printf '{"Agentory-AI/x":{"mode":"autopilot","pane":"p4"}}' > "$OPSX_STATE_DIR/dispatch.json"
+printf '{"Acmecorp-AI/x":{"mode":"autopilot","pane":"p4"}}' > "$OPSX_STATE_DIR/dispatch.json"
 printf 'agent_not_found\n' > "$FX/prompt-err"
 n="$(notes | wc -l | tr -d ' ')"
 out="$(OPSX_TEST_PROMPT_ERR="$FX/prompt-err" opsx note x "送不出去" 2>&1)"; [ $? -ne 0 ] || fail "herdr 失敗要退出非零: $out"

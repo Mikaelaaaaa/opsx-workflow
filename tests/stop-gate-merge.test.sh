@@ -5,7 +5,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 H="$OPSX_ROOT/hooks"
 export CLAUDE_PLUGIN_ROOT="$OPSX_ROOT"
 
-R="$(mk_repo Agentory-AI git@gitlab.tsg-navigator.com:agentory/Agentory-AI.git)"
+R="$(mk_repo Acmecorp-AI git@gitlab.example.com:acmecorp/Acmecorp-AI.git)"
 C="$R/openspec/changes/eval-core"; mk_change "$R" eval-core
 printf 'schema: opsx\ncreated: 2026-11-05\nkind: bug-fix\n' > "$C/.openspec.yaml"
 printf '## 已知\n- x\n\n## 待決\n\n## 不做\n' > "$C/explore.md"

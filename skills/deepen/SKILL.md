@@ -34,7 +34,7 @@ This skill is _informed_ by the project's domain model. The domain language give
 
 ### 1. Explore
 
-Read the project's domain glossary (`CONTEXT.md`, only gmtc-rag has one today; skip when absent) and any ADRs in the area you're touching first.
+Read the project's domain glossary (`CONTEXT.md`, only rag-demo has one today; skip when absent) and any ADRs in the area you're touching first.
 
 Then use the Agent tool with `subagent_type=Explore` to walk the codebase. Don't follow rigid heuristics. Explore organically and note where you experience friction:
 

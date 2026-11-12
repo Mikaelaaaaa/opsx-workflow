@@ -563,7 +563,7 @@ NO_OPENER = "opsx board: 沒有 open 或 xdg-open，自己開 http://127.0.0.1:8
 
 class OpenOutcomeTest(unittest.TestCase):
     def test_failure_starts_with_short_label_and_keeps_whole_message(self):
-        argv = tm.open_argv("/Users/someone/code/sandbox/opsx-workflow", {"kind": "card", "card": {"repo": "a", "slug": "x"}})
+        argv = tm.open_argv("/Users/dev/code/opsx-workflow", {"kind": "card", "card": {"repo": "a", "slug": "x"}})
         note = tm.open_outcome(argv, proc(argv, rc=1, err=NO_OPENER + "\n"))
         self.assertTrue(note.startswith("open-board 失敗："), note)
         self.assertIn("#token=%s&card=" % TOKEN, note)

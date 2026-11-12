@@ -112,7 +112,7 @@ assert_eq "$(cat "$FX/victim")" "keep me" "sync.lock 不能被改"
 rm -f "$OPSX_STATE_DIR/sync.lock"
 
 # ========== gitlab / github ==========
-CS="$(mk_opsx_repo Agentory-CS)"; mv "$CS" "$ROOT/Agentory-CS"; CS="$(cd "$ROOT/Agentory-CS" && pwd -P)"
+CS="$(mk_opsx_repo Acmecorp-CS)"; mv "$CS" "$ROOT/Acmecorp-CS"; CS="$(cd "$ROOT/Acmecorp-CS" && pwd -P)"
 B="$(mk_opsx_repo b)"; mv "$B" "$ROOT/b"; B="$(cd "$ROOT/b" && pwd -P)"
 mkdir -p "$FX/elsewhere"; Z="$(mk_opsx_repo z)"; mv "$Z" "$FX/elsewhere/z"; Z="$(cd "$FX/elsewhere/z" && pwd -P)"
 cat > "$OPSX_STATE_DIR/sources.toml" <<EOF
@@ -125,8 +125,8 @@ path = "$A"
 
 [[source]]
 kind = "gitlab"
-repo = "Agentory-CS"
-project = "agentory/agentory-cs"
+repo = "Acmecorp-CS"
+project = "acmecorp/acmecorp-cs"
 assignee = "mika"
 path = "$CS"
 
@@ -140,7 +140,7 @@ export OPSX_TEST_ISSUES="$FX/issues"; mkdir -p "$OPSX_TEST_ISSUES"
 gl() { # <iid> <title> <updated_at> [labels json]
   printf '{"iid":%s,"title":"%s","description":"%s 的內文","state":"opened","updated_at":"%s","web_url":"https://gitlab.example/g/x/-/issues/%s","labels":%s}' "$1" "$2" "$2" "$3" "$1" "${4:-[]}"; }
 printf '[%s,%s]' "$(gl 412 聊天視窗被鍵盤蓋住 2026-11-05T10:00:00Z '["bug"]')" "$(gl 500 撞名的 2026-11-05T10:00:00Z)" > "$OPSX_TEST_ISSUES/a.json"
-printf '[%s]' "$(gl 9 大寫的 2026-11-05T10:00:00Z)" > "$OPSX_TEST_ISSUES/Agentory-CS.json"
+printf '[%s]' "$(gl 9 大寫的 2026-11-05T10:00:00Z)" > "$OPSX_TEST_ISSUES/Acmecorp-CS.json"
 printf '[%s]' "$(gl 1 不該撈 2026-11-05T10:00:00Z)" > "$OPSX_TEST_ISSUES/b.json"
 printf '[{"number":3,"title":"README 錯字","body":"第三行","state":"OPEN","updatedAt":"2026-11-05T10:00:00Z","url":"https://github.com/me/z/issues/3","labels":[{"name":"docs"}]}]' > "$OPSX_TEST_ISSUES/gh-z.json"
 # slug 撞名但來源不同：先有一張 source: me 的 gl-a-500
@@ -156,7 +156,7 @@ assert_grep '^upstream_url: https://gitlab.example/g/x/-/issues/412$' "$I"; asse
 assert_eq "$(awk '/^## 一句話/{f=1;next} f&&NF{print;exit}' "$I")" 聊天視窗被鍵盤蓋住
 assert_grep '^聊天視窗被鍵盤蓋住 的內文$' "$I"
 assert_grep '^source: gitlab:a#500$' "$CH/gl-a-500-2/inbox.md"; assert_grep '^手動建的$' "$CH/gl-a-500/inbox.md"
-assert_grep '^source: gitlab:Agentory-CS#9$' "$CS/openspec/changes/gl-agentory-cs-9/inbox.md"
+assert_grep '^source: gitlab:Acmecorp-CS#9$' "$CS/openspec/changes/gl-acmecorp-cs-9/inbox.md"
 GI="$Z/openspec/changes/gh-z-3/inbox.md"
 assert_grep '^source: github:z#3$' "$GI"; assert_grep '^type: 功能$' "$GI"; assert_grep '^upstream_url: https://github.com/me/z/issues/3$' "$GI"
 assert_eq "$(find "$B/openspec/changes" -mindepth 1 -maxdepth 1 ! -name archive | wc -l | tr -d ' ')" 0 "沒登記在 sources.toml 的 repo 不撈"
@@ -183,18 +183,18 @@ assert_eq "$(snap_all)" "$before"; assert_eq "$(logcols | cut -f1)" 0
 # --- 還沒 explore 的卡內容更新：一句話換新、upstream_updated 換新 ---
 printf '[%s,%s]' "$(gl 412 鍵盤蓋住輸入框 2026-11-06T08:00:00Z '["bug"]')" "$(gl 500 撞名的 2026-11-05T10:00:00Z)" > "$OPSX_TEST_ISSUES/a.json"
 # --- explore 過的卡內容更新：一句話不變，證據多一行 ---
-printf '## 已知\n' > "$CS/openspec/changes/gl-agentory-cs-9/explore.md"
-printf '[%s]' "$(gl 9 改過的標題 2026-11-06T08:00:00Z)" > "$OPSX_TEST_ISSUES/Agentory-CS.json"
+printf '## 已知\n' > "$CS/openspec/changes/gl-acmecorp-cs-9/explore.md"
+printf '[%s]' "$(gl 9 改過的標題 2026-11-06T08:00:00Z)" > "$OPSX_TEST_ISSUES/Acmecorp-CS.json"
 opsx sync --root "$ROOT" >/dev/null 2>&1
 assert_eq "$(awk '/^## 一句話/{f=1;next} f&&NF{print;exit}' "$I")" 鍵盤蓋住輸入框
 assert_grep '^鍵盤蓋住輸入框 的內文$' "$I"; assert_not_grep '^聊天視窗被鍵盤蓋住 的內文$' "$I"
 assert_grep '^upstream_updated: 2026-11-06T08:00:00Z$' "$I"
-CI="$CS/openspec/changes/gl-agentory-cs-9/inbox.md"
+CI="$CS/openspec/changes/gl-acmecorp-cs-9/inbox.md"
 assert_eq "$(awk '/^## 一句話/{f=1;next} f&&NF{print;exit}' "$CI")" 大寫的
-awk '/^## 證據/{f=1;next} /^## /{f=0} f' "$CI" | grep -q 'gitlab:Agentory-CS#9.*2026-11-06' || fail "證據要多一行更新：$(cat "$CI")"
+awk '/^## 證據/{f=1;next} /^## /{f=0} f' "$CI" | grep -q 'gitlab:Acmecorp-CS#9.*2026-11-06' || fail "證據要多一行更新：$(cat "$CI")"
 assert_eq "$(logcols | cut -f2)" 2
 opsx sync --root "$ROOT" >/dev/null 2>&1
-assert_eq "$(grep -c 'gitlab:Agentory-CS#9' "$CI")" 2 "同一次更新不重複追加（source 那行加一行證據）"
+assert_eq "$(grep -c 'gitlab:Acmecorp-CS#9' "$CI")" 2 "同一次更新不重複追加（source 那行加一行證據）"
 
 # --- issue 關閉 · 改指派給別人 · github 關閉 ---
 printf '[]' > "$OPSX_TEST_ISSUES/a.json"; printf '[]' > "$OPSX_TEST_ISSUES/gh-z.json"
@@ -595,7 +595,7 @@ assert out[0] == (0, "新建 0 · 更新 0 · 沒變 1 · 錯誤 0"), out
 
 # --- issue 內文含 U+2028：只按換行切 JSON 行，sync 不崩潰（me-20261111-1824 G1）---
 printf '[{"iid":777,"title":"含行分隔符","description":"前\xe2\x80\xa8後","state":"opened","updated_at":"2026-11-07T10:00:00Z","web_url":"https://gitlab.example/g/x/-/issues/777","labels":[]}]' > "$OPSX_TEST_ISSUES/a.json"
-printf '[]' > "$OPSX_TEST_ISSUES/Agentory-CS.json"; rm -f "$OPSX_TEST_ISSUES/wt.json"   # wt.json 是上面 worktree 那段留下的壞 JSON（gl 的第 4 個參數被當成 labels）
+printf '[]' > "$OPSX_TEST_ISSUES/Acmecorp-CS.json"; rm -f "$OPSX_TEST_ISSUES/wt.json"   # wt.json 是上面 worktree 那段留下的壞 JSON（gl 的第 4 個參數被當成 labels）
 out="$(opsx sync --root "$ROOT" --source gitlab 2>&1)"; assert_eq "$?" 0 "U+2028 的 issue 不該讓 sync 崩潰：$out"
 [ -f "$CH/gl-a-777/inbox.md" ] || fail "U+2028 的 issue 要建殼：${out}"
 assert_eq "$(awk -F'\t' '$2=="sync"' "$LOG" | tail -1 | cut -f1 | wc -l | tr -d ' ')" 1 "sync.log 要有這次的列"

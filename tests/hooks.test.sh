@@ -12,7 +12,7 @@ j() { python3 -I -c 'import json,sys;print(json.dumps(dict(cwd=sys.argv[1],tool_
 decision() { [ -z "$1" ] && { echo allow; return; }; printf '%s' "$1" | jq -r '.hookSpecificOutput.permissionDecision // .decision // "allow"'; }
 reason()   { printf '%s' "$1" | jq -r '.hookSpecificOutput.permissionDecisionReason // .reason // .hookSpecificOutput.additionalContext // ""'; }
 
-R="$(mk_repo Agentory-AI git@gitlab.tsg-navigator.com:agentory/Agentory-AI.git)"
+R="$(mk_repo Acmecorp-AI git@gitlab.example.com:acmecorp/Acmecorp-AI.git)"
 mkdir -p "$R/openspec/changes/archive"
 C="$R/openspec/changes/eval-core"; mk_change "$R" eval-core
 printf 'schema: opsx\ncreated: 2026-11-05\nkind: bug-fix\n' > "$C/.openspec.yaml"
@@ -45,11 +45,11 @@ printf '{"phase":"apply","step":8,"total":8,"label":"x","tests":"green","at":"20
 out="$(run_hook openspec-router.sh "$(j "$R" "" '{}' "下一步")")"; reason "$out" | grep -q '^opsx：review · eval-core' || fail "router: review: $(reason "$out")"
 printf '# report\n四桶…\n' > "$C/report.md"
 out="$(run_hook openspec-router.sh "$(j "$R" "" '{}' "下一步")")"; reason "$out" | grep -q '^opsx：pr · eval-core' || fail "router: pr: $(reason "$out")"
-printf '# report\nMR: https://gitlab.tsg-navigator.com/a/b/-/merge_requests/212\n' > "$C/report.md"
+printf '# report\nMR: https://gitlab.example.com/a/b/-/merge_requests/212\n' > "$C/report.md"
 out="$(run_hook openspec-router.sh "$(j "$R" "" '{}' "下一步")")"; reason "$out" | grep -q '^opsx：babysit · eval-core' || fail "router: MR 已開 → babysit: $(reason "$out")"
 # 模式規則：照 dispatch.json 該卡的 mode 附在那行後面；drive 讀成 autopilot；沒派過不附
 mkdir -p "$OPSX_STATE_DIR"
-printf '{"Agentory-AI/eval-core":{"mode":"autopilot"}}' > "$OPSX_STATE_DIR/dispatch.json"
+printf '{"Acmecorp-AI/eval-core":{"mode":"autopilot"}}' > "$OPSX_STATE_DIR/dispatch.json"
 out="$(run_hook openspec-router.sh "$(j "$R" "" '{}' "下一步")")"; r="$(reason "$out")"
 case "$r" in *"autopilot："*"不用 AskUserQuestion"*) ;; *) fail "router: autopilot 規則: $r" ;; esac
 case "$r" in *'approval | decision'*'needs: run'*) ;; *) fail "router: autopilot 規則要寫合法 type 與 needs: run: $r" ;; esac
@@ -60,10 +60,10 @@ case "$r" in *"interactive："*) fail "router: autopilot 卡不該有 interactiv
 for tok in "不寫迴圈" "賦值" "命令替換" "{ } 群組" "source" "bash -c" '印 $?' "一個 Bash 呼叫做一件事" "opsx log"; do
   case "$r" in *"$tok"*) ;; *) fail "router: autopilot 的 Bash 寫法規則缺「${tok}」: $r" ;; esac
 done
-printf '{"Agentory-AI/eval-core":{"mode":"drive"}}' > "$OPSX_STATE_DIR/dispatch.json"
+printf '{"Acmecorp-AI/eval-core":{"mode":"drive"}}' > "$OPSX_STATE_DIR/dispatch.json"
 out="$(run_hook openspec-router.sh "$(j "$R" "" '{}' "下一步")")"; reason "$out" | grep -q 'autopilot：' || fail "router: drive 讀成 autopilot: $(reason "$out")"
 out="$(run_hook openspec-router.sh "$(j "$R" "" '{}' "/babysit 看一下 MR")")"; reason "$out" | grep -q 'autopilot：' || fail "router: 平行流程也要附規則: $(reason "$out")"
-printf '{"Agentory-AI/eval-core":{"mode":"interactive"}}' > "$OPSX_STATE_DIR/dispatch.json"
+printf '{"Acmecorp-AI/eval-core":{"mode":"interactive"}}' > "$OPSX_STATE_DIR/dispatch.json"
 out="$(run_hook openspec-router.sh "$(j "$R" "" '{}' "下一步")")"; reason "$out" | grep -q 'interactive：要授權就直接問' || fail "router: interactive 規則: $(reason "$out")"
 reason "$out" | grep -q '不寫迴圈' && fail "router: interactive 卡不附 Bash 寫法規則: $(reason "$out")"
 printf '{}' > "$OPSX_STATE_DIR/dispatch.json"
@@ -147,7 +147,7 @@ for c in 'git log --oneline' 'echo "git commit"' 'git commit-tree HEAD' 'echo gi
   out="$(cg "$c")"; assert_eq "$out" "" "commit: $c 不是 commit，不出聲"
 done
 # session cwd 在別的 repo、commit 實際作用在 $R（沒勾 task）：每一種寫法都要對到 $R 的卡
-R2="$(mk_repo Other git@gitlab.tsg-navigator.com:agentory/Other.git)"
+R2="$(mk_repo Other git@gitlab.example.com:acmecorp/Other.git)"
 for c in "git -C $R commit -m x" "/usr/bin/git -C $R commit -m x" "git -c user.name=a -C $R commit -m x" "git --no-pager -C $R commit -m x" "\\git -C $R commit -m x" "echo \`git -C $R commit -m x\`" "cd $R && /usr/bin/git commit -m x" "cd $R && \\git commit -m x"; do
   out="$(run_hook openspec-commit-gate.sh "$(j "$R2" Bash "{\"command\":$(printf '%s' "$c" | jq -Rs .)}")")"
   assert_eq "$(decision "$out")" deny "commit: cwd 在別的 repo，$c 要對到 $R 的卡"
@@ -156,7 +156,7 @@ printf '## 1. x\n\n- [x] 1.1 a\n- [ ] 1.2 b\n' > "$C/tasks.md"
 git -C "$R" checkout -q main
 out="$(cg 'git commit -m "chore: bump"')"; assert_eq "$(decision "$out")" deny "commit: branch 對不到卡要擋"
 out="$(cg 'git commit -m "chore: bump [no-change] 只是改 README"')"; assert_eq "$(decision "$out")" allow "commit: [no-change] 放行"
-assert_grep "Agentory-AI" "$OPSX_STATE_DIR/bypass.log"
+assert_grep "Acmecorp-AI" "$OPSX_STATE_DIR/bypass.log"
 # symlink-safe-writes：bypass.log 是 symlink → 不寫到目標
 rm -f "$OPSX_STATE_DIR/bypass.log"; printf 'keep me\n' > "$FX/victim"; ln -s "$FX/victim" "$OPSX_STATE_DIR/bypass.log"
 cg 'git commit -m "chore: bump [no-change] 再一次"' >/dev/null 2>&1 || true
@@ -240,12 +240,12 @@ cmdj() { printf '{"command":%s}' "$(printf '%s' "$1" | jq -Rs .)"; }
 # 沒 dispatch.json → 不管
 out="$(gg Bash "$(cmdj 'git push gitlab feat/eval-core/mikaela')")"; assert_eq "$(decision "$out")" allow "grant: 沒派工不管"
 mkdir -p "$OPSX_STATE_DIR"
-printf '{"Agentory-AI/eval-core":{"mode":"interactive","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"
+printf '{"Acmecorp-AI/eval-core":{"mode":"interactive","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"
 out="$(gg Bash "$(cmdj 'git push gitlab feat/eval-core/mikaela')")"; assert_eq "$(decision "$out")" allow "grant: 互動模式不管"
 PD="${OPSX_STATE_DIR}-protected"; mkdir -p "$PD"   # 這張卡 / 這次 / 合併的授權只信這裡（protected-authorization）；dispatch.json 的同名欄位一律忽略
-printf '{"Agentory-AI/eval-core":{"mode":"autopilot","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"
-printf '{"Agentory-AI/eval-core":{"grants":["migrate"]}}' > "$PD/authz.json"
-printf '[repos."Agentory-AI"]\npush = true\nmr = false\nmigrate = false\n' > "$OPSX_STATE_DIR/grants.toml"
+printf '{"Acmecorp-AI/eval-core":{"mode":"autopilot","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"
+printf '{"Acmecorp-AI/eval-core":{"grants":["migrate"]}}' > "$PD/authz.json"
+printf '[repos."Acmecorp-AI"]\npush = true\nmr = false\nmigrate = false\n' > "$OPSX_STATE_DIR/grants.toml"
 out="$(gg Bash "$(cmdj 'git push gitlab feat/eval-core/mikaela')")"; assert_eq "$(decision "$out")" allow "grant: repo 永遠 push"
 out="$(gg Bash "$(cmdj 'glab mr create -F desc.md')")"; assert_eq "$(decision "$out")" deny "grant: mr 沒授權"
 reason "$out" | grep -q 'gates.md' || fail "grant: deny 要叫它寫 gate"
@@ -280,6 +280,7 @@ out="$(gg Bash "$(cmdj 'pnpm add left-pad')")"; assert_eq "$(decision "$out")" d
 out="$(gg Bash "$(cmdj 'pnpm test:ring0')")"; assert_eq "$(decision "$out")" allow "grant: 跑測試直接做"
 out="$(gg Bash "$(cmdj 'curl -s http://localhost:3000/api/health')")"; assert_eq "$(decision "$out")" allow "grant: localhost 不算外部"
 out="$(gg Bash "$(cmdj 'curl https://api.example.com/x')")"; assert_eq "$(decision "$out")" deny "grant: 外部 API"
+out="$(gg Bash "$(cmdj 'curl https://litellm.acmecorp.cc/v1/models')")"; assert_eq "$(decision "$out")" deny "grant: 只有 localhost 與 127.0.0.1 算本機，litellm 風格網域也是外部"
 out="$(gg Write '{"file_path":"/x/.env.local","content":"A=1"}')"; assert_eq "$(decision "$out")" deny "grant: 寫 .env"
 out="$(gg Write '{"file_path":"/x/.env.example","content":"A="}')"; assert_eq "$(decision "$out")" allow "grant: .env.example 可以"
 out="$(gg Edit '{"file_path":"/x/.gitlab-ci.yml","old_string":"a","new_string":"b"}')"; assert_eq "$(decision "$out")" deny "grant: 改 CI 第三級"
@@ -329,7 +330,7 @@ done
 # 第三級的 force 旗標只看同一段 push：後面串的指令自己的 -f、+5 不算
 # 串起來的段要查 agent 的 settings allow，所以先給一份讓 tail、echo、ls 在 allow 裡
 mkdir -p "$OPSX_STATE_DIR/settings"
-printf '{"permissions":{"allow":["Bash(tail:*)","Bash(echo:*)","Bash(ls:*)"]}}' > "$OPSX_STATE_DIR/settings/Agentory-AI-eval-core-autopilot.json"
+printf '{"permissions":{"allow":["Bash(tail:*)","Bash(echo:*)","Bash(ls:*)"]}}' > "$OPSX_STATE_DIR/settings/Acmecorp-AI-eval-core-autopilot.json"
 for c in 'git push gitlab feat/x 2>&1 | tail -n +5' 'git push -u gitlab feat/x && echo "see +1" && ls -lf'; do
   out="$(gg Bash "$(cmdj "$c")")"; assert_eq "$(decision "$out")" allow "grant: $c 的 push 本身沒有 force，不能當第三級擋：$(reason "$out")"
 done
@@ -381,7 +382,7 @@ out="$(gg Bash "$(cmdj 'cat > notes.md <<'"'EOF'"'
 git push --force origin main
 EOF')")"; assert_eq "$out" "" "grant 白名單: cat 寫檔 heredoc（quoted delimiter）不觸發"
 out="$(gg Bash "$(cmdj 'cat >> notes.md <<EOF
-./deploy.sh spark1-prod
+./deploy.sh node01-prod
 EOF')")"; assert_eq "$out" "" "grant 白名單: cat 寫檔 heredoc（unquoted、沒有命令替換）不觸發"
 out="$(gg Bash "$(cmdj 'git commit -m "$(git push --force gitlab main)"')")"; assert_eq "$(decision "$out")" deny "grant 白名單: commit 訊息內的 \$(…) 仍擋"
 out="$(gg Bash "$(cmdj 'opsx answer s g1 -- "$(gh pr merge 12)"')")"; assert_eq "$(decision "$out")" deny "grant 白名單: answer 內的 \$(…) 仍擋"
@@ -394,11 +395,11 @@ EOF')")"; assert_eq "$(decision "$out")" deny "grant 白名單: heredoc 接 pipe
 out="$(gg Bash "$(cmdj 'psql <<SQL
 DROP TABLE users;
 SQL')")"; assert_eq "$(decision "$out")" deny "grant 繞過口: heredoc 餵 psql"
-out="$(gg Bash "$(cmdj 'ssh spark1 bash <<EOF
-cd /srv && ./deploy.sh spark1-prod
+out="$(gg Bash "$(cmdj 'ssh node01 bash <<EOF
+cd /srv && ./deploy.sh node01-prod
 EOF')")"; assert_eq "$(decision "$out")" deny "grant 繞過口: heredoc 餵 ssh bash"
 out="$(gg Bash "$(cmdj 'git push gitlab feat/eval-core/mikaela && psql -c "DROP TABLE users"')")"; assert_eq "$(decision "$out")" deny "grant 繞過口: 已授權 push 串 psql -c DROP TABLE"
-out="$(gg Bash "$(cmdj 'git push gitlab feat/eval-core/mikaela && ssh spark1 "cd /srv && ./deploy.sh spark1-prod"')")"; assert_eq "$(decision "$out")" deny "grant 繞過口: 已授權 push 串 ssh deploy"
+out="$(gg Bash "$(cmdj 'git push gitlab feat/eval-core/mikaela && ssh node01 "cd /srv && ./deploy.sh node01-prod"')")"; assert_eq "$(decision "$out")" deny "grant 繞過口: 已授權 push 串 ssh deploy"
 out="$(gg Bash "$(cmdj 'c="git push --force gitlab main"; $c')")"; assert_eq "$(decision "$out")" deny "grant 繞過口: 變數展開"
 out="$(gg Bash "$(cmdj 'source <(echo "git push --force gitlab main")')")"; assert_eq "$(decision "$out")" deny "grant 繞過口: source <(…)"
 out="$(gg Bash "$(cmdj 'bash -e -c "git push --force gitlab main"')")"; assert_eq "$(decision "$out")" deny "grant 繞過口: bash -e -c"
@@ -537,19 +538,19 @@ out="$(gg Write "{\"file_path\":\"$R/src/newdir/foo.test.ts\",\"content\":\"x\"}
 assert_eq "$(reason "$out" | grep -oE 'action: [a-z-]+')" "action: test-path" "grant-action: test-path 只帶自己的 action：$(reason "$out")"
 out="$(gg Bash "$(cmdj 'git push --force gitlab main')")"
 reason "$out" | grep -qF 'action:' && fail "grant-action: 第三級不帶 action：$(reason "$out")"
-printf '[repos."Agentory-AI"]\npush = true\nmr = false\nmigrate = false\n' > "$OPSX_STATE_DIR/grants.toml"
-printf '{"Agentory-AI/eval-core":{"grants":["migrate"]}}' > "$PD/authz.json"
+printf '[repos."Acmecorp-AI"]\npush = true\nmr = false\nmigrate = false\n' > "$OPSX_STATE_DIR/grants.toml"
+printf '{"Acmecorp-AI/eval-core":{"grants":["migrate"]}}' > "$PD/authz.json"
 
 # ---------- grant gate：合併的一次性核准（herdr-board D5 / 3.3）----------
 FAKES="$OPSX_ROOT/tests/fakes"; mkdir -p "$FX/fakebin"
 printf '#!/usr/bin/env bash\nexec bash "%s/glab" "$@"\n' "$FAKES" > "$FX/fakebin/glab"; chmod +x "$FX/fakebin/glab"
 export PATH="$FX/fakebin:$PATH" OPSX_FAKE_LOG="$FX/fake.log" OPSX_TEST_GLAB_JSON="$FX/mr.json"; : > "$OPSX_FAKE_LOG"
-printf '# report\nMR: https://gitlab.tsg-navigator.com/a/b/-/merge_requests/212\n' > "$C/report.md"
+printf '# report\nMR: https://gitlab.example.com/a/b/-/merge_requests/212\n' > "$C/report.md"
 printf '{"state":"opened","draft":false,"has_conflicts":false,"sha":"abc123","head_pipeline":{"status":"success"},"unresolved_discussions_count":0}' > "$OPSX_TEST_GLAB_JSON"
 # 核准相符，單一指令，MR 號碼對：放行；核准綁 sha 不刪，同一個 sha 再合一次還是放行（合併過的 MR 第二次 glab 自己會拒）
-printf '{"Agentory-AI/eval-core":{"mode":"autopilot","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"
+printf '{"Acmecorp-AI/eval-core":{"mode":"autopilot","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"
 # dispatch.json 偽造的核准（沙盒內 session 寫得到那個檔）：sha 相符也 deny
-printf '{"Agentory-AI/eval-core":{"mode":"autopilot","grants":[],"merge_approved":"abc123","merge_approved_at":"2026-11-06T01:00:00+08:00"}}' > "$OPSX_STATE_DIR/dispatch.json"
+printf '{"Acmecorp-AI/eval-core":{"mode":"autopilot","grants":[],"merge_approved":"abc123","merge_approved_at":"2026-11-06T01:00:00+08:00"}}' > "$OPSX_STATE_DIR/dispatch.json"
 out="$(gg Bash "$(cmdj 'glab mr merge 212 --squash')")"; assert_eq "$(decision "$out")" deny "grant: dispatch.json 的 merge_approved 不放行"
 reason "$out" | grep -q '看板' || fail "grant: 偽造核准的 deny 也要指向看板: $(reason "$out")"
 # 受保護目錄不存在、檔案壞掉：都是沒核准
@@ -557,10 +558,10 @@ rm -rf "$PD"
 out="$(gg Bash "$(cmdj 'glab mr merge 212 --squash')")"; assert_eq "$(decision "$out")" deny "grant: 受保護位置缺檔 deny"
 mkdir -p "$PD"; printf 'not json {' > "$PD/authz.json"
 out="$(gg Bash "$(cmdj 'glab mr merge 212 --squash')")"; assert_eq "$(decision "$out")" deny "grant: 受保護檔壞掉 deny"
-printf '{"Agentory-AI/eval-core":{"merge_approved":"abc123","merge_approved_at":"2026-11-06T01:00:00+08:00"}}' > "$PD/authz.json"
-printf '{"Agentory-AI/eval-core":{"mode":"autopilot","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"
+printf '{"Acmecorp-AI/eval-core":{"merge_approved":"abc123","merge_approved_at":"2026-11-06T01:00:00+08:00"}}' > "$PD/authz.json"
+printf '{"Acmecorp-AI/eval-core":{"mode":"autopilot","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"
 out="$(gg Bash "$(cmdj 'glab mr merge 212 --squash')")"; assert_eq "$(decision "$out")" allow "grant: 核准相符放行"
-assert_eq "$(jq -r '."Agentory-AI/eval-core".merge_approved' "$PD/authz.json")" abc123 "核准綁 sha，不刪"
+assert_eq "$(jq -r '."Acmecorp-AI/eval-core".merge_approved' "$PD/authz.json")" abc123 "核准綁 sha，不刪"
 out="$(gg Bash "$(cmdj 'glab mr merge 212 --squash')")"; assert_eq "$(decision "$out")" allow "grant: 同 sha 第二次仍放行"
 out="$(gg Bash "$(cmdj 'glab mr merge --squash')")"; assert_eq "$(decision "$out")" allow "grant: 沒寫號碼（目前分支）也放行"
 out="$(gg Bash "$(cmdj 'glab mr merge --squash 212')")"; assert_eq "$(decision "$out")" allow "grant: 旗標在前、號碼對也放行"
@@ -575,15 +576,15 @@ out="$(gg Bash "$(cmdj 'glab mr merge 999 --squash')")"; assert_eq "$(decision "
 reason "$out" | grep -q '999' || fail "grant: 要指出號碼不同: $(reason "$out")"
 out="$(gg Bash "$(cmdj 'glab mr merge 212 && git push --force origin main')")"; assert_eq "$(decision "$out")" deny
 # 「這次」授權：repo 永遠關掉，只靠 once
-printf '[repos."Agentory-AI"]\npush = false\n' > "$OPSX_STATE_DIR/grants.toml"
+printf '[repos."Acmecorp-AI"]\npush = false\n' > "$OPSX_STATE_DIR/grants.toml"
 # dispatch.json 偽造的 once / grants 不放行
-printf '{"Agentory-AI/eval-core":{"mode":"autopilot","grants":["push"],"once":["push"]}}' > "$OPSX_STATE_DIR/dispatch.json"; printf '{}' > "$PD/authz.json"
+printf '{"Acmecorp-AI/eval-core":{"mode":"autopilot","grants":["push"],"once":["push"]}}' > "$OPSX_STATE_DIR/dispatch.json"; printf '{}' > "$PD/authz.json"
 out="$(gg Bash "$(cmdj 'git push gitlab feat/eval-core/mikaela')")"; assert_eq "$(decision "$out")" deny "grant: dispatch.json 的 once / grants 不放行"
-printf '{"Agentory-AI/eval-core":{"mode":"autopilot","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"
-printf '{"Agentory-AI/eval-core":{"once":["push"]}}' > "$PD/authz.json"
+printf '{"Acmecorp-AI/eval-core":{"mode":"autopilot","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"
+printf '{"Acmecorp-AI/eval-core":{"once":["push"]}}' > "$PD/authz.json"
 out="$(gg Bash "$(cmdj 'git push gitlab feat/eval-core/mikaela')")"; assert_eq "$(decision "$out")" allow "grant: once 放行一次"
-assert_eq "$(jq -c '."Agentory-AI/eval-core".once' "$PD/authz.json")" '[]' "once 用掉就刪"
-printf '{"Agentory-AI/eval-core":{"grants":["mr"]}}' > "$PD/authz.json"
+assert_eq "$(jq -c '."Acmecorp-AI/eval-core".once' "$PD/authz.json")" '[]' "once 用掉就刪"
+printf '{"Acmecorp-AI/eval-core":{"grants":["mr"]}}' > "$PD/authz.json"
 out="$(gg Bash "$(cmdj 'glab mr create -F desc.md')")"; assert_eq "$(decision "$out")" allow "grant: 受保護位置的卡授權放行"
 out="$(gg Bash "$(cmdj 'glab issue note 12 -m x')")"; assert_eq "$(decision "$out")" allow "grant: mr 授權放行 glab issue note"
 out="$(gg Bash "$(cmdj 'gh issue comment https://github.com/o/r/issues/3 --body x')")"; assert_eq "$(decision "$out")" allow "grant: mr 授權放行 gh issue comment"
@@ -598,32 +599,32 @@ for bad in 'gh pr comment 12 --body-file /x/m.md' \
 done
 out="$(gg Bash "$(cmdj 'git push gitlab feat/eval-core/mikaela')")"; assert_eq "$(decision "$out")" deny "grant: once 第二次 deny"
 # once mr 只放行一次：開 MR 用掉後，回寫 issue 會被擋，deny 訊息帶 action: mr（/pr 5b 靠它分辨原因）
-printf '{"Agentory-AI/eval-core":{"once":["mr"]}}' > "$PD/authz.json"
+printf '{"Acmecorp-AI/eval-core":{"once":["mr"]}}' > "$PD/authz.json"
 out="$(gg Bash "$(cmdj 'glab mr create -F desc.md')")"; assert_eq "$(decision "$out")" allow "grant: once mr 開 MR"
 out="$(gg Bash "$(cmdj 'glab issue note 12 -m x')")"; assert_eq "$(decision "$out")" deny "grant: once mr 用掉後 issue note deny"
 reason "$out" | grep -qF 'action: mr' || fail "grant: once mr 用掉後的 deny 要帶 action: mr：$(reason "$out")"
 # grants.toml 壞掉：當成沒授權，不是放行
 printf 'this is not toml ===\n' > "$OPSX_STATE_DIR/grants.toml"
 out="$(gg Bash "$(cmdj 'git push gitlab feat/eval-core/mikaela')")"; assert_eq "$(decision "$out")" deny "grant: 壞 toml deny"
-printf '[repos."Agentory-AI"]\npush = true\nmr = false\nmigrate = false\n' > "$OPSX_STATE_DIR/grants.toml"
+printf '[repos."Acmecorp-AI"]\npush = true\nmr = false\nmigrate = false\n' > "$OPSX_STATE_DIR/grants.toml"
 # 在 dispatch 開的 linked worktree 裡：repo 名要是主 repo，gate 照樣生效
-printf '{"Agentory-AI/eval-core":{"mode":"autopilot","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"; printf '{}' > "$PD/authz.json"
+printf '{"Acmecorp-AI/eval-core":{"mode":"autopilot","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"; printf '{}' > "$PD/authz.json"
 git -C "$R" worktree add -q "$R/.claude/worktrees/eval-core" -b feat/eval-core/wt   # 主 checkout 已在 mikaela 那條，worktree 另開一條同 slug 的
 WT="$(cd "$R/.claude/worktrees/eval-core" && pwd -P)"
 out="$(run_hook opsx-grant-gate.sh "$(j "$WT" Bash "$(cmdj 'glab mr create -F desc.md')")")"; assert_eq "$(decision "$out")" deny "grant: worktree 裡也要 deny"
 out="$(run_hook opsx-grant-gate.sh "$(j "$WT" Bash "$(cmdj 'pnpm test')")")"; assert_eq "$(decision "$out")" allow
-printf '{"Agentory-AI/eval-core":{"mode":"autopilot","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"
-printf '{"Agentory-AI/eval-core":{"merge_approved":"abc123"}}' > "$PD/authz.json"
+printf '{"Acmecorp-AI/eval-core":{"mode":"autopilot","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"
+printf '{"Acmecorp-AI/eval-core":{"merge_approved":"abc123"}}' > "$PD/authz.json"
 out="$(run_hook opsx-grant-gate.sh "$(j "$WT" Bash "$(cmdj 'glab mr merge 212 --squash')")")"; assert_eq "$(decision "$out")" allow "grant: worktree 裡核准相符放行"
 # MR 又推了新 commit → deny，核准保留
 printf '{"state":"opened","draft":false,"has_conflicts":false,"sha":"def456","head_pipeline":{"status":"success"},"unresolved_discussions_count":0}' > "$OPSX_TEST_GLAB_JSON"
 out="$(gg Bash "$(cmdj 'glab mr merge 212')")"; assert_eq "$(decision "$out")" deny "grant: sha 不符 deny"
 reason "$out" | grep -q '看板' || fail "grant: deny 要指向看板的合併按鈕: $(reason "$out")"
-assert_eq "$(jq -r '."Agentory-AI/eval-core".merge_approved' "$PD/authz.json")" abc123 "不符時核准不動"
+assert_eq "$(jq -r '."Acmecorp-AI/eval-core".merge_approved' "$PD/authz.json")" abc123 "不符時核准不動"
 # 沒有核准 → deny
 printf '{}' > "$PD/authz.json"
 out="$(gg Bash "$(cmdj 'gh pr merge 12 --squash')")"; assert_eq "$(decision "$out")" deny "grant: 沒核准 deny"
-printf '{"Agentory-AI/eval-core":{"mode":"autopilot","grants":["migrate"]}}' > "$OPSX_STATE_DIR/dispatch.json"; rm -f "$C/report.md"
+printf '{"Acmecorp-AI/eval-core":{"mode":"autopilot","grants":["migrate"]}}' > "$OPSX_STATE_DIR/dispatch.json"; rm -f "$C/report.md"
 
 # ---------- grant gate：對不到卡（grant-gate-unmapped-branch）----------
 # subagent 的 worktree-agent-<id> 與 fanout 子分支 feat/<主>--<子>/<user> 對不到 dispatch.json 的卡
@@ -631,18 +632,18 @@ git -C "$R" worktree add -q "$R/.claude/worktrees/agent-x" -b worktree-agent-x
 git -C "$R" worktree add -q "$R/.claude/worktrees/bt-as" -b feat/bt--as/u
 UW1="$(cd "$R/.claude/worktrees/agent-x" && pwd -P)"; UW2="$(cd "$R/.claude/worktrees/bt-as" && pwd -P)"
 ugg() { run_hook opsx-grant-gate.sh "$(j "$1" Bash "$(cmdj "$2")")"; }
-printf '{"Agentory-AI/eval-core":{"mode":"autopilot","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"
+printf '{"Acmecorp-AI/eval-core":{"mode":"autopilot","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"
 out="$(ugg "$UW1" 'git push --force origin main')"; assert_eq "$(decision "$out")" deny "unmapped: worktree-agent 分支 force-push main"
 reason "$out" | grep -q '第三級' || fail "unmapped: 要說第三級: $(reason "$out")"
 out="$(ugg "$UW2" 'glab mr merge 212')"; assert_eq "$(decision "$out")" deny "unmapped: fanout 子分支 merge"
 out="$(ugg "$UW2" 'git push origin HEAD')"; assert_eq "$(decision "$out")" allow "unmapped: 第二級放行"
 out="$(run_hook opsx-grant-gate.sh "$(j "$UW1" Write '{"file_path":"/x/.gitlab-ci.yml","content":"a"}')")"; assert_eq "$(decision "$out")" deny "unmapped: 改 CI 第三級"
 out="$(run_hook opsx-grant-gate.sh "$(j "$UW1" Write '{"file_path":"/x/.env.local","content":"A=1"}')")"; assert_eq "$(decision "$out")" allow "unmapped: 寫 .env 屬第二級放行"
-printf '{"Agentory-AI/eval-core":{"mode":"stopped"},"Agentory-AI/x":{"mode":"interactive"},"Other/y":{"mode":"autopilot"}}' > "$OPSX_STATE_DIR/dispatch.json"
+printf '{"Acmecorp-AI/eval-core":{"mode":"stopped"},"Acmecorp-AI/x":{"mode":"interactive"},"Other/y":{"mode":"autopilot"}}' > "$OPSX_STATE_DIR/dispatch.json"
 out="$(ugg "$UW1" 'git push --force origin main')"; assert_eq "$(decision "$out")" allow "unmapped: repo 沒有在跑的卡就放行"
-printf '{"Agentory-AI/@g":{"mode":"autopilot"},"Agentory-AI/m1":{"mode":"stopped","feature":"g","via":"@g"}}' > "$OPSX_STATE_DIR/dispatch.json"
+printf '{"Acmecorp-AI/@g":{"mode":"autopilot"},"Acmecorp-AI/m1":{"mode":"stopped","feature":"g","via":"@g"}}' > "$OPSX_STATE_DIR/dispatch.json"
 out="$(ugg "$UW1" 'git push --force origin main')"; assert_eq "$(decision "$out")" allow "unmapped: session 條目不是卡，成員都停了就放行"
-printf '{"Agentory-AI/@g":{"mode":"autopilot"},"Agentory-AI/m1":{"mode":"autopilot","feature":"g","via":"@g"}}' > "$OPSX_STATE_DIR/dispatch.json"
+printf '{"Acmecorp-AI/@g":{"mode":"autopilot"},"Acmecorp-AI/m1":{"mode":"autopilot","feature":"g","via":"@g"}}' > "$OPSX_STATE_DIR/dispatch.json"
 out="$(ugg "$UW1" 'git push --force origin main')"; assert_eq "$(decision "$out")" deny "unmapped: session 的成員還在跑就照擋"
 printf '{}' > "$OPSX_STATE_DIR/dispatch.json"
 out="$(ugg "$UW1" 'git push --force origin main')"; assert_eq "$(decision "$out")" allow "unmapped: 空 dispatch.json 放行"
@@ -650,16 +651,16 @@ rm -f "$OPSX_STATE_DIR/dispatch.json"
 out="$(ugg "$UW1" 'git push --force origin main')"; assert_eq "$(decision "$out")" allow "unmapped: 沒有 dispatch.json 放行"
 printf 'not json' > "$OPSX_STATE_DIR/dispatch.json"
 out="$(ugg "$UW1" 'git push --force origin main')"; assert_eq "$(decision "$out")" allow "unmapped: dispatch.json 壞掉且沒有這個 repo 的卡，放行"
-printf '{"Agentory-AI/eval-core":{"mode":"autopilot"' > "$OPSX_STATE_DIR/dispatch.json"
+printf '{"Acmecorp-AI/eval-core":{"mode":"autopilot"' > "$OPSX_STATE_DIR/dispatch.json"
 out="$(ugg "$UW1" 'git push --force origin main')"; assert_eq "$(decision "$out")" deny "unmapped: dispatch.json 壞掉且有這個 repo 的卡，先擋"
-printf '{"Agentory-AI/bt":{"mode":"autopilot"' > "$OPSX_STATE_DIR/dispatch.json"
+printf '{"Acmecorp-AI/bt":{"mode":"autopilot"' > "$OPSX_STATE_DIR/dispatch.json"
 out="$(ugg "$UW2" 'git push --force origin main')"; assert_eq "$(decision "$out")" deny "unmapped: 有 slug 的分支，壞掉的 dispatch.json 裡有這張卡的 key 就擋"
-printf '{"Agentory-AI/eval-core":{"mode":"autopilot","grants":["migrate"]}}' > "$OPSX_STATE_DIR/dispatch.json"
+printf '{"Acmecorp-AI/eval-core":{"mode":"autopilot","grants":["migrate"]}}' > "$OPSX_STATE_DIR/dispatch.json"
 
 # ---------- grant gate：測試檔放非慣例位置（grant-test-path）----------
 # R 的分支追蹤 tests/a.test.sh 與 src/sub/d.test.ts；WT、UW1 的分支在這之前開出來，沒有這兩個檔
 tw() { run_hook opsx-grant-gate.sh "$(j "${2:-$R}" Write "{\"file_path\":\"$1\",\"content\":\"x\"}")"; }
-printf '{"Agentory-AI/eval-core":{"mode":"autopilot","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"; printf '{}' > "$PD/authz.json"
+printf '{"Acmecorp-AI/eval-core":{"mode":"autopilot","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"; printf '{}' > "$PD/authz.json"
 mkdir -p "$R/tests" "$R/src/sub" "$R/src/newdir" "$R/lib"
 printf 'x\n' > "$R/tests/a.test.sh"; printf 'x\n' > "$R/src/sub/d.test.ts"; printf 'x\n' > "$R/lib/u.test.ts"
 git -C "$R" add tests/a.test.sh src/sub/d.test.ts; git -C "$R" commit -q -m "fixture: tests"
@@ -703,9 +704,9 @@ mkdir -p "$R/locked"; chmod 000 "$R/locked"
 out="$(tw "$R/locked/x.test.ts")"; chmod 755 "$R/locked"
 assert_eq "$(decision "$out")" deny "test-path: 進不去的目錄要 deny"
 # 有授權：repo 永遠、這張卡
-printf '[repos."Agentory-AI"]\ntest-path = true\n' > "$OPSX_STATE_DIR/grants.toml"
+printf '[repos."Acmecorp-AI"]\ntest-path = true\n' > "$OPSX_STATE_DIR/grants.toml"
 out="$(tw "$R/src/newdir/foo.test.ts")"; assert_eq "$(printf '%s' "$out" | jq -r '.hookSpecificOutput.permissionDecision')" allow "test-path: grants.toml 有授權要明說 allow"
-printf '# grants\n' > "$OPSX_STATE_DIR/grants.toml"; printf '{"Agentory-AI/eval-core":{"grants":["test-path"]}}' > "$PD/authz.json"
+printf '# grants\n' > "$OPSX_STATE_DIR/grants.toml"; printf '{"Acmecorp-AI/eval-core":{"grants":["test-path"]}}' > "$PD/authz.json"
 out="$(tw "$R/src/newdir/foo.test.ts")"; assert_eq "$(printf '%s' "$out" | jq -r '.hookSpecificOutput.permissionDecision')" allow "test-path: 這張卡的授權要明說 allow"
 printf '{}' > "$PD/authz.json"
 # 只看 hook cwd 所在的 worktree
@@ -715,13 +716,13 @@ out="$(tw "$WT/src/newdir/x.test.ts")"; assert_eq "$out" "" "test-path: 主 chec
 out="$(tw "$WT/tests/b.test.sh" "$WT")"; assert_eq "$(decision "$out")" deny "test-path: 照 cwd 所在 worktree 的追蹤檔，不是主 repo 的"
 out="$(tw "$R/src/newdir/x.test.ts" "$WT")"; assert_eq "$out" "" "test-path: worktree 裡寫主 checkout 的檔不判"
 out="$(tw "$UW1/src/newdir/x.test.ts" "$UW1")"; assert_eq "$out" "" "test-path: 對不到卡放行"
-printf '{"Agentory-AI/eval-core":{"mode":"interactive","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"
+printf '{"Acmecorp-AI/eval-core":{"mode":"interactive","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"
 out="$(tw "$R/src/newdir/foo.test.ts")"; assert_eq "$out" "" "test-path: 互動模式不判"
 # 對外發話（grant-outbound-speech）：閘門不判，沒被其他規則分級的發話類指令照舊不出聲
-printf '{"Agentory-AI/eval-core":{"mode":"autopilot","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"
+printf '{"Acmecorp-AI/eval-core":{"mode":"autopilot","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"
 out="$(gg Bash "$(cmdj 'mail -s "進度" customer@example.com < note.txt')")"; assert_eq "$out" "" "outbound: 寄信的本機 CLI 判定不變"
-printf '[repos."Agentory-AI"]\npush = true\nmr = false\nmigrate = false\n' > "$OPSX_STATE_DIR/grants.toml"
-printf '{"Agentory-AI/eval-core":{"mode":"autopilot","grants":["migrate"]}}' > "$OPSX_STATE_DIR/dispatch.json"
+printf '[repos."Acmecorp-AI"]\npush = true\nmr = false\nmigrate = false\n' > "$OPSX_STATE_DIR/grants.toml"
+printf '{"Acmecorp-AI/eval-core":{"mode":"autopilot","grants":["migrate"]}}' > "$OPSX_STATE_DIR/dispatch.json"
 
 # ---------- mr format gate ----------
 mg() { run_hook mr-format-gate.sh "$(j "$R" Bash "$(cmdj "$1")")"; }
@@ -979,7 +980,7 @@ out="$(sd 'GIT_COMMITTER_NAME=Claude git commit -m x')"; assert_eq "$(decision "
 STOP_STATE="$OPSX_STATE_DIR/stop-chain"
 # 每次呼叫先清擋的次數；要測次數的 case 用 KEEP=1 sg 保留
 sg() { [ -n "${KEEP:-}" ] || rm -rf "$STOP_STATE"; printf '{"cwd":"%s","stop_hook_active":%s}' "$R" "${1:-false}" | bash "$H/openspec-stop-gate.sh" 2>/dev/null; true; }
-done_report() { printf '# report\n\n## MR\nhttps://gitlab.tsg-navigator.com/a/b/-/merge_requests/212 · opened 2026-11-10 · auto-merge: no\nbabysit: 2026-11-10T14:00:00+08:00\n' > "$C/report.md"; }
+done_report() { printf '# report\n\n## MR\nhttps://gitlab.example.com/a/b/-/merge_requests/212 · opened 2026-11-10 · auto-merge: no\nbabysit: 2026-11-10T14:00:00+08:00\n' > "$C/report.md"; }
 # 放行時回報協調者：fake herdr 只在這個 PATH 前綴下才有，opsx-coordinator 在（OPSX_TEST_COORDINATOR_UP）
 CL="$FX/coord.log"; mkdir -p "$FX/cbin"
 printf '#!/usr/bin/env bash\nexec bash "%s/tests/fakes/herdr" "$@"\n' "$OPSX_ROOT" > "$FX/cbin/herdr"; chmod +x "$FX/cbin/herdr"
@@ -1030,7 +1031,7 @@ assert_grep 'opsx-coordinator' "$OPSX_STATE_DIR/coordinator.log"
 out="$(KEEP_SAID=1 sgc)"; assert_eq "$out" "" "stop: 協調者回來後放行"
 assert_grep '^agent prompt opsx-coordinator \[eval-core\] 停住：babysit 一輪做完' "$CL"
 # 記去重的檔寫不進去（symlink）：回報照送，hook 仍以 0 放行
-rm -rf "$OPSX_STATE_DIR/stop-said"; mkdir -p "$OPSX_STATE_DIR/stop-said"; ln -s "$FX/nowhere" "$OPSX_STATE_DIR/stop-said/Agentory-AI-eval-core"
+rm -rf "$OPSX_STATE_DIR/stop-said"; mkdir -p "$OPSX_STATE_DIR/stop-said"; ln -s "$FX/nowhere" "$OPSX_STATE_DIR/stop-said/Acmecorp-AI-eval-core"
 printf '{"cwd":"%s"}' "$R" | PATH="$FX/cbin:$PATH" OPSX_FAKE_LOG="$CL" OPSX_TEST_COORDINATOR_UP=1 bash "$H/openspec-stop-gate.sh" > /dev/null 2>&1
 assert_eq "$?" 0 "stop: 去重檔寫不進去不能讓 hook 以非 0 結束"
 rm -rf "$OPSX_STATE_DIR/stop-said"
@@ -1054,7 +1055,7 @@ assert_eq "$out" "" "stop: reviewer 在跑連停五次都放行"
 out="$(sgc)"; assert_eq "$out" "" "stop: reviewer 在跑放行（回報版）"
 assert_grep '^agent prompt opsx-coordinator \[eval-core\] 停住：等 reviewer' "$CL"
 assert_eq "$([ -e "$C/gates.md" ] && echo y || echo n)" n "stop: reviewer 在跑不寫「卡在接 /review」gate"
-assert_eq "$([ -e "$STOP_STATE/Agentory-AI-eval-core" ] && echo y || echo n)" n "stop: reviewer 在跑不留擋的次數"
+assert_eq "$([ -e "$STOP_STATE/Acmecorp-AI-eval-core" ] && echo y || echo n)" n "stop: reviewer 在跑不留擋的次數"
 # review 走到最後一步仍沒有 report.md：不再是「在等 reviewer」，照擋
 printf '{"phase":"review","step":7,"total":7,"label":"report.md 寫好","tests":"green","at":"2026-11-10T14:40:00+08:00"}' > "$C/status.json"
 out="$(sg)"; assert_eq "$(decision "$out")" block "stop: review 最後一步 report 後有新 commit 照擋"
@@ -1079,7 +1080,7 @@ assert_eq "$out" "" "stop: subagent 在做未疊的子 change，連停五次都�
 out="$(sgc)"; assert_eq "$out" "" "stop: subagent 在做放行（回報版）"
 assert_grep '^agent prompt opsx-coordinator \[eval-core\] 停住：等背景 subagent' "$CL"
 assert_eq "$([ -e "$C/gates.md" ] && echo y || echo n)" n "stop: subagent 在做不寫「卡在接 /apply」gate"
-assert_eq "$([ -e "$STOP_STATE/Agentory-AI-eval-core" ] && echo y || echo n)" n "stop: subagent 在做不留擋的次數"
+assert_eq "$([ -e "$STOP_STATE/Acmecorp-AI-eval-core" ] && echo y || echo n)" n "stop: subagent 在做不留擋的次數"
 printf '## 1. x\n\n- [x] 1.1 `attach-cli`：a\n- [ ] 1.2 `attach-board`：b\n' > "$C/tasks.md"
 out="$(sg)"; assert_eq "$(decision "$out")" block "stop: 子 change 已疊（主殼已勾）、沒有別的 subagent 在跑"; reason "$out" | grep -q '1 個 task 沒勾' || fail "stop: 已疊要說幾個 task 沒勾"
 mk_sub attach-board subagent-attach-board "$FRESH"
@@ -1223,7 +1224,7 @@ rm -f "$C/gates.md" "$C/tasks.md"
 # 擋的次數：同一站 3 次，第 4 次 hook 寫 gate 放行；第 5 次不寫第二個
 rm -rf "$STOP_STATE"
 # symlink-safe-writes：擋次數的狀態檔是 symlink → 換成一般檔，目標不變（內容是合法的舊狀態，讀它不出錯）
-mkdir -p "$STOP_STATE"; printf 'none 0 - x\n' > "$FX/victim"; ln -s "$FX/victim" "$STOP_STATE/Agentory-AI-$(basename "$C")"
+mkdir -p "$STOP_STATE"; printf 'none 0 - x\n' > "$FX/victim"; ln -s "$FX/victim" "$STOP_STATE/Acmecorp-AI-$(basename "$C")"
 out="$(KEEP=1 sg)"; assert_eq "$(decision "$out")" block "stop: 第 1 次擋"
 assert_eq "$(cat "$FX/victim")" "none 0 - x" "stop: 狀態檔上的 symlink 不能被寫到目標"
 out="$(KEEP=1 sg)"; assert_eq "$(decision "$out")" block "stop: 第 2 次擋"
@@ -1265,27 +1266,27 @@ rm -rf "$STOP_STATE"
 out="$(KEEP=1 sg)"; out="$(KEEP=1 sg)"
 git -C "$R" commit -q --allow-empty -m "chore: between stops"
 out="$(KEEP=1 sg)"
-assert_eq "$(cut -d' ' -f1,2 "$STOP_STATE/Agentory-AI-eval-core")" "propose 3" "stop: propose 站 commit 不算進度"
+assert_eq "$(cut -d' ' -f1,2 "$STOP_STATE/Acmecorp-AI-eval-core")" "propose 3" "stop: propose 站 commit 不算進度"
 # 站換了從 1 起算
 rm -rf "$STOP_STATE"
 out="$(KEEP=1 sg)"; out="$(KEEP=1 sg)"
-assert_eq "$(cut -d' ' -f1,2 "$STOP_STATE/Agentory-AI-eval-core")" "propose 2" "stop: propose 站記 2 次"
+assert_eq "$(cut -d' ' -f1,2 "$STOP_STATE/Acmecorp-AI-eval-core")" "propose 2" "stop: propose 站記 2 次"
 printf '## 1. x\n\n- [ ] 1.1 a\n' > "$C/tasks.md"
 out="$(KEEP=1 sg)"; assert_eq "$(decision "$out")" block "stop: 換站後擋"
-assert_eq "$(cut -d' ' -f1,2 "$STOP_STATE/Agentory-AI-eval-core")" "apply 1" "stop: 換站從 1 起算"
+assert_eq "$(cut -d' ' -f1,2 "$STOP_STATE/Acmecorp-AI-eval-core")" "apply 1" "stop: 換站從 1 起算"
 # 同一站有進度（勾了 task）次數重算，不把有在做事算成「連續卡住」
 printf '## 1. x\n\n- [ ] 1.1 a\n- [ ] 1.2 b\n- [ ] 1.3 c\n' > "$C/tasks.md"; rm -rf "$STOP_STATE"
 out="$(KEEP=1 sg)"; out="$(KEEP=1 sg)"
-assert_eq "$(cut -d' ' -f1,2 "$STOP_STATE/Agentory-AI-eval-core")" "apply 2" "stop: 進度前 apply 記 2 次"
+assert_eq "$(cut -d' ' -f1,2 "$STOP_STATE/Acmecorp-AI-eval-core")" "apply 2" "stop: 進度前 apply 記 2 次"
 printf '## 1. x\n\n- [x] 1.1 a\n- [ ] 1.2 b\n- [ ] 1.3 c\n' > "$C/tasks.md"
 out="$(KEEP=1 sg)"; assert_eq "$(decision "$out")" block "stop: 勾了 task 後仍擋"
-assert_eq "$(cut -d' ' -f1,2 "$STOP_STATE/Agentory-AI-eval-core")" "apply 1" "stop: 有進度次數重算"
+assert_eq "$(cut -d' ' -f1,2 "$STOP_STATE/Acmecorp-AI-eval-core")" "apply 1" "stop: 有進度次數重算"
 # apply 站 HEAD 算進度：同一組未勾 task，中間多一個 commit，次數歸零
 out="$(KEEP=1 sg)"
-assert_eq "$(cut -d' ' -f1,2 "$STOP_STATE/Agentory-AI-eval-core")" "apply 2" "stop: HEAD 不變次數累計"
+assert_eq "$(cut -d' ' -f1,2 "$STOP_STATE/Acmecorp-AI-eval-core")" "apply 2" "stop: HEAD 不變次數累計"
 git -C "$R" commit -q --allow-empty -m "chore: between apply stops"
 out="$(KEEP=1 sg)"; assert_eq "$(decision "$out")" block "stop: apply 站 commit 後仍擋"
-assert_eq "$(cut -d' ' -f1,2 "$STOP_STATE/Agentory-AI-eval-core")" "apply 1" "stop: apply 站 commit 算進度，次數歸零"
+assert_eq "$(cut -d' ' -f1,2 "$STOP_STATE/Acmecorp-AI-eval-core")" "apply 1" "stop: apply 站 commit 算進度，次數歸零"
 # 現有檢查共用次數：tests red 擋 3 次，第 4 次寫「卡在接 /apply」
 printf '## 1. x\n\n- [x] 1.1 a\n' > "$C/tasks.md"
 printf '{"phase":"apply","step":8,"total":8,"label":"x","tests":"red","at":"2026-11-05T15:00:00+08:00"}' > "$C/status.json"
@@ -1301,11 +1302,11 @@ out="$(KEEP=1 sg)"; assert_eq "$out" "" "stop: gate 還開著，狀態檔清掉�
 assert_eq "$(grep -c '^## 卡在接 /apply' "$C/gates.md")" 1 "stop: 狀態檔清掉後不寫第二個 gate"
 # gate 開著時再停（gated 路徑）：放行、不寫第二個、狀態不變
 out="$(KEEP=1 sg)"; assert_eq "$out" "" "stop: gated 後 gate 還開著放行"
-assert_eq "$(cut -d' ' -f1,2,3 "$STOP_STATE/Agentory-AI-eval-core")" "apply 3 gated" "stop: gated 狀態保留"
+assert_eq "$(cut -d' ' -f1,2,3 "$STOP_STATE/Acmecorp-AI-eval-core")" "apply 3 gated" "stop: gated 狀態保留"
 # 人答完：次數歸零，重新擋，不寫新 gate
 sed -i.bak 's/^status: open$/status: answered/' "$C/gates.md"; rm -f "$C/gates.md.bak"
 out="$(KEEP=1 sg)"; assert_eq "$(decision "$out")" block "stop: gate 答完後 apply 站重新擋"
-assert_eq "$(cut -d' ' -f1,2 "$STOP_STATE/Agentory-AI-eval-core")" "apply 1" "stop: 答完後次數從 1 起算"
+assert_eq "$(cut -d' ' -f1,2 "$STOP_STATE/Acmecorp-AI-eval-core")" "apply 1" "stop: 答完後次數從 1 起算"
 assert_eq "$(grep -c '^## 卡在接 /apply' "$C/gates.md")" 1 "stop: 答完後不寫新 gate"
 rm -f "$C/gates.md"
 
@@ -1332,13 +1333,13 @@ OPEN_MR='{"state":"opened","draft":false,"has_conflicts":false,"sha":"abc123","h
 MERGED_MR='{"state":"merged","draft":false,"has_conflicts":false,"sha":"abc123","merged_at":"2026-11-10T03:00:00.000Z"}'
 printf '%s' "$OPEN_MR" > "$OPSX_TEST_GLAB_JSON"
 # babysit 站：有 MR 沒有 babysit: 行
-printf '# report\n\n## MR\nhttps://gitlab.tsg-navigator.com/a/b/-/merge_requests/212 · opened 2026-11-10 · auto-merge: no\n' > "$C/report.md"
+printf '# report\n\n## MR\nhttps://gitlab.example.com/a/b/-/merge_requests/212 · opened 2026-11-10 · auto-merge: no\n' > "$C/report.md"
 out="$(sg)"; assert_eq "$(decision "$out")" block "stop: MR 已開沒 babysit → 擋"; reason "$out" | grep -q '/opsx-workflow:babysit' || fail "stop: 要叫 /babysit"
 done_report
 out="$(sg)"; assert_eq "$out" "" "stop: 有 babysit: 行放行"
 # MR 已合併、workplan 沒標 merged、沒有 babysit: 行 → 要 /archive，不要 babysit 記號
 printf '%s' "$MERGED_MR" > "$OPSX_TEST_GLAB_JSON"
-printf '# report\n\n## MR\nhttps://gitlab.tsg-navigator.com/a/b/-/merge_requests/212 · opened 2026-11-10 · auto-merge: no\n' > "$C/report.md"
+printf '# report\n\n## MR\nhttps://gitlab.example.com/a/b/-/merge_requests/212 · opened 2026-11-10 · auto-merge: no\n' > "$C/report.md"
 out="$(sg)"; assert_eq "$(decision "$out")" block "stop: MR 已合併 → 擋"
 reason "$out" | grep -q '/opsx-workflow:archive' || fail "stop: 已合併要叫 /archive: $(reason "$out")"
 reason "$out" | grep -q 'babysit' && fail "stop: 已合併不該提 babysit: $(reason "$out")"
@@ -1352,7 +1353,7 @@ out="$(KEEP=1 sg)"; assert_eq "$out" "" "stop: 已合併擋 3 次後放行"
 assert_grep '^## 卡在接 /archive #1$' "$C/gates.md"; assert_not_grep '卡在接 /babysit' "$C/gates.md"
 rm -f "$C/gates.md"
 # 查不到 MR 狀態：維持 /babysit，reason 帶查詢的錯誤文字
-printf '# report\n\n## MR\nhttps://gitlab.tsg-navigator.com/a/b/-/merge_requests/212 · opened 2026-11-10 · auto-merge: no\n' > "$C/report.md"
+printf '# report\n\n## MR\nhttps://gitlab.example.com/a/b/-/merge_requests/212 · opened 2026-11-10 · auto-merge: no\n' > "$C/report.md"
 printf '' > "$OPSX_TEST_GLAB_JSON"
 out="$(sg)"; assert_eq "$(decision "$out")" block "stop: 查不到 MR → 維持擋"
 reason "$out" | grep -q '/opsx-workflow:babysit' || fail "stop: 查不到要叫 /babysit: $(reason "$out")"
@@ -1382,41 +1383,41 @@ git -C "$R" checkout -q "feat/eval-core/mikaela"
 # ---------- herdr 佇列（auto-dispatch D5）：PostToolUse 看到 opsx chain 才執行，依序、失敗就停 ----------
 use_fakes herdr; export OPSX_FAKE_LOG="$FX/herdr.log"
 QD="$OPSX_STATE_DIR/herdr-queue"; mkdir -p "$QD"; CD="$R/openspec/changes/qc"; mkdir -p "$CD"
-mkq() { printf 'rename\tp\tqc\nprompt\tqc\t/apply qc\n' > "$QD/Agentory-AI-qc.tsv"; }
+mkq() { printf 'rename\tp\tqc\nprompt\tqc\t/apply qc\n' > "$QD/Acmecorp-AI-qc.tsv"; }
 post() { printf '{"cwd":"%s","tool_name":"Bash","tool_input":{"command":"%s"},"hook_event_name":"PostToolUse"}' "$R" "$1" | bash "$H/opsx-herdr-queue.sh" 2>/dev/null; true; }
 # 別的指令不碰佇列
 mkq; : > "$OPSX_FAKE_LOG"; out="$(post "git status")"
-assert_eq "$(cat "$OPSX_FAKE_LOG")" "" "別的指令不叫 herdr"; assert_file "$QD/Agentory-AI-qc.tsv"
+assert_eq "$(cat "$OPSX_FAKE_LOG")" "" "別的指令不叫 herdr"; assert_file "$QD/Acmecorp-AI-qc.tsv"
 # opsx chain 之後：依序 rename、prompt，佇列清掉
 out="$(post "opsx chain p")"
 assert_eq "$(cat "$OPSX_FAKE_LOG")" "$(printf 'agent rename p qc\nagent prompt qc /apply qc')" "依序執行佇列"
-assert_no_file "$QD/Agentory-AI-qc.tsv"
+assert_no_file "$QD/Acmecorp-AI-qc.tsv"
 # herdr 失敗：停在那一步，佇列留成 .failed，decisions 記一行，additionalContext 說失敗
 mkq; : > "$OPSX_FAKE_LOG"; out="$(OPSX_TEST_RENAME_FAIL=1 post "opsx chain p")"
 assert_not_grep '^agent prompt' "$OPSX_FAKE_LOG"
-assert_no_file "$QD/Agentory-AI-qc.tsv"; assert_file "$QD/Agentory-AI-qc.tsv.failed"
+assert_no_file "$QD/Acmecorp-AI-qc.tsv"; assert_file "$QD/Acmecorp-AI-qc.tsv.failed"
 assert_grep 'rename' "$CD/decisions.tsv"; assert_grep 'agent_not_found' "$CD/decisions.tsv"
 printf '%s' "$out" | jq -r '.hookSpecificOutput.additionalContext' | grep -q '失敗' || fail "要用 additionalContext 說失敗: $out"
 # symlink-safe-writes：drive 的 log 是 symlink → 這一步失敗（佇列留 .failed），目標不變
-rm -f "$QD/Agentory-AI-qc.tsv.failed"; printf 'drive\tqc\t%s\n' "$R" > "$QD/Agentory-AI-qc.tsv"; : > "$OPSX_FAKE_LOG"
-DL="$OPSX_STATE_DIR/drive-Agentory-AI-qc.log"; rm -f "$DL"; printf 'keep me\n' > "$FX/victim"; ln -s "$FX/victim" "$DL"
+rm -f "$QD/Acmecorp-AI-qc.tsv.failed"; printf 'drive\tqc\t%s\n' "$R" > "$QD/Acmecorp-AI-qc.tsv"; : > "$OPSX_FAKE_LOG"
+DL="$OPSX_STATE_DIR/drive-Acmecorp-AI-qc.log"; rm -f "$DL"; printf 'keep me\n' > "$FX/victim"; ln -s "$FX/victim" "$DL"
 out="$(post "opsx chain p")"
 sleep 1
 assert_eq "$(cat "$FX/victim")" "keep me" "queue: drive log 不能附加到 symlink 的目標"
-assert_file "$QD/Agentory-AI-qc.tsv.failed"
-rm -f "$DL" "$QD/Agentory-AI-qc.tsv.failed"
+assert_file "$QD/Acmecorp-AI-qc.tsv.failed"
+rm -f "$DL" "$QD/Acmecorp-AI-qc.tsv.failed"
 # drive 成功起來：dispatch.json 的 drive_pid 是被起的那支程序本身（假 opsx drive 把自己的 $$ 寫進檔），不是等它的子 shell
 mkdir -p "$FX/fake-root/bin"; ln -s "$OPSX_ROOT/hooks" "$FX/fake-root/hooks"; ln -s "$OPSX_ROOT/bin/lib" "$FX/fake-root/bin/lib"
 printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$$" > "%s/drive-self.pid"\nsleep 2\n' "$FX" > "$FX/fake-root/bin/opsx"
-printf '{"Agentory-AI/qc":{"mode":"autopilot","drive_pid":null}}\n' > "$OPSX_STATE_DIR/dispatch.json"
-printf 'drive\tqc\t%s\n' "$R" > "$QD/Agentory-AI-qc.tsv"
+printf '{"Acmecorp-AI/qc":{"mode":"autopilot","drive_pid":null}}\n' > "$OPSX_STATE_DIR/dispatch.json"
+printf 'drive\tqc\t%s\n' "$R" > "$QD/Acmecorp-AI-qc.tsv"
 out="$(CLAUDE_PLUGIN_ROOT="$FX/fake-root" post "opsx chain p")"
 n=0; until [ -s "$FX/drive-self.pid" ]; do n=$((n+1)); [ $n -lt 30 ] || fail "假 drive 沒在背景起來"; sleep 0.1; done
-assert_eq "$(jq -r '."Agentory-AI/qc".drive_pid' "$OPSX_STATE_DIR/dispatch.json")" "$(cat "$FX/drive-self.pid")" "queue: drive_pid 要是起出來的程序本身"
+assert_eq "$(jq -r '."Acmecorp-AI/qc".drive_pid' "$OPSX_STATE_DIR/dispatch.json")" "$(cat "$FX/drive-self.pid")" "queue: drive_pid 要是起出來的程序本身"
 # pane 關掉時 process group 收到 SIGHUP：背景起的 drive 要活著
 kill -HUP "$(cat "$FX/drive-self.pid")"; sleep 0.3
 kill -0 "$(cat "$FX/drive-self.pid")" 2>/dev/null || fail "queue: drive 收到 SIGHUP 死了"
-assert_no_file "$QD/Agentory-AI-qc.tsv.failed"
+assert_no_file "$QD/Acmecorp-AI-qc.tsv.failed"
 
 # ---------- 當前卡：dispatch worktree 根優先，否則 branch 第二段 ----------
 K="$(mk_repo Cards)"

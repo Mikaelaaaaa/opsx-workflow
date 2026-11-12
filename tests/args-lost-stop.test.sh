@@ -5,14 +5,14 @@ source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 H="$OPSX_ROOT/hooks"
 export CLAUDE_PLUGIN_ROOT="$OPSX_ROOT"
 
-R="$(mk_repo Agentory-AI)"
+R="$(mk_repo Acmecorp-AI)"
 mkdir -p "$R/openspec/changes/archive"
 C="$R/openspec/changes/eval-core"; mk_change "$R" eval-core
 printf 'schema: opsx\ncreated: 2026-11-05\nkind: bug-fix\n' > "$C/.openspec.yaml"
 printf '## 1. x\n\n- [x] 1.1 a\n- [ ] 1.2 b\n' > "$C/tasks.md"
-S="$OPSX_STATE_DIR/settings/Agentory-AI-eval-core-autopilot.json"
+S="$OPSX_STATE_DIR/settings/Acmecorp-AI-eval-core-autopilot.json"
 mkdir -p "$(dirname "$S")"; printf '{}' > "$S"
-mode() { printf '{"Agentory-AI/eval-core":{"mode":"%s"}}' "$1" > "$OPSX_STATE_DIR/dispatch.json"; }
+mode() { printf '{"Acmecorp-AI/eval-core":{"mode":"%s"}}' "$1" > "$OPSX_STATE_DIR/dispatch.json"; }
 
 # 假 ps 與假 herdr（回報協調者的那行記在 $CL）
 mkdir -p "$FX/cbin"
@@ -42,12 +42,12 @@ for i in 1 2 3 4 5; do
 done
 assert_no_file "$C/gates.md"
 assert_grep "參數遺失" "$CL"
-assert_file "$OPSX_STATE_DIR/args-lost/Agentory-AI-eval-core"   # drive 靠這個標記知道參數遺失
+assert_file "$OPSX_STATE_DIR/args-lost/Acmecorp-AI-eval-core"   # drive 靠這個標記知道參數遺失
 
 # 重新啟動後有帶 settings：標記清掉
 fresh
 OPSX_FAKE_PS="claude --settings $S" stop >/dev/null
-assert_no_file "$OPSX_STATE_DIR/args-lost/Agentory-AI-eval-core"
+assert_no_file "$OPSX_STATE_DIR/args-lost/Acmecorp-AI-eval-core"
 
 # 認不得（不是 claude 的 cmdline）：照舊擋，回報原因，不放行
 fresh

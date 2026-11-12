@@ -18,7 +18,7 @@ assert_eq "$(mr_state "$C")" none "report.md 不存在"
 assert_eq "$(field "$(mr_json "$C")" state)" none
 
 # --- 五條件全綠；-R 從 URL 解出來 ---
-printf '# r\n\n## MR\nhttps://gitlab.tsg-navigator.com/agentory/Agentory-CS/-/merge_requests/431\n' > "$C/report.md"
+printf '# r\n\n## MR\nhttps://gitlab.example.com/acmecorp/Acmecorp-CS/-/merge_requests/431\n' > "$C/report.md"
 export OPSX_TEST_GLAB_JSON="$FX/mr.json" OPSX_MR_CACHE_TTL=0
 printf '%s' "$GREEN" > "$OPSX_TEST_GLAB_JSON"
 j="$(mr_json "$C")"
@@ -26,8 +26,8 @@ assert_eq "$(field "$j" state)" ready
 assert_eq "$(field "$j" head_sha)" abc123
 assert_eq "$(field "$j" conditions)" '{"opened": true, "not_draft": true, "no_conflicts": true, "pipeline": true, "threads": true}'
 assert_eq "$(field "$j" blocked_on)" null; assert_eq "$(field "$j" error)" null
-assert_eq "$(field "$j" url)" "https://gitlab.tsg-navigator.com/agentory/Agentory-CS/-/merge_requests/431"
-assert_grep '^mr view 431 -R gitlab.tsg-navigator.com/agentory/Agentory-CS -F json$' "$OPSX_FAKE_LOG"
+assert_eq "$(field "$j" url)" "https://gitlab.example.com/acmecorp/Acmecorp-CS/-/merge_requests/431"
+assert_grep '^mr view 431 -R gitlab.example.com/acmecorp/Acmecorp-CS -F json$' "$OPSX_FAKE_LOG"
 assert_eq "$(mr_state "$C")" ready
 assert_eq "$(field "$j" created_at)" null "樣本沒有時間就是 null"
 # GitLab 的開啟與合併時間
@@ -48,8 +48,8 @@ assert_eq "$(mr_state "$C")" "threads:2"; assert_eq "$(field "$(mr_json "$C")" b
 # --- glab 讀不到：none、url 留著、error 說是哪條指令 ---
 printf '' > "$OPSX_TEST_GLAB_JSON"
 j="$(mr_json "$C")"; assert_eq "$(field "$j" state)" none; assert_eq "$(field "$j" conditions)" null
-assert_eq "$(field "$j" url)" "https://gitlab.tsg-navigator.com/agentory/Agentory-CS/-/merge_requests/431"
-field "$j" error | grep -q 'glab mr view 431 -R gitlab.tsg-navigator.com/agentory/Agentory-CS' || fail "error 要說是哪條指令: $(field "$j" error)"
+assert_eq "$(field "$j" url)" "https://gitlab.example.com/acmecorp/Acmecorp-CS/-/merge_requests/431"
+field "$j" error | grep -q 'glab mr view 431 -R gitlab.example.com/acmecorp/Acmecorp-CS' || fail "error 要說是哪條指令: $(field "$j" error)"
 printf 'not json' > "$OPSX_TEST_GLAB_JSON"; field "$(mr_json "$C")" error | grep -q '不是 JSON' || fail "壞 JSON 要有 error"
 
 # --- GitHub：-R owner/repo、欄位是真 gh 有的、checks 還在跑不算過、CHANGES_REQUESTED 算 threads ---
@@ -75,7 +75,7 @@ mr_json "$C" >/dev/null; mr_json "$C" >/dev/null
 assert_eq "$(grep -c '^mr view' "$OPSX_FAKE_LOG" || true)" 1 "60 秒內只打一次 glab"
 [ "$(ls "$OPSX_STATE_DIR/cache/" | grep -c '^mr-.*\.json$')" -ge 1 ] || fail "要有快取檔"
 C3="$FX/other/openspec/changes/x"; mkdir -p "$C3"   # 另一個 repo、同 slug x、不同 MR
-printf '# r\n\n## MR\nhttps://gitlab.tsg-navigator.com/agentory/Other/-/merge_requests/8\n' > "$C3/report.md"
+printf '# r\n\n## MR\nhttps://gitlab.example.com/acmecorp/Other/-/merge_requests/8\n' > "$C3/report.md"
 export OPSX_TEST_GLAB_JSON_BY_IID="$FX/mr-"
 printf '{"state":"opened","draft":false,"has_conflicts":false,"sha":"fff999","head_pipeline":{"status":"failed"},"unresolved_discussions_count":0}' > "$FX/mr-8.json"
 assert_eq "$(mr_state "$C3")" "pipeline:failed" "同 slug 不同 repo 不能吃到 x 的快取"
@@ -99,7 +99,7 @@ wait_unlock() { # 背景重抓結束時會拿掉 lock 目錄；最多等 5 秒
   for i in $(seq 50); do [ -d "$1" ] || return 0; sleep 0.1; done
   fail "背景重抓 5 秒內沒放掉 $1"
 }
-CACHE="$OPSX_STATE_DIR/cache/mr-$(printf '%s' "https://gitlab.tsg-navigator.com/agentory/Agentory-CS/-/merge_requests/431" | shasum | cut -c1-12).json"
+CACHE="$OPSX_STATE_DIR/cache/mr-$(printf '%s' "https://gitlab.example.com/acmecorp/Acmecorp-CS/-/merge_requests/431" | shasum | cut -c1-12).json"
 OLD='{"url": "x", "state": "ready", "head_sha": "old111"}'
 SLOWBIN="$FX/slow-glab"; mkdir -p "$SLOWBIN"
 printf '#!/usr/bin/env bash\n[ "$1 $2" = "mr view" ] && sleep 2\nexec bash "%s/tests/fakes/glab" "$@"\n' "$OPSX_ROOT" > "$SLOWBIN/glab"; chmod +x "$SLOWBIN/glab"

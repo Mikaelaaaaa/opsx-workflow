@@ -24,7 +24,7 @@ assert_rc 2 opsx
 assert_rc 2 opsx nope
 
 # --- repo 層：gitlab remote ---
-R="$(mk_repo Agentory-CS git@gitlab.tsg-navigator.com:agentory/Agentory-CS.git)"
+R="$(mk_repo Acmecorp-CS git@gitlab.example.com:acmecorp/Acmecorp-CS.git)"
 cd "$R"
 out="$(opsx init 2>&1)"; rc=$?
 assert_eq "$rc" 0 "init rc: $out"
@@ -45,10 +45,10 @@ assert_grep "^openspec/$" "$R/.git/info/exclude"           # 不進 git，不動
 assert_no_file "$R/.gitignore"
 assert_file "$OPSX_STATE_DIR/sources.toml"
 assert_grep 'kind = "gitlab"' "$OPSX_STATE_DIR/sources.toml"
-assert_grep 'repo = "Agentory-CS"' "$OPSX_STATE_DIR/sources.toml"
+assert_grep 'repo = "Acmecorp-CS"' "$OPSX_STATE_DIR/sources.toml"
 assert_grep "path = \"$R\"" "$OPSX_STATE_DIR/sources.toml"
 assert_file "$OPSX_STATE_DIR/workspaces.toml"               # 非互動：建檔但不掛
-assert_not_grep "Agentory-CS" "$OPSX_STATE_DIR/workspaces.toml"
+assert_not_grep "Acmecorp-CS" "$OPSX_STATE_DIR/workspaces.toml"
 # 該 repo 加進使用者層可寫目錄；範圍只到 repo，不含父目錄
 assert_eq "$(cj "$CR" permissions.additionalDirectories)" "[\"$R\"]"
 
@@ -65,7 +65,7 @@ case "$out2" in *還沒信任*) fail "已信任的 repo 不該警告：$out2" ;;
 assert_eq "$(cat "$CLAUDE_CONFIG_DIR/.claude.json")" "$trust_before" "opsx 不能改信任紀錄"
 after="$(cat "$OPSX_STATE_DIR/sources.toml" "$R/.git/info/exclude" "$CR")"
 assert_eq "$after" "$before" "rerun changed files"
-assert_eq "$(grep -c 'repo = "Agentory-CS"' "$OPSX_STATE_DIR/sources.toml")" 1 "duplicate registration"
+assert_eq "$(grep -c 'repo = "Acmecorp-CS"' "$OPSX_STATE_DIR/sources.toml")" 1 "duplicate registration"
 
 # --- 邊界：已有 openspec/（既有 repo）→ 不重跑 openspec init，只補 schema 和登記 ---
 R2="$(mk_repo scam-guard https://github.com/Mikaelaaaaa/scam-guard.git)"
@@ -76,13 +76,13 @@ assert_grep 'kind = "github"' "$OPSX_STATE_DIR/sources.toml"
 assert_grep 'repo = "scam-guard"' "$OPSX_STATE_DIR/sources.toml"
 
 # --- origin 是 GitHub 鏡像、gitlab 才是開 MR 的 remote → 登記 gitlab ---
-R4="$(mk_repo Agentory-AI https://github.com/agentory-ai/Agentory-AI.git)"
-git -C "$R4" remote add gitlab https://gitlab.tsg-navigator.com/agentory/agentory-ai.git
+R4="$(mk_repo Acmecorp-AI https://github.com/acmecorp-ai/Acmecorp-AI.git)"
+git -C "$R4" remote add gitlab https://gitlab.example.com/acmecorp/acmecorp-ai.git
 cd "$R4"; opsx init >/dev/null 2>&1 || fail "init with two remotes"
-assert_grep 'project = "agentory/agentory-ai"' "$OPSX_STATE_DIR/sources.toml"
-assert_not_grep 'project = "agentory-ai/Agentory-AI"' "$OPSX_STATE_DIR/sources.toml"
-assert_eq "$(grep -A3 'repo = "Agentory-AI"' "$OPSX_STATE_DIR/sources.toml" | grep -c 'kind = "gitlab"')" 0 "kind line is above repo line"
-assert_eq "$(grep -B1 'repo = "Agentory-AI"' "$OPSX_STATE_DIR/sources.toml" | grep -c 'kind = "gitlab"')" 1 "Agentory-AI should be gitlab"
+assert_grep 'project = "acmecorp/acmecorp-ai"' "$OPSX_STATE_DIR/sources.toml"
+assert_not_grep 'project = "acmecorp-ai/Acmecorp-AI"' "$OPSX_STATE_DIR/sources.toml"
+assert_eq "$(grep -A3 'repo = "Acmecorp-AI"' "$OPSX_STATE_DIR/sources.toml" | grep -c 'kind = "gitlab"')" 0 "kind line is above repo line"
+assert_eq "$(grep -B1 'repo = "Acmecorp-AI"' "$OPSX_STATE_DIR/sources.toml" | grep -c 'kind = "gitlab"')" 1 "Acmecorp-AI should be gitlab"
 
 # --- 邊界：只有 origin 且 URL 帶尾斜線 → project 不帶尾斜線 ---
 R5="$(mk_repo slashy https://github.com/x/slashy/)"

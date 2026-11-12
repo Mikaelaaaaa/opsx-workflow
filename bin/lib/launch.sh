@@ -47,7 +47,7 @@ try:
     g=tomllib.load(open(os.path.join(sd,"grants.toml"),"rb")).get("repos",{}).get(repo,{})
     if g.get("push"): allow.append("Bash(git push:*)")
     if g.get("mr"): allow+=["Bash(glab mr create:*)","Bash(glab mr update:*)","Bash(gh pr create:*)","Bash(gh pr edit:*)","Bash(glab issue note:*)","Bash(glab issue comment:*)","Bash(gh issue comment:*)"]   # gh pr comment 與 glab api 不進 allow：規則放行形狀之外的寫法（-R other/repo、merge?x=/notes/1）
-    if g.get("migrate"): allow+=["Bash(pnpm db:migrate:*)","Bash(pnpm --filter @agentory/db run db:migrate:*)","Bash(alembic upgrade:*)"]
+    if g.get("migrate"): allow+=["Bash(pnpm db:migrate:*)","Bash(pnpm --filter * run db:migrate:*)","Bash(alembic upgrade:*)"]
 except FileNotFoundError: pass
 safefile.write_atomic(sys.argv[1], json.dumps({"env":env,"permissions":{"allow":allow,"deny":deny,"additionalDirectories":dirs}},indent=2))
 PY

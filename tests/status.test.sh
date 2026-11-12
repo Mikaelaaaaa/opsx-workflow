@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # opsx status：寫 changes/<slug>/status.json。對應要求檔 §3.6 新增的儲存 6。
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
-R="$(mk_repo Agentory-AI)"; mk_change "$R" eval-core; cd "$R"
+R="$(mk_repo Acmecorp-AI)"; mk_change "$R" eval-core; cd "$R"
 S="$R/openspec/changes/eval-core/status.json"
 
 # --- 正常：從 branch 推 slug ---

@@ -90,7 +90,7 @@ append_line_once() { # <file> <line>
   grep -qxF -- "$2" "$1" || printf '%s\n' "$2" >> "$1"
 }
 
-# MR 所在的 remote：Agentory-AI / Infrastructure 的 origin 是 GitHub 鏡像，有 gitlab 就以它為準（同 init.sh 的 register_source）
+# MR 所在的 remote：Acmecorp-AI / Infrastructure 的 origin 是 GitHub 鏡像，有 gitlab 就以它為準（同 init.sh 的 register_source）
 primary_remote() { # <git dir>
   if git -C "$1" remote get-url gitlab >/dev/null 2>&1; then printf 'gitlab\n'; else printf 'origin\n'; fi
 }

@@ -37,13 +37,13 @@ for c in 'git push origin $(git branch --show-current)' 'git push && echo $(date
   out="$(gg "$c")"; assert_eq "$(decision "$out")" allow "涵蓋的命令替換與子 shell 要放行（${c}）: $(reason "$out")"
 done
 # 只有 mr 授權：管線與背景符號緊接在前面的 push、rebase、rm 一樣要授權
-printf '[repos."Agentory-AI"]\npush = false\nmr = false\nmigrate = false\n' > "$OPSX_STATE_DIR/grants.toml"
+printf '[repos."Acmecorp-AI"]\npush = false\nmr = false\nmigrate = false\n' > "$OPSX_STATE_DIR/grants.toml"
 card_grants '["mr"]'
 for c in 'gh pr create --title x; echo |git push' 'gh pr create --title x ||git push origin feat' 'gh pr create --title x &git push' 'gh pr create --title x; echo|rm -rf important' 'gh pr create --title x; git status|git rebase main'; do
   out="$(gg "$c")"; assert_eq "$(decision "$out")" deny "沒授權的類別不能跟著 mr 授權放行（${c}）: $(reason "$out")"
 done
 card_grants '[]'
-printf '[repos."Agentory-AI"]\npush = true\nmr = false\nmigrate = false\n' > "$OPSX_STATE_DIR/grants.toml"
+printf '[repos."Acmecorp-AI"]\npush = true\nmr = false\nmigrate = false\n' > "$OPSX_STATE_DIR/grants.toml"
 
 # 單段指令不需要 settings：沒有 settings 檔也照放行
 rm -f "$SETTINGS"
@@ -53,12 +53,12 @@ out="$(gg 'cd /x && git push')"; assert_eq "$(decision "$out")" allow "cd 與授
 out="$(gg 'git add a.txt && git push')"; assert_eq "$(decision "$out")" deny "讀不到 settings 要擋: $(reason "$out")"
 reason "$out" | grep -qF "$SETTINGS" || fail "deny 要點名 settings 路徑: $(reason "$out")"
 # feature session：dispatch 條目的 herdr_name 是 feature 名，settings 檔在 feature 名之下（dispatch.sh 以 feature 當 slug 寫）
-printf '{"Agentory-AI/eval-core":{"mode":"autopilot","grants":[],"herdr_name":"fsess","feature":"fsess","via":"@fsess"}}' > "$OPSX_STATE_DIR/dispatch.json"
-printf '{"permissions":{"allow":["Bash(git add:*)","Bash(git commit:*)"]}}' > "$OPSX_STATE_DIR/settings/Agentory-AI-fsess-autopilot.json"
+printf '{"Acmecorp-AI/eval-core":{"mode":"autopilot","grants":[],"herdr_name":"fsess","feature":"fsess","via":"@fsess"}}' > "$OPSX_STATE_DIR/dispatch.json"
+printf '{"permissions":{"allow":["Bash(git add:*)","Bash(git commit:*)"]}}' > "$OPSX_STATE_DIR/settings/Acmecorp-AI-fsess-autopilot.json"
 out="$(gg 'git add a.txt && git commit -m x && git push')"; assert_eq "$(decision "$out")" allow "feature session 要用 feature 名找 settings: $(reason "$out")"
 out="$(gg 'git -C . merge origin/main && git push')"; assert_eq "$(decision "$out")" deny "feature session 的 settings 也要擋 allow 外的段"
 # MR 留言不是第二級：有 mr 授權時閘門也不輸出 allow，交給 dontAsk 的 settings 去拒
-printf '[repos."Agentory-AI"]\npush = false\nmr = false\nmigrate = false\n' > "$OPSX_STATE_DIR/grants.toml"
+printf '[repos."Acmecorp-AI"]\npush = false\nmr = false\nmigrate = false\n' > "$OPSX_STATE_DIR/grants.toml"
 card_grants '["mr"]'
 for c in 'gh pr comment 159 --body-file openspec/changes/x/logic-map.md' 'gh pr comment 159 --edit-last --body-file x.md'; do
   out="$(gg "$c")"; assert_eq "$out" "" "MR 留言閘門不放行（${c}）"
@@ -66,7 +66,7 @@ done
 card_grants '[]'
 
 # command-gate-bypass：git 與 push 之間夾全域選項，一樣是 push（沒有 push 授權要擋）
-printf '[repos."Agentory-AI"]\npush = false\nmr = false\nmigrate = false\n' > "$OPSX_STATE_DIR/grants.toml"
+printf '[repos."Acmecorp-AI"]\npush = false\nmr = false\nmigrate = false\n' > "$OPSX_STATE_DIR/grants.toml"
 for c in 'git -C /tmp/r push origin feat/x' 'git -c core.x=1 push origin feat/x' 'git --git-dir=/tmp/r/.git push origin feat/x' 'git --git-dir /tmp/r/.git push origin feat/x' 'git --work-tree=/tmp/r push origin feat/x' 'git --no-pager push origin feat/x' 'git -C /tmp/r -c a=b push origin feat/x'; do
   out="$(gg "$c")"; assert_eq "$(decision "$out")" deny "沒有 push 授權，夾全域選項的 push 要擋：${c}｜$(reason "$out")"
   case "$(reason "$out")" in *第二級*) ;; *) fail "要說這是第二級的 push：${c}｜$(reason "$out")" ;; esac
@@ -74,7 +74,7 @@ done
 out="$(gg 'git -C /tmp/r log --oneline')"; assert_eq "$out" "" "夾全域選項的非 push 不出聲"
 out="$(gg 'git -C /tmp/r status && echo push')"; assert_eq "$out" "" "push 字樣只出現在別的指令不算"
 # 有 push 授權：夾全域選項的 push 放行，危險的寫法仍擋（第三級，授權不夠）
-printf '[repos."Agentory-AI"]\npush = true\nmr = false\nmigrate = false\n' > "$OPSX_STATE_DIR/grants.toml"
+printf '[repos."Acmecorp-AI"]\npush = true\nmr = false\nmigrate = false\n' > "$OPSX_STATE_DIR/grants.toml"
 out="$(gg 'git -C /tmp/r push origin feat/x')"
 printf '%s' "$out" | jq -e '.hookSpecificOutput.permissionDecision=="allow"' >/dev/null || fail "有 push 授權的 -C push 要明說放行（輸出：${out}）"
 for c in 'git -C /tmp/r push --force origin feat' 'git -c core.x=1 push -f origin feat' 'git --git-dir=/tmp/r/.git push --force origin feat' 'git -C /tmp/r push origin main' 'git --no-pager push origin HEAD:main' 'git push --receive-pack=evil origin feat' 'git push --exec=evil origin feat' 'git -C /tmp/r push --all origin' 'git push --mirror origin' "GIT_SSH_COMMAND='sh -c evil' git push origin feat" "git -c core.sshCommand='sh -c evil' push origin feat" "git -c core.sshcommand='sh -c evil' push origin feat" "GIT_SSH=./evil git push origin feat"; do
