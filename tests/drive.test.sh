@@ -282,8 +282,9 @@ gap="$(grep '^sleep' "$OPSX_FAKE_LOG" | tail -1 | cut -d' ' -f2)"
 reset_apply; printf 'timeout\n' > "$FX/perr"; export OPSX_TEST_PROMPT_ERR="$FX/perr" OPSX_TEST_ON_PROMPT="$FX/noop.sh"
 out="$(PATH="$FX/sleepbin:$PATH" OPSX_DRIVE_POLL=1000 OPSX_DRIVE_MAX=4 opsx drive retry-backoff 2>&1)"; assert_eq "$?" 0 "drive 逾時: $out"
 assert_eq "$(grep -c '^agent prompt' "$OPSX_FAKE_LOG")" 2 "逾時後再送一次: $(cat "$OPSX_FAKE_LOG")"
-gap="$(grep '^sleep' "$OPSX_FAKE_LOG" | tail -1 | cut -d' ' -f2)"
-[ -n "$gap" ] && [ "$gap" -ge 990 ] && [ "$gap" -le 1000 ] || fail "逾時後的第二次送出前要 sleep 接近 poll 秒，得到「${gap}」: $(cat "$OPSX_FAKE_LOG")"
+assert_eq "$(grep -c '^sleep' "$OPSX_FAKE_LOG")" 2 "起來先睡一次、兩次送出之間再睡一次: $(cat "$OPSX_FAKE_LOG")"
+gap="$(sed -n '/^agent prompt/,$p' "$OPSX_FAKE_LOG" | grep '^sleep' | head -1 | cut -d' ' -f2)"
+[ -n "$gap" ] && [ "$gap" -ge 990 ] && [ "$gap" -le 1000 ] || fail "逾時後的第二次送出前要 sleep 接近 poll 秒（在第一個 prompt 之後），得到「${gap}」: $(cat "$OPSX_FAKE_LOG")"
 unset OPSX_TEST_PROMPT_ERR
 # --- 退避有動歸零：失敗、有動、再失敗，第二次退避仍是 poll 秒，不是翻倍 ---
 reset_apply; printf '0' > "$FX/cnt"
@@ -433,7 +434,14 @@ for ago in none 11; do
   out="$(PATH="$FX/sleepbin2:$PATH" OPSX_TEST_WAIT_ERR="$FX/werr" OPSX_DRIVE_POLL=1 OPSX_DRIVE_MAX=3 opsx drive retry-backoff 2>&1)"; assert_eq "$?" 0 "agent_not_running（標記 ${ago}）: $out"
   echo "$out" | grep -q "回 agent_not_running，等 1 秒" || fail "標記 ${ago} 要照舊記錯誤碼與退避: $out"
   [ "$(grep -c '^agent prompt' "$OPSX_FAKE_LOG")" -ge 1 ] || fail "標記 ${ago} 要照舊送階段指令: $(cat "$OPSX_FAKE_LOG")"
+  assert_grep '^sleep 1$' "$OPSX_FAKE_LOG"
 done
+# 標記晚於現在 5 分鐘（超出 1 分鐘時鐘差）：不算在 relaunch，走一般路徑
+printf 'agent_not_running\n' > "$FX/werr"; reset_apply
+printf '{"Acmecorp-CS/retry-backoff":{"mode":"drive","pane":"p42","grants":[],"relaunching_at":"%s"}}' "$(python3 -I -c 'import datetime; print((datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(minutes=5)).isoformat(timespec="seconds"))')" > "$OPSX_STATE_DIR/dispatch.json"
+out="$(PATH="$FX/sleepbin2:$PATH" OPSX_TEST_WAIT_ERR="$FX/werr" OPSX_DRIVE_POLL=1 OPSX_DRIVE_MAX=3 opsx drive retry-backoff 2>&1)"; assert_eq "$?" 0 "標記晚 5 分鐘: $out"
+echo "$out" | grep -q "回 agent_not_running，等 1 秒" || fail "晚 5 分鐘的標記不算 relaunch，要照舊記錯誤碼與退避: $out"
+[ "$(grep -c '^agent prompt' "$OPSX_FAKE_LOG")" -ge 1 ] || fail "晚 5 分鐘的標記要照舊送階段指令: $(cat "$OPSX_FAKE_LOG")"
 # 標記格式不合（沒時區）：大聲說出欄位名與原值，仍照沒標記處理
 printf 'agent_not_running\n' > "$FX/werr"; reset_apply
 printf '{"Acmecorp-CS/retry-backoff":{"mode":"drive","pane":"p42","grants":[],"relaunching_at":"2026-11-12T13:00:00"}}' > "$OPSX_STATE_DIR/dispatch.json"
