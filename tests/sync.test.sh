@@ -287,10 +287,13 @@ logcols | cut -f5 | grep -q 'upstream_updated' || fail "要記錯：$(lastsync)"
 # --- sources.toml 的 path 不是 repo 根（linked worktree）：不建殼、記錯，不會每次多一張 ---
 WT="$FX/elsewhere/wt"; mkdir -p "$WT/openspec/changes"; printf 'gitdir: /nowhere\n' > "$WT/.git"
 printf '\n[[source]]\nkind = "gitlab"\nrepo = "wt"\nproject = "g/wt"\npath = "%s"\n' "$WT" >> "$OPSX_STATE_DIR/sources.toml"
-printf '[%s]' "$(gl 7 worktree 的 2026-11-06T08:00:00Z)" > "$OPSX_TEST_ISSUES/wt.json"
+printf '[%s]' "$(gl 7 worktree 2026-11-06T08:00:00Z)" > "$OPSX_TEST_ISSUES/wt.json"
+python3 -I -c 'import json,sys;d=json.load(open(sys.argv[1]));assert isinstance(d,list) and len(d)==1,d' "$OPSX_TEST_ISSUES/wt.json" || fail "wt.json 要是含一個 issue 的合法 JSON list"
 opsx sync --root "$ROOT" --source gitlab >/dev/null 2>&1
 assert_eq "$(find "$WT/openspec/changes" -mindepth 1 -maxdepth 1 | wc -l | tr -d ' ')" 0 "worktree 不建殼"
 [ "$(logcols | cut -f4)" -ge 1 ] || fail "要記錯：$(lastsync)"
+lastsync | grep -qF "$WT 不是 opsx repo 的根目錄" || fail "錯誤要來自 path 不是 repo 根，不是 JSON 解析失敗：$(lastsync)"
+rm -f "$OPSX_TEST_ISSUES/wt.json"
 
 # ========== 真實樣本（board-inbox 1.1，tests/fakes/gh-samples/，cli/cli 公開 issue 2026-11-06 實抓）==========
 GS="$OPSX_ROOT/tests/fakes/gh-samples"

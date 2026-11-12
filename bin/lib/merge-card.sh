@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # opsx merge-card <來源> --into <目標> --repo <path>：把同 repo 的收件卡併進另一張卡。
-# 先驗目標與來源，再用 opsx_drop 捨棄來源（理由「併入 <repo>/<目標>」），最後在目標 inbox.md 的 ## 證據 段尾端
-# 追加一行、decisions.tsv 記一列。捨棄會歸檔、退不回來，所以能驗的都在捨棄之前驗完。
+# 先驗目標與來源，把來源的 kind_of_work / impact / evidence 併進目標 frontmatter（等級不低於兩張卡各自的），再用 opsx_drop
+# 捨棄來源（理由「併入 <repo>/<目標>」），最後在目標 inbox.md 的 ## 證據 段尾端追加一行、decisions.tsv 記一列。捨棄會歸檔、退不回來，所以能驗的都在捨棄之前驗完。
 # specs/board-actions「併進既有的卡」。
 
 # shellcheck source=/dev/null
@@ -39,7 +39,16 @@ opsx_merge-card() {
   [ -n "$source" ] || die "merge-card: 來源 $src 的 inbox.md frontmatter 沒有 source:：$s_inbox"
   url="$(frontmatter_field "$s_inbox" upstream_url)"
 
+  # 事實欄位：捨棄之前只驗（來源的 impact 沒有 evidence、目標沒有 frontmatter 會在這裡失敗，兩張卡都沒動），
+  # 捨棄成功之後才寫進目標；來源 inbox 先複製出來，因為捨棄會把它歸檔
+  MERGE_CARD_COPY="$(mktemp "${TMPDIR:-/tmp}/opsx-merge-card.XXXXXX")" || die "merge-card: 開不了暫存檔"
+  trap 'rm -f "$MERGE_CARD_COPY"' EXIT   # opsx_drop 拒絕時走 die 離開，暫存檔也要收
+  cp "$s_inbox" "$MERGE_CARD_COPY" || die "merge-card: 複製來源 inbox 失敗：$s_inbox"
+  "$OPSX_PY" -I "$OPSX_ROOT/bin/lib/inboxmerge.py" carry-check "$ch/$into" "$MERGE_CARD_COPY" "$src" || die "merge-card: 來源 $src 的事實欄位併不進 $into，兩張卡都沒動"
+
   opsx_drop "$src" --repo "$top" -- "併入 $repo/$into"
+  "$OPSX_PY" -I "$OPSX_ROOT/bin/lib/inboxmerge.py" carry "$ch/$into" "$MERGE_CARD_COPY" "$src" \
+    || die "merge-card: $repo/$src 已歸檔，但事實欄位寫不進 ${t_inbox}；請手動把來源的 kind_of_work / impact / evidence 補進去"
 
   local line="- 併進：$repo/$src · source: $source"
   [ -z "$url" ] || line="$line · $url"
