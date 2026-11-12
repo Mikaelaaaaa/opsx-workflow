@@ -83,7 +83,7 @@ PY
 }
 # autopilot 用 dontAsk 起，不在 settings allow 的指令 Claude 直接拒；所以有授權的動作要由這裡明說 allow，
 # 板上事後給的「這次 / 這張卡」授權才生效。等整條指令所有檢查都過了才 allow，一段有授權不能替後面那段放行。
-GRANTED=0; MERGE_GATED=0; MR_COMMENT=0
+GRANTED=0; MERGE_GATED=0
 GRANTED_ACTIONS=()   # 這條指令已查過、有授權的 action；「這次」授權查一次就用掉，逐段涵蓋只看這份清單，不再問授權
 allow() { jq -n '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"allow",permissionDecisionReason:"opsx 授權閘門：有授權"}}'; exit 0; }
 
@@ -270,11 +270,6 @@ if [ "$tool" = "Bash" ]; then
   # 第二級
   printf '%s' "$sk" | grep -qE "$RE_PUSH" && level2 push "git push"
   printf '%s' "$sk" | grep -qE "$RE_MR" && level2 mr "開 / 改 MR"
-  # MR 留言（/pr 步 5c 的邏輯表）：只認這兩種形狀，且整條指令只能是它，所以錨定原文，不走逐段判斷。路徑不准含 ..。
-  # GitLab 的路徑在引號裡骨架看不到；形狀之外的 glab api（例如打 /merge）不分類，settings 也沒有 glab api 規則，dontAsk 會拒。
-  gh_comment='^gh pr comment [0-9]+( --edit-last)? --body-file [A-Za-z0-9_./-]+ *$'
-  glab_note='^glab api --method (POST|PUT) "projects/:id/merge_requests/[0-9]+/notes(/[0-9]+)?" --field body=@[A-Za-z0-9_./-]+ *$'
-  if [[ $cmd != *..* && ( $cmd =~ $gh_comment || $cmd =~ $glab_note ) ]]; then level2 mr "留言到 MR"; MR_COMMENT=1; fi
   printf '%s' "$sk" | grep -qE "$RE_MIGRATE" && level2 migrate "本機 migrate"
   printf '%s' "$sk" | grep -qE "$RE_DELETE" && level2 delete "刪檔（rm -r/-f）"
   printf '%s' "$sk" | grep -qE "$RE_INSTALL" && level2 install "裝套件"
@@ -285,7 +280,6 @@ if [ "$tool" = "Bash" ]; then
   # 一段有授權不能替整串放行：串起來的指令每一段都要有授權、屬於不用授權的小指令、或在 dispatch 給這個 agent 的 settings allow 裡
   if [ "$GRANTED" = 1 ]; then
     [ "$MERGE_GATED" = 1 ] && allow
-    [ "$MR_COMMENT" = 1 ] && allow
     if first_uncovered_segment; then
       [ -z "$UNCOVERED_ACTION" ] || deny "opsx 授權閘門：指令裡有一段「${UNCOVERED}」要授權（第二級），$repo 沒有長期授權、這張卡也沒有。gate 寫 action: ${UNCOVERED_ACTION}。$GATE_MSG"
       deny "opsx 授權閘門：這條指令有一段不在這個 agent 的 settings allow 裡：「${UNCOVERED}」。把它拆成單獨一條指令；它需要授權的話，$GATE_MSG"

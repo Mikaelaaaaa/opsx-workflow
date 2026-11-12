@@ -241,11 +241,9 @@ reason "$out" | grep -qF 'action: mr' || fail "grant: issue note 的 deny 要帶
 out="$(gg Bash "$(cmdj 'gh issue comment https://github.com/o/r/issues/3 --body x')")"; assert_eq "$(decision "$out")" deny "grant: gh issue comment 沒 mr 授權"
 reason "$out" | grep -qF 'action: mr' || fail "grant: issue comment 的 deny 要帶 action: mr：$(reason "$out")"
 out="$(gg Bash "$(cmdj 'glab issue comment 12 -m x')")"; assert_eq "$(decision "$out")" deny "grant: glab issue comment 是 note 的別名，沒 mr 授權"
-# MR 留言（/pr 步 5c 的邏輯表）歸在 mr 底下
-out="$(gg Bash "$(cmdj 'gh pr comment 12 --body-file /x/logic-map.md')")"; assert_eq "$(decision "$out")" deny "grant: gh pr comment 沒 mr 授權"
-reason "$out" | grep -qF 'action: mr' || fail "grant: gh pr comment 的 deny 要帶 action: mr：$(reason "$out")"
-out="$(gg Bash "$(cmdj 'glab api --method POST "projects/:id/merge_requests/12/notes" --field body=@/x/logic-map.md')")"; assert_eq "$(decision "$out")" deny "grant: GitLab note 沒 mr 授權"
-reason "$out" | grep -qF 'action: mr' || fail "grant: GitLab note 的 deny 要帶 action: mr：$(reason "$out")"
+# MR 留言不歸任何授權：沒授權時閘門也不管，不輸出 deny
+out="$(gg Bash "$(cmdj 'gh pr comment 12 --body-file /x/logic-map.md')")"; assert_eq "$out" "" "grant: gh pr comment 不是第二級"
+out="$(gg Bash "$(cmdj 'glab api --method POST "projects/:id/merge_requests/12/notes" --field body=@/x/logic-map.md')")"; assert_eq "$out" "" "grant: GitLab note 不是第二級"
 out="$(gg Bash "$(cmdj 'gh pr view 12 --json comments')")"; assert_eq "$out" "" "grant: gh pr view 不是第二級"
 out="$(gg Bash "$(cmdj 'glab issue view 12')")"; assert_eq "$out" "" "grant: glab issue view 不是第二級"
 out="$(gg Bash "$(cmdj 'gh issue list')")"; assert_eq "$out" "" "grant: gh issue list 不是第二級"
@@ -519,26 +517,13 @@ out="$(gg Bash "$(cmdj 'glab mr create -F desc.md')")"; assert_eq "$(decision "$
 out="$(gg Bash "$(cmdj 'glab issue note 12 -m x')")"; assert_eq "$(decision "$out")" allow "grant: mr 授權放行 glab issue note"
 out="$(gg Bash "$(cmdj 'gh issue comment https://github.com/o/r/issues/3 --body x')")"; assert_eq "$(decision "$out")" allow "grant: mr 授權放行 gh issue comment"
 out="$(gg Bash "$(cmdj 'glab issue comment 12 -m x')")"; assert_eq "$(decision "$out")" allow "grant: mr 授權放行 glab issue comment"
-# decision 對空輸出也回 allow，這三條要看原始輸出真的是 allow JSON，閘門沒作用時才會紅
-for ok in 'gh pr comment 12 --edit-last --body-file /x/logic-map.md' \
-          'glab api --method POST "projects/:id/merge_requests/12/notes" --field body=@/x/logic-map.md' \
-          'glab api --method PUT "projects/:id/merge_requests/12/notes/345" --field body=@/x/logic-map.md'; do
-  out="$(gg Bash "$(cmdj "$ok")")"
-  printf '%s' "$out" | jq -e '.hookSpecificOutput.permissionDecision=="allow"' >/dev/null || fail "grant: mr 授權要明說放行 MR 留言：$ok（輸出：$out）"
-done
-# glab api 形狀之外的寫法、串接、註解裡的字樣：授權閘門不放行（不輸出 allow，交給 dontAsk 的 settings 去拒）
-for bad in 'glab api --method PUT projects/1/merge_requests/999/merge' \
-           'glab api --method PUT projects/1/merge_requests/999/merge && glab api --method POST "projects/:id/merge_requests/12/notes" --field body=@/x/m.md' \
-           'glab api --method POST "projects/:id/merge_requests/12/notes" --field body=@/x/m.md && glab api --method PUT projects/1/merge_requests/999/merge' \
-           'glab api --method PUT projects/1/merge_requests/999/merge # "projects/:id/merge_requests/12/notes"' \
-           'gh pr comment 12 --body-file /x/m.md; glab api --method PUT projects/1/merge_requests/999/merge' \
-           'gh pr comment 12 -R evil/repo --body-file /x/m.md' \
-           'gh pr comment 12 --body-file ../../x.md' \
-           'glab api --method POST "projects/:id/merge_requests/12/notes" --field body=@../../x.md' \
-           $'gh pr comment 12 --body-file /x/m.md\nglab api --method PUT projects/1/merge_requests/999/merge' \
-           'gh pr comment 12 --body-file $(id)' \
-           'gh pr comment 12 --body-file `id`'; do
-  out="$(gg Bash "$(cmdj "$bad")")"; assert_eq "$out" "" "grant: 形狀之外的 glab api 不放行：$bad"
+# MR 留言不是授權動作：就算有 mr 授權，閘門也不輸出 allow，交給 dontAsk 的 settings 去拒
+for bad in 'gh pr comment 12 --body-file /x/m.md' \
+           'gh pr comment 12 --edit-last --body-file /x/m.md' \
+           'glab api --method POST "projects/:id/merge_requests/12/notes" --field body=@/x/m.md' \
+           'glab api --method PUT "projects/:id/merge_requests/12/notes/345" --field body=@/x/m.md' \
+           'glab api --method PUT projects/1/merge_requests/999/merge'; do
+  out="$(gg Bash "$(cmdj "$bad")")"; assert_eq "$out" "" "grant: MR 留言與 glab api 不放行：$bad"
 done
 out="$(gg Bash "$(cmdj 'git push gitlab feat/eval-core/mikaela')")"; assert_eq "$(decision "$out")" deny "grant: once 第二次 deny"
 # once mr 只放行一次：開 MR 用掉後，回寫 issue 會被擋，deny 訊息帶 action: mr（/pr 5b 靠它分辨原因）
