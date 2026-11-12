@@ -78,15 +78,15 @@ opsx_drive() {
         local mr; mr="$(OPSX_MR_CACHE_TTL=0 mr_state "$d")"   # 剛 /babysit 過，要看新值，不吃看板的 60 秒快取
         case "$mr" in
           ready) say "drive: $slug MR 五條件全綠，可以合併，停在這裡等人"; opsx_status_quiet "$top" "$slug" pr 5/5 "可以合併"; coordinate_kick "$slug"; return 0 ;;
-          none)  say "drive: $slug report.md 有 MR 但 glab 讀不到，等 $poll 秒再看"; sleep "$poll" ;;
-          *)     say "drive: $slug MR 卡在 $mr → /opsx-workflow:babysit"; herdr_step "$slug" agent prompt "$slug" "/opsx-workflow:babysit $slug" --wait || return 0; sleep "$poll" ;;
+          none)  say "drive: $slug report.md 有 MR 但 glab 讀不到，等 $poll 秒再看"; sleep "$poll"; settled=0 ;;
+          *)     say "drive: $slug MR 卡在 $mr → /opsx-workflow:babysit"; herdr_step "$slug" agent prompt "$slug" "/opsx-workflow:babysit $slug" --wait || return 0; sleep "$poll"; settled=0 ;;
         esac ;;
       explore|grill|propose|apply|review|pr)
         # 上一輪送出後 pane 有背景工作：不重送。指紋動了就照常往下；還在跑就再等；不跑了指紋仍沒動才算卡住
         if [ -n "$bg_fp" ]; then
           if [ "$(stage_fingerprint "$top" "$slug")" != "$bg_fp" ]; then bg_fp=""
           elif [ "$(pane_state "$repo" "$slug")" = busy ]; then
-            say "drive: $slug 的 pane 還有背景工作或 subagent 在跑，不重送 /opsx-workflow:${stage}，等 $poll 秒"; sleep "$poll"; continue
+            say "drive: $slug 的 pane 還有背景工作或 subagent 在跑，不重送 /opsx-workflow:${stage}，等 $poll 秒"; sleep "$poll"; settled=0; continue
           else
             if drive_args_lost "$repo" "$slug"; then return 0; fi
             bg_fp=""; write_stuck_gate "$d" "$stage" "$repo" "$slug"; say "drive: $slug 背景工作結束後階段還是沒動，寫了 gate 等人"
@@ -113,11 +113,11 @@ opsx_drive() {
               # shortcut: [已評估] 沒有 usage-limit-pause 的重置時間，從 poll 秒起每次翻倍、上限 3600 秒；有那張卡之後改等重置時間
               if [ "$backoff" -eq 0 ]; then backoff="$poll"; else backoff=$((backoff * 2 > 3600 ? 3600 : backoff * 2)); fi
               say "drive: $slug 送了 /opsx-workflow:$stage 之後 agent 立刻失敗（pane 尾巴有 API 錯誤），不重送、不寫 gate，退避 $backoff 秒"
-              sleep "$backoff" ;;
+              sleep "$backoff"; settled=0 ;;
             busy)
               bg_fp="$before"
               say "drive: $slug 送了 /opsx-workflow:$stage 之後階段沒動，但 pane 有背景工作或 subagent 在跑，不寫 gate、不重送，等 $poll 秒"
-              sleep "$poll" ;;
+              sleep "$poll"; settled=0 ;;
             *)
               if drive_args_lost "$repo" "$slug"; then return 0; fi
               write_stuck_gate "$d" "$stage" "$repo" "$slug"; say "drive: $slug 送了 /opsx-workflow:$stage 之後階段沒動，寫了 gate 等人"

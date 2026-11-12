@@ -44,7 +44,7 @@ echo "$out" | grep -q "可以合併" || fail "要停在可以合併: $out"
 assert_grep '"phase": "pr"' "$C/status.json"
 # 起來先等 agent 把 dispatch 送的第一句做完，之後沒 gate 就不再 wait
 assert_eq "$(head -1 "$OPSX_FAKE_LOG")" "agent wait retry-backoff" "第一個呼叫要等 agent settle"
-assert_eq "$(grep -c '^agent wait' "$OPSX_FAKE_LOG")" 1 "沒 gate 只有起來那次 wait"
+assert_eq "$(grep -c '^agent wait' "$OPSX_FAKE_LOG")" 2 "沒 gate：起來那次 wait，加上 /babysit 睡完後重等的那次"
 
 # --- 可以合併時觸發一輪 coordinate，沒有任何 merge 指令 ---
 assert_eq "$(grep -c '^opsx coordinate --kick$' "$KL")" 1 "可以合併要 kick 一次: $(cat "$KL")"
@@ -267,6 +267,27 @@ assert_eq "$(grep -c '^agent prompt' "$OPSX_FAKE_LOG")" 1 "背景工作結束也
 assert_grep '^## drive-apply-1$' "$C/gates.md"
 unset OPSX_TEST_PANE_ONCE
 unset OPSX_TEST_PANE_TEXT
+# --- 為了等而 sleep 之後先重等 agent：睡的時候 agent 可能自己起了新 turn（背景任務結束），不重等就把階段指令排在它後面 ---
+# 每個後面還有呼叫的 sleep，下一行必須是 agent wait；最後一個 sleep 後面沒有行，不算
+sleep_without_wait() { awk 's && NR == s + 1 && $0 != "agent wait retry-backoff" {b++} /^sleep [0-9]+$/ {s = NR} END {print b + 0}' "$OPSX_FAKE_LOG"; }
+reset_apply; printf '{"Acmecorp-CS/retry-backoff":{"mode":"drive","pane":"p42","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"
+export OPSX_TEST_ON_PROMPT="$FX/noop.sh" OPSX_TEST_PANE_TEXT="1 shell / 1 monitor still running"
+out="$(PATH="$FX/sleepbin:$PATH" OPSX_DRIVE_POLL=7 OPSX_DRIVE_MAX=3 opsx drive retry-backoff 2>&1)"; assert_eq "$?" 0 "drive 背景工作睡完: $out"
+assert_grep '^sleep 7$' "$OPSX_FAKE_LOG"
+assert_eq "$(sleep_without_wait)" 0 "背景工作的 sleep 之後要先 agent wait: $(cat "$OPSX_FAKE_LOG")"
+reset_apply; export OPSX_TEST_PANE_TEXT="API Error: HTTP 429 rate_limit"
+out="$(PATH="$FX/sleepbin:$PATH" OPSX_DRIVE_POLL=7 OPSX_DRIVE_MAX=3 opsx drive retry-backoff 2>&1)"; assert_eq "$?" 0 "drive error 退避睡完: $out"
+assert_grep '^sleep 7$' "$OPSX_FAKE_LOG"
+assert_eq "$(sleep_without_wait)" 0 "error 退避的 sleep 之後要先 agent wait: $(cat "$OPSX_FAKE_LOG")"
+# babysit：MR 的 CI 還紅，送 /babysit 後睡 poll 秒
+reset_apply; printf '## 1\n\n- [x] 1.1 a\n' > "$C/tasks.md"
+printf '{"phase":"apply","step":8,"total":8,"label":"x","tests":"green","at":"2026-11-05T15:00:00+08:00"}' > "$C/status.json"
+printf '# report\n\n## MR\nhttps://gitlab.example.com/acmecorp/Acmecorp-CS/-/merge_requests/431\n' > "$C/report.md"
+printf '{"state":"opened","draft":false,"has_conflicts":false,"head_pipeline":{"status":"failed"},"unresolved_discussions_count":1}' > "$OPSX_TEST_GLAB_JSON"
+unset OPSX_TEST_PANE_TEXT
+out="$(PATH="$FX/sleepbin:$PATH" OPSX_DRIVE_POLL=7 OPSX_DRIVE_MAX=3 opsx drive retry-backoff 2>&1)"; assert_eq "$?" 0 "drive babysit 睡完: $out"
+assert_grep '^agent prompt retry-backoff /opsx-workflow:babysit retry-backoff' "$OPSX_FAKE_LOG"
+assert_eq "$(sleep_without_wait)" 0 "babysit 的 sleep 之後要先 agent wait: $(cat "$OPSX_FAKE_LOG")"
 # --- 同階段相鄰兩次送出之間至少隔 poll 秒（扣掉已經過的時間） ---
 reset_apply; printf '## 1\n\n- [ ] 1.1 a\n- [ ] 1.2 b\n- [ ] 1.3 c\n' > "$C/tasks.md"
 cat > "$FX/tick.sh" <<EOF
