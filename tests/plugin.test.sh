@@ -6,9 +6,24 @@ FAKES="$OPSX_ROOT/tests/fakes"; mkdir -p "$FX/fakebin" "$OPSX_STATE_DIR"
 printf '#!/usr/bin/env bash\nexec bash "%s/herdr" "$@"\n' "$FAKES" > "$FX/fakebin/herdr"
 printf '#!/usr/bin/env bash\nprintf "open %%s\\n" "$*" >> "%s"\n' "$FX/open.log" > "$FX/fakebin/open"   # 假的 macOS open
 printf '#!/usr/bin/env bash\nprintf "xdg-open %%s\\n" "$*" >> "%s"\n' "$FX/open.log" > "$FX/fakebin/xdg-open"
+# 假的 orca：參數記到 OPSX_TEST_ORCA_LOG；OPSX_TEST_ORCA_FAIL=create|switch 讓那一步失敗，nopage 讓 tab create 回沒有 browserPageId 的 JSON
+cat > "$FX/fakebin/orca" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$OPSX_TEST_ORCA_LOG"
+echo "codesign noise" >&2   # 真的 Orca Electron 殼成功時 stderr 也有雜訊
+case "$1 $2:${OPSX_TEST_ORCA_FAIL:-}" in
+  "tab create:create"|"tab switch:switch") echo '{"ok":false}'; echo "runtime_access_denied" >&2; exit 1;;
+  "tab create:nopage") echo '{"id":"r1","ok":true,"result":{}}';;
+  "tab create:"*) echo '{"id":"r1","ok":true,"result":{"browserPageId":"page-9"}}';;
+  "tab switch:"*) echo '{"id":"r2","ok":true,"result":{}}';;
+  *) echo "fake orca: 沒教過 [$*]" >&2; exit 2;;
+esac
+SH
 chmod +x "$FX/fakebin/"*
 export PATH="$FX/fakebin:$PATH"
 export OPSX_FAKE_LOG="$FX/herdr.log"; : > "$OPSX_FAKE_LOG"; : > "$FX/open.log"
+export OPSX_TEST_ORCA_LOG="$FX/orca.log"; : > "$OPSX_TEST_ORCA_LOG"
+unset ORCA_TERMINAL_HANDLE OPSX_TEST_ORCA_FAIL   # 在 Orca terminal 裡跑測試時會繼承它，下面除了 Orca 段都要走系統瀏覽器
 trap 'for f in "$OPSX_STATE_DIR"/board*.pid; do kill "$(cat "$f" 2>/dev/null)" 2>/dev/null; done; rm -rf "$FX"' EXIT   # 斷言失敗也要把 server 收掉（每個 port 一份 pid 檔）
 
 # --- manifest ---
@@ -99,6 +114,36 @@ for good in "notification-toast-replays-on-load" "a$(printf 'b%.0s' $(seq 1 40))
   out="$(bash "$OPSX_ROOT/herdr-board/scripts/open-board.sh" "opsx-workflow/$good" 2>&1)"; assert_eq "$?" 0 "slug [$good] 要開得了: $out"
   assert_eq "$(cat "$FX/open.log")" "open http://127.0.0.1:$port/#token=$tok&card=opsx-workflow/$good" "slug [$good] 帶進 card="
 done
+# --- Orca terminal 裡：開在 Orca 內建瀏覽器並切過去，不叫系統瀏覽器（specs/orca-board-tab）---
+: > "$FX/open.log"; : > "$OPSX_TEST_ORCA_LOG"
+out="$(ORCA_TERMINAL_HANDLE=term-1 bash "$OPSX_ROOT/herdr-board/scripts/open-board.sh" opsx-workflow/tui-keys 2>&1)"; assert_eq "$?" 0 "Orca terminal 開看板: $out"
+assert_eq "$(cat "$OPSX_TEST_ORCA_LOG")" "tab create --url http://127.0.0.1:$port/#token=$tok&card=opsx-workflow/tui-keys --json
+tab switch --page page-9 --focus" "Orca 先 tab create 再 tab switch 到回傳的 page"
+assert_eq "$(cat "$FX/open.log")" "" "Orca 開成功不叫 open / xdg-open"
+case "$out" in *"opsx 看板：http://127.0.0.1:$port/"*) ;; *) fail "Orca 開成功仍要印看板那一行：$out";; esac
+# 不在 Orca terminal：沒設、空字串都照舊 open，不叫 orca
+: > "$FX/open.log"; : > "$OPSX_TEST_ORCA_LOG"
+out="$(env -u ORCA_TERMINAL_HANDLE bash "$OPSX_ROOT/herdr-board/scripts/open-board.sh" 2>&1)"; assert_eq "$?" 0 "沒設 handle: $out"
+assert_eq "$(cat "$FX/open.log")" "open http://127.0.0.1:$port/#token=$tok" "沒設 handle 照舊 open"
+assert_eq "$(cat "$OPSX_TEST_ORCA_LOG")" "" "沒設 handle 不叫 orca"
+: > "$FX/open.log"
+out="$(ORCA_TERMINAL_HANDLE= bash "$OPSX_ROOT/herdr-board/scripts/open-board.sh" 2>&1)"; assert_eq "$?" 0 "handle 空字串: $out"
+assert_eq "$(cat "$FX/open.log")" "open http://127.0.0.1:$port/#token=$tok" "handle 空字串照舊 open"
+assert_eq "$(cat "$OPSX_TEST_ORCA_LOG")" "" "handle 空字串不叫 orca"
+# Orca 任一步失敗：非零結束、orca 的錯誤到 stderr、不退回系統瀏覽器
+for f in create switch; do
+  : > "$FX/open.log"; : > "$OPSX_TEST_ORCA_LOG"
+  err="$(ORCA_TERMINAL_HANDLE=term-1 OPSX_TEST_ORCA_FAIL=$f bash "$OPSX_ROOT/herdr-board/scripts/open-board.sh" 2>&1 >/dev/null)"; rc=$?
+  [ "$rc" -ne 0 ] || fail "orca tab $f 失敗要非零結束：$err"
+  case "$err" in *runtime_access_denied*) ;; *) fail "orca tab $f 失敗，stderr 要有 orca 的錯誤：$err";; esac
+  assert_eq "$(cat "$FX/open.log")" "" "orca tab $f 失敗不退回 open / xdg-open"
+done
+assert_grep "^tab switch --page page-9 --focus\$" "$OPSX_TEST_ORCA_LOG"   # 上一輪是 switch 失敗：tab 已開，仍算失敗
+: > "$FX/open.log"
+err="$(ORCA_TERMINAL_HANDLE=term-1 OPSX_TEST_ORCA_FAIL=nopage bash "$OPSX_ROOT/herdr-board/scripts/open-board.sh" 2>&1 >/dev/null)"; rc=$?
+[ "$rc" -ne 0 ] || fail "tab create 沒回 browserPageId 要非零結束：$err"
+case "$err" in *browserPageId*) ;; *) fail "沒有 browserPageId 時 stderr 要點出缺的欄位：$err";; esac
+assert_eq "$(cat "$FX/open.log")" "" "沒有 browserPageId 不退回 open"
 # --- 沒有 open / xdg-open：非零結束、網址寫到 stderr，呼叫的人（TUI 的 o）才不會當成開好了 ---
 mkdir -p "$FX/noopen"
 for t in bash dirname cat mkdir seq sleep rmdir curl grep tail nohup; do ln -sf "$(command -v "$t")" "$FX/noopen/$t"; done
