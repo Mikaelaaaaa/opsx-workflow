@@ -77,7 +77,7 @@ out="$(gg 'git -C /tmp/r status && echo push')"; assert_eq "$out" "" "push 字�
 printf '[repos."Agentory-AI"]\npush = true\nmr = false\nmigrate = false\n' > "$OPSX_STATE_DIR/grants.toml"
 out="$(gg 'git -C /tmp/r push origin feat/x')"
 printf '%s' "$out" | jq -e '.hookSpecificOutput.permissionDecision=="allow"' >/dev/null || fail "有 push 授權的 -C push 要明說放行（輸出：${out}）"
-for c in 'git -C /tmp/r push --force origin feat' 'git -c core.x=1 push -f origin feat' 'git --git-dir=/tmp/r/.git push --force origin feat' 'git -C /tmp/r push origin main' 'git --no-pager push origin HEAD:main' 'git push --receive-pack=evil origin feat' 'git push --exec=evil origin feat' 'git -C /tmp/r push --all origin' 'git push --mirror origin' "GIT_SSH_COMMAND='sh -c evil' git push origin feat" "git -c core.sshCommand='sh -c evil' push origin feat"; do
+for c in 'git -C /tmp/r push --force origin feat' 'git -c core.x=1 push -f origin feat' 'git --git-dir=/tmp/r/.git push --force origin feat' 'git -C /tmp/r push origin main' 'git --no-pager push origin HEAD:main' 'git push --receive-pack=evil origin feat' 'git push --exec=evil origin feat' 'git -C /tmp/r push --all origin' 'git push --mirror origin' "GIT_SSH_COMMAND='sh -c evil' git push origin feat" "git -c core.sshCommand='sh -c evil' push origin feat" "git -c core.sshcommand='sh -c evil' push origin feat" "GIT_SSH=./evil git push origin feat"; do
   out="$(gg "$c")"; assert_eq "$(decision "$out")" deny "push 授權不夠，危險的寫法要擋：${c}｜$(reason "$out")"
   case "$(reason "$out")" in *第三級*) ;; *) fail "要說這是第三級：${c}｜$(reason "$out")" ;; esac
 done

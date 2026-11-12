@@ -274,7 +274,10 @@ if [ "$tool" = "Bash" ]; then
   push_main="${GIT_PUSH}\\b[^;&|]*[[:space:]:+\"']"'(refs/heads/)?(main|master)([^A-Za-z0-9._/:-]|$)'
   printf '%s' "$l3n" | grep -qE "$push_main" && level3 "push main"
   # 帶程式的 ssh 指令（GIT_SSH_COMMAND、core.sshCommand）讓 push 去執行任意程式：push 授權蓋不掉
-  printf '%s' "$l3" | grep -qE "(GIT_SSH_COMMAND|GIT_SSH|core\\.sshCommand)=" && printf '%s' "$l3" | grep -qE "${GIT_PUSH}" && level3 "push 帶 ssh 指令"
+  # git 設定的鍵不分大小寫（core.sshcommand 也算），環境變數名分
+  if { printf '%s' "$l3" | grep -qE "(GIT_SSH_COMMAND|GIT_SSH)=" || printf '%s' "$l3" | grep -qiE "core\\.sshcommand="; } && printf '%s' "$l3" | grep -qE "${GIT_PUSH}"; then
+    level3 "push 帶 ssh 指令"
+  fi
   printf '%s' "$l3" | grep -qiE '(^|\s|/)deploy(\.sh)?(\s|$)' && level3 "deploy"
   printf '%s' "$l3" | grep -qiE 'drop\s+(table|database|schema)|truncate\s+table|db:reset' && level3 "刪資料"
   printf '%s' "$l3" | grep -qiE 'sops\s+(-e|--encrypt|edit)|\.gitlab-ci\.yml|\.github/workflows' && level3 "改 CI / secrets"
