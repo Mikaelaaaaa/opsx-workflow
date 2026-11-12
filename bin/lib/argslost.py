@@ -5,7 +5,7 @@
         True：沒有 `--settings <settings_path>` 也沒有 `--settings=<settings_path>`（完整路徑相等；
         `--settings` 出現多次時任何一個相等就算有帶）。
         認不得的輸入 raise ValueError，訊息點名欄位與值：argv 不是 list 或含非 str、argv 空、
-        basename(argv[0]) 不是 claude、`--settings` 後面沒有值、settings_path 不是絕對路徑或含空白。
+        argv[0] 既不是 claude 也不是 claude 的版本執行檔（<任意>/claude/versions/<版本>）、`--settings` 後面沒有值、settings_path 不是絕對路徑或含空白。
 
 CLI（hook 用）：stdin 一行 ps 輸出，參數是 settings_path。
     退出碼 0 有帶、1 遺失、2 認不得（原因寫 stderr）。
@@ -19,12 +19,21 @@ import sys
 FLAG = "--settings"
 
 
+def is_claude(argv0: str) -> bool:
+    """檔名是 claude，或是版本執行檔 <任意>/claude/versions/<版本>（ps 顯示 symlink 指向的實檔）。"""
+    if os.path.basename(argv0) == "claude":
+        return True
+    versions_dir, _ = os.path.split(argv0)
+    claude_dir, versions = os.path.split(versions_dir)
+    return versions == "versions" and os.path.basename(claude_dir) == "claude"
+
+
 def args_lost(argv: list[str], settings_path: str) -> bool:
     if not isinstance(argv, list) or not all(isinstance(a, str) for a in argv):
         raise ValueError(f"argv 要是 list[str]：{argv!r}")
     if not argv:
         raise ValueError(f"argv 是空的：{argv!r}")
-    if os.path.basename(argv[0]) != "claude":
+    if not is_claude(argv[0]):
         raise ValueError(f"argv[0] 不是 claude：{argv[0]!r}")
     if not os.path.isabs(settings_path):
         raise ValueError(f"settings_path 要是絕對路徑：{settings_path!r}")
