@@ -66,6 +66,27 @@ sync_debt >/dev/null 2>&1
 assert_eq "$(cards)" "" "已歸檔的 source 不能再建殼"
 assert_eq "$(cat "$CH/archive/2026-11-01-debt-$H/inbox.md")" "$(cat "$FX/archived.md")" "歸檔的卡不動"
 
+# --- 夾具字串與已評估標記不開卡；行首與行尾的真註解照開（debt-scan-ack）---
+FIXTURE='夾具字串, 不該建'; REAL='行首註解, 該建'; ACK='[已評估] 已標記, 不該建'; TRAIL='行尾註解, 該建'
+printf '%s\n' "echo \"# shortcut: $FIXTURE\" > y.py" > "$A/f1.sh"
+printf '%s\n' "# shortcut: $REAL" > "$A/f2.py"
+printf '%s\n' "# shortcut: $ACK" > "$A/f3.py"
+printf '%s\n' "x = 1  # shortcut: $TRAIL" > "$A/f4.py"
+before="$(cards | wc -l | tr -d ' ')"
+sync_debt >/dev/null 2>&1
+assert_dir "$CH/debt-$(printf '%s' "$REAL" | shasum -a 1 | cut -c1-8)"
+assert_dir "$CH/debt-$(printf '%s' "$TRAIL" | shasum -a 1 | cut -c1-8)"
+assert_eq "$(cards | wc -l | tr -d ' ')" "$((before + 2))" "只有行首與行尾的真註解開卡，夾具字串與已評估標記不開"
+# 已開的卡，註解改成帶標記：標 stale，不建新卡
+OLD='舊文字, 之後補'; OLDH="$(printf '%s' "$OLD" | shasum -a 1 | cut -c1-8)"
+printf '%s\n' "# shortcut: $OLD" > "$A/f5.py"; sync_debt >/dev/null 2>&1
+assert_dir "$CH/debt-$OLDH"
+printf '%s\n' "# shortcut: [已評估] $OLD" > "$A/f5.py"; n="$(cards | wc -l | tr -d ' ')"
+sync_debt >/dev/null 2>&1
+assert_grep '^stale: true$' "$CH/debt-$OLDH/inbox.md"
+assert_eq "$(cards | wc -l | tr -d ' ')" "$n" "改成標記後不建新卡"
+rm -f "$A/f1.sh" "$A/f2.py" "$A/f3.py" "$A/f4.py" "$A/f5.py"
+
 # --- 不合格的來源 ---
 assert_rc 2 opsx sync --root "$ROOT" --source customer
 

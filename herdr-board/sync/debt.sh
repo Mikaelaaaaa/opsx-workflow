@@ -41,7 +41,9 @@ for repo_dir in "$root"/*/; do
 	# The grep from ponytail-debt, run with the repo as cwd so paths are relative.
 	# --no-index --exclude-standard: respect .gitignore, skip .git.
 	# Agent worktrees under .claude/worktrees/ are copies of the same tree; skip them.
-	(cd "$repo_dir" && git grep --no-index --exclude-standard -nE '(#|//|/[*]) ?(shortcut|ponytail):' -- . ':!.claude/worktrees' 2>/dev/null || true) |
+	# Only a real comment counts: no quote or backtick before the marker, so an
+	# `echo "# shortcut: …"` inside a test fixture does not open a card.
+	(cd "$repo_dir" && git grep --no-index --exclude-standard -nE '^[^"'"'"'`]*(#|//|/[*]) ?(shortcut|ponytail):' -- . ':!.claude/worktrees' 2>/dev/null || true) |
 	while IFS= read -r hit; do
 		file="${hit%%:*}"
 		rest="${hit#*:}"
@@ -51,6 +53,8 @@ for repo_dir in "$root"/*/; do
 		# Comment text after the marker word, closing */ stripped, trimmed.
 		comment="$(printf '%s' "$text" | sed -E 's/.*(shortcut|ponytail):[[:space:]]*//; s#[[:space:]]*\*/[[:space:]]*$##; s/^[[:space:]]+//; s/[[:space:]]+$//')"
 		[ -n "$comment" ] || continue
+		# A shortcut that was judged and deliberately kept carries [已評估]; it opens no card.
+		case "$comment" in *'[已評估]'*) continue ;; esac
 
 		hash="$(printf '%s' "$comment" | shasum -a 1 | cut -c1-8)"
 
