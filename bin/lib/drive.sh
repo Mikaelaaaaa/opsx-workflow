@@ -22,6 +22,9 @@ opsx_drive() {
   drive_register "$repo/$slug" || exit 2
   trap "drive_unregister $(printf '%q' "$repo/$slug")" EXIT   # 展開在設 trap 時：EXIT 跑時 local 已經沒了
   local max="${OPSX_DRIVE_MAX:-200}" poll="${OPSX_DRIVE_POLL:-300}" i=0 settled=0 watch="" watch_fp="" last_stage="" last_at=0 backoff=0 bg_fp=""
+  DRIVE_REPO="$repo"
+  # dispatch 與 relaunch 都在起 drive 之前送過當下這一站，所以第一次送出和其他同階段送出一樣受間隔下限
+  last_stage="$(stage_name "$top" "$slug")"; last_at="$(date +%s)"
 
   while [ "$i" -lt "$max" ]; do
     i=$((i+1))
@@ -92,7 +95,11 @@ opsx_drive() {
         fi
         # 同階段相鄰兩次送出之間至少隔 poll 秒；階段前進的那一輪不受限
         local gap
-        if [ "$stage" = "$last_stage" ]; then gap=$((poll - ($(date +%s) - last_at))); [ "$gap" -le 0 ] || sleep "$gap"; fi
+        if [ "$stage" = "$last_stage" ]; then
+          gap=$((poll - ($(date +%s) - last_at)))
+          # 睡醒後 agent 的 turn 可能還在跑、階段、gate、歸檔也可能變了：重等 agent 閒下來，回迴圈頂端重算，不送睡前算的站
+          if [ "$gap" -gt 0 ]; then sleep "$gap"; last_at=$(($(date +%s) - poll)); settled=0; continue; fi
+        fi
         say "drive: $slug → /opsx-workflow:$stage"
         local before sent_at; before="$(stage_fingerprint "$top" "$slug")"; sent_at="$(date +%s)"
         herdr_step "$slug" agent prompt "$slug" "/opsx-workflow:$stage $slug" --wait || return 0
@@ -144,8 +151,30 @@ herdr_step() { # <slug> <herdr args…>
       herdr agent wait "$slug" --until working >/dev/null 2>&1 && herdr agent wait "$slug" >/dev/null 2>&1 || sleep "$poll"
       return 0 ;;
     *)
+      # relaunch 讓 claude /exit 的空窗：結束，relaunch 結束時會起新的 drive，不睡完再送階段指令
+      if [ "$code" = agent_not_running ] && drive_relaunching "$DRIVE_REPO" "$slug"; then
+        say "drive: $slug 的 claude 在 relaunch 空窗（agent_not_running，relaunching_at 未過期），結束，relaunch 會起新的 drive"; return 1
+      fi
       say "drive: herdr $1 $2 回 ${code:-$err}，等 $poll 秒"; sleep "$poll"; return 0 ;;
   esac
+}
+
+# dispatch.json 該卡的 relaunching_at 不到 10 分鐘、不晚於現在 1 分鐘（與 coordinate.py 的 RELAUNCH_MINUTES、CLOCK_SKEW_MINUTES 同值）才算 relaunch 進行中。
+# 缺或過期回 1；格式不合在 stderr 印欄位名與原值再回 1（格式由 coordinate 驗證並通知，drive 照沒標記處理）
+drive_relaunching() { # <repo> <slug>
+  [ -f "$OPSX_STATE_DIR/dispatch.json" ] || return 1
+  OPSX_KEY="$1/$2" "$OPSX_PY" -I - "$OPSX_STATE_DIR/dispatch.json" <<'PY'
+import datetime, json, os, sys
+key = os.environ["OPSX_KEY"]
+at = (json.load(open(sys.argv[1])).get(key) or {}).get("relaunching_at")
+if at is None:
+    sys.exit(1)
+try:
+    age = datetime.datetime.now(datetime.timezone.utc) - datetime.datetime.fromisoformat(at)
+except (TypeError, ValueError) as e:
+    sys.exit("drive: %s 的 relaunching_at=%r 不是帶時區的 ISO 8601（%s），當成沒有標記" % (key, at, e))
+sys.exit(0 if datetime.timedelta(minutes=-1) <= age < datetime.timedelta(minutes=10) else 1)
+PY
 }
 
 # agent 的 claude 沒帶這張卡的 --settings（hooks/_lib.sh args_lost_status 判出後留標記）：agent 寫不了檔，階段不會動，
