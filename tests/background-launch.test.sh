@@ -12,8 +12,22 @@ out="$(nohup true 2>&1)"; rc=$?
 assert_eq "$rc" 1 "假 nohup 要失敗"
 assert_eq "$out" "nohup: can't detach from console"
 
-# 程式碼裡不能有 nohup 呼叫（註解不算）
-sites="$(grep -rInwE '^[^#]*nohup' "$OPSX_ROOT/bin" "$OPSX_ROOT/hooks" "$OPSX_ROOT/herdr-board" --exclude-dir=tests || true)"
+# 程式碼裡不能有 nohup 呼叫（註解不算）。
+# bin/lib/cmdsegments.py 不在內：它只解析指令字串，把 nohup 當前綴剝掉，閘門才認得 `nohup git push origin main`，不起程序。
+nohup_sites() { # <根目錄>
+  grep -rInwE '^[^#]*nohup' "$1/bin" "$1/hooks" "$1/herdr-board" --exclude-dir=tests | grep -vF "$1/bin/lib/cmdsegments.py:" || true
+}
+
+# 排除只有 cmdsegments.py 一個檔：別的檔案新增 nohup 呼叫，掃描要紅，而且不指 cmdsegments.py
+SCAN_FX="$FX/scan"; mkdir -p "$SCAN_FX/bin/lib" "$SCAN_FX/hooks" "$SCAN_FX/herdr-board"
+printf 'COMMAND_PREFIXES = ("exec", "nohup")\n' > "$SCAN_FX/bin/lib/cmdsegments.py"
+assert_eq "$(nohup_sites "$SCAN_FX")" "" "只有 cmdsegments.py 含 nohup：掃描要過"
+printf 'nohup drive >> log 2>&1 &\n' > "$SCAN_FX/bin/other.sh"
+fixture_hits="$(nohup_sites "$SCAN_FX")"
+case "$fixture_hits" in *"bin/other.sh:1:"*) ;; *) fail "別的檔案的 nohup 呼叫要被掃到：$fixture_hits" ;; esac
+case "$fixture_hits" in *cmdsegments*) fail "掃描不該指 cmdsegments.py：$fixture_hits" ;; esac
+
+sites="$(nohup_sites "$OPSX_ROOT")"
 [ -z "$sites" ] || fail "這些地方還在用 nohup：
 $sites"
 echo ok
