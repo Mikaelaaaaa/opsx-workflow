@@ -20,7 +20,7 @@ assert_grep "in \`threads-only\` mode, report the conflict and leave the branch 
 # gitlab 為主的 repo 裡 origin 只是鏡像，remote 照 pr 步 1 選
 assert_not_grep "origin/main" "$FX/step5"
 assert_grep "the way the \`pr\` skill's step 1 does" "$FX/step5"
-assert_grep "\`gitlab\` in Agentory-AI and Agentory-Infrastructure, where \`origin\` is only a mirror" "$FX/step5"
+assert_grep "\`gitlab\` in Acmecorp-AI and Acmecorp-Infrastructure, where \`origin\` is only a mirror" "$FX/step5"
 assert_not_grep "report rather than resolve" "$SKILL"
 assert_not_grep "Say which branch needs the rebase" "$SKILL"
 assert_grep "commits and pushes" "$FX/step1"

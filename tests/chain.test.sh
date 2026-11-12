@@ -6,15 +6,15 @@ use_fakes herdr glab
 export OPSX_FAKE_LOG="$FX/fake.log"; : > "$OPSX_FAKE_LOG"
 export OPSX_TEST_GLAB_JSON="$FX/mr.json"
 
-R="$(mk_repo Agentory-AI)"; mk_change "$R" p; mkdir -p "$OPSX_STATE_DIR"
+R="$(mk_repo Acmecorp-AI)"; mk_change "$R" p; mkdir -p "$OPSX_STATE_DIR"
 cd "$R"
 
 # --- 已交接的父卡：merge / answer / stop 都拒絕，訊息說交給誰，不碰 herdr 也不動檔 ---
 P="$R/openspec/changes/p"
-printf '# report\n\n## MR\nhttps://gitlab.tsg-navigator.com/agentory/Agentory-AI/-/merge_requests/431\n' > "$P/report.md"
+printf '# report\n\n## MR\nhttps://gitlab.example.com/acmecorp/Acmecorp-AI/-/merge_requests/431\n' > "$P/report.md"
 printf '## g1\ntype: decision\nstatus: open\n問題: q\n選項: a | b\n' > "$P/gates.md"
 printf '{"state":"opened","draft":false,"has_conflicts":false,"sha":"abc123","head_pipeline":{"status":"success"},"unresolved_discussions_count":0}' > "$OPSX_TEST_GLAB_JSON"
-printf '{"Agentory-AI/p":{"mode":"autopilot","pane":"w5:pQ","agent":"claude","grants":[],"herdr_name":"p","handed_to":["c"],"handed_at":"2026-11-06T15:00:00+08:00"}}' > "$OPSX_STATE_DIR/dispatch.json"
+printf '{"Acmecorp-AI/p":{"mode":"autopilot","pane":"w5:pQ","agent":"claude","grants":[],"herdr_name":"p","handed_to":["c"],"handed_at":"2026-11-06T15:00:00+08:00"}}' > "$OPSX_STATE_DIR/dispatch.json"
 cp "$OPSX_STATE_DIR/dispatch.json" "$FX/disp.before"; cp "$P/gates.md" "$FX/gates.before"
 for cmd in "stop p" "merge p" "answer p --gate g1 a"; do
   : > "$OPSX_FAKE_LOG"
@@ -92,7 +92,7 @@ echo "$out" | grep -q 'dispatch.json' || fail "要說父卡不在 dispatch.json:
 assert_eq "$(cat "$OPSX_FAKE_LOG")" "" "父卡沒派出不碰 herdr"; assert_eq "$(cat "$OPSX_STATE_DIR/dispatch.json")" "{}"
 
 # 父卡派出了，可是 d 還有沒合的依賴、e 是收件匣的卡、f 已經在跑：一張都不接
-printf '{"Agentory-AI/p":{"mode":"autopilot","pane":"w5:pQ","agent":"claude","grants":[],"worktree":"%s","branch":"feat/p/mikaela"},"Agentory-AI/f":{"mode":"autopilot","pane":"w5:pZ","agent":"claude","grants":[]}}' "$R" > "$OPSX_STATE_DIR/dispatch.json"
+printf '{"Acmecorp-AI/p":{"mode":"autopilot","pane":"w5:pQ","agent":"claude","grants":[],"worktree":"%s","branch":"feat/p/mikaela"},"Acmecorp-AI/f":{"mode":"autopilot","pane":"w5:pZ","agent":"claude","grants":[]}}' "$R" > "$OPSX_STATE_DIR/dispatch.json"
 cp "$OPSX_STATE_DIR/dispatch.json" "$FX/disp.before"; : > "$OPSX_FAKE_LOG"
 out="$(opsx chain p 2>&1)"; assert_eq "$?" 0 "沒有子卡可接: $out"
 assert_eq "$(cat "$OPSX_FAKE_LOG")" "" "沒有子卡可接不碰 herdr"
@@ -203,7 +203,7 @@ cd "$R"
 ORIGIN="$FX/origin3.git"; git init -q --bare "$ORIGIN"
 R3="$(mk_repo solo "$ORIGIN")"; git -C "$R3" branch -M main; git -C "$R3" push -q origin main
 printf 'openspec/\n' >> "$R3/.git/info/exclude"    # 跟真的 repo 一樣，openspec/ 不進 git
-# 6.3：像 Agentory-AI 一樣，gitlab 是主要 remote，origin 是落後的鏡像；父卡的合併只在 gitlab 的 main 上
+# 6.3：像 Acmecorp-AI 一樣，gitlab 是主要 remote，origin 是落後的鏡像；父卡的合併只在 gitlab 的 main 上
 git clone -q --bare "$ORIGIN" "$FX/mirror3.git"
 git -C "$R3" remote rename origin gitlab; git -C "$R3" remote add origin "$FX/mirror3.git"
 git clone -q -b main "$ORIGIN" "$FX/pusher3"; git -C "$FX/pusher3" -c user.email=t@t -c user.name=t commit -q --allow-empty -m "merge p"; git -C "$FX/pusher3" push -q origin HEAD:main

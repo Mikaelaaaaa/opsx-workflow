@@ -3,9 +3,9 @@
   "result": {
     "root_pane": {
       "agent_status": "unknown",
-      "cwd": "/Users/mikaela_lin/code/sandbox/opsx-workflow",
+      "cwd": "/Users/dev/code/sandbox/opsx-workflow",
       "focused": false,
-      "foreground_cwd": "/Users/mikaela_lin/code/sandbox/opsx-workflow",
+      "foreground_cwd": "/Users/dev/code/sandbox/opsx-workflow",
       "pane_id": "w1:pE",
       "revision": 0,
       "scroll": {"max_offset_from_bottom": 0, "offset_from_bottom": 0, "viewport_rows": 55},

@@ -5,11 +5,11 @@ source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 H="$OPSX_ROOT/hooks"
 export CLAUDE_PLUGIN_ROOT="$OPSX_ROOT"
 
-R="$(mk_repo Agentory-AI)"
+R="$(mk_repo Acmecorp-AI)"
 mkdir -p "$R/openspec/changes/archive"
 C="$R/openspec/changes/eval-core"; mk_change "$R" eval-core
 printf 'schema: opsx\ncreated: 2026-11-05\nkind: bug-fix\n' > "$C/.openspec.yaml"
-S="$OPSX_STATE_DIR/settings/Agentory-AI-eval-core-autopilot.json"
+S="$OPSX_STATE_DIR/settings/Acmecorp-AI-eval-core-autopilot.json"
 
 # 假 ps：輸出 $OPSX_FAKE_PS，退出碼 $OPSX_FAKE_PS_RC（預設 0）
 mkdir -p "$FX/psbin"
@@ -21,7 +21,7 @@ start() { # <事件> → router 注入的文字。hook 是 bash -c 這個行程�
   local json; json="$(python3 -I -c 'import json,sys;print(json.dumps(dict(cwd=sys.argv[1],prompt="",hook_event_name=sys.argv[2])))' "$R" "$1")"
   PATH="$FX/psbin:$PATH" bash -c 'echo $$ > "$OPSX_FAKE_PS_PID"; printf "%s" "$0" | bash "$1"' "$json" "$H/openspec-router.sh" 2>/dev/null | jq -r '.hookSpecificOutput.additionalContext // ""'
 }
-mode() { mkdir -p "$OPSX_STATE_DIR"; printf '{"Agentory-AI/eval-core":{"mode":"%s"}}' "$1" > "$OPSX_STATE_DIR/dispatch.json"; }
+mode() { mkdir -p "$OPSX_STATE_DIR"; printf '{"Acmecorp-AI/eval-core":{"mode":"%s"}}' "$1" > "$OPSX_STATE_DIR/dispatch.json"; }
 
 mode autopilot
 mkdir -p "$(dirname "$S")"; printf '{}' > "$S"

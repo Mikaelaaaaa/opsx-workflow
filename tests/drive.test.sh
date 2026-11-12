@@ -7,7 +7,7 @@ export PATH="$FX/fakebin:$PATH"
 export OPSX_FAKE_LOG="$FX/herdr.log"; : > "$OPSX_FAKE_LOG"
 export OPSX_DRIVE_POLL=0 OPSX_DRIVE_MAX=20
 
-R="$(mk_repo Agentory-CS)"; C="$R/openspec/changes/retry-backoff"; mkdir -p "$C" "$OPSX_STATE_DIR"
+R="$(mk_repo Acmecorp-CS)"; C="$R/openspec/changes/retry-backoff"; mkdir -p "$C" "$OPSX_STATE_DIR"
 # opsx coordinate 走 fake（記到 kick.log，連同當下 gates.md 有幾個 drive gate），其他子命令照常跑真的
 KL="$FX/kick.log"; : > "$KL"
 cat > "$FX/fakebin/opsx" <<EOF
@@ -21,7 +21,7 @@ EOF
 chmod +x "$FX/fakebin/opsx"
 printf 'schema: opsx\nkind: bug-fix\n' > "$C/.openspec.yaml"
 printf '## 1\n\n- [ ] 1.1 a\n  - 驗收：R1\n  - 測試：t.py\n' > "$C/tasks.md"
-printf '{"Agentory-CS/retry-backoff":{"mode":"drive","pane":"p42","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"
+printf '{"Acmecorp-CS/retry-backoff":{"mode":"drive","pane":"p42","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"
 export OPSX_TEST_GLAB_JSON="$FX/mr.json"
 printf '{"state":"opened","draft":false,"has_conflicts":false,"head_pipeline":{"status":"failed"},"unresolved_discussions_count":1}' > "$OPSX_TEST_GLAB_JSON"
 
@@ -30,7 +30,7 @@ cat > "$FX/on_prompt.sh" <<EOF
 case "\$1" in
   "/opsx-workflow:apply retry-backoff") printf '## 1\n\n- [x] 1.1 a\n' > "$C/tasks.md"; printf '{"phase":"apply","step":8,"total":8,"label":"x","tests":"green","at":"2026-11-05T15:00:00+08:00"}' > "$C/status.json" ;;
   "/opsx-workflow:review retry-backoff") printf '# report\n' > "$C/report.md" ;;
-  "/opsx-workflow:pr retry-backoff") printf '# report\n\n## MR\nhttps://gitlab.tsg-navigator.com/agentory/Agentory-CS/-/merge_requests/431\n' > "$C/report.md" ;;
+  "/opsx-workflow:pr retry-backoff") printf '# report\n\n## MR\nhttps://gitlab.example.com/acmecorp/Acmecorp-CS/-/merge_requests/431\n' > "$C/report.md" ;;
   "/opsx-workflow:babysit retry-backoff") printf '{"state":"opened","draft":false,"has_conflicts":false,"head_pipeline":{"status":"success"},"unresolved_discussions_count":0}' > "$OPSX_TEST_GLAB_JSON" ;;
 esac
 EOF
@@ -116,7 +116,7 @@ EOF
 out="$(OPSX_TEST_ON_WAIT="$FX/on_wait_stop.sh" opsx drive retry-backoff 2>&1)"; assert_eq "$?" 0 "drive stalled: $out"
 assert_eq "$(grep -c '^agent prompt' "$OPSX_FAKE_LOG")" 1 "stalled 一次就該寫 gate: $(cat "$OPSX_FAKE_LOG")"
 assert_grep '^## drive-apply-1$' "$C/gates.md"
-printf '{"Agentory-CS/retry-backoff":{"mode":"drive","pane":"p42","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"
+printf '{"Acmecorp-CS/retry-backoff":{"mode":"drive","pane":"p42","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"
 
 # --- gate 回了但 agent 沒開工（answer 的 prompt 沒送成）：wait 逾時就回頭重讀 gates.md，不永遠卡著 ---
 reset_apply; : > "$FX/perr"
@@ -132,7 +132,7 @@ unset OPSX_TEST_PROMPT_ERR
 
 # --- 送一次 /stage 階段沒動 → 寫 gate（附 pane 最後幾行），照 gate 等；不送第二次 ---
 reset_apply
-printf '{"Agentory-CS/retry-backoff":{"mode":"drive","pane":"p42","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"
+printf '{"Acmecorp-CS/retry-backoff":{"mode":"drive","pane":"p42","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"
 export OPSX_TEST_ON_PROMPT="$FX/noop.sh"; : > "$FX/noop.sh"
 export OPSX_TEST_PANE_TEXT="pane 最後一行：卡住了"
 cat > "$FX/on_wait.sh" <<EOF
@@ -155,7 +155,7 @@ assert_grep '^agent wait retry-backoff --until working --timeout 0$' "$OPSX_FAKE
 assert_not_grep 'opsx stop' "$C/gates.md"   # 選項會變成送給 agent 的按鈕，不能叫 agent 停自己
 unset OPSX_TEST_ON_WAIT OPSX_TEST_PANE_TEXT
 export OPSX_TEST_ON_PROMPT="$FX/on_prompt.sh"
-printf '{"Agentory-CS/retry-backoff":{"mode":"drive","pane":"p42","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"
+printf '{"Acmecorp-CS/retry-backoff":{"mode":"drive","pane":"p42","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"
 
 # --- drive 自己開的 gate 被回答：「重做」才繼續（不再送階段指令，做完後驗一次），其他答案結束並 kick ---
 export OPSX_TEST_ON_PROMPT="$FX/noop.sh"; export OPSX_TEST_PANE_TEXT="pane 尾巴"
@@ -167,7 +167,7 @@ esac
 EOF
 export OPSX_TEST_ON_WAIT="$FX/answer_on_wait.sh"
 answered_run() { # <答案>：卡住的 gate 一開就被答掉
-  reset_apply; printf '{"Agentory-CS/retry-backoff":{"mode":"drive","pane":"p42","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"
+  reset_apply; printf '{"Acmecorp-CS/retry-backoff":{"mode":"drive","pane":"p42","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"
   printf '%s' "$1" > "$FX/answer.txt"; : > "$KL"
   out="$(opsx drive retry-backoff 2>&1)"; assert_eq "$?" 0 "drive gate 答「${1}」: $out"
   assert_eq "$(grep -c '^agent prompt' "$OPSX_FAKE_LOG")" 1 "答「${1}」之後不該再送階段指令: $(cat "$OPSX_FAKE_LOG")"
@@ -189,7 +189,7 @@ case "\$*" in *"--until working"*)
 esac
 EOF
 export OPSX_TEST_ON_WAIT="$FX/answer_and_tick.sh"
-reset_apply; printf '{"Agentory-CS/retry-backoff":{"mode":"drive","pane":"p42","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"
+reset_apply; printf '{"Acmecorp-CS/retry-backoff":{"mode":"drive","pane":"p42","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"
 out="$(opsx drive retry-backoff 2>&1)"; assert_eq "$?" 0 "drive 重做有動: $out"
 if echo "$out" | grep -q "重做 /opsx-workflow:apply 之後階段還是沒動"; then fail "重做後 tasks 動了，不該再寫 gate: $out"; fi
 assert_eq "$(grep -c '^agent prompt' "$OPSX_FAKE_LOG")" 2 "重做有動之後 drive 繼續送階段指令: $(cat "$OPSX_FAKE_LOG")"
@@ -203,7 +203,7 @@ esac
 EOF
 export OPSX_TEST_ON_WAIT="$FX/answer_hook_gate.sh"
 hook_gate_run() { # <答案>：Stop hook 的 gate 一開始就是 open，等 agent 開工時被答掉
-  reset_apply; printf '{"Agentory-CS/retry-backoff":{"mode":"drive","pane":"p42","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"
+  reset_apply; printf '{"Acmecorp-CS/retry-backoff":{"mode":"drive","pane":"p42","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"
   printf '## 卡在接 /apply #1\ntype: decision\nstatus: open\n' > "$C/gates.md"
   printf '%s' "$1" > "$FX/answer.txt"; : > "$KL"
   out="$(opsx drive retry-backoff 2>&1)"; assert_eq "$?" 0 "卡在接 gate 答「${1}」: $out"
@@ -224,7 +224,7 @@ unset OPSX_TEST_ON_WAIT OPSX_TEST_PANE_TEXT
 export OPSX_TEST_ON_PROMPT="$FX/on_prompt.sh"
 
 # --- agent 立刻失敗（送出後階段沒動，pane 尾巴有 API 錯誤）→ 不寫 gate、不立刻重送、退避 poll 秒；再失敗翻倍 ---
-reset_apply; printf '{"Agentory-CS/retry-backoff":{"mode":"drive","pane":"p42","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"
+reset_apply; printf '{"Acmecorp-CS/retry-backoff":{"mode":"drive","pane":"p42","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"
 export OPSX_TEST_ON_PROMPT="$FX/noop.sh" OPSX_TEST_PANE_TEXT="API Error: HTTP 429 rate_limit"
 out="$(PATH="$FX/sleepbin:$PATH" OPSX_DRIVE_POLL=7 OPSX_DRIVE_MAX=1 opsx drive retry-backoff 2>&1)"; assert_eq "$?" 0 "drive 429: $out"
 assert_eq "$(grep -c '^agent prompt' "$OPSX_FAKE_LOG")" 1 "429 尾巴只送一次: $(cat "$OPSX_FAKE_LOG")"
@@ -238,7 +238,7 @@ if [ -f "$C/gates.md" ]; then assert_not_grep '^## drive-' "$C/gates.md"; fi
 unset OPSX_TEST_PANE_TEXT
 # --- 送出後階段沒動，但 pane 顯示背景工作或 subagent 在跑 → 不寫 gate、不重送、睡 poll 秒；輸入框與一般輸出照樣寫 gate ---
 for t in "1 shell / 1 monitor still running" "general-purpose 8m"; do
-  reset_apply; printf '{"Agentory-CS/retry-backoff":{"mode":"drive","pane":"p42","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"
+  reset_apply; printf '{"Acmecorp-CS/retry-backoff":{"mode":"drive","pane":"p42","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"
   export OPSX_TEST_ON_PROMPT="$FX/noop.sh" OPSX_TEST_PANE_TEXT="$t"
   out="$(PATH="$FX/sleepbin:$PATH" OPSX_DRIVE_POLL=7 OPSX_DRIVE_MAX=1 opsx drive retry-backoff 2>&1)"; assert_eq "$?" 0 "drive 背景工作「${t}」: $out"
   assert_eq "$(grep -c '^agent prompt' "$OPSX_FAKE_LOG")" 1 "「${t}」只送一次: $(cat "$OPSX_FAKE_LOG")"
@@ -246,20 +246,20 @@ for t in "1 shell / 1 monitor still running" "general-purpose 8m"; do
   if [ -f "$C/gates.md" ]; then assert_not_grep '^## drive-' "$C/gates.md"; fi
 done
 for t in "❯ " "● Bash(ls) Running…" "Plan 3 steps"; do
-  reset_apply; printf '{"Agentory-CS/retry-backoff":{"mode":"drive","pane":"p42","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"
+  reset_apply; printf '{"Acmecorp-CS/retry-backoff":{"mode":"drive","pane":"p42","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"
   export OPSX_TEST_ON_PROMPT="$FX/noop.sh" OPSX_TEST_PANE_TEXT="$t"
   out="$(PATH="$FX/sleepbin:$PATH" OPSX_DRIVE_POLL=7 OPSX_DRIVE_MAX=1 opsx drive retry-backoff 2>&1)"; assert_eq "$?" 0 "drive 沒有背景工作「${t}」: $out"
   assert_grep '^## drive-apply-1$' "$C/gates.md"
 done
 # 背景工作等過一輪之後仍在跑：不重送階段指令（間隔下限被 --wait 加 sleep 吃掉，只靠它擋不住）
-reset_apply; printf '{"Agentory-CS/retry-backoff":{"mode":"drive","pane":"p42","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"
+reset_apply; printf '{"Acmecorp-CS/retry-backoff":{"mode":"drive","pane":"p42","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"
 export OPSX_TEST_ON_PROMPT="$FX/noop.sh" OPSX_TEST_PANE_TEXT="1 shell / 1 monitor still running"
 out="$(PATH="$FX/sleepbin:$PATH" OPSX_DRIVE_POLL=7 OPSX_DRIVE_MAX=2 opsx drive retry-backoff 2>&1)"; assert_eq "$?" 0 "drive 背景工作兩輪: $out"
 assert_eq "$(grep -c '^agent prompt' "$OPSX_FAKE_LOG")" 1 "背景工作還在跑時第二輪不重送: $(cat "$OPSX_FAKE_LOG")"
 assert_eq "$(grep -c '^sleep 7$' "$OPSX_FAKE_LOG")" 2 "兩輪各等一次: $(cat "$OPSX_FAKE_LOG")"
 if [ -f "$C/gates.md" ]; then assert_not_grep '^## drive-' "$C/gates.md"; fi
 # 背景工作結束（第二次讀 pane 只剩輸入框）而指紋仍沒動：寫 gate，不重送
-reset_apply; printf '{"Agentory-CS/retry-backoff":{"mode":"drive","pane":"p42","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"
+reset_apply; printf '{"Acmecorp-CS/retry-backoff":{"mode":"drive","pane":"p42","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"
 printf '1 shell / 1 monitor still running\n' > "$FX/pane_once"
 export OPSX_TEST_PANE_TEXT="❯ " OPSX_TEST_PANE_ONCE="$FX/pane_once"
 out="$(PATH="$FX/sleepbin:$PATH" OPSX_DRIVE_POLL=7 OPSX_DRIVE_MAX=2 opsx drive retry-backoff 2>&1)"; assert_eq "$?" 0 "drive 背景工作結束: $out"
@@ -307,7 +307,7 @@ assert_grep 'opsx-workflow:review' "$FX/upto_pr.log"; assert_not_grep '^sleep' "
 
 # --- 送一次後有動就不寫 gate：階段、tasks 勾數、status.json 的 at、gate 數各一案（只跑一輪，看送完那刻有沒有 drive gate） ---
 run_once() { # <名稱>：fixture 與 $FX/moved.sh 已備好
-  printf '{"Agentory-CS/retry-backoff":{"mode":"drive","pane":"p42","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"
+  printf '{"Acmecorp-CS/retry-backoff":{"mode":"drive","pane":"p42","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"
   export OPSX_TEST_ON_PROMPT="$FX/moved.sh"
   out="$(OPSX_DRIVE_MAX=1 opsx drive retry-backoff 2>&1)"; assert_eq "$?" 0 "drive 有動($1): $out"
   assert_eq "$(grep -c '^agent prompt' "$OPSX_FAKE_LOG")" 1 "有動($1)只送一次: $(cat "$OPSX_FAKE_LOG")"
@@ -335,14 +335,14 @@ bash "$FX/on_prompt.sh" "\$1"
 EOF
 export OPSX_TEST_ON_PROMPT="$FX/snap.sh"
 out="$(opsx drive retry-backoff 2>&1)"; assert_eq "$?" 0 "drive register: $out"
-assert_eq "$(jq -r '."Agentory-CS/retry-backoff".drive_pid | type' "$FX/snap.json")" number "跑的時候 drive_pid 要是數字"
-assert_eq "$(jq -r '."Agentory-CS/retry-backoff".mode' "$FX/snap.json")" autopilot "drive 要正規化成 autopilot"
-assert_eq "$(jq -r '."Agentory-CS/retry-backoff".drive_pid' "$OPSX_STATE_DIR/dispatch.json")" null "結束後清掉自己的 pid"
+assert_eq "$(jq -r '."Acmecorp-CS/retry-backoff".drive_pid | type' "$FX/snap.json")" number "跑的時候 drive_pid 要是數字"
+assert_eq "$(jq -r '."Acmecorp-CS/retry-backoff".mode' "$FX/snap.json")" autopilot "drive 要正規化成 autopilot"
+assert_eq "$(jq -r '."Acmecorp-CS/retry-backoff".drive_pid' "$OPSX_STATE_DIR/dispatch.json")" null "結束後清掉自己的 pid"
 export OPSX_TEST_ON_PROMPT="$FX/on_prompt.sh"
 
 # --- 已經有一支活著的 drive → 拒絕，不碰 herdr ---
 reset_apply
-printf '{"Agentory-CS/retry-backoff":{"mode":"autopilot","pane":"p42","grants":[],"drive_pid":%s}}' "$$" > "$OPSX_STATE_DIR/dispatch.json"
+printf '{"Acmecorp-CS/retry-backoff":{"mode":"autopilot","pane":"p42","grants":[],"drive_pid":%s}}' "$$" > "$OPSX_STATE_DIR/dispatch.json"
 out="$(opsx drive retry-backoff 2>&1)"; rc=$?
 [ "$rc" -ne 0 ] || fail "活著的 drive_pid 要拒絕: $out"
 echo "$out" | grep -q "$$" || fail "拒絕訊息要有那個 pid: $out"
@@ -352,13 +352,13 @@ assert_eq "$(cat "$OPSX_FAKE_LOG")" "" "拒絕時不該碰 herdr"
 : > "$OPSX_FAKE_LOG"; printf '{}' > "$OPSX_STATE_DIR/dispatch.json"
 out="$(opsx drive retry-backoff 2>&1)"; assert_eq "$?" 0; assert_eq "$(cat "$OPSX_FAKE_LOG")" "" "stopped card 不該碰 herdr"
 echo "$out" | grep -q "不在 dispatch.json" || fail "要說明為什麼結束: $out"
-: > "$OPSX_FAKE_LOG"; printf '{"Agentory-CS/retry-backoff":{"mode":"stopped","pane":"p42","grants":[],"drive_pid":null}}' > "$OPSX_STATE_DIR/dispatch.json"
+: > "$OPSX_FAKE_LOG"; printf '{"Acmecorp-CS/retry-backoff":{"mode":"stopped","pane":"p42","grants":[],"drive_pid":null}}' > "$OPSX_STATE_DIR/dispatch.json"
 out="$(opsx drive retry-backoff 2>&1)"; assert_eq "$?" 0; assert_eq "$(cat "$OPSX_FAKE_LOG")" "" "stopped 的卡不該碰 herdr"
-assert_eq "$(jq -r '."Agentory-CS/retry-backoff".drive_pid' "$OPSX_STATE_DIR/dispatch.json")" null "stopped 的卡不登記 pid"
+assert_eq "$(jq -r '."Acmecorp-CS/retry-backoff".drive_pid' "$OPSX_STATE_DIR/dispatch.json")" null "stopped 的卡不登記 pid"
 
 # --- 跑到一半卡被 /archive 搬走（fixture 沒有 workplan）→ 結束，搬走之後不再送 prompt，不寫 gate ---
 reset_apply
-printf '{"Agentory-CS/retry-backoff":{"mode":"drive","pane":"p42","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"
+printf '{"Acmecorp-CS/retry-backoff":{"mode":"drive","pane":"p42","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"
 mkdir -p "$R/openspec/changes/archive"
 cat > "$FX/archive_on_prompt.sh" <<EOF
 mv "$C" "$R/openspec/changes/archive/2026-11-10-retry-backoff"
@@ -372,7 +372,7 @@ echo "$out" | grep -q "已歸檔" || fail "要說已歸檔: $out"
 # --- 第一輪等 agent settle 的時候卡被搬走（手動掛 drive 時 agent 正在跑 /archive）→ 一個 prompt 都不送 ---
 rm -rf "$R/openspec/changes/archive/2026-11-10-retry-backoff"; mkdir -p "$C"
 printf 'schema: opsx\nkind: bug-fix\n' > "$C/.openspec.yaml"; reset_apply
-printf '{"Agentory-CS/retry-backoff":{"mode":"drive","pane":"p42","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"
+printf '{"Acmecorp-CS/retry-backoff":{"mode":"drive","pane":"p42","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"
 cat > "$FX/archive_on_wait.sh" <<EOF
 mv "$C" "$R/openspec/changes/archive/2026-11-10-retry-backoff"
 EOF
@@ -385,7 +385,7 @@ unset OPSX_TEST_ON_WAIT
 # --- 卡目錄被直接刪掉（archive/ 底下也沒有）→ 同樣結束，訊息不同 ---
 rm -rf "$R/openspec/changes/archive/2026-11-10-retry-backoff"; mkdir -p "$C"
 printf 'schema: opsx\nkind: bug-fix\n' > "$C/.openspec.yaml"; reset_apply
-printf '{"Agentory-CS/retry-backoff":{"mode":"drive","pane":"p42","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"
+printf '{"Acmecorp-CS/retry-backoff":{"mode":"drive","pane":"p42","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"
 printf 'rm -rf "%s"\n' "$C" > "$FX/delete_on_prompt.sh"
 export OPSX_TEST_ON_PROMPT="$FX/delete_on_prompt.sh"
 out="$(opsx drive retry-backoff 2>&1)"; assert_eq "$?" 0 "drive 卡被刪: $out"

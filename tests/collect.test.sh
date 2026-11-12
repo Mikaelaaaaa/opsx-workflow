@@ -56,7 +56,7 @@ EOF
 # x4：MR 全綠、已派出
 D=$(mkcard a x4); printf '## 1\n\n- [x] 1.1 a\n' > "$D/tasks.md"
 printf '{"phase":"pr","step":"5","total":"5","label":"可以合併","tests":"green","at":"2026-11-05T10:00:00+08:00"}' > "$D/status.json"
-printf '# report\n\n## MR\nhttps://gitlab.tsg-navigator.com/agentory/a/-/merge_requests/7\n' > "$D/report.md"
+printf '# report\n\n## MR\nhttps://gitlab.example.com/acmecorp/a/-/merge_requests/7\n' > "$D/report.md"
 # x5：archive；另外塞 3 張更舊的，cap 設 2 時只留最新 2 張
 D="$ROOT/a/openspec/changes/archive/2026-11-01-x5"; mkdir -p "$D"; printf 'schema: opsx\nkind: chore\n' > "$D/.openspec.yaml"; printf '## 一句話\n\n舊的\n' > "$D/inbox.md"
 for i in 1 2 3; do D2="$ROOT/a/openspec/changes/archive/2026-10-0$i-old$i"; mkdir -p "$D2"; printf 'schema: opsx\n' > "$D2/.openspec.yaml"; touch -t "2026100${i}0000" "$D2"; done; touch "$D"
@@ -75,7 +75,7 @@ D=$(mkcard a x9 "關掉的"); printf -- '---\ntype: 功能\nsource: gitlab:a#412
 mkcard b y3 >/dev/null
 # y2：MR pipeline 紅、已派出
 D=$(mkcard b y2); printf '## 1\n\n- [x] 1.1 a\n' > "$D/tasks.md"
-printf '# report\n\n## MR\nhttps://gitlab.tsg-navigator.com/agentory/b/-/merge_requests/8\n' > "$D/report.md"
+printf '# report\n\n## MR\nhttps://gitlab.example.com/acmecorp/b/-/merge_requests/8\n' > "$D/report.md"
 
 printf '[repos]\n"a" = "develop"\n' > "$OPSX_STATE_DIR/workspaces.toml"
 printf '[repos."a"]\npush = true\nmr = false\n' > "$OPSX_STATE_DIR/grants.toml"
@@ -250,7 +250,7 @@ assert_eq "$(q "$(card "$J" r opsx-crlf)" stage)" explore "CRLF 的 opsx 卡要�
 # ---------- 舊卡不查 MR：glab / gh 不被叫，errors 不記它（collect-legacy-mr-errors） ----------
 R3="$FX/code3"; D="$R3/r3/openspec/changes/legacy-mr"; mkdir -p "$R3/r3/.git" "$D"
 printf 'schema: spec-driven\n' > "$D/.openspec.yaml"
-printf '# report\n\n## MR\nhttps://gitlab.tsg-navigator.com/agentory/r3/-/merge_requests/4242\n' > "$D/report.md"
+printf '# report\n\n## MR\nhttps://gitlab.example.com/acmecorp/r3/-/merge_requests/4242\n' > "$D/report.md"
 : > "$FX/glab-empty.json"; : > "$OPSX_FAKE_LOG"
 J="$(OPSX_TEST_GLAB_JSON="$FX/glab-empty.json" OPSX_TEST_GLAB_JSON_BY_IID= opsx collect --root "$R3")"; assert_eq "$?" 0
 [ -z "$(grep -v '^agent list' "$OPSX_FAKE_LOG")" ] || fail "只有舊卡的 repo 不該叫 glab / gh（herdr agent list 除外）：$(cat "$OPSX_FAKE_LOG")"
@@ -336,7 +336,7 @@ printf '%s' "$LE" | grep -q 'rl/bad' || fail "error 要指名 repo/slug：$LE"
 # 慢的是迴圈裡的 mr_json：它比 herdr 早讀，取時點放在迴圈之後的實作會被抓到
 R4="$FX/code4"; D="$R4/r4/openspec/changes/slow-mr"; mkdir -p "$R4/r4/.git" "$D"
 printf 'schema: opsx\ncreated: 2026-11-06\nkind: dev\n' > "$D/.openspec.yaml"; printf '## 一句話\n\n慢\n' > "$D/inbox.md"
-printf '# report\n\n## MR\nhttps://gitlab.tsg-navigator.com/agentory/r4/-/merge_requests/9\n' > "$D/report.md"
+printf '# report\n\n## MR\nhttps://gitlab.example.com/acmecorp/r4/-/merge_requests/9\n' > "$D/report.md"
 SLOW="$FX/slow-bin"; mkdir -p "$SLOW"
 printf '#!/usr/bin/env bash\n[ "$1 $2" = "mr view" ] && sleep 4\nexec bash "%s/tests/fakes/glab" "$@"\n' "$OPSX_ROOT" > "$SLOW/glab"; chmod +x "$SLOW/glab"
 : > "$OPSX_FAKE_LOG"; S="$(date +%s)"
@@ -349,12 +349,12 @@ G="$(printf '%s' "$J" | python3 -I -c 'import datetime,json,sys;print(int(dateti
 ms() { perl -MTime::HiRes=time -e 'printf "%d\n", time * 1000'; }
 R9="$FX/code9"; D9="$R9/r9/openspec/changes/cached-mr"; mkdir -p "$R9/r9/.git" "$D9"
 printf 'schema: opsx\ncreated: 2026-11-10\nkind: dev\n' > "$D9/.openspec.yaml"; printf '## 一句話\n\n快取\n' > "$D9/inbox.md"
-printf '# report\n\n## MR\nhttps://gitlab.tsg-navigator.com/agentory/r9/-/merge_requests/11\n' > "$D9/report.md"
-CACHE9="$OPSX_STATE_DIR/cache/mr-$(printf '%s' "https://gitlab.tsg-navigator.com/agentory/r9/-/merge_requests/11" | shasum | cut -c1-12).json"
+printf '# report\n\n## MR\nhttps://gitlab.example.com/acmecorp/r9/-/merge_requests/11\n' > "$D9/report.md"
+CACHE9="$OPSX_STATE_DIR/cache/mr-$(printf '%s' "https://gitlab.example.com/acmecorp/r9/-/merge_requests/11" | shasum | cut -c1-12).json"
 SLOW2="$FX/slow2-bin"; mkdir -p "$SLOW2"
 printf '#!/usr/bin/env bash\n[ "$1 $2" = "mr view" ] && sleep 2\nexec bash "%s/tests/fakes/glab" "$@"\n' "$OPSX_ROOT" > "$SLOW2/glab"; chmod +x "$SLOW2/glab"
 printf '{"state":"opened","draft":false,"has_conflicts":false,"sha":"new222","head_pipeline":{"status":"success"},"unresolved_discussions_count":0}' > "$FX/glab-new.json"
-OLD9='{"url": "https://gitlab.tsg-navigator.com/agentory/r9/-/merge_requests/11", "state": "ready", "head_sha": "old111", "conditions": null, "blocked_on": null, "error": null, "created_at": null, "merged_at": null}'
+OLD9='{"url": "https://gitlab.example.com/acmecorp/r9/-/merge_requests/11", "state": "ready", "head_sha": "old111", "conditions": null, "blocked_on": null, "error": null, "created_at": null, "merged_at": null}'
 collect9() { PATH="$SLOW2:$PATH" OPSX_MR_CACHE_TTL=60 OPSX_TEST_GLAB_JSON="$FX/glab-new.json" OPSX_TEST_GLAB_JSON_BY_IID= opsx collect --root "$R9"; }
 mkdir -p "$(dirname "$CACHE9")"; printf '%s\n' "$OLD9" > "$CACHE9"; touch -t 202601010000 "$CACHE9"; : > "$OPSX_FAKE_LOG"
 t0="$(ms)"; J="$(collect9)"; assert_eq "$?" 0; elapsed=$(( $(ms) - t0 ))
@@ -471,7 +471,7 @@ agent6() { # <pane> <status> <cwd> [foreground_cwd]
   agent6 w1:p4 idle "$O/.claude/worktrees/cm"; printf ','
   agent6 w1:p5 idle /Users/me/notes; printf ','
   agent6 w1:p6 idle "$O/.claude/worktrees/lv"; printf ','
-  agent6 w1:p7 idle /Users/me/code/gmtc-rag; printf ','
+  agent6 w1:p7 idle /Users/me/code/rag-demo; printf ','
   agent6 w1:p8 working "$O/.claude/worktrees/ar2"; printf ','
   agent6 w1:p9 idle "$O/.claude/worktrees/my-own-session"
   printf '],"type":"agent_list"}}'; } > "$FX/agents6.json"
@@ -726,7 +726,7 @@ pc10() { # <repo> <slug> [frontmatter 行…]：建殼，印目錄
 printf 'schema: opsx\n' > "$R10/r/openspec/changes/archive/2026-11-01-arch-x/.openspec.yaml"
 # m-merge：MR 五條件綠
 D=$(pc10 r m-merge); printf '## 1\n\n- [x] 1.1 a\n' > "$D/tasks.md"
-printf '# report\n\n## MR\nhttps://gitlab.tsg-navigator.com/agentory/r/-/merge_requests/7\n' > "$D/report.md"
+printf '# report\n\n## MR\nhttps://gitlab.example.com/acmecorp/r/-/merge_requests/7\n' > "$D/report.md"
 # m-gate：派出，needs: run 的 gate（純函式說留給人）
 D=$(pc10 r m-gate); printf '## 1\n\n- [ ] 1.1 a\n' > "$D/tasks.md"
 printf '## g1\ntype: decision\nstatus: open\nneeds: run\n問題: 跑 x？\n建議: bash x.sh\n' > "$D/gates.md"
@@ -745,7 +745,7 @@ D=$(pc10 r m-park); printf '## 1\n\n- [ ] 1.1 a\n' > "$D/tasks.md"
 printf '## g1\ntype: decision\nstatus: open\nwaits-on: m-apply\n問題: 等 m-apply\n建議: 等 m-apply 合併後繼續\n' > "$D/gates.md"
 # m-ready-gate：派出、MR 全綠、另有會代答的 gate：照 D3 看 mr.state，算可合併
 D=$(pc10 r m-ready-gate); printf '## 1\n\n- [x] 1.1 a\n' > "$D/tasks.md"
-printf '# report\n\n## MR\nhttps://gitlab.tsg-navigator.com/agentory/r/-/merge_requests/7\n' > "$D/report.md"
+printf '# report\n\n## MR\nhttps://gitlab.example.com/acmecorp/r/-/merge_requests/7\n' > "$D/report.md"
 printf '## g1\ntype: decision\nstatus: open\n問題: 哪個？\n建議: 用 A\n' > "$D/gates.md"
 # m-pr-run：派出、stage pr、needs: run 的 gate：等你排在測試中之前
 D=$(pc10 r m-pr-run); printf '## 1\n\n- [x] 1.1 a\n' > "$D/tasks.md"; printf '# report\n' > "$D/report.md"

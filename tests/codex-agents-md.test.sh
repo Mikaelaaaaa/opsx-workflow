@@ -6,12 +6,12 @@ export CLAUDE_PLUGIN_ROOT="$OPSX_ROOT"
 source "$OPSX_ROOT/bin/lib/rules.sh"
 
 # --- 1.1 router 輸出以 ` · ` 接 rule_autopilot / rule_interactive ---
-R="$(mk_repo Agentory-AI git@gitlab.tsg-navigator.com:agentory/Agentory-AI.git)"
+R="$(mk_repo Acmecorp-AI git@gitlab.example.com:acmecorp/Acmecorp-AI.git)"
 mkdir -p "$R/openspec/changes/eval-core" "$OPSX_STATE_DIR"
 printf 'schema: opsx\ncreated: 2026-11-05\nkind: dev\n' > "$R/openspec/changes/eval-core/.openspec.yaml"
 git -C "$R" checkout -q -b feat/eval-core/mikaela
 router() { # <mode> → additionalContext
-  printf '{"Agentory-AI/eval-core":{"mode":"%s"}}' "$1" > "$OPSX_STATE_DIR/dispatch.json"
+  printf '{"Acmecorp-AI/eval-core":{"mode":"%s"}}' "$1" > "$OPSX_STATE_DIR/dispatch.json"
   python3 -I -c 'import json,sys;print(json.dumps(dict(cwd=sys.argv[1],tool_name="",tool_input={},prompt="下一步",hook_event_name="UserPromptSubmit")))' "$R" \
     | bash "$OPSX_ROOT/hooks/openspec-router.sh" 2>/dev/null | jq -r '.hookSpecificOutput.additionalContext'
 }
@@ -56,16 +56,16 @@ wait_drive() { # <repo> <slug>
   local f="$OPSX_STATE_DIR/drive-$1-$2.log" n=0
   until grep -q '跑滿 [01] 輪' "$f" 2>/dev/null; do n=$((n+1)); [ $n -lt 50 ] || fail "drive 沒在背景起來：$f"; sleep 0.1; done
 }
-D="$(mk_repo Agentory-CS git@gitlab.tsg-navigator.com:agentory/Agentory-CS.git)"
+D="$(mk_repo Acmecorp-CS git@gitlab.example.com:acmecorp/Acmecorp-CS.git)"
 for c in cx cl; do
   mkdir -p "$D/openspec/changes/$c"; printf 'schema: opsx\ncreated: 2026-11-10\nkind: chore\n' > "$D/openspec/changes/$c/.openspec.yaml"
 done
-printf '[repos]\n"Agentory-CS" = "agnetory-ai"\n' > "$OPSX_STATE_DIR/workspaces.toml"
+printf '[repos]\n"Acmecorp-CS" = "agnetory-ai"\n' > "$OPSX_STATE_DIR/workspaces.toml"
 EXCL="$(git -C "$D" rev-parse --path-format=absolute --git-path info/exclude)"
 cd "$D"
 
 out="$(opsx dispatch cx --agent codex --mode autopilot --kind chore 2>&1)" || fail "dispatch codex autopilot: $out"
-wait_drive Agentory-CS cx
+wait_drive Acmecorp-CS cx
 WT="$D/.claude/worktrees/cx"
 assert_file "$WT/AGENTS.md"
 has "$(cat "$WT/AGENTS.md")" "$(rule_autopilot | awk -F' · ' '{ print $1 }')" "worktree 的 AGENTS.md"
@@ -84,10 +84,10 @@ out="$(opsx dispatch cl --agent claude --mode interactive 2>&1)" || fail "dispat
 assert_no_file "$D/.claude/worktrees/cl/AGENTS.md"
 
 # repo 已有 tracked 的 AGENTS.md：原檔不動，寫 AGENTS.override.md
-E="$(mk_repo Agentory-AI git@gitlab.tsg-navigator.com:agentory/Agentory-AI.git)"
+E="$(mk_repo Acmecorp-AI git@gitlab.example.com:acmecorp/Acmecorp-AI.git)"
 printf 'repo-rule-xyz\n' > "$E/AGENTS.md"; git -C "$E" add AGENTS.md; git -C "$E" commit -q -m "add AGENTS.md"
 mkdir -p "$E/openspec/changes/tr"; printf 'schema: opsx\ncreated: 2026-11-10\nkind: chore\n' > "$E/openspec/changes/tr/.openspec.yaml"
-printf '[repos]\n"Agentory-CS" = "agnetory-ai"\n"Agentory-AI" = "agnetory-ai"\n' > "$OPSX_STATE_DIR/workspaces.toml"
+printf '[repos]\n"Acmecorp-CS" = "agnetory-ai"\n"Acmecorp-AI" = "agnetory-ai"\n' > "$OPSX_STATE_DIR/workspaces.toml"
 cd "$E"
 out="$(opsx dispatch tr --agent codex --mode interactive --kind chore 2>&1)" || fail "dispatch codex tracked AGENTS.md: $out"
 TW="$E/.claude/worktrees/tr"

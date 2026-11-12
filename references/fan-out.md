@@ -1,6 +1,6 @@
 # Fan-out: one pane coordinating subagents
 
-When a parent card merges and more than one child card is ready, `opsx chain <parent>` registers every child in `dispatch.json` with `via: <parent>` and `herdr_name: <this pane's herdr name>`, and prints one line per child: `chain: fan out <slug> · <branch> · <kind> · /<stage> · from <remote>/main`. `<remote>` is the repo's primary remote: `gitlab` when it exists (in Agentory-AI and Agentory-Infrastructure `origin` is only the GitHub mirror and can lag behind the merge), otherwise `origin`. From then on this pane does none of the cards itself. It spawns, relays and opens gates.
+When a parent card merges and more than one child card is ready, `opsx chain <parent>` registers every child in `dispatch.json` with `via: <parent>` and `herdr_name: <this pane's herdr name>`, and prints one line per child: `chain: fan out <slug> · <branch> · <kind> · /<stage> · from <remote>/main`. `<remote>` is the repo's primary remote: `gitlab` when it exists (in Acmecorp-AI and Acmecorp-Infrastructure `origin` is only the GitHub mirror and can lag behind the merge), otherwise `origin`. From then on this pane does none of the cards itself. It spawns, relays and opens gates.
 
 ## What goes to a subagent, what stays in the pane
 

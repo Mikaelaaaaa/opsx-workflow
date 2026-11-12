@@ -97,4 +97,3 @@ flowchart LR
 
 - **1.0 全自動**：任一台電腦裝好就能用；卡從收件到 PR 自己跑完，合併留給人。
 - **2.0 Orca**：卡的 worktree 在 Orca IDE 裡開得到，驗證過後執行層從 herdr 換成 Orca。
-- **補 LICENSE**：專案目前沒有授權檔。

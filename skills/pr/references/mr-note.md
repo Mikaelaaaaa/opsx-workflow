@@ -1,6 +1,6 @@
 # MR/PR note 工程規範
 
-來源：`Agentory-AI/.claude/skills/mr-note/SKILL.md`（2026-11-05 版），搬進 opsx 後所有 repo 共用；hook `mr-format-gate.sh` 擋沒照這個格式的 MR。
+來源：`Acmecorp-AI/.claude/skills/mr-note/SKILL.md`（2026-11-05 版），搬進 opsx 後所有 repo 共用；hook `mr-format-gate.sh` 擋沒照這個格式的 MR。
 
 所有對外工程輸出零 buzzword。MR note 給工程師 review、也給 PM 讀業務層。**這個格式是定案的，不要即興發揮成作文。**
 
@@ -79,7 +79,7 @@ glab 常因 token scope 卡 403。可行路徑：push option 開 MR（需該次 
 ```bash
 PAT=$(tr -d '\n\r\t ' < <token檔>)
 curl -sS --request PUT --header "PRIVATE-TOKEN: $PAT" \
-  --url "https://gitlab.tsg-navigator.com/api/v4/projects/<group>%2F<repo>/merge_requests/<iid>" \
+  --url "https://gitlab.example.com/api/v4/projects/<group>%2F<repo>/merge_requests/<iid>" \
   --data-urlencode "description=$(cat <note檔>)" -o /dev/null -w "HTTP %{http_code}\n"
 ```
 

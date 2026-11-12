@@ -49,7 +49,7 @@ init_global() {
 # folder = "01-Projects/inbox"
 '
   write_if_missing "$state/grants.toml" '# 「這個 repo 永遠」那級的授權。每 repo 一個表：push / mr / migrate 三個布林。merge 永遠不可寫。
-# [repos."Agentory-AI"]
+# [repos."Acmecorp-AI"]
 # push = true
 # mr = true
 # migrate = false
@@ -428,7 +428,7 @@ PY
 register_source() { # <top> <name>
   local top="$1" name="$2" f="$OPSX_STATE_DIR/sources.toml" url kind project
   if grep -qF "path = \"$top\"" "$f"; then say "init: sources.toml 已有 $name"; return; fi
-  # Agentory-AI / Infrastructure 的 origin 是 GitHub 鏡像，MR 在名為 gitlab 的 remote；有它就以它為準
+  # Acmecorp-AI / Infrastructure 的 origin 是 GitHub 鏡像，MR 在名為 gitlab 的 remote；有它就以它為準
   url="$(git -C "$top" remote get-url gitlab 2>/dev/null || true)"
   [ -z "$url" ] && url="$(git -C "$top" remote get-url origin 2>/dev/null || true)"
   if [ -z "$url" ]; then say "init: 這個 repo 沒有 remote，sources.toml 不登記（之後加了 remote 再跑一次）"; return; fi

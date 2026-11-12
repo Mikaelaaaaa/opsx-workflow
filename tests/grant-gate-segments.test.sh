@@ -37,13 +37,13 @@ for c in 'git push origin $(git branch --show-current)' 'git push && echo $(date
   out="$(gg "$c")"; assert_eq "$(decision "$out")" allow "涵蓋的命令替換與子 shell 要放行（${c}）: $(reason "$out")"
 done
 # 只有 mr 授權：管線與背景符號緊接在前面的 push、rebase、rm 一樣要授權
-printf '[repos."Agentory-AI"]\npush = false\nmr = false\nmigrate = false\n' > "$OPSX_STATE_DIR/grants.toml"
+printf '[repos."Acmecorp-AI"]\npush = false\nmr = false\nmigrate = false\n' > "$OPSX_STATE_DIR/grants.toml"
 card_grants '["mr"]'
 for c in 'gh pr create --title x; echo |git push' 'gh pr create --title x ||git push origin feat' 'gh pr create --title x &git push' 'gh pr create --title x; echo|rm -rf important' 'gh pr create --title x; git status|git rebase main'; do
   out="$(gg "$c")"; assert_eq "$(decision "$out")" deny "沒授權的類別不能跟著 mr 授權放行（${c}）: $(reason "$out")"
 done
 card_grants '[]'
-printf '[repos."Agentory-AI"]\npush = true\nmr = false\nmigrate = false\n' > "$OPSX_STATE_DIR/grants.toml"
+printf '[repos."Acmecorp-AI"]\npush = true\nmr = false\nmigrate = false\n' > "$OPSX_STATE_DIR/grants.toml"
 
 # 單段指令不需要 settings：沒有 settings 檔也照放行
 rm -f "$SETTINGS"
@@ -53,12 +53,12 @@ out="$(gg 'cd /x && git push')"; assert_eq "$(decision "$out")" allow "cd 與授
 out="$(gg 'git add a.txt && git push')"; assert_eq "$(decision "$out")" deny "讀不到 settings 要擋: $(reason "$out")"
 reason "$out" | grep -qF "$SETTINGS" || fail "deny 要點名 settings 路徑: $(reason "$out")"
 # feature session：dispatch 條目的 herdr_name 是 feature 名，settings 檔在 feature 名之下（dispatch.sh 以 feature 當 slug 寫）
-printf '{"Agentory-AI/eval-core":{"mode":"autopilot","grants":[],"herdr_name":"fsess","feature":"fsess","via":"@fsess"}}' > "$OPSX_STATE_DIR/dispatch.json"
-printf '{"permissions":{"allow":["Bash(git add:*)","Bash(git commit:*)"]}}' > "$OPSX_STATE_DIR/settings/Agentory-AI-fsess-autopilot.json"
+printf '{"Acmecorp-AI/eval-core":{"mode":"autopilot","grants":[],"herdr_name":"fsess","feature":"fsess","via":"@fsess"}}' > "$OPSX_STATE_DIR/dispatch.json"
+printf '{"permissions":{"allow":["Bash(git add:*)","Bash(git commit:*)"]}}' > "$OPSX_STATE_DIR/settings/Acmecorp-AI-fsess-autopilot.json"
 out="$(gg 'git add a.txt && git commit -m x && git push')"; assert_eq "$(decision "$out")" allow "feature session 要用 feature 名找 settings: $(reason "$out")"
 out="$(gg 'git -C . merge origin/main && git push')"; assert_eq "$(decision "$out")" deny "feature session 的 settings 也要擋 allow 外的段"
 # MR 留言不是第二級：有 mr 授權時閘門也不輸出 allow，交給 dontAsk 的 settings 去拒
-printf '[repos."Agentory-AI"]\npush = false\nmr = false\nmigrate = false\n' > "$OPSX_STATE_DIR/grants.toml"
+printf '[repos."Acmecorp-AI"]\npush = false\nmr = false\nmigrate = false\n' > "$OPSX_STATE_DIR/grants.toml"
 card_grants '["mr"]'
 for c in 'gh pr comment 159 --body-file openspec/changes/x/logic-map.md' 'gh pr comment 159 --edit-last --body-file x.md'; do
   out="$(gg "$c")"; assert_eq "$out" "" "MR 留言閘門不放行（${c}）"
