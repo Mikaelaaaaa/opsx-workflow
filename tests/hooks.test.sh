@@ -1241,8 +1241,10 @@ assert_grep '^type: decision$' "$C/gates.md"; assert_grep '^問題: ' "$C/gates.
 assert_eq "$( source "$OPSX_ROOT/bin/lib/stage.sh"; st_open_gates "$C" )" 1 "stop: 自動 gate 被 st_open_gates 數到"
 out="$(KEEP=1 sg)"; assert_eq "$out" "" "stop: 第 5 次放行"
 assert_eq "$(grep -c '^## 卡在接 /propose' "$C/gates.md")" 1 "stop: 不寫第二個 gate"
-# gate 被回答後次數歸零：再擋，不再寫新 gate
+# gate 被回答後：回應答覆的那一輪照擋但不計次，之後次數從 1 算起：再擋，不再寫新 gate
 sed -i.bak 's/^status: open$/status: answered/' "$C/gates.md"; rm -f "$C/gates.md.bak"
+out="$(KEEP=1 sg)"; assert_eq "$(decision "$out")" block "stop: gate 答完的第一輪照擋"
+assert_eq "$(cut -d' ' -f1,2 "$STOP_STATE/Acmecorp-AI-eval-core")" "propose 0" "stop: 答完的第一輪不計次"
 out="$(KEEP=1 sg)"; assert_eq "$(decision "$out")" block "stop: gate 答完後重新擋"
 assert_eq "$(grep -c '^## 卡在接 /propose' "$C/gates.md")" 1 "stop: 答完後第一次擋不寫新 gate"
 # 第二輪擋滿：新 gate 的標題要跟答完的不同，opsx answer 才找得到
@@ -1303,8 +1305,10 @@ assert_eq "$(grep -c '^## 卡在接 /apply' "$C/gates.md")" 1 "stop: 狀態檔�
 # gate 開著時再停（gated 路徑）：放行、不寫第二個、狀態不變
 out="$(KEEP=1 sg)"; assert_eq "$out" "" "stop: gated 後 gate 還開著放行"
 assert_eq "$(cut -d' ' -f1,2,3 "$STOP_STATE/Acmecorp-AI-eval-core")" "apply 3 gated" "stop: gated 狀態保留"
-# 人答完：次數歸零，重新擋，不寫新 gate
+# 人答完：回應答覆的那一輪照擋但不計次，之後從 1 算起，不寫新 gate
 sed -i.bak 's/^status: open$/status: answered/' "$C/gates.md"; rm -f "$C/gates.md.bak"
+out="$(KEEP=1 sg)"; assert_eq "$(decision "$out")" block "stop: gate 答完的第一輪照擋"
+assert_eq "$(cut -d' ' -f1,2 "$STOP_STATE/Acmecorp-AI-eval-core")" "apply 0" "stop: 答完的第一輪不計次"
 out="$(KEEP=1 sg)"; assert_eq "$(decision "$out")" block "stop: gate 答完後 apply 站重新擋"
 assert_eq "$(cut -d' ' -f1,2 "$STOP_STATE/Acmecorp-AI-eval-core")" "apply 1" "stop: 答完後次數從 1 起算"
 assert_eq "$(grep -c '^## 卡在接 /apply' "$C/gates.md")" 1 "stop: 答完後不寫新 gate"
