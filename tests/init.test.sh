@@ -266,7 +266,7 @@ case "$outg" in *"主控 session 用 opsx lead 啟動（它帶 --settings $CO"*)
 case "$outg" in *"用 claude --settings"*) fail "不能再叫人直接跑 claude --settings（起來的協調者沒有 herdr 名）：$outg" ;; esac
 assert_eq "$(printf '%s\n' "$outg" | tail -1)" "init --global: 開協調者：在 herdr pane 跑 opsx lead" "結尾要提示用 opsx lead 開協調者：$outg"
 co_before="$(cat "$CO")"
-assert_eq "$(cj "$CS" sandbox.excludedCommands)" '["gh pr *", "gh issue comment *", "orca *"]' "只排除 gh pr *、gh issue comment * 與 orca *，不是整個 gh *"
+assert_eq "$(cj "$CS" sandbox.excludedCommands)" '["gh pr *", "gh issue comment *", "orca status *", "orca repo list *", "orca repo add *", "orca repo set *", "orca worktree list *", "orca tab create *", "orca terminal read *"]' "只排除 gh pr *、gh issue comment * 與七條 orca 子指令，不是整個 gh * 也不是 orca *"
 assert_eq "$(cj "$CS" sandbox.filesystem.denyWrite)" "[\"$OPSX_STATE_DIR/grants.toml\", \"$OPSX_STATE_DIR/python\", \"$OPSX_STATE_DIR/coordinator-settings.json\"]" "grants.toml、hook 的 interpreter 路徑、主控 session 的設定檔要拒絕沙盒寫入；dispatch.json 不能列（沙盒內的 chain / dispatch 要寫它）"
 assert_eq "$(cj "$CS" sandbox.enabled)" MISSING "不替使用者開關沙盒"
 assert_no_file "$CS.opsx-bak"        # 第一次裝，原檔不存在，沒有東西可備份
@@ -327,14 +327,16 @@ case "$outc" in *"$R"*) ;; *) fail "要印缺的 repo 路徑：$outc" ;; esac
 CLAUDE_CONFIG_DIR="$FX/cc6" opsx init >/dev/null 2>&1 || fail "init in cc6"
 outc="$(HOME="$PYH" CLAUDE_CONFIG_DIR="$FX/cc6" opsx init --check 2>&1)"; assert_eq "$?" 0 "登記後 --check 要過：$outc"
 case "$outc" in *還沒信任*) ;; *) fail "cc6 沒有信任紀錄，--check 要警告：$outc" ;; esac
-# 只缺 orca * 的 settings：--check 指出這一項、exit 1、不改檔
-python3 -I -c 'import json,sys;p=sys.argv[1];d=json.load(open(p));d["sandbox"]["excludedCommands"].remove("orca *");json.dump(d,open(p,"w"))' "$FX/cc6/settings.json"
+# 只缺 orca repo add * 的 settings：--check 指出這一項、exit 1、不改檔；補回後 settings 又齊
+python3 -I -c 'import json,sys;p=sys.argv[1];d=json.load(open(p));d["sandbox"]["excludedCommands"].remove("orca repo add *");json.dump(d,open(p,"w"))' "$FX/cc6/settings.json"
 before="$(cat "$FX/cc6/settings.json")"
-outc="$(HOME="$PYH" CLAUDE_CONFIG_DIR="$FX/cc6" opsx init --check 2>&1)"; rc=$?
-assert_eq "$rc" 1 "缺 orca * 時 --check 要失敗：$outc"
-case "$outc" in *"缺 sandbox.excludedCommands: orca *"*) ;; *) fail "要印缺 orca *：$outc" ;; esac
+outo="$(HOME="$PYH" CLAUDE_CONFIG_DIR="$FX/cc6" opsx init --check 2>&1)"; rc=$?
+assert_eq "$rc" 1 "缺 orca repo add * 時 --check 要失敗：$outo"
+case "$outo" in *"缺 sandbox.excludedCommands: orca repo add *"*) ;; *) fail "要印缺 orca repo add *：$outo" ;; esac
 assert_eq "$(cat "$FX/cc6/settings.json")" "$before" "--check 改了檔"
 CLAUDE_CONFIG_DIR="$FX/cc6" opsx init --global >/dev/null 2>&1 || fail "global re-add orca for cc6"
+python3 -I -c 'import json,sys;e=json.load(open(sys.argv[1]))["sandbox"]["excludedCommands"];assert "orca repo add *" in e,e' "$FX/cc6/settings.json" || fail "init --global 沒把 orca repo add * 補回來"
+assert_eq "$(cj "$CS" sandbox.excludedCommands | grep -c 'orca terminal send\|orca terminal create\|orca orchestration\|"orca \*"')" 0 "寫入類的 orca 子指令與整個 orca * 不進排除清單"
 cd "$FX"
 # pyenv rehash 鎖檔殘留：超過 5 分鐘才報（rc 1、印路徑與 rehash）；剛建立的與不存在的都不提
 case "$outc" in *pyenv*) fail "沒有鎖檔時不該提 pyenv：$outc" ;; esac
