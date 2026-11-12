@@ -27,7 +27,7 @@ R="$(mk_repo Acmecorp-CS)"
 mkdir -p "$R/openspec/changes/retry-backoff"
 printf 'schema: opsx\nkind: bug-fix\n' > "$R/openspec/changes/retry-backoff/.openspec.yaml"
 printf -- '- [ ] 1.1 x\n' > "$R/openspec/changes/retry-backoff/tasks.md"   # 階段 apply
-CARD='{"pane":"w1:pE","tab":"w1:tB","workspace":"agnetory-ai","workspace_id":"w1","agent":"claude","model":"claude-sonnet-5-5","mode":"autopilot","worktree":"/x","kind":"bug-fix","branch":"fix/retry-backoff/mikaela","grants":[],"once":[],"drive_pid":null}'
+CARD='{"pane":"w1:pE","tab":"w1:tB","workspace":"acmecorp-ai","workspace_id":"w1","agent":"claude","model":"claude-sonnet-5-5","mode":"autopilot","worktree":"/x","kind":"bug-fix","branch":"fix/retry-backoff/mikaela","grants":[],"once":[],"drive_pid":null}'
 put_entry Acmecorp-CS/retry-backoff "$CARD"
 export OPSX_TEST_HERDR_AGENTS="$FX/agents.json"
 cd "$R"

@@ -9,7 +9,7 @@ export OPSX_USER=mikaela OPSX_DISPATCH_RETRY_SLEEP=0
 R="$(mk_repo Acmecorp-CS git@gitlab.example.com:acmecorp/Acmecorp-CS.git)"
 mkdir -p "$R/openspec/changes/nr-card" "$OPSX_STATE_DIR"
 printf 'schema: opsx\n' > "$R/openspec/changes/nr-card/.openspec.yaml"
-printf '[repos]\n"Acmecorp-CS" = "agnetory-ai"\n' > "$OPSX_STATE_DIR/workspaces.toml"
+printf '[repos]\n"Acmecorp-CS" = "acmecorp-ai"\n' > "$OPSX_STATE_DIR/workspaces.toml"
 cd "$R"
 
 # pane read 失敗

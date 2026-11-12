@@ -19,7 +19,7 @@ R="$(mk_repo Acmecorp-CS git@gitlab.example.com:acmecorp/Acmecorp-CS.git)"
 mkdir -p "$R/openspec/changes/retry-backoff" "$OPSX_STATE_DIR"
 printf 'schema: opsx\ncreated: 2026-11-05\n' > "$R/openspec/changes/retry-backoff/.openspec.yaml"
 printf '## 已知\n- x\n\n## 待決\n\n## 不做\n' > "$R/openspec/changes/retry-backoff/explore.md"
-printf '[repos]\n"Acmecorp-CS" = "agnetory-ai"\n' > "$OPSX_STATE_DIR/workspaces.toml"   # label，dispatch 用 workspace list 換成 w1
+printf '[repos]\n"Acmecorp-CS" = "acmecorp-ai"\n' > "$OPSX_STATE_DIR/workspaces.toml"   # label，dispatch 用 workspace list 換成 w1
 printf '[repos."Acmecorp-CS"]\npush = true\nmr = false\nmigrate = false\n' > "$OPSX_STATE_DIR/grants.toml"
 
 # --- 邊界：slug 不合法 / 卡不存在 / mode 不對 → rc 2，不碰 herdr ---
@@ -58,11 +58,11 @@ python3 -I -c 'import json,sys;d=json.load(open(sys.argv[1]))["permissions"];ass
 # dispatch.json
 python3 -I -c '
 import json,sys;d=json.load(open(sys.argv[1]))["Acmecorp-CS/retry-backoff"]
-assert d["pane"]=="w1:pE" and d["tab"]=="w1:tB" and d["workspace"]=="agnetory-ai" and d["workspace_id"]=="w1" and d["mode"]=="autopilot" and d["kind"]=="bug-fix" and d["model"]=="claude-sonnet-5-5" and d["agent"]=="claude", d
+assert d["pane"]=="w1:pE" and d["tab"]=="w1:tB" and d["workspace"]=="acmecorp-ai" and d["workspace_id"]=="w1" and d["mode"]=="autopilot" and d["kind"]=="bug-fix" and d["model"]=="claude-sonnet-5-5" and d["agent"]=="claude", d
 assert d["branch"]=="fix/retry-backoff/mikaela" and d["grants"]==[] and d["once"]==[] and d["drive_pid"] is None, d' "$OPSX_STATE_DIR/dispatch.json"   # drive 跑完清掉自己的 pid
 # 另一個 repo 派出同名 slug：herdr 只認名字，會送錯 agent，要拒絕
 R4="$(mk_repo Acmecorp-X)"; mkdir -p "$R4/openspec/changes/retry-backoff"; printf 'schema: opsx\n' > "$R4/openspec/changes/retry-backoff/.openspec.yaml"
-printf '"Acmecorp-X" = "agnetory-ai"\n' >> "$OPSX_STATE_DIR/workspaces.toml"
+printf '"Acmecorp-X" = "acmecorp-ai"\n' >> "$OPSX_STATE_DIR/workspaces.toml"
 out="$(cd "$R4" && opsx dispatch retry-backoff --agent claude --mode autopilot --kind dev 2>&1)"; [ $? -ne 0 ] || fail "同名 slug 要拒絕"
 echo "$out" | grep -q 'Acmecorp-CS/retry-backoff' || fail "要指名撞到哪張: $out"
 last_row() { tail -1 "$R/openspec/changes/retry-backoff/decisions.tsv" | cut -f2-3; }
@@ -74,7 +74,7 @@ assert_not_grep 'gitlab\.example\.com' "$OPSX_FAKE_LOG"
 # --- 同一張卡還在跑就再派：拒絕，說它在哪（herdr 本來就會回 agent_name_taken；板上「指派」按到舊畫面就是這條） ---
 : > "$OPSX_FAKE_LOG"
 out="$(opsx dispatch retry-backoff --agent claude --mode autopilot 2>&1)"; [ $? -eq 2 ] || fail "active card must be refused: $out"
-echo "$out" | grep -q 'agnetory-ai · w1:tB · w1:pE' || fail "要說它在哪: $out"
+echo "$out" | grep -q 'acmecorp-ai · w1:tB · w1:pE' || fail "要說它在哪: $out"
 echo "$out" | grep -q 'opsx stop retry-backoff' || fail "要說怎麼換人: $out"
 assert_eq "$(cat "$OPSX_FAKE_LOG")" "" "拒絕時不碰 herdr"
 
@@ -204,7 +204,7 @@ assert_grep '^agent start rdap-timeout --kind claude --pane w1:pE -- --model cla
 R3="$(mk_repo rag-demo)"; mkdir -p "$R3/openspec/changes/z"; printf 'schema: opsx\n' > "$R3/openspec/changes/z/.openspec.yaml"
 printf '"rag-demo" = "develop"\n' >> "$OPSX_STATE_DIR/workspaces.toml"
 out="$(cd "$R3" && opsx dispatch z --agent claude --mode autopilot --kind dev 2>&1)"; [ $? -ne 0 ] || fail "沒有的 workspace 要失敗"
-echo "$out" | grep -q 'develop' && echo "$out" | grep -q 'agnetory-ai' || fail "要列出現有 label: $out"
+echo "$out" | grep -q 'develop' && echo "$out" | grep -q 'acmecorp-ai' || fail "要列出現有 label: $out"
 assert_grep '^agent prompt rdap-timeout /opsx-workflow:explore rdap-timeout$' "$OPSX_FAKE_LOG"                       # 沒 explore.md → explore
 
 # --- workplan 有 branch 就用它 ---
@@ -369,7 +369,7 @@ assert_not_grep 'Feat-Repo/@fs.*已歸檔' "$OPSX_STATE_DIR/reap.log"
 
 # 人停的成員卡不被撿回（C-human-stop）：m1 人停了，session 重派 --feature 不寫 m1、第一句不是 m1
 python3 -I -c 'import json,sys;p=sys.argv[1];d=json.load(open(p));d["Feat-Repo/m1"]["mode"]="stopped";json.dump(d,open(p,"w"))' "$J"
-sed -i.bak 's/^"Feat-Repo" = .*/"Feat-Repo" = "agnetory-ai"/' "$OPSX_STATE_DIR/workspaces.toml"   # 第一次派新建的 workspace 不在假 herdr 的 workspace list 裡
+sed -i.bak 's/^"Feat-Repo" = .*/"Feat-Repo" = "acmecorp-ai"/' "$OPSX_STATE_DIR/workspaces.toml"   # 第一次派新建的 workspace 不在假 herdr 的 workspace list 裡
 : > "$OPSX_FAKE_LOG"
 out="$(opsx dispatch --feature fs --agent claude --mode autopilot 2>&1)"; assert_eq "$?" 0 "session 重派: $out"
 assert_eq "$(jq -r '."Feat-Repo/m1".mode' "$J")" stopped "人停的 m1 仍是 stopped"

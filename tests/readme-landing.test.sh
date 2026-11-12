@@ -37,7 +37,7 @@ grep -qF "$GIF" "$README" || fail "README 沒引用 $GIF"
 
 # --- Requirement：不外洩也不宣稱授權 ---
 # 禁用字樣拼接寫：這個檔自己不能被下面的追蹤檔掃描命中
-leak='ts''g-navigator|agen''tory|10\.65\.|172\.21\.|59\.120\.|mikaela''_lin|/Users/mikae''la|spar''k[12]|gmt''c'
+leak='ts''g-navigator|agen''tory|10\.65\.|172\.21\.|59\.120\.|mikaela''_lin|/Users/mikae''la|spar''k[12]|gmt''c|agn''etory|192\.168\.|10\.66\.|newre''tail|srv19[0-9]|a60''00|台''鋼'
 ! grep -qiE -- "$leak|/Users/|~/code" "$README" || fail "README 含禁用字樣：$(grep -oiE -- "$leak|/Users/|~/code" "$README" | head -1)"
 for s in 'MIT License' 'Apache License' 'licensed under' 'GPL' 'SPDX-License-Identifier'; do
   ! grep -qiF -- "$s" "$README" || fail "README 宣稱授權：$s"
@@ -55,6 +55,10 @@ grep -qF -- "$(printf '%s\n' "$meta" | sed -n '2p')" "$OPSX_ROOT/LICENSE" || fai
 # --- Requirement：repo 追蹤檔不含公司名、內網主機與個人路徑 ---
 hits="$(git -C "$OPSX_ROOT" grep -niE -- "$leak" -- . ':!docs/assets' | head -20)"
 [ -z "$hits" ] || fail "追蹤檔含禁用字樣：
+$hits"
+# /Users/ 底下只准中性名字（dev、me、you）
+hits="$(git -C "$OPSX_ROOT" grep -noE '/Users/[A-Za-z0-9_.-]+' -- . ':!docs/assets' ':!tests/readme-landing.test.sh' | grep -vE ':/Users/(dev|me|you)$' | head -20)"
+[ -z "$hits" ] || fail "追蹤檔含非中性的 /Users/ 路徑：
 $hits"
 
 # --- Requirement：安裝細節搬到 docs/setup.md 不遺失 ---

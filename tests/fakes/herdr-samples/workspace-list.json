@@ -3,7 +3,7 @@
   "result": {
     "type": "workspace_list",
     "workspaces": [
-      {"active_tab_id": "w1:t8", "agent_status": "working", "focused": false, "label": "agnetory-ai", "number": 1, "pane_count": 8, "tab_count": 8, "workspace_id": "w1"},
+      {"active_tab_id": "w1:t8", "agent_status": "working", "focused": false, "label": "acmecorp-ai", "number": 1, "pane_count": 8, "tab_count": 8, "workspace_id": "w1"},
       {"active_tab_id": "w2:t1", "agent_status": "idle", "focused": false, "label": "rag-demo", "number": 2, "pane_count": 1, "tab_count": 1, "workspace_id": "w2"},
       {"active_tab_id": "w4:t4", "agent_status": "idle", "focused": true, "label": "research", "number": 3, "pane_count": 3, "tab_count": 2, "workspace_id": "w4"}
     ]

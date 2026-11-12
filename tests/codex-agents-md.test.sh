@@ -60,7 +60,7 @@ D="$(mk_repo Acmecorp-CS git@gitlab.example.com:acmecorp/Acmecorp-CS.git)"
 for c in cx cl; do
   mkdir -p "$D/openspec/changes/$c"; printf 'schema: opsx\ncreated: 2026-11-10\nkind: chore\n' > "$D/openspec/changes/$c/.openspec.yaml"
 done
-printf '[repos]\n"Acmecorp-CS" = "agnetory-ai"\n' > "$OPSX_STATE_DIR/workspaces.toml"
+printf '[repos]\n"Acmecorp-CS" = "acmecorp-ai"\n' > "$OPSX_STATE_DIR/workspaces.toml"
 EXCL="$(git -C "$D" rev-parse --path-format=absolute --git-path info/exclude)"
 cd "$D"
 
@@ -87,7 +87,7 @@ assert_no_file "$D/.claude/worktrees/cl/AGENTS.md"
 E="$(mk_repo Acmecorp-AI git@gitlab.example.com:acmecorp/Acmecorp-AI.git)"
 printf 'repo-rule-xyz\n' > "$E/AGENTS.md"; git -C "$E" add AGENTS.md; git -C "$E" commit -q -m "add AGENTS.md"
 mkdir -p "$E/openspec/changes/tr"; printf 'schema: opsx\ncreated: 2026-11-10\nkind: chore\n' > "$E/openspec/changes/tr/.openspec.yaml"
-printf '[repos]\n"Acmecorp-CS" = "agnetory-ai"\n"Acmecorp-AI" = "agnetory-ai"\n' > "$OPSX_STATE_DIR/workspaces.toml"
+printf '[repos]\n"Acmecorp-CS" = "acmecorp-ai"\n"Acmecorp-AI" = "acmecorp-ai"\n' > "$OPSX_STATE_DIR/workspaces.toml"
 cd "$E"
 out="$(opsx dispatch tr --agent codex --mode interactive --kind chore 2>&1)" || fail "dispatch codex tracked AGENTS.md: $out"
 TW="$E/.claude/worktrees/tr"

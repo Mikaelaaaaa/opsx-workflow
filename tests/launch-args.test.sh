@@ -53,7 +53,7 @@ launch_args claude claude-sonnet-5-5 autopilot Acmecorp-AI no-grant "$TOP"
 assert_eq "$(grep -c 'db:migrate' "$SD/settings/Acmecorp-AI-no-grant-autopilot.json")" 0 "沒有 migrate 授權就沒有 migrate 規則"
 printf '[repos.Acmecorp-AI]\nmigrate = true\n' > "$SD/grants.toml"
 launch_args claude claude-sonnet-5-5 autopilot Acmecorp-AI with-grant "$TOP"
-python3 -I -c 'import json,sys;a=json.load(open(sys.argv[1]))["permissions"]["allow"];assert "Bash(pnpm --filter @acmecorp/db run db:migrate:*)" in a and "Bash(pnpm db:migrate:*)" in a,a' "$SD/settings/Acmecorp-AI-with-grant-autopilot.json" || fail "migrate 授權要放行 filter 寫法與原本的 db:migrate"
+python3 -I -c 'import json,sys;a=json.load(open(sys.argv[1]))["permissions"]["allow"];assert "Bash(pnpm --filter * run db:migrate:*)" in a and "Bash(pnpm db:migrate:*)" in a,a' "$SD/settings/Acmecorp-AI-with-grant-autopilot.json" || fail "migrate 授權要放行 filter 寫法與原本的 db:migrate"
 rm -f "$SD/grants.toml"
 
 echo ok
