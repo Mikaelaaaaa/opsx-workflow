@@ -2186,4 +2186,15 @@ ra unknown
 round || fail "via 繞圈也要跑完這一輪：$(cat "$FX/out")"
 assert_grep '^opsx stop ra ' "$OPSX_FAKE_LOG"
 rm -f "$MEMO"; printf '{}' > "$DISP"
+
+# dispatch.json 的條目不是物件（dispatch-entry-shape）：這輪不跑、退出非零，log 點名 key 與型別，不帶 traceback
+for pair in '["x"]|list' '"x"|str' '3|int' 'null|NoneType'; do
+  v="${pair%|*}"; t="${pair#*|}"
+  rm -f "$MEMO"; printf '{"demo/ra":%s}' "$v" > "$DISP"
+  round; rc=$?
+  [ "$rc" -ne 0 ] || fail "條目是 ${t} 要以非零退出：$(cat "$FX/out")"
+  grep -q "demo/ra" "$LOG" && grep -q "$t" "$LOG" || fail "log 要點名 demo/ra 與 ${t}：$(cat "$LOG")"
+  if grep -q Traceback "$FX/out" "$LOG"; then fail "不能帶 traceback：$(cat "$FX/out")"; fi
+done
+rm -f "$MEMO"; printf '{}' > "$DISP"
 echo "coordinate: ok"
