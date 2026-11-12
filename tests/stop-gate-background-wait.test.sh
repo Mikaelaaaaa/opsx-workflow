@@ -117,18 +117,27 @@ rm -rf "$STOP_STATE"; rm -f "$C/gates.md"; : > "$T"
 for i in 1 2 3; do out="$(sg "$T")"; assert_eq "$(decision "$out")" block "gate 前第 $i 次擋"; done
 out="$(sg "$T")"; assert_eq "$out" "" "擋滿後開 gate 放行"
 assert_eq "$(stuck_gates)" 1 "擋滿開一張 gate"
-# gate 寫完立刻被答覆（中間沒有別的 Stop）：答覆那一輪放行一次，不開新 gate
+# gate 寫完立刻被答覆（中間沒有別的 Stop）：答覆那一輪擋停但不計次，不開新 gate
 sed 's/^status: open$/status: answered/' "$C/gates.md" > "$C/gates.md.new" && mv "$C/gates.md.new" "$C/gates.md"
-out="$(sg "$T")"; assert_eq "$out" "" "gate 寫完立刻答覆，那一輪放行一次"
+out="$(sg "$T")"; assert_eq "$(decision "$out")" block "gate 寫完立刻答覆，那一輪仍擋停"
 assert_eq "$(stuck_gates)" 1 "答覆那一輪不開新 gate"
-# 還沒答覆的 gate：維持放行，不再開，答覆後仍然放行一次
+read -r _ n gated _ < "$STOP_STATE/Acmecorp-AI-eval-core"; assert_eq "$n $gated" "0 -" "答覆那一輪不計次"
+# 答覆那一輪指紋變了（有新 commit）：重新從 1 算
+rm -rf "$STOP_STATE"; rm -f "$C/gates.md"
+for i in 1 2 3; do out="$(sg "$T")"; done
+out="$(sg "$T")"
+sed 's/^status: open$/status: answered/' "$C/gates.md" > "$C/gates.md.new" && mv "$C/gates.md.new" "$C/gates.md"
+git -C "$R" commit -q --allow-empty -m "feat: answer turn"
+out="$(sg "$T")"; assert_eq "$(decision "$out")" block "答覆那一輪有新 commit 仍擋停"
+read -r _ n _ < "$STOP_STATE/Acmecorp-AI-eval-core"; assert_eq "$n" 1 "指紋變了從 1 算"
+# 還沒答覆的 gate：維持放行，不再開，答覆後那一輪擋停不計次
 rm -rf "$STOP_STATE"; rm -f "$C/gates.md"
 for i in 1 2 3; do out="$(sg "$T")"; done
 out="$(sg "$T")"; assert_eq "$out" "" "擋滿後開 gate 放行（第二輪）"
 out="$(sg "$T")"; assert_eq "$out" "" "gate open 時放行"
 assert_eq "$(stuck_gates)" 1 "gate open 時不再開"
 sed 's/^status: open$/status: answered/' "$C/gates.md" > "$C/gates.md.new" && mv "$C/gates.md.new" "$C/gates.md"
-out="$(sg "$T")"; assert_eq "$out" "" "答覆那一輪放行一次"
+out="$(sg "$T")"; assert_eq "$(decision "$out")" block "答覆那一輪擋停"
 assert_eq "$(stuck_gates)" 1 "答覆那一輪不開新 gate"
 read -r _ n gated _ < "$STOP_STATE/Acmecorp-AI-eval-core"; assert_eq "$n $gated" "0 -" "答覆那一輪之後次數歸零且不再是 gated"
 # 反例：之後仍不接站，照樣擋 3 次再開下一張

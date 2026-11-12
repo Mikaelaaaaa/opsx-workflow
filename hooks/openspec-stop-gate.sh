@@ -6,7 +6,7 @@
 #   grill / propose / pr / babysit 站該 invoke 下一站而沒有會擋的 open gate；
 #   babysit 站若 forge 說 MR 已合併（workplan 還沒標 merged），下一站改成 /archive。
 # 同一站最多擋 MAX_BLOCKS 次，再停就由這支 hook 寫「卡在接 /<站>」gate 放行；不看 stop_hook_active。
-# 背景工作（Monitor、背景 Bash、背景 subagent）還在跑，或「卡在接」gate 剛答覆的那一輪，都放行且不計次。
+# 背景工作（Monitor、背景 Bash、背景 subagent）還在跑時放行且不計次；「卡在接」gate 剛答覆的那一輪照擋但不計次。
 # 要求檔 §8.5。
 source "$(dirname "${BASH_SOURCE[0]}")/_lib.sh"
 source "$OPSX_ROOT/bin/lib/common.sh"
@@ -220,10 +220,10 @@ if [ "$n" -ge "$MAX_BLOCKS" ]; then
     say_once "[$slug] 停住：連續 ${n} 次沒接 ${want}，已開「卡在接」gate"
     exit 0
   fi
-  if [ "$gated" = gated ]; then   # gate 剛被回答：這一輪是回應它，放行一次不計次，下一輪從 0 重算
+  if [ "$gated" = gated ]; then   # gate 剛被回答：這一輪是回應它，照擋但不計次，下一輪從 1 算起
     printf '%s 0 - %s\n' "$want" "$fp" | opsx_replace "$state"
-    say_once "[$slug] 停住：「卡在接 /${want}」gate 剛答覆，這一輪不計次"
-    exit 0
+    rm -f "$OPSX_STATE_DIR/stop-said/$(repo_name)-$slug"
+    stop_block "$reason"
   fi
   n=0; gated="-"
 fi
