@@ -75,6 +75,12 @@ woken() { # <說明>
 wp merged merged; parked ',"waits_on":"x-pr"'; waiting '"x-pr"'
 round || fail "rc: $(cat "$FX/out")"
 woken "等的那張合併"
+# 通知後 gate 沒人答，下一輪照樣等：不答、不派、不記成已答、不重送通知
+waiting '"x-pr"'
+round || fail "rc: $(cat "$FX/out")"
+assert_eq "$(count '^opsx (answer|dispatch)')" 0 "gate 還開著，下一輪也不答不派：$(cat "$OPSX_FAKE_LOG")"
+assert_eq "$(count '^notification show')" 0 "下一輪不重送通知：$(cat "$OPSX_FAKE_LOG")"
+assert_eq "$(jq -r '._parked."demo/card-a".answered // "none"' "$MEMO")" none "人沒答不記成已答：$(cat "$MEMO")"
 
 # 等的那張在停下前就已合併（parked 記錄的 merged 已含它）：waits-on 的條件已滿足，要喚醒
 wp merged pending; printf '{"_parked":{"demo/card-a":{"at":"2026-11-10T10:00:00+08:00","gate":"g9","merged":["x-pr"],"waits_on":"x-pr"}},"_redispatched":{}}' > "$MEMO"; waiting '"x-pr"'
