@@ -103,7 +103,7 @@ reset_apply; printf 'boom\n' > "$FX/perr"
 mkdir -p "$FX/sleepbin"; printf '#!/usr/bin/env bash\necho "sleep $*" >> "$OPSX_FAKE_LOG"\n' > "$FX/sleepbin/sleep"; chmod +x "$FX/sleepbin/sleep"
 out="$(PATH="$FX/sleepbin:$PATH" OPSX_DRIVE_POLL=1 opsx drive retry-backoff 2>&1)"; assert_eq "$?" 0 "drive generic err: $out"
 echo "$out" | grep -q "回 boom，等 1 秒" || fail "一般錯誤要說碼與退避: $out"
-assert_eq "$(sed -n '/^agent prompt/,$p' "$OPSX_FAKE_LOG" | sed -n 1,3p | tr '\n' '|')" "agent prompt retry-backoff /opsx-workflow:apply retry-backoff --wait|sleep 1|agent prompt retry-backoff /opsx-workflow:apply retry-backoff --wait|" "失敗後先 sleep poll 才再送"
+assert_eq "$(sed -n '/^agent prompt/,$p' "$OPSX_FAKE_LOG" | sed -n 1,3p | tr '\n' '|')" "agent prompt retry-backoff /opsx-workflow:apply retry-backoff --wait|sleep 1|agent wait retry-backoff|" "失敗後先 sleep poll、重等 agent 才再送"
 echo "$out" | grep -q "可以合併" || fail "退避後要照常推進到可以合併: $out"
 
 # --- agent_prompt_stalled：herdr 收下了，算送過；階段沒動照樣寫 gate，不再送 ---
@@ -288,6 +288,30 @@ unset OPSX_TEST_PANE_TEXT
 out="$(PATH="$FX/sleepbin:$PATH" OPSX_DRIVE_POLL=7 OPSX_DRIVE_MAX=3 opsx drive retry-backoff 2>&1)"; assert_eq "$?" 0 "drive babysit 睡完: $out"
 assert_grep '^agent prompt retry-backoff /opsx-workflow:babysit retry-backoff' "$OPSX_FAKE_LOG"
 assert_eq "$(sleep_without_wait)" 0 "babysit 的 sleep 之後要先 agent wait: $(cat "$OPSX_FAKE_LOG")"
+# herdr 回錯誤時 herdr_step 退避睡 poll 秒，睡完也要先重等；迴圈頂端的 wait 失敗不算 settled
+printf '{"Acmecorp-CS/retry-backoff":{"mode":"drive","pane":"p42","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"
+reset_apply; printf 'boom\n' > "$FX/perr"
+out="$(PATH="$FX/sleepbin:$PATH" OPSX_TEST_ON_PROMPT="$FX/noop.sh" OPSX_TEST_PROMPT_ERR="$FX/perr" OPSX_DRIVE_POLL=7 OPSX_DRIVE_MAX=3 opsx drive retry-backoff 2>&1)"; assert_eq "$?" 0 "drive prompt boom: $out"
+echo "$out" | grep -q "回 boom，等 7 秒" || fail "prompt boom 要退避: $out"
+assert_eq "$(sleep_without_wait)" 0 "prompt 回 boom 的退避 sleep 之後要先 agent wait: $(cat "$OPSX_FAKE_LOG")"
+# agent_blocked 之後的 wait 失敗才退避：top wait、間隔下限睡完的 wait 都 ok，第三次（--until working）回 boom
+reset_apply; printf 'agent_blocked\n' > "$FX/perr"; printf 'ok\nok\nboom\n' > "$FX/werr"
+out="$(PATH="$FX/sleepbin:$PATH" OPSX_TEST_ON_PROMPT="$FX/noop.sh" OPSX_TEST_PROMPT_ERR="$FX/perr" OPSX_TEST_WAIT_ERR="$FX/werr" OPSX_DRIVE_POLL=7 OPSX_DRIVE_MAX=3 opsx drive retry-backoff 2>&1)"; assert_eq "$?" 0 "drive blocked 後 wait boom: $out"
+assert_eq "$(grep -A1 '^agent wait retry-backoff --until working$' "$OPSX_FAKE_LOG" | sed -n 2p)" "sleep 7" "blocked 後 wait 失敗要退避: $(cat "$OPSX_FAKE_LOG")"
+assert_eq "$(sleep_without_wait)" 0 "blocked 後 wait 失敗的 sleep 之後要先 agent wait: $(cat "$OPSX_FAKE_LOG")"
+for code in agent_not_running boom; do
+  reset_apply; : > "$FX/perr"; printf '%s\n' "$code" > "$FX/werr"
+  out="$(PATH="$FX/sleepbin:$PATH" OPSX_TEST_ON_PROMPT="$FX/noop.sh" OPSX_TEST_WAIT_ERR="$FX/werr" OPSX_DRIVE_POLL=7 OPSX_DRIVE_MAX=3 opsx drive retry-backoff 2>&1)"; assert_eq "$?" 0 "drive 首輪 wait $code: $out"
+  assert_eq "$(sed -n 2p "$OPSX_FAKE_LOG")" "sleep 7" "首輪 wait $code 要退避: $(cat "$OPSX_FAKE_LOG")"
+  assert_eq "$(sleep_without_wait)" 0 "首輪 wait $code 不算 settled，sleep 之後要先 agent wait: $(cat "$OPSX_FAKE_LOG")"
+  assert_grep '^agent prompt retry-backoff /opsx-workflow:apply retry-backoff --wait$' "$OPSX_FAKE_LOG"
+done
+# agent_blocked 等到 working 又等到 settled：不退避（poll 0 時間隔下限不睡，log 裡的 sleep 只會來自退避）
+reset_apply; printf 'agent_blocked\n' > "$FX/perr"
+out="$(PATH="$FX/sleepbin:$PATH" OPSX_TEST_ON_PROMPT="$FX/noop.sh" OPSX_TEST_PROMPT_ERR="$FX/perr" OPSX_DRIVE_POLL=0 OPSX_DRIVE_MAX=2 opsx drive retry-backoff 2>&1)"; assert_eq "$?" 0 "drive blocked 等到 settled: $out"
+assert_grep '^agent wait retry-backoff --until working$' "$OPSX_FAKE_LOG"
+assert_not_grep '^sleep' "$OPSX_FAKE_LOG"
+: > "$FX/perr"; : > "$FX/werr"
 # --- 同階段相鄰兩次送出之間至少隔 poll 秒（扣掉已經過的時間） ---
 reset_apply; printf '## 1\n\n- [ ] 1.1 a\n- [ ] 1.2 b\n- [ ] 1.3 c\n' > "$C/tasks.md"
 cat > "$FX/tick.sh" <<EOF
