@@ -22,6 +22,12 @@ assert_eq "$(lost claude --settings /state/settings/other.json)" True "帶了別
 assert_eq "$(lost claude --settings "$S.bak")" True "路徑只是前綴相同不算"
 assert_eq "$(lost claude --settings-x "$S")" True "旗標名只是前綴相同不算"
 
+V=/Users/x/.local/share/claude/versions/2.1.322
+assert_eq "$(lost "$V" --model m --settings "$S")" False "argv[0] 是 claude 的版本執行檔、帶了該卡的 settings"
+assert_eq "$(lost "$V" --model m)" True "argv[0] 是 claude 的版本執行檔、沒帶 settings"
+out="$(lost /x/other/versions/1 --settings "$S")"; case "$out" in ERR:*argv\[0\]*/x/other/versions/1*) ;; *) fail "不是 claude 的版本目錄要點名欄位與值：$out" ;; esac
+out="$(lost 2.1.322 --settings "$S")"; case "$out" in ERR:*argv\[0\]*2.1.322*) ;; *) fail "單獨的版本號檔名不算 claude：$out" ;; esac
+
 out="$(lost)"; case "$out" in ERR:*argv*) ;; *) fail "空 argv 要 raise 並點名 argv：$out" ;; esac
 out="$(lost bash --settings "$S")"; case "$out" in ERR:*argv\[0\]*bash*) ;; *) fail "argv[0] 不是 claude 要點名欄位與值：$out" ;; esac
 out="$(lost claude --settings)"; case "$out" in ERR:*--settings*) ;; *) fail "--settings 無值要點名：$out" ;; esac
@@ -51,6 +57,8 @@ for v in ("claude --settings x", ["claude", 3]):
 cli() { printf '%s\n' "$1" | OPSX_LIB="$OPSX_ROOT/bin/lib" python3 -I "$OPSX_ROOT/bin/lib/argslost.py" "$S" 2>"$FX/cli.err"; }
 cli "claude --model m --settings $S"; assert_eq "$?" 0 "CLI 有帶"
 cli "claude --model m"; assert_eq "$?" 1 "CLI 遺失"
+cli "$V --model m --settings $S"; assert_eq "$?" 0 "CLI 版本執行檔有帶"
+cli "$V --model m"; assert_eq "$?" 1 "CLI 版本執行檔遺失"
 cli "node server.js"; assert_eq "$?" 2 "CLI 認不得"
 assert_grep "argv\[0\]" "$FX/cli.err"
 cli ""; assert_eq "$?" 2 "CLI 空輸入"
