@@ -23,9 +23,12 @@ for h in "${want[@]}"; do
   [ "$n" -gt "$last" ] || fail "README 二級標題順序不對：$h"
   last=$n
 done
-grep -qF 'opsx init --global' "$README" || fail "快速開始沒有 opsx init --global"
-grep -qE 'opsx init([^ -]|$)|opsx init$|opsx init `' "$README" || fail "快速開始沒有 opsx init"
-grep -qF 'docs/setup.md' "$README" || fail "README 沒連到 docs/setup.md"
+quick="$(awk '/^## 快速開始/{f=1;next} /^## /{f=0} f' "$README")"
+printf '%s\n' "$quick" | grep -qE '^(bash <plugin root>/bin/)?opsx init --global$' || fail "快速開始沒有 opsx init --global 這一行"
+printf '%s\n' "$quick" | grep -qxF 'opsx init' || fail "快速開始沒有單獨一行 opsx init"
+printf '%s\n' "$quick" | grep -qF 'docs/setup.md' || fail "快速開始沒連到 docs/setup.md"
+printf '%s\n' "$quick" | grep -qF 'openspec' || fail "快速開始前置條件沒提 openspec CLI"
+! grep -qF 'ogulcancelik' "$README" || fail "README 含查無佐證的 herdr 外部連結"
 grep -qF 'references/work-split.md' "$README" || fail "README 沒連到 references/work-split.md"
 
 # --- Requirement：README 引用示範 GIF ---
@@ -43,7 +46,7 @@ awk '/^## 路線圖/{f=1;next} /^## /{f=0} f' "$README" | grep -qF '補 LICENSE'
 
 # --- Requirement：安裝細節搬到 docs/setup.md 不遺失 ---
 assert_file "$SETUP"
-for k in 'templates/settings.opsx.json' 'grants.toml' 'opsx-protected' 'coordinator-settings.json' 'opsx init --check' 'com.opsx.sync' 'opsx drop'; do
+for k in 'templates/settings.opsx.json' 'grants.toml' 'opsx-protected' 'coordinator-settings.json' 'opsx init --check' 'com.opsx.sync' 'opsx drop' 'security-guard.sh' 'claude plugin update' 'openspec'; do
   grep -qF -- "$k" "$SETUP" || fail "docs/setup.md 少了 $k"
 done
 echo ok

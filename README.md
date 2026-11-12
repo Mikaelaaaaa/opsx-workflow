@@ -25,7 +25,7 @@ A Claude Code plugin that runs a change from inbox card to pull request, with a 
 
 ## 快速開始
 
-需要 Claude Code 2.1.275 以上、Python 3.11 以上、[herdr](https://github.com/ogulcancelik/herdr)（看板與派工用）。
+需要 Claude Code 2.1.275 以上（並在 Claude Code 設定開啟沙盒，下面的安全模型靠它）、Python 3.11 以上、openspec CLI（`npm i -g @fission-ai/openspec`）、`gh` 或 `glab`（開 PR 與 MR），看板與派工另外需要 herdr。定時同步與 `opsx coordinate` 的排程只在 macOS（launchd）裝得起來。
 
 ```
 /plugin install opsx-workflow --marketplace Mikaelaaaaa/opsx-workflow
@@ -86,9 +86,9 @@ flowchart LR
 
 ## 安全模型
 
-- agent 在 Claude Code 沙盒內跑，只能寫目前 repo、worktree 與 opsx 狀態目錄。
+- 開啟 Claude Code 沙盒後，agent 在沙盒內跑，只能寫目前 repo、worktree 與 opsx 狀態目錄；opsx 不替你開沙盒。
 - 做到 push、開 MR、遷移資料庫這類事，授權閘門先看你給過什麼授權；沒給就寫成 gate 等你回。
-- 合併核准存在沙盒內寫不到的位置，只有你在沙盒外（終端機或看板）才寫得進去。
+- 合併核准存在沙盒內寫不到的位置，只有你在沙盒外（終端機或看板）才寫得進去（同樣要先開沙盒）。
 - herdr socket 只有協調者 session 連得到，一般 agent 的 herdr 動作走受限的佇列。
 
 細節與已知沒驗證的地方見 [docs/setup.md](docs/setup.md)。
