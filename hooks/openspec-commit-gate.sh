@@ -15,11 +15,13 @@ valued='-C|-c|--git-dir|--work-tree|--namespace|--super-prefix|--config-env|--ex
 opt="(${valued})[[:space:]]+${tok}|--[a-z][a-z-]*(=${tok})?|-[A-Za-z]"
 commit_re="${git_word}(([[:space:]]+(${opt}))*)[[:space:]]+commit([[:space:]]|\$)"
 alias_re="${git_word}([[:space:]]+[^;&|]*)?[[:space:]]-c[[:space:]]+alias\\."
-# 把 commit 寫進 git 設定成別名（git config alias.ci commit）：之後用別名 commit 時骨架裡沒有 commit，閘門看不到，所以設定當下就擋。
-# 別名的值常含空白、會被骨架換成空字串，所以看原指令。
-persist_re="(^|[[:space:];&|(])git[[:space:]]([^;&|]*[[:space:]])?config[[:space:]]([^;&|]*[[:space:]])?alias\\.[[:alnum:]_-]+[=[:space:]]+[\"']?!?(git[[:space:]]+)?commit([[:space:]\"']|\$)"
+# 在 git 設定寫入別名（git config alias.ci …）：別名的值可以用 bash 與 git 的引號、跳脫寫成 commit（com\mit、'c""ommit'、!f() { git commit; }），
+# 之後用別名 commit 時骨架裡沒有 commit，閘門看不到，所以任何別名的寫入在設定當下就擋（--get、--unset、--list 這類讀取與刪除不擋）。
+# 看骨架：commit 訊息之類引號裡只是提到這串字，不是在命令位置，不算
+persist_re='(^|[[:space:];&|(])git[[:space:]]([^;&|]*[[:space:]])?config[[:space:]]([^;&|]*[[:space:]])?alias\.[[:alnum:]_.-]+'
+readonly_re='[[:space:]]--(get|get-all|get-regexp|unset|unset-all|list)([[:space:]]|$)'
 is_alias=0
-[[ "$cmd" =~ $persist_re ]] && is_alias=1
+if [[ "$sk" =~ $persist_re ]] && ! [[ "$sk" =~ $readonly_re ]]; then is_alias=1; fi
 m0=''; opts=''
 if [[ "$sk" =~ $commit_re ]]; then
   m0="${BASH_REMATCH[0]}"; opts="${BASH_REMATCH[3]}"
@@ -51,6 +53,9 @@ while [[ "$rest_cd" =~ $cd_re ]]; do
   check_dir "${BASH_REMATCH[3]}"; cd_dirs+=("${BASH_REMATCH[3]}")
   rest_cd="${rest_cd#*"${BASH_REMATCH[0]}"}"
 done
+# popd 回到哪個目錄要追目錄堆疊，讀不出來
+popd_re='(^|[[:space:];&|(])popd([[:space:];&|)]|$)'
+[[ "$before" =~ $popd_re ]] && bad_dirs="$bad_dirs 'popd'（回到哪個目錄讀不出來）"
 # 依序走過全域選項：-C 的目錄照順序收；--git-dir 與 --work-tree 決定作用的 repo
 c_dirs=()
 gitdir_v=''; wt_v=''
@@ -72,12 +77,19 @@ if [ -z "$bad_dirs" ]; then
   target="$(hook_cwd)"
   for d in "${cd_dirs[@]+"${cd_dirs[@]}"}"; do target="$(join_dir "$target" "$d")"; done
   for d in "${c_dirs[@]+"${c_dirs[@]}"}"; do target="$(join_dir "$target" "$d")"; done
-  if [ -n "$wt_v" ]; then
-    target="$(join_dir "$target" "$wt_v")"
-  elif [ -n "$gitdir_v" ]; then
+  # repo 由 --git-dir 決定（HEAD 在那裡）；只給 --work-tree 不改 repo，仍是 cwd 與 -C 找到的那個
+  if [ -n "$gitdir_v" ]; then
     gd="$(join_dir "$target" "$gitdir_v")"
     case "$gd" in
-      */.git) target="${gd%/.git}" ;;
+      */.git)
+        target="${gd%/.git}"
+        # work-tree 對不上時也要看得到 repo，deny 才出得來
+        ! [ -d "$target" ] || export OPSX_CWD="$target"
+        if [ -n "$wt_v" ]; then
+          wt="$(join_dir "$(hook_cwd)" "$wt_v")"
+          [ "$(cd "$wt" 2>/dev/null && pwd -P)" = "$(cd "$target" 2>/dev/null && pwd -P)" ] \
+            || bad_dirs="$bad_dirs '--work-tree ${wt_v}'（跟 --git-dir 不是同一個 repo）"
+        fi ;;
       *) bad_dirs="$bad_dirs '--git-dir ${gitdir_v}'（不是 <repo>/.git）" ;;
     esac
   fi
