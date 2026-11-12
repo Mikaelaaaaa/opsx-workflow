@@ -24,11 +24,14 @@ confirmed_covers_head() { # <確認的 sha> <HEAD sha>
   [ "$c" = "$2" ] && return 0
   git -C "$cwd" merge-base --is-ancestor "$c" "$2" 2>/dev/null || return 1
   [ -z "$(git -C "$cwd" rev-list --first-parent --no-merges "$c..$2")" ] || return 1
-  # 第一父鏈上的每個 merge commit：它的第二父要已經在某個 remote-tracking 分支裡（合併的是 base 分支，不是本地沒審查過的側枝）
-  local m p2
+  # 第一父鏈上的每個 merge commit：除了第一父，每個父（章魚合併有好幾個）都要已經在某個 remote-tracking 分支裡
+  # （合併的是遠端的分支，不是本地沒審查過的側枝）。
+  # shortcut: [已評估] 只查父在不在某個 remote-tracking 分支，不認是不是 base 分支，也不比對 merge commit 自己的內容（衝突解決時多加的改動）；Stop hook 是流程提醒不是安全邊界（agent 本來就能自己寫 確認: 那一行），要擋刻意繞過時改成父要是 origin/<base> 的祖先、樹要等於 git merge-tree 的結果
+  local m p
   while read -r m; do
-    p2="$(git -C "$cwd" rev-parse "$m^2" 2>/dev/null)" || return 1
-    [ -n "$(git -C "$cwd" branch -r --contains "$p2" 2>/dev/null)" ] || return 1
+    while read -r p; do
+      [ -n "$(git -C "$cwd" branch -r --contains "$p" 2>/dev/null)" ] || return 1
+    done < <(git -C "$cwd" rev-parse "$m^@" 2>/dev/null | tail -n +2)
   done < <(git -C "$cwd" rev-list --first-parent --merges "$c..$2")
   return 0
 }

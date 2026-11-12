@@ -16,7 +16,7 @@ sg() { printf '{"cwd":"%s","stop_hook_active":false}' "$R" | bash "$H/openspec-s
 decision() { [ -z "$1" ] && { echo allow; return; }; printf '%s' "$1" | jq -r '.decision // "allow"'; }
 reason() { printf '%s' "$1" | jq -r '.reason // ""'; }
 
-SHA0="$(git -C "$R" rev-parse HEAD)"
+SHA0="$(git -C "$R" rev-parse HEAD)"; BR="$(git -C "$R" rev-parse --abbrev-ref HEAD)"
 printf '# report\n### 待修（範圍內）\n確認: %s\n' "$SHA0" > "$C/report.md"; touch -t 200001010000 "$C/report.md"
 
 # 確認之後只合併了 base 分支（merge commit，帶進別人的 commit）：不用再 review
@@ -36,6 +36,20 @@ git -C "$R" checkout -q -
 git -C "$R" merge -q --no-ff local-side -m "Merge branch 'local-side'"
 rm -rf "$STOP_STATE"
 out="$(sg)"; assert_eq "$(decision "$out")" block "合併本地側枝要擋"
+case "$(reason "$out")" in */opsx-workflow:review*) ;; *) fail "要叫跑 review：$out" ;; esac
+
+# 章魚合併：第二父在 remote-tracking 分支、第三父是本地側枝，每個非第一父都要查
+NEWSHA="$(git -C "$R" rev-parse HEAD)"
+printf '# report\n### 待修（範圍內）\n確認: %s\n' "$NEWSHA" > "$C/report.md"; touch -t 200001010000 "$C/report.md"
+git -C "$R" checkout -q -b oct-remote "$NEWSHA"
+git -C "$R" commit -q --allow-empty -m "octopus: remote side"
+git -C "$R" update-ref refs/remotes/origin/oct "$(git -C "$R" rev-parse oct-remote)"
+git -C "$R" checkout -q -b oct-local "$NEWSHA"
+git -C "$R" commit -q --allow-empty -m "octopus: unreviewed local side"
+git -C "$R" checkout -q "$BR"
+git -C "$R" merge -q --no-ff -m "Merge branches 'oct-remote' and 'oct-local'" oct-remote oct-local
+rm -rf "$STOP_STATE"
+out="$(sg)"; assert_eq "$(decision "$out")" block "章魚合併帶本地側枝要擋"
 case "$(reason "$out")" in */opsx-workflow:review*) ;; *) fail "要叫跑 review：$out" ;; esac
 
 # 確認之後這個 branch 自己又多一個一般 commit：要再 review
