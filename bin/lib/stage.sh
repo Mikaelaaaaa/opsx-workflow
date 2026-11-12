@@ -22,7 +22,7 @@ st_status_tests() { local d="$1"; [ -f "$d/status.json" ] && jq -r '.tests // "u
 st_review_running() { local d="$1"; [ -f "$d/status.json" ] && jq -e '.phase == "review" and .step < .total' "$d/status.json" >/dev/null 2>&1; }
 # 主殼有子 change 的 subagent 在背景做：子殼名在主殼某個未勾 task 行的編號之後、status.json 的 worker 是 subagent-* 且 step < total、at 在過去 120 分鐘內。
 # 已疊的子殼 status.json 不會更新，所以「未疊」只認主殼 tasks.md 的勾選；收到 DONE 後 session 把子殼 status 寫成 n/n，等疊的時候不算在跑。
-# shortcut: 120 分鐘上限，subagent 死了又沒通知最多多等兩小時；有心跳之後改看心跳
+# shortcut: [已評估] 120 分鐘上限，subagent 死了又沒通知最多多等兩小時；有心跳之後改看心跳
 st_subagent_running() { # <主殼目錄>
   local d="$1" s name now; now="$(date +%s)"
   [ -f "$d/tasks.md" ] || return 1
@@ -169,7 +169,7 @@ stage_name() { local s; s="$(stage_of "$1" "$2")"; printf '%s\n' "${s%% *}"; }
 
 st_gates_total() { [ -f "$1/gates.md" ] || { printf 0; return; }; grep -c '^## ' "$1/gates.md" || true; }
 # drive 送出階段指令前後各取一次，不同就算「有動」：階段、status.json 的 at、tasks 勾數、gate 數。
-# shortcut: 不做每站專屬判斷，漏判只多開一個 gate 給人；status.json 被別的流程刷新時誤判有動，退回照階段繼續送
+# shortcut: [已評估] 不做每站專屬判斷，漏判只多開一個 gate 給人；status.json 被別的流程刷新時誤判有動，退回照階段繼續送
 stage_fingerprint() { # <top> <slug>
   local d="$1/openspec/changes/$2" at=""
   [ ! -f "$d/status.json" ] || at="$(jq -r '.at // ""' "$d/status.json")"

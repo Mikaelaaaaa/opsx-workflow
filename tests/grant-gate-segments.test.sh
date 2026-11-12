@@ -64,4 +64,21 @@ for c in 'gh pr comment 159 --body-file openspec/changes/x/logic-map.md' 'gh pr 
   out="$(gg "$c")"; assert_eq "$out" "" "MR 留言閘門不放行（${c}）"
 done
 card_grants '[]'
+
+# command-gate-bypass：git 與 push 之間夾全域選項，一樣是 push（沒有 push 授權要擋）
+printf '[repos."Acmecorp-AI"]\npush = false\nmr = false\nmigrate = false\n' > "$OPSX_STATE_DIR/grants.toml"
+for c in 'git -C /tmp/r push origin feat/x' 'git -c core.x=1 push origin feat/x' 'git --git-dir=/tmp/r/.git push origin feat/x' 'git --git-dir /tmp/r/.git push origin feat/x' 'git --work-tree=/tmp/r push origin feat/x' 'git --no-pager push origin feat/x' 'git -C /tmp/r -c a=b push origin feat/x'; do
+  out="$(gg "$c")"; assert_eq "$(decision "$out")" deny "沒有 push 授權，夾全域選項的 push 要擋：${c}｜$(reason "$out")"
+  case "$(reason "$out")" in *第二級*) ;; *) fail "要說這是第二級的 push：${c}｜$(reason "$out")" ;; esac
+done
+out="$(gg 'git -C /tmp/r log --oneline')"; assert_eq "$out" "" "夾全域選項的非 push 不出聲"
+out="$(gg 'git -C /tmp/r status && echo push')"; assert_eq "$out" "" "push 字樣只出現在別的指令不算"
+# 有 push 授權：夾全域選項的 push 放行，危險的寫法仍擋（第三級，授權不夠）
+printf '[repos."Acmecorp-AI"]\npush = true\nmr = false\nmigrate = false\n' > "$OPSX_STATE_DIR/grants.toml"
+out="$(gg 'git -C /tmp/r push origin feat/x')"
+printf '%s' "$out" | jq -e '.hookSpecificOutput.permissionDecision=="allow"' >/dev/null || fail "有 push 授權的 -C push 要明說放行（輸出：${out}）"
+for c in 'git -C /tmp/r push --force origin feat' 'git -c core.x=1 push -f origin feat' 'git --git-dir=/tmp/r/.git push --force origin feat' 'git -C /tmp/r push origin main' 'git --no-pager push origin HEAD:main' 'git push --receive-pack=evil origin feat' 'git push --exec=evil origin feat' 'git -C /tmp/r push --all origin' 'git push --mirror origin' "GIT_SSH_COMMAND='sh -c evil' git push origin feat" "git -c core.sshCommand='sh -c evil' push origin feat" "git -c core.sshcommand='sh -c evil' push origin feat" "GIT_SSH=./evil git push origin feat"; do
+  out="$(gg "$c")"; assert_eq "$(decision "$out")" deny "push 授權不夠，危險的寫法要擋：${c}｜$(reason "$out")"
+  case "$(reason "$out")" in *第三級*) ;; *) fail "要說這是第三級：${c}｜$(reason "$out")" ;; esac
+done
 echo "grant-gate-segments ok"

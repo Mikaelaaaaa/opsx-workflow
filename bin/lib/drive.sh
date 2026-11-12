@@ -47,7 +47,7 @@ opsx_drive() {
       continue
     fi
     if [ -n "$watch" ]; then
-      # shortcut: 答案的 prompt 沒送成時 agent 沒動，這裡會多開一個 gate；多一個 gate 給人看，升級時改成答完先確認 agent 開過工
+      # shortcut: [已評估] 答案的 prompt 沒送成時 agent 沒動，這裡會多開一個 gate；多一個 gate 給人看，升級時改成答完先確認 agent 開過工
       local ans wstage; ans="$(gate_field "$d" "$watch" answer)"
       case "$watch" in
         drive-*) wstage="${watch#drive-}"; wstage="${wstage%-*}" ;;
@@ -103,7 +103,7 @@ opsx_drive() {
         else
           case "$(pane_state "$repo" "$slug")" in
             error)
-              # shortcut: 沒有 usage-limit-pause 的重置時間，從 poll 秒起每次翻倍、上限 3600 秒；有那張卡之後改等重置時間
+              # shortcut: [已評估] 沒有 usage-limit-pause 的重置時間，從 poll 秒起每次翻倍、上限 3600 秒；有那張卡之後改等重置時間
               if [ "$backoff" -eq 0 ]; then backoff="$poll"; else backoff=$((backoff * 2 > 3600 ? 3600 : backoff * 2)); fi
               say "drive: $slug 送了 /opsx-workflow:$stage 之後 agent 立刻失敗（pane 尾巴有 API 錯誤），不重送、不寫 gate，退避 $backoff 秒"
               sleep "$backoff" ;;
@@ -159,7 +159,7 @@ pane_tail() { # <repo> <slug>：pane 最後 20 行壓成一行；pane 讀不到�
   herdr pane read "$(dispatch_pane "$1" "$2")" 2>/dev/null | tail -20 | tr '\n' ' ' || true
 }
 pane_state() { # <repo> <slug>：pane 尾巴是 API 錯誤（error）、有背景工作或 subagent 在跑（busy），或都不是（idle）
-  # shortcut: busy 只認 inbox 證據裡見過的兩種畫面，沒在真 pane 上校正過，漏掉的樣式會退回開 gate，有需要再補
+  # shortcut: [已評估] busy 只認 inbox 證據裡見過的兩種畫面，沒在真 pane 上校正過，漏掉的樣式會退回開 gate，有需要再補
   case "$(pane_tail "$1" "$2")" in
     *rate_limit*|*"Usage limit reached"*|*"HTTP 429"*|*"API Error"*) echo error ;;
     *"still running"*|*"general-purpose "[0-9]*) echo busy ;;

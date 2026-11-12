@@ -130,6 +130,7 @@ class Round:
         for k in ("_parked", "_redispatched", "_notified", "_limit_stuck", "_relaunched"):
             self.memo.setdefault(k, {})   # 沒有這個 key 就是還沒記過任何一張
         self.dispatch_file = read_json(os.path.join(self.state, "dispatch.json"), "dispatch.json")
+        check_dispatch_entries(self.dispatch_file)
         self.stages = {card_key(c): c["stage"] for c in data["cards"]}
         return data
 
@@ -1083,6 +1084,15 @@ def read_json(path, what):
         return json.loads(text or "{}")
     except json.JSONDecodeError as e:
         raise CoordinateError("%s（%s）不是合法 JSON：%s" % (what, path, e)) from e
+
+
+def check_dispatch_entries(entries):
+    """dispatch.json 是 {<repo>/<slug>: 條目物件}；別的形狀讓後面每個 .get() 都丟 AttributeError，所以載入時就點名 key 與型別。"""
+    if not isinstance(entries, dict):
+        raise CoordinateError("dispatch.json 要是 JSON 物件，拿到 %s" % type(entries).__name__)
+    for key, entry in entries.items():
+        if not isinstance(entry, dict):
+            raise CoordinateError("dispatch.json 的條目 %s 要是 JSON 物件，拿到 %s：%s" % (key, type(entry).__name__, json.dumps(entry, ensure_ascii=False)[:100]))
 
 
 def read_features(path):

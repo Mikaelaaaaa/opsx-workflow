@@ -115,7 +115,7 @@ class Reaper:
             return
         rc, _, err = run(["herdr", "pane", "close", o["pane"]])
         if rc != 0:
-            # shortcut: 任何失敗都當 pane 已不在，spec 這樣定；錯誤文字留在 log，之後若出現關不掉的真錯誤再分碼
+            # shortcut: [已評估] 任何失敗都當 pane 已不在，spec 這樣定；錯誤文字留在 log，之後若出現關不掉的真錯誤再分碼
             text += "；herdr 回錯，當作 pane 已不在：%s" % err[:120]
         key = "%s/%s" % (o["repo"], o["slug"])
         jsonfile.update(self.dispatch_path, MarkReaped(key, now_iso()))

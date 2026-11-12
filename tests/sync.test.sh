@@ -20,51 +20,73 @@ assert m and m[1]==new, (new,text)
 print("\t".join([m[1],m[2],m[3],m[4],m[5] or ""]))'; }
 
 # ========== debt ==========
+# shortcut 註解不開卡：sync 寫 <state>/debt.json 快照，看板只顯示各 repo 的數量與清單（specs/debt-board-count、debt-scan-ack）
+SNAP="$OPSX_STATE_DIR/debt.json"
+debt_of() { python3 -I -c 'import json,sys;print(json.dumps(json.load(open(sys.argv[1])).get(sys.argv[2], []),ensure_ascii=False,sort_keys=True))' "$SNAP" "$1"; }
+files_of() { python3 -I -c 'import json,sys;print(sorted(h["file"] for h in json.load(open(sys.argv[1]))["a"]))' "$SNAP"; }
 COMMENT='單 worker, 跑第二個 instance 時改 redis'
-H="$(printf '%s' "$COMMENT" | shasum -a 1 | cut -c1-8)"
 { for i in 1 2 3 4 5 6 7 8 9; do echo "x = $i"; done; echo "# shortcut: $COMMENT"; } > "$A/x.py"
+# 先放一張舊的 debt 卡：sync 不能動它（清掉是使用者以 opsx drop 做的）
+mkdir -p "$CH/debt-old1"; printf 'schema: opsx\n' > "$CH/debt-old1/.openspec.yaml"
+printf -- '---\nsource: shortcut:a:x.py:abcd1234\nline: 3\n---\n\n## 一句話\n\n舊的\n' > "$CH/debt-old1/inbox.md"
+old_sum="$(shasum "$CH/debt-old1/inbox.md")"
 
-# --- 新的 shortcut 註解 · 只跑一個來源 ---
+# --- 新的 shortcut 註解 · 只跑一個來源：寫快照，不開卡 ---
 out="$(sync_debt 2>&1)"; assert_eq "$?" 0 "sync: $out"
-D="$CH/debt-$H"; I="$D/inbox.md"
-assert_file "$I"; assert_grep '^schema: opsx$' "$D/.openspec.yaml"
-assert_grep "^source: shortcut:a:x.py:$H\$" "$I"; assert_grep '^type: 技術債$' "$I"; assert_grep '^line: 10$' "$I"
-assert_grep '^limit: 單 worker$' "$I"; assert_grep '^trigger: 跑第二個 instance 時改 redis$' "$I"
-assert_grep "^$COMMENT\$" "$I"
+assert_eq "$(debt_of a)" '[{"comment": "單 worker, 跑第二個 instance 時改 redis", "file": "x.py", "limit": "單 worker", "line": 10, "trigger": "跑第二個 instance 時改 redis"}]'
+assert_eq "$(cards)" "$CH/debt-old1" "debt 來源不能開新卡"
+assert_eq "$(shasum "$CH/debt-old1/inbox.md")" "$old_sum" "既有的 debt 卡不動（不標 stale）"
 assert_eq "$(cat "$OPSX_FAKE_LOG")" "" "--source debt 不呼叫 glab、gh"
 
 # --- 一次同步一行：at、created、updated、unchanged、errors、first_error ---
 assert_eq "$(awk -F'\t' '$2=="sync"' "$LOG" | wc -l | tr -d ' ')" 1 "一次同步一列 sync"
 assert_eq "$(awk -F'\t' '$2=="debt"' "$LOG" | wc -l | tr -d ' ')" 1 "debt.sh 自己的掃描列照舊"
-assert_eq "$(logcols)" "$(printf '1\t0\t0\t0\t')"
+assert_eq "$(logcols)" "$(printf '0\t0\t0\t0\t')"
 lastsync | cut -f1 | grep -qE '^20[0-9]{2}-[0-9]{2}-[0-9]{2}T[0-9:]{8}[+-][0-9]{2}:[0-9]{2}$' || fail "ts 要 ISO 8601 含時區：$(lastsync)"
 
-# --- 重跑不長新卡 ---
-before="$(cards)"; sync_debt >/dev/null 2>&1
-assert_eq "$(cards)" "$before"; assert_eq "$(logcols)" "$(printf '0\t0\t1\t0\t')"
+# --- 重跑：快照一樣，不長卡 ---
+before="$(cat "$SNAP")"; sync_debt >/dev/null 2>&1
+assert_eq "$(cat "$SNAP")" "$before"; assert_eq "$(cards)" "$CH/debt-old1"
 
-# --- 行號漂移：同一張卡，line 改了 ---
+# --- 行號漂移：快照的 line 跟著變 ---
 { printf 'a\nb\nc\nd\n'; cat "$A/x.py"; } > "$FX/x.py"; mv "$FX/x.py" "$A/x.py"
 sync_debt >/dev/null 2>&1
-assert_eq "$(cards)" "$before"; assert_grep '^line: 14$' "$I"; assert_not_grep '^line: 10$' "$I"
-assert_eq "$(logcols)" "$(printf '0\t1\t0\t0\t')"
+assert_eq "$(python3 -I -c 'import json,sys;print(json.load(open(sys.argv[1]))["a"][0]["line"])' "$SNAP")" 14
 
-# --- 註解被刪：stale: true，卡還在；再出現就拿掉 ---
+# --- 註解被刪：離開快照 ---
 grep -v shortcut "$A/x.py" > "$FX/x.py"; mv "$FX/x.py" "$A/x.py"
 sync_debt >/dev/null 2>&1
-assert_dir "$D"; assert_grep '^stale: true$' "$I"; assert_eq "$(logcols)" "$(printf '0\t1\t0\t0\t')"
-sync_debt >/dev/null 2>&1; assert_eq "$(logcols)" "$(printf '0\t0\t0\t0\t')" "已標 stale 的不重複算更新"
-echo "# shortcut: $COMMENT" >> "$A/x.py"
-sync_debt >/dev/null 2>&1
-assert_not_grep '^stale:' "$I"; assert_grep '^line: 14$' "$I"
+assert_eq "$(debt_of a)" '[]' "註解刪掉後離開快照"
 
-# --- 已歸檔的卡也算：不新建，也不改歸檔的卡 ---
-mkdir -p "$CH/archive"; mv "$D" "$CH/archive/2026-11-01-debt-$H"
-cp "$CH/archive/2026-11-01-debt-$H/inbox.md" "$FX/archived.md"
-grep -v shortcut "$A/x.py" > "$FX/x.py"; { cat "$FX/x.py"; echo "# shortcut: $COMMENT"; } > "$A/x.py"
+# --- 夾具字串與已評估標記不進快照；行首與行尾的真註解照進（debt-scan-ack）---
+FIXTURE='夾具字串, 不該進'; REAL='行首註解, 該進'; ACK='[已評估] 已標記, 不該進'; TRAIL='行尾註解, 該進'
+printf '%s\n' "echo \"# shortcut: $FIXTURE\" > y.py" > "$A/f1.sh"
+printf '%s\n' "# shortcut: $REAL" > "$A/f2.py"
+printf '%s\n' "# shortcut: $ACK" > "$A/f3.py"
+printf '%s\n' "x = 1  # shortcut: $TRAIL" > "$A/f4.py"
 sync_debt >/dev/null 2>&1
-assert_eq "$(cards)" "" "已歸檔的 source 不能再建殼"
-assert_eq "$(cat "$CH/archive/2026-11-01-debt-$H/inbox.md")" "$(cat "$FX/archived.md")" "歸檔的卡不動"
+assert_eq "$(files_of)" "['f2.py', 'f4.py']" "只有行首與行尾的真註解進快照"
+# 註解改成帶標記：離開快照
+printf '%s\n' "# shortcut: [已評估] $REAL" > "$A/f2.py"
+sync_debt >/dev/null 2>&1
+assert_eq "$(files_of)" "['f4.py']" "改成已評估標記後離開快照"
+# 字串後面的行尾註解照進快照（標記前的引號成對）；標記本身在字串裡的不進
+printf '%s\n' 'URL = "http://10.0.0.1"  # shortcut: 字串後面的註解, 該進' > "$A/f6.py"
+printf '%s\n' "log.info('start')  # shortcut: 單引號字串後面, 該進" > "$A/f7.py"
+printf '%s\n' "print('# shortcut: 在字串裡, 不該進')" > "$A/f8.py"
+printf '%s\n' 'msg = "can'"'"'t connect"  # shortcut: 雙引號裡有撇號, 該進' > "$A/f9.py"
+printf '%s\n' "fn f(x: &'a str) // shortcut: Rust 生命週期的單引號, 該進" > "$A/f10.rs"
+printf '%s\n' 'q = "a \" b"  # shortcut: 跳脫的雙引號, 該進' > "$A/f11.py"
+sync_debt >/dev/null 2>&1
+assert_eq "$(files_of)" "['f10.rs', 'f11.py', 'f4.py', 'f6.py', 'f7.py', 'f9.py']" "字串後面的真註解進快照，標記在字串裡的不進"
+: > "$A/f6.py"; : > "$A/f7.py"; : > "$A/f8.py"; : > "$A/f9.py"; : > "$A/f10.rs"; : > "$A/f11.py"
+: > "$A/f1.sh"; : > "$A/f2.py"; : > "$A/f3.py"; : > "$A/f4.py"
+
+# --- debt.json 是 symlink：換成一般檔，目標不變 ---
+printf 'keep me\n' > "$FX/victim-snap"; mv -f "$SNAP" "$FX/snap-old"; ln -s "$FX/victim-snap" "$SNAP"
+sync_debt >/dev/null 2>&1
+assert_eq "$(cat "$FX/victim-snap")" "keep me" "debt.json 是 symlink 時不能寫到目標"
+[ ! -L "$SNAP" ] || fail "debt.json 要換成一般檔"
 
 # --- 不合格的來源 ---
 assert_rc 2 opsx sync --root "$ROOT" --source customer
@@ -89,29 +111,6 @@ case "$err" in *sync.lock*) ;; *) fail "訊息要含 sync.lock：$err" ;; esac
 assert_eq "$(cat "$FX/victim")" "keep me" "sync.lock 不能被改"
 rm -f "$OPSX_STATE_DIR/sync.lock"
 
-# --- inbox.md 改寫（update_debt、mark_stale）：inbox.md 是 symlink → 換成一般檔，目標不變 ---
-printf -- '---\nsource: shortcut:x:1\nline: 1\n---\n\n## 一句話\n\nx\n' > "$FX/victim-inbox.md"
-cp "$FX/victim-inbox.md" "$FX/victim-inbox.before"
-ln -s "$FX/victim-inbox.md" "$FX/inbox-link.md"
-python3 -I -c '
-import pathlib, sys
-sys.path.insert(0, sys.argv[1]); import sync
-p = pathlib.Path(sys.argv[2])
-assert sync.update_debt({"path": p}, {"extra": {"line": "9"}})
-' "$OPSX_ROOT/bin/lib" "$FX/inbox-link.md" || fail "update_debt rc"
-cmp -s "$FX/victim-inbox.md" "$FX/victim-inbox.before" || fail "update_debt 不能寫到 symlink 的目標：$(cat "$FX/victim-inbox.md")"
-[ ! -L "$FX/inbox-link.md" ] || fail "update_debt 要把 symlink 換成一般檔"
-assert_grep '^line: 9$' "$FX/inbox-link.md"
-rm -f "$FX/inbox-link.md"; ln -s "$FX/victim-inbox.md" "$FX/inbox-link.md"
-python3 -I -c '
-import pathlib, sys
-sys.path.insert(0, sys.argv[1]); import sync
-p = pathlib.Path(sys.argv[2])
-sync.mark_stale({"shortcut:x:1": {"frozen": False, "path": p}}, set(), {"x"}, sync.Tally())
-' "$OPSX_ROOT/bin/lib" "$FX/inbox-link.md" || fail "mark_stale rc"
-cmp -s "$FX/victim-inbox.md" "$FX/victim-inbox.before" || fail "mark_stale 不能寫到 symlink 的目標"
-assert_grep '^stale: true$' "$FX/inbox-link.md"
-rm -f "$FX/inbox-link.md"
 # ========== gitlab / github ==========
 CS="$(mk_opsx_repo Acmecorp-CS)"; mv "$CS" "$ROOT/Acmecorp-CS"; CS="$(cd "$ROOT/Acmecorp-CS" && pwd -P)"
 B="$(mk_opsx_repo b)"; mv "$B" "$ROOT/b"; B="$(cd "$ROOT/b" && pwd -P)"
@@ -121,12 +120,14 @@ cat > "$OPSX_STATE_DIR/sources.toml" <<EOF
 kind = "gitlab"
 repo = "a"
 project = "g/a"
+assignee = "mika"
 path = "$A"
 
 [[source]]
 kind = "gitlab"
 repo = "Acmecorp-CS"
 project = "acmecorp/acmecorp-cs"
+assignee = "mika"
 path = "$CS"
 
 [[source]]
@@ -160,6 +161,19 @@ GI="$Z/openspec/changes/gh-z-3/inbox.md"
 assert_grep '^source: github:z#3$' "$GI"; assert_grep '^type: 功能$' "$GI"; assert_grep '^upstream_url: https://github.com/me/z/issues/3$' "$GI"
 assert_eq "$(find "$B/openspec/changes" -mindepth 1 -maxdepth 1 ! -name archive | wc -l | tr -d ' ')" 0 "沒登記在 sources.toml 的 repo 不撈"
 assert_eq "$(grep -c '^issue list' "$OPSX_FAKE_LOG")" 3 "兩個 gitlab、一個 github 各 list 一次：$(cat "$OPSX_FAKE_LOG")"
+# gitlab 來源用 sources.toml 的 assignee，不用 @me（@me 要打 /user，token 要有 User: Read；gitlab-assignee-source）
+assert_eq "$(grep -c -- '--assignee=mika' "$OPSX_FAKE_LOG")" 2 "兩個 gitlab 來源各帶 --assignee=mika：$(cat "$OPSX_FAKE_LOG")"
+assert_eq "$(grep '^issue list' "$OPSX_FAKE_LOG" | grep -c '@me')" 1 "只有 github 還用 @me"
+# 沒設 assignee 的 gitlab 來源：不呼叫 glab，sync 的錯誤訊息點名 assignee 與 sources.toml；其他來源照跑
+cp "$OPSX_STATE_DIR/sources.toml" "$FX/sources.bak"
+printf '\n[[source]]\nkind = "gitlab"\nrepo = "noasg"\nproject = "g/noasg"\npath = "%s"\n' "$FX/elsewhere" >> "$OPSX_STATE_DIR/sources.toml"
+: > "$OPSX_FAKE_LOG"
+opsx sync --root "$ROOT" --source gitlab >/dev/null 2>&1
+assert_eq "$(grep -c 'g/noasg' "$OPSX_FAKE_LOG" || true)" 0 "沒設 assignee 不能呼叫 glab：$(cat "$OPSX_FAKE_LOG")"
+assert_eq "$(grep -c -- '--assignee=mika' "$OPSX_FAKE_LOG")" 2 "其他 gitlab 來源照跑"
+lastsync | grep -q 'assignee' || fail "sync.log 的錯誤要點名 assignee：$(lastsync)"
+lastsync | grep -q 'sources.toml' || fail "sync.log 的錯誤要說去 sources.toml 設：$(lastsync)"
+cp "$FX/sources.bak" "$OPSX_STATE_DIR/sources.toml"
 
 # --- 重跑不長新卡 ---
 snap_all() { find "$A/openspec/changes" "$CS/openspec/changes" "$Z/openspec/changes" -mindepth 1 -maxdepth 1 | sort; }
@@ -201,12 +215,9 @@ assert_not_grep '^upstream:' "$I"
 
 # --- 一個來源失敗：其他照建，sync.log 記錯，退出 0 ---
 touch "$OPSX_TEST_ISSUES/a.fail"
-NEW_DEBT='第二個 worker, 量大再拆'; echo "# shortcut: $NEW_DEBT" > "$A/y.py"
-ND="$CH/debt-$(printf '%s' "$NEW_DEBT" | shasum -a 1 | cut -c1-8)"
 printf '[{"number":4,"title":"新的","body":"","state":"OPEN","updatedAt":"2026-11-06T08:00:00Z","url":"https://github.com/me/z/issues/4","labels":[]}]' > "$OPSX_TEST_ISSUES/gh-z.json"
 out="$(opsx sync --root "$ROOT" 2>&1)"; assert_eq "$?" 0 "一個來源失敗仍退出 0：$out"
 assert_file "$Z/openspec/changes/gh-z-4/inbox.md"
-assert_file "$ND/inbox.md"
 rm "$OPSX_TEST_ISSUES/a.fail"
 [ "$(logcols | cut -f4)" -ge 1 ] || fail "errors 要 >= 1：$(lastsync)"
 logcols | cut -f5 | grep -q '401' || fail "first_error 要含 glab 的 stderr：$(lastsync)"
@@ -250,17 +261,14 @@ SIB="$(mk_opsx_repo sib)"; mv "$SIB" "$FX/elsewhere/sib"; SIB="$(cd "$FX/elsewhe
 echo "# shortcut: 兄弟 repo 的, 不該建" > "$SIB/s.py"
 echo "# shortcut: z 自己的, 要建" > "$Z/z.py"
 opsx sync --root "$ROOT" --source debt >/dev/null 2>&1
-assert_eq "$(find "$SIB/openspec/changes" -mindepth 1 -maxdepth 1 ! -name archive | wc -l | tr -d ' ')" 0 "沒登記的兄弟 repo 不建卡"
-assert_file "$Z/openspec/changes/debt-$(printf '%s' 'z 自己的, 要建' | shasum -a 1 | cut -c1-8)/inbox.md"
+assert_eq "$(python3 -I -c 'import json,sys;print("sib" in json.load(open(sys.argv[1])))' "$SNAP")" False "沒登記的兄弟 repo 不進快照"
+assert_eq "$(debt_of z | python3 -I -c 'import json,sys;print([h["comment"] for h in json.load(sys.stdin)])')" "['z 自己的, 要建']"
 
 # --- symlink 進 root 的 repo：debt 照樣撈得到，既有的卡不會被標 stale ---
 REAL="$(mk_opsx_repo linked-real)"; ln -s "$REAL" "$ROOT/linked"
 echo "# shortcut: 連結進來的, 要建" > "$REAL/l.py"
 opsx sync --root "$ROOT" --source debt >/dev/null 2>&1
-LD="$REAL/openspec/changes/debt-$(printf '%s' '連結進來的, 要建' | shasum -a 1 | cut -c1-8)/inbox.md"
-assert_file "$LD"
-opsx sync --root "$ROOT" --source debt >/dev/null 2>&1
-assert_not_grep '^stale:' "$LD"
+assert_eq "$(debt_of linked-real | python3 -I -c 'import json,sys;print([h["comment"] for h in json.load(sys.stdin)])')" "['連結進來的, 要建']" "symlink 進 root 的 repo 用實體名進快照"
 
 # --- 撞名截斷的邊界：沒有 -、最後一段很長（opsx file 收得進來的 slug）也要 ≤32 字、字母開頭 ---
 for odd in abcdefghijklmnopqrstuvwxyzabcdef x-abcdefghijklmnopqrstuvwxyzabcd; do
@@ -275,7 +283,7 @@ mkdir -p "$FX/links"; RS="$(mk_opsx_repo source-real)"; ln -s "$RS" "$FX/links/s
 printf '\n[[source]]\nkind = "github"\nrepo = "source-link"\nproject = "me/source-link"\npath = "%s"\n' "$FX/links/source-link" >> "$OPSX_STATE_DIR/sources.toml"
 echo "# shortcut: 登記的 symlink, 要建" > "$RS/r.py"
 opsx sync --root "$ROOT" --source debt >/dev/null 2>&1
-assert_file "$RS/openspec/changes/debt-$(printf '%s' '登記的 symlink, 要建' | shasum -a 1 | cut -c1-8)/inbox.md"
+assert_eq "$(debt_of source-real | python3 -I -c 'import json,sys;print([h["comment"] for h in json.load(sys.stdin)])')" "['登記的 symlink, 要建']" "sources.toml 的 symlink path 用實體名進快照"
 
 # --- 少了 upstream_updated 的卡（手動改過）：記錯，不默默改寫 ---
 python3 -I -c 'import json,sys;print(json.dumps([{"iid":600,"title":"又改了","description":"x","state":"opened","updated_at":"2026-11-07T08:00:00Z","web_url":"u600","labels":[]}]))' > "$OPSX_TEST_ISSUES/a.json"
@@ -286,7 +294,7 @@ logcols | cut -f5 | grep -q 'upstream_updated' || fail "要記錯：$(lastsync)"
 
 # --- sources.toml 的 path 不是 repo 根（linked worktree）：不建殼、記錯，不會每次多一張 ---
 WT="$FX/elsewhere/wt"; mkdir -p "$WT/openspec/changes"; printf 'gitdir: /nowhere\n' > "$WT/.git"
-printf '\n[[source]]\nkind = "gitlab"\nrepo = "wt"\nproject = "g/wt"\npath = "%s"\n' "$WT" >> "$OPSX_STATE_DIR/sources.toml"
+printf '\n[[source]]\nkind = "gitlab"\nrepo = "wt"\nproject = "g/wt"\nassignee = "mika"\npath = "%s"\n' "$WT" >> "$OPSX_STATE_DIR/sources.toml"
 printf '[%s]' "$(gl 7 worktree 2026-11-06T08:00:00Z)" > "$OPSX_TEST_ISSUES/wt.json"
 python3 -I -c 'import json,sys;d=json.load(open(sys.argv[1]));assert isinstance(d,list) and len(d)==1,d' "$OPSX_TEST_ISSUES/wt.json" || fail "wt.json 要是含一個 issue 的合法 JSON list"
 opsx sync --root "$ROOT" --source gitlab >/dev/null 2>&1
@@ -309,14 +317,14 @@ opsx sync --root "$ROOT" --source github >/dev/null 2>&1
 assert_grep '^upstream: closed$' "$SI"
 
 # ========== 沒有 repo 的來源寫進待分類（sync-obsidian / sync-unfiled-sink）==========
-# 正式來源都還綁 repo：把 debt 的收集換成固定的、沒有 repo 的 item，再跑 sync.main
+# 正式來源都還綁 repo：把 obsidian 的收集換成固定的、沒有 repo 的 item，再跑 sync.main
 sync_unrepo() { # <items json：[{source, slug, title}]>
   python3 -I -c 'import json,sys
 sys.path.insert(0, sys.argv[1] + "/bin/lib")
 import sync
 items = [dict(i, repo=None, path=None, type="功能", body=None, evidence="- 測試來源", extra={}) for i in json.loads(sys.argv[2])]
-sync.debt_items = lambda *_: (items, set())
-sys.argv = ["opsx sync", "--state", sys.argv[3], "--opsx-root", sys.argv[1], "--root", sys.argv[4], "--source", "debt"]
+sync.obsidian_items = lambda *_: items
+sys.argv = ["opsx sync", "--state", sys.argv[3], "--opsx-root", sys.argv[1], "--root", sys.argv[4], "--source", "obsidian"]
 sys.exit(sync.main())' "$OPSX_ROOT" "$1" "$OPSX_STATE_DIR" "$ROOT"; }
 UF="$OPSX_STATE_DIR/unfiled"
 repo_changes() { find "$FX" -path "$OPSX_STATE_DIR" -prune -o -path '*/openspec/changes/*' -print | sort; }
@@ -469,7 +477,7 @@ OPSX_ROOT, WORK, STATE = sys.argv[1], pathlib.Path(sys.argv[2]), pathlib.Path(sy
 CARDS, ARCHIVE = WORK / "changes", WORK / "changes" / "archive"
 for d in (CARDS, ARCHIVE, WORK / "root"):
     d.mkdir(parents=True)
-PLAN = {"index": {}, "items": [], "listed": {}, "scanned": set(), "move": None}
+PLAN = {"index": {}, "items": [], "listed": {}, "move": None}
 real_build_index = sync.build_index
 CARD = "---\ntype: 功能\nsource: %s\nline: 1\nupstream_updated: 2026-11-05T10:00:00Z\n---\n\n## 一句話\n\n舊\n\n## 內文\n\n舊內文\n\n## 證據\n\n- x\n"
 
@@ -487,16 +495,12 @@ def index_then_move(repos, state):
     return PLAN["index"]
 
 
-def items_of_plan(*_):
-    return PLAN["items"], PLAN["scanned"]
-
-
 def issues_of_plan(*_):
     return PLAN["items"], PLAN["listed"]
 
 
-def run_sync(source, index, items, move, listed=None, scanned=None):
-    PLAN.update(index=index, items=items, move=move, listed=listed or {}, scanned=scanned or set())
+def run_sync(source, index, items, move, listed=None):
+    PLAN.update(index=index, items=items, move=move, listed=listed or {})
     sys.argv = ["opsx sync", "--state", str(STATE), "--opsx-root", OPSX_ROOT, "--root", str(WORK / "root"), "--source", source]
     rc = sync.main()
     rows = [l.split("\t") for l in (STATE / "sync.log").read_text(encoding="utf-8").splitlines() if l.split("\t")[1] == "sync"]
@@ -504,17 +508,7 @@ def run_sync(source, index, items, move, listed=None, scanned=None):
 
 
 sync.build_index = index_then_move
-sync.debt_items = items_of_plan
 sync.issue_items = issues_of_plan
-
-# 更新 shortcut 卡時卡已被歸檔：計沒變，其餘照常
-a, b = make_card("debt-a", "shortcut:r:f.py:aaaa1111"), make_card("debt-b", "shortcut:r:g.py:bbbb2222")
-before = a["path"].read_text(encoding="utf-8")
-items = [{"source": "shortcut:r:f.py:aaaa1111", "path": WORK, "extra": {"line": "5"}},
-         {"source": "shortcut:r:g.py:bbbb2222", "path": WORK, "extra": {"line": "1"}}]
-rc, row = run_sync("debt", {"shortcut:r:f.py:aaaa1111": a, "shortcut:r:g.py:bbbb2222": b}, items, "debt-a")
-assert rc == 0 and row == "新建 0 · 更新 0 · 沒變 2 · 錯誤 0", (rc, row)
-assert (ARCHIVE / "debt-a" / "inbox.md").read_text(encoding="utf-8") == before
 
 # 更新 issue 時卡已被歸檔：計沒變，歸檔的卡內容不變
 c = make_card("gl-a-1", "gitlab:a#1")
@@ -532,12 +526,6 @@ for n in (2, 3):
 rc, row = run_sync("gitlab", {"gitlab:a#2": d, "gitlab:a#3": e}, [], "gl-a-2", listed={"a": "g/a"})
 assert rc == 0 and row == "新建 0 · 更新 1 · 沒變 0 · 錯誤 0", (rc, row)
 assert "\nupstream: closed\n" in e["path"].read_text(encoding="utf-8")
-
-# 標 stale 時卡已被歸檔：其他 shortcut 卡的 stale 標記照寫
-f, g = make_card("debt-c", "shortcut:r:h.py:cccc3333"), make_card("debt-d", "shortcut:r:i.py:dddd4444")
-rc, row = run_sync("debt", {"shortcut:r:h.py:cccc3333": f, "shortcut:r:i.py:dddd4444": g}, [], "debt-c", scanned={"r"})
-assert rc == 0 and row == "新建 0 · 更新 1 · 沒變 0 · 錯誤 0", (rc, row)
-assert "\nstale: true\n" in g["path"].read_text(encoding="utf-8")
 
 # 建索引時檔案讀不到（待分類裡指向已不存在的檔）：略過，其餘照進索引
 unfiled = WORK / "state5" / "unfiled"

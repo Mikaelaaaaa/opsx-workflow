@@ -37,6 +37,7 @@ import priority  # noqa: E402
 import safefile  # noqa: E402
 
 HEAD = re.compile(r"^## ")
+FRONTMATTER = re.compile(r"\A---\n(.*?\n)---\n", re.S)
 MERGED = re.compile(r"^## 併入：")
 MERGED_HEAD = re.compile(r"^## 併入：(\S+) (\S+)\s*$")
 ID_LINE = re.compile(r"^- id: (\S+)\s*$")
@@ -99,17 +100,28 @@ def section(mid: str, when: str, source: str, kind: str, evidence: str, kind_typ
     return "\n".join(lines)
 
 
+def ensure_open(card_dir: str, inbox_text: str) -> None:
+    """目標卡還能收併入：沒有 tasks.md、沒有拆。"""
+    if os.path.exists(os.path.join(card_dir, "tasks.md")):
+        raise TargetStarted("%s 已有 tasks.md，不併" % card_dir)
+    if split_into(inbox_text):
+        raise TargetStarted("%s 已拆（split_into: %s），不併" % (card_dir, split_into(inbox_text)))
+
+
+def open_check(card_dir: str) -> None:
+    """opsx merge-card 在捨棄來源之前先問：目標還收不收。"""
+    with open(os.path.join(card_dir, "inbox.md"), encoding="utf-8") as f:
+        ensure_open(card_dir, f.read())
+
+
 def append(card_dir: str, base: str, when: str, source: str, kind: str, evidence: str, kind_type: str, text: str) -> str:
     inbox = os.path.join(card_dir, "inbox.md")
     with safefile.CardLock(card_dir):
         with open(inbox, encoding="utf-8") as f:
             cur = f.read()
         # opsx new 在鎖外判斷階段，這裡鎖內再查一次，免得併進剛開工或剛拆的卡。
-        # shortcut: propose 寫 tasks.md 不取卡鎖，這只把視窗縮到查完到寫入之間；要關死得讓 tasks.md 的寫入也取卡鎖
-        if os.path.exists(os.path.join(card_dir, "tasks.md")):
-            raise TargetStarted("%s 已有 tasks.md，不併" % card_dir)
-        if split_into(cur):
-            raise TargetStarted("%s 已拆（split_into: %s），不併" % (card_dir, split_into(cur)))
+        # tasks.md 由 agent 用 Write 寫，取不到這把鎖；晚到的併入由 Stop hook 的 check_merged 補查（hooks/openspec-stop-gate.sh）
+        ensure_open(card_dir, cur)
         mid = free_id(base, merged_ids(cur))
         if cur and not cur.endswith("\n"):
             cur += "\n"
@@ -117,6 +129,17 @@ def append(card_dir: str, base: str, when: str, source: str, kind: str, evidence
             cur += "\n"
         safefile.write_atomic(inbox, cur + section(mid, when, source, kind, evidence, kind_type, text))
     return mid
+
+
+def append_full(card_dir: str, source_inbox: str, source_slug: str, when: str) -> str:
+    """來源卡全文（一句話、證據）以 ## 併入： 段併進目標；每行縮排兩格，標題與欄位樣式的行就切不斷這一段、也不會多出假 id。"""
+    with open(source_inbox, encoding="utf-8") as f:
+        text = f.read()
+    fm, _ = priority.frontmatter(text)
+    got = facts(source_slug, text)
+    body = FRONTMATTER.sub("", text, count=1).strip("\n")
+    indented = "\n".join(("  " + x) if x else x for x in body.split("\n"))
+    return append(card_dir, source_slug, when, fm.get("source") or "me", got["kind"], got["evidence"], fm.get("type") or "待定", indented)
 
 
 def find(text: str, mid: str) -> tuple:
@@ -336,13 +359,17 @@ def drop(card_dir: str, reason: str, argv: list) -> int:
 def main() -> None:
     args = sys.argv[1:]
     cmd = args[0] if args else ""
-    want = {"append": 9, "card": 3, "remove": 3, "ids": 2, "evidence": 3, "split-out": 4, "carry": 4, "carry-check": 4}
+    want = {"append": 9, "append-full": 5, "open-check": 2, "card": 3, "remove": 3, "ids": 2, "evidence": 3, "split-out": 4, "carry": 4, "carry-check": 4}
     ok = len(args) >= 5 and args[3] == "--" if cmd == "drop" else cmd in want and len(args) == want[cmd]
     if not ok:
-        sys.exit("用法：inboxmerge.py append <卡目錄> <基本 id> <ISO 時間> <來源> <kind_of_work> <evidence> <type> <一句話> | card <卡目錄> <id> | remove <卡目錄> <id> | ids <卡目錄> | evidence <卡目錄> <行> | carry <目標卡目錄> <來源 inbox 檔> <來源 slug> | carry-check <目標卡目錄> <來源 inbox 檔> <來源 slug> | split-out <卡目錄> <id> <repo 根> | drop <卡目錄> <理由> -- <歸檔指令…>")
+        sys.exit("用法：inboxmerge.py append <卡目錄> <基本 id> <ISO 時間> <來源> <kind_of_work> <evidence> <type> <一句話> | append-full <目標卡目錄> <來源 inbox 檔> <來源 slug> <ISO 時間> | open-check <目標卡目錄> | card <卡目錄> <id> | remove <卡目錄> <id> | ids <卡目錄> | evidence <卡目錄> <行> | carry <目標卡目錄> <來源 inbox 檔> <來源 slug> | carry-check <目標卡目錄> <來源 inbox 檔> <來源 slug> | split-out <卡目錄> <id> <repo 根> | drop <卡目錄> <理由> -- <歸檔指令…>")
     try:
         if cmd == "append":
             print(append(*args[1:]))
+        elif cmd == "append-full":
+            print(append_full(*args[1:]))
+        elif cmd == "open-check":
+            open_check(args[1])
         elif cmd == "split-out":
             split_out(*args[1:])
         elif cmd == "evidence":

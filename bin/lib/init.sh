@@ -43,6 +43,7 @@ init_global() {
   fi
 
   write_if_missing "$state/sources.toml" '# opsx 同步來源。opsx init 在每個 repo 跑時會自動補 gitlab / github；obsidian 在這裡填。
+# gitlab 的 [[source]] 要加 assignee = "<GitLab 帳號名>"（opsx sync 用它篩 issue，不用 @me），沒填會報錯。
 # customer 來源尚未支援（on-hold），填了 opsx sync 也不會同步。
 # [obsidian]
 # vault = "/path/to/vault"
@@ -107,7 +108,7 @@ $term_line
 claude_settings_file() { printf '%s/settings.json' "${CLAUDE_CONFIG_DIR:-$HOME/.claude}"; }
 
 # 插件 skill 名 → 撞到的 Claude Code 內建指令；沒撞印空。
-# shortcut: 手維護的已知表，內建指令改名或新增時更新；Claude Code 沒有可查的清單
+# shortcut: [已評估] 手維護的已知表，內建指令改名或新增時更新；Claude Code 沒有可查的清單
 builtin_command_for() { # <skill 名>
   case "$1" in
     review) printf 'code-review' ;;
@@ -439,6 +440,8 @@ register_source() { # <top> <name>
   esac
   project="$(printf '%s' "$url" | sed -E 's#^(git@|https?://)[^:/]+[:/]##; s#/$##; s#\.git$##')"
   printf '\n[[source]]\nkind = "%s"\nrepo = "%s"\nproject = "%s"\npath = "%s"\n' "$kind" "$name" "$project" "$top" >> "$f"
+  # gitlab 來源要自己填 GitLab 帳號名：opsx 不用 @me（它要打 /user，token 沒有 User: Read 會 403），沒填時 opsx sync 會報錯
+  [ "$kind" != gitlab ] || printf '# assignee = "<GitLab 帳號名>"   # 取消註解並填上，opsx sync 用它篩指派給你的 issue\n' >> "$f"
   say "init: sources.toml +$kind:$project"
 }
 

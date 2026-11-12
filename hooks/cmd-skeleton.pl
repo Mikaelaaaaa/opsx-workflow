@@ -53,6 +53,37 @@ sub heredoc {
     return $out;
 }
 
+# 一次走過整串，回傳等長的字串：第 i 個字元是 '1' 表示 $s 的第 i 個位置在 shell 眼中是一般的指令文字，
+# '0' 表示在引號（含 $'…'，裡面的 \' 是字面引號）或註解裡，或是被反斜線跳脫的字元。線性，heredoc 開頭一個一個查表
+sub code_mask {
+    my ($s) = @_;
+    my $n = length $s;
+    my $mask = '1' x $n;
+    my $i = 0;
+    while ($i < $n) {
+        my $c = substr $s, $i, 1;
+        if ($c eq '\\') { substr($mask, $i + 1, 1) = '0' if $i + 1 < $n; $i += 2; next }
+        my $end;
+        if ($c eq '$' && substr($s, $i + 1, 1) eq $SQ) {
+            $end = $i + 2;
+            $end += substr($s, $end, 1) eq '\\' ? 2 : 1 while $end < $n && substr($s, $end, 1) ne $SQ;
+        } elsif ($c eq $SQ) {
+            $end = index $s, $SQ, $i + 1;
+        } elsif ($c eq '"') {
+            $end = skip_dq($s, $i);
+        } elsif ($c eq '#' && ($i == 0 || substr($s, $i - 1, 1) =~ /[\s;&|()]/)) {
+            $end = index $s, "\n", $i;
+        } else {
+            $i++;
+            next;
+        }
+        $end = $n - 1 if $end < 0 || $end >= $n;    # 沒結尾的引號或註解一路到尾
+        substr($mask, $i, $end - $i + 1) = '0' x ($end - $i + 1);
+        $i = $end + 1;
+    }
+    return $mask;
+}
+
 # heredoc 的分隔字照 bash：整個字去掉引號與反斜線之後的樣子（'E'F、E\OF 都是 EF 與 EOF，EOF-X 就是 EOF-X）
 sub unquote_word {
     my ($w) = @_;
@@ -76,25 +107,30 @@ sub unquote_word {
 
 my $HEREDOC_WORD = qr/(?>(?:\$?'[^']*'|\$?"[^"]*"|[^\s;&|<>()\\'"]|\\.)+)/;
 
-# 由左到右把每一段 heredoc 換成 heredoc() 的結果；開頭沒有結尾行的原樣留下，繼續找後面的
+# 由左到右把每一段 heredoc 換成 heredoc() 的結果；只認 in_code 的開頭（引號、註解、跳脫內的不算）。
+# 開頭沒有結尾行的原樣留下，繼續找後面的
 sub strip_heredocs {
     my ($s, $depth) = @_;
-    my ($out, $rest) = ('', $s);
-    while ($rest =~ /(^|\n)([^\n]*?)(?<!<)(<<-?[ \t]*($HEREDOC_WORD)[^\n]*)\n/s) {
-        my ($pre, $lead, $prefix, $opener, $word, $after) = ($`, $1, $2, $3, $4, $');
-        my $delim = unquote_word($word);
+    my ($out, $copied) = ('', 0);
+    my $mask = code_mask($s);
+    while ($s =~ /(?<!<)<<-?[ \t]*($HEREDOC_WORD)/g) {
+        my ($start, $opener_end, $word) = ($-[0], $+[0], $1);
+        my $nl = index $s, "\n", $opener_end;
+        next if $nl < 0;
+        next unless substr($mask, $start, 1) eq '1';
         # $'…\x41…' 的跳脫 bash 會展開，這裡不展開：算不準分隔字就不剝本體（fail-closed）
-        my $ansi_c = $word =~ /\$['"]/ && $word =~ /\\/;
-        if (!$ansi_c && $after =~ /\A(.*?)\n[ \t]*\Q$delim\E[ \t]*(?:\n|\z)/s) {
-            my ($body, $tail) = ($1, $');
-            $out .= $pre . heredoc($lead, $prefix, $opener, $word =~ /[\x27"\\]/ ? $SQ : '', $body, $depth);
-            $rest = $tail;
-        } else {
-            $out .= "$pre$lead$prefix$opener\n";
-            $rest = $after;
-        }
+        next if $word =~ /\$['"]/ && $word =~ /\\/;
+        my $delim = unquote_word($word);
+        next unless substr($s, $nl + 1) =~ /\A(.*?)\n[ \t]*\Q$delim\E[ \t]*(?:\n|\z)/s;
+        my ($body, $consumed) = ($1, $+[0]);
+        my $line_start = $start;
+        $line_start-- while $line_start > 0 && substr($s, $line_start - 1, 1) ne "\n";
+        $out .= substr($s, $copied, $line_start - $copied);
+        $out .= heredoc('', substr($s, $line_start, $start - $line_start), substr($s, $start, $nl - $start), $word =~ /[\x27"\\]/ ? $SQ : '', $body, $depth);
+        $copied = $nl + 1 + $consumed;
+        pos($s) = $copied;
     }
-    return $out . $rest;
+    return $out . substr($s, $copied);
 }
 
 sub skeleton {
@@ -104,8 +140,26 @@ sub skeleton {
     my ($out, $i, $n) = ('', 0, length $s);
     while ($i < $n) {
         my $c = substr $s, $i, 1;
-        if ($c eq '\\') { $out .= substr($s, $i, 2); $i += 2; next }
+        if ($c eq '\\') {
+            my $next = substr $s, $i + 1, 1;
+            # c\ommit、g\it：bash 把 \o 當 o。參數位置含 / 的字是路徑，保留跳脫，commit 閘門靠它認出讀不出來的目錄；
+            # 指令位置（行首或 ; & | ( 之後）的字一律還原，絕對路徑的 /usr/bin/g\it 也是
+            # 只看 $out 最後 256 字：每個反斜線都掃整串 $out 會變成二次方
+            my $tail = substr $out, -256;
+            my $cmdpos = (length($out) <= 256 && $tail =~ /\A\s*[^\s;&|()]*\z/) || $tail =~ /[;&|(\n]\s*[^\s;&|()]*\z/;
+            if ($next =~ /^\w$/ && ($cmdpos || $tail !~ m{[^\s]*/[^\s]*\z})) { $out .= $next }
+            elsif ($next eq "\n") { }                     # 行尾續行：bash 把反斜線與換行整個拿掉
+            else { $out .= "\\$next" }
+            $i += 2;
+            next;
+        }
         my $prev = $i ? substr($s, $i - 1, 1) : '';
+        if ($c eq $SQ && $prev =~ /[\w]/) {
+            # g''it、g'i't：緊貼著字的單引號片段是指令字的一部分，沒有空白就去掉引號
+            my $end = index $s, $SQ, $i + 1;
+            my $body = $end < 0 ? '' : substr($s, $i + 1, $end - $i - 1);
+            if ($end >= 0 && $body =~ /^[^\s\\\$`"']*$/) { $out .= $body; $i = $end + 1; next }
+        }
         if ($c eq $SQ && $prev !~ /[\w\\]/) {
             my $end = index $s, $SQ, $i + 1;
             if ($end >= 0) {

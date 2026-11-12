@@ -86,10 +86,11 @@ new="$(awk -v now="$now" -v syn="$SYN" -v warn="$warn" -v warn_title="$warn_titl
 ' "$file" "$file")" || { rm -f "$warn" "$warn_title"; exit 0; }
 
 if [ "$new" != "$(cat "$file")" ]; then
-  # shortcut: mktemp 與寫入之間有毫秒級空窗（要猜到隨機名並換成 symlink），這支不載入 python；要補就改走 safefile.py replace
-  tmp="$(mktemp "$file.tmp.XXXXXX")" || { rm -f "$warn" "$warn_title"; exit 0; }
-  chmod "$(stat -f %Lp "$file" 2>/dev/null || stat -c %a "$file")" "$tmp" 2>/dev/null   # mktemp 是 0600，換名後 gates.md 要保留原權限
-  printf '%s\n' "$new" > "$tmp" && mv "$tmp" "$file"
+  # safefile.py replace：隨機暫存檔、排他建立、換名後保留 gates.md 原權限；寫不回就安靜略過（上面的契約）
+  OPSX_ROOT="$root"; OPSX_STATE_DIR="${OPSX_STATE_DIR:-$HOME/.local/state/opsx}"
+  # shellcheck source=/dev/null
+  source "$root/bin/lib/python.sh"
+  if opsx_python_load; then printf '%s\n' "$new" | opsx_replace "$file" 2>/dev/null || true; fi
 fi
 
 ctx=""

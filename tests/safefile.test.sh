@@ -131,4 +131,21 @@ with safefile.CardLock(sys.argv[2]):
 assert_grep "$D/no-such-card" "$D/err"
 assert_no_file "$D/no-such-card"
 
+# --- Requirement「drive 與 coordinate 的 log 附加寫入不經 shell 重導向」：檢查與開檔之間不能有空窗 ---
+if grep -qE '>> *"\$(out|drivelog)"' "$OPSX_ROOT/bin/lib/coordinate.sh" "$OPSX_ROOT/bin/lib/dispatch.sh" "$OPSX_ROOT/hooks/opsx-herdr-queue.sh"; then
+  fail "coordinate.out 與 drive log 的附加要走 opsx_append（safefile.py），不能用 shell 的 >>"
+fi
+# --- Requirement「gate-timestamp 改寫 gates.md 走 safefile」：不用 mktemp 加 mv ---
+if grep -q 'mv "\$tmp"' "$OPSX_ROOT/hooks/gate-timestamp.sh"; then fail "gate-timestamp 改寫 gates.md 要走 opsx_replace，不能 mktemp 加 mv"; fi
+
+# --- exec-append：指令的 stdout 與 stderr 附加到 log；log 是 symlink 時指令不跑、退出 2、目標不變 ---
+printf 'keep\n' > "$D/run.log"
+"$PY" -I "$LIB/safefile.py" exec-append "$D/run.log" sh -c 'echo out; echo err >&2' || fail "exec-append rc"
+assert_eq "$(cat "$D/run.log")" "$(printf 'keep\nout\nerr')" "exec-append 要把 stdout 與 stderr 附加在後面"
+new_victim; before="$(hash_of "$D/victim")"; ln -sf "$D/victim" "$D/linkrun"
+"$PY" -I "$LIB/safefile.py" exec-append "$D/linkrun" sh -c 'echo evil' 2> "$D/err"; rc=$?
+assert_eq "$rc" 2 "exec-append symlink 要退出 2"
+assert_grep "$D/linkrun" "$D/err"
+assert_eq "$(hash_of "$D/victim")" "$before" "exec-append 不能寫到 symlink 的目標"
+
 echo "safefile ok"

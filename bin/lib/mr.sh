@@ -41,12 +41,21 @@ mr_age() { # <path> 印距 mtime 幾秒
 mr_refresh_bg() { # <card dir> <cache>
   local lock="$2.lock"
   if ! mkdir "$lock" 2>/dev/null; then
-    # shortcut: 120 s 死鎖上限，背景行程掛住時最多兩分鐘不重抓；要更準改成在 lock 目錄裡寫 pid
-    [ "$(mr_age "$lock")" -ge 120 ] || return 0
-    rmdir "$lock" 2>/dev/null; mkdir "$lock" 2>/dev/null || return 0
+    # 持有者把自己的 pid 寫在 lock/pid：pid 已經不在就立即接手；pid 還活著也只讓它抓 120 秒（pid 可能被別的行程重用，
+    # 活著的重抓有 OPSX_MR_TIMEOUT=60 秒的上限，不會超過這個時間）。
+    # 還沒有 pid 檔是持有者剛 mkdir、還沒寫 pid 的空窗，等到 lock 超過 120 秒才當死鎖
+    local holder=""
+    [ ! -f "$lock/pid" ] || holder="$(cat "$lock/pid")"
+    if [ -n "$holder" ]; then
+      if kill -0 "$holder" 2>/dev/null; then [ "$(mr_age "$lock")" -ge 120 ] || return 0; fi
+    else
+      [ "$(mr_age "$lock")" -ge 120 ] || return 0
+    fi
+    rm -f "$lock/pid"; rmdir "$lock" 2>/dev/null; mkdir "$lock" 2>/dev/null || return 0
   fi
-  # forge 的時間上限要比 120 s 死鎖上限短：鎖被當死鎖接手時，舊的那支已經被殺了，不會兩支一起掛著
   OPSX_MR_TIMEOUT=60 perl -MPOSIX -e 'POSIX::setsid(); exec @ARGV' bash "$OPSX_ROOT/bin/opsx" mr "$1" --refresh "$lock" </dev/null >/dev/null 2>&1 &
+  # 背景行程可能已經跑完並拿掉 lock：目錄還在才寫
+  if [ -d "$lock" ]; then printf '%s\n' "$!" > "$lock/pid" 2>/dev/null; fi
 }
 
 # opsx mr <card dir> [--refresh [<lock>]]：印 mr_json；--refresh 跳過快取重抓、寫快取；帶 <lock> 時最後放掉那個鎖（mr_refresh_bg 拿的）
@@ -56,7 +65,7 @@ opsx_mr() {
     "") mr_json "$d" ;;
     --refresh)
       OPSX_MR_REFRESH=1 mr_json "$d" >/dev/null || rc=$?
-      [ -z "${3:-}" ] || rmdir "$3"
+      [ -z "${3:-}" ] || { rm -f "$3/pid"; rmdir "$3"; }
       return "$rc" ;;
     *) die "opsx mr：不認得的參數 $2" ;;
   esac

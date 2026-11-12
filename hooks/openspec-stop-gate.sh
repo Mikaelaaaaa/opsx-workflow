@@ -16,6 +16,26 @@ MAX_BLOCKS=3
 # 這支 hook 在 hooks.json 只有 10 秒：forge 查詢（mr_forge）限 5 秒，逾時當查不到
 export OPSX_MR_TIMEOUT="${OPSX_MR_TIMEOUT:-5}"
 
+# report.md 的「確認: <sha>」涵蓋 HEAD：sha 就是 HEAD，或 HEAD 是 sha 的後代、第一父鏈上 sha 到 HEAD 之間沒有一般 commit
+# （第一父鏈只走這個 branch 自己的 commit；合併 base 分支帶進來的 commit 在第二父鏈上）
+confirmed_covers_head() { # <確認的 sha> <HEAD sha>
+  local cwd c; cwd="$(hook_cwd)"
+  c="$(git -C "$cwd" rev-parse "$1" 2>/dev/null)" || return 1
+  [ "$c" = "$2" ] && return 0
+  git -C "$cwd" merge-base --is-ancestor "$c" "$2" 2>/dev/null || return 1
+  [ -z "$(git -C "$cwd" rev-list --first-parent --no-merges "$c..$2")" ] || return 1
+  # 第一父鏈上的每個 merge commit：除了第一父，每個父（章魚合併有好幾個）都要已經在某個 remote-tracking 分支裡
+  # （合併的是遠端的分支，不是本地沒審查過的側枝）。
+  # shortcut: [已評估] 只查父在不在某個 remote-tracking 分支，不認是不是 base 分支，也不比對 merge commit 自己的內容（衝突解決時多加的改動）；Stop hook 是流程提醒不是安全邊界（agent 本來就能自己寫 確認: 那一行），要擋刻意繞過時改成父要是 origin/<base> 的祖先、樹要等於 git merge-tree 的結果
+  local m p
+  while read -r m; do
+    while read -r p; do
+      [ -n "$(git -C "$cwd" branch -r --contains "$p" 2>/dev/null)" ] || return 1
+    done < <(git -C "$cwd" rev-parse "$m^@" 2>/dev/null | tail -n +2)
+  done < <(git -C "$cwd" rev-list --first-parent --merges "$c..$2")
+  return 0
+}
+
 # 印要擋的原因；空字串表示放行。
 stop_reason() { # <dir> <slug> <stage>
   local d="$1" slug="$2" stage="$3" open missing last_commit report_ts confirmed head_sha
@@ -48,6 +68,14 @@ $missing
         printf '%s' "apply|opsx：${slug} 的 spec 不合 Gherkin 寫法（opsx check ${slug}）：
 $missing
 改好 spec 再停。"
+        return 0
+      fi
+      # tasks.md 是 agent 寫的，併入發生在它讀完 inbox.md 之後、寫完 tasks.md 之前就會被漏掉；這裡補查
+      missing="$(check_merged "$d")"
+      if [ -n "$missing" ]; then
+        printf '%s' "apply|opsx：${slug} 有併入的項目沒有去處（opsx check ${slug}）：
+$missing
+補成 tasks.md 的 task，或 opsx split-out 拆出去，再停。"
         return 0
       fi
     fi
@@ -83,7 +111,8 @@ $missing
     report_ts="$(stat -f %m "$d/report.md" 2>/dev/null || stat -c %Y "$d/report.md" 2>/dev/null || echo 0)"
     confirmed="$(sed -n 's/^確認: *//p' "$d/report.md" | head -1)"
     head_sha="$(git -C "$(hook_cwd)" rev-parse HEAD 2>/dev/null)"
-    if [ "$last_commit" -gt "$report_ts" ] && { [ -z "$confirmed" ] || [ "$(git -C "$(hook_cwd)" rev-parse "$confirmed" 2>/dev/null)" != "$head_sha" ]; }; then
+    # 確認: <sha> 之後這個 branch 自己沒有新的一般 commit（只合併了 base 分支，merge commit 與它帶進來的別人的 commit 不算）就視同確認過
+    if [ "$last_commit" -gt "$report_ts" ] && { [ -z "$confirmed" ] || ! confirmed_covers_head "$confirmed" "$head_sha"; }; then
       printf '%s' "review|opsx：$slug 在 report.md 之後又有新 commit，review 沒涵蓋到。再跑一次 /opsx-workflow:review $slug 再停。"
       return 0
     fi

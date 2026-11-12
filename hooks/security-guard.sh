@@ -50,7 +50,7 @@ if echo "$SKELETON" | grep -qE '(^|\s|&&|\|\||;)git\s+commit(\s|$)'; then
   # Only the attribution forms count: a trailer line starting with Co-Authored-By / Generated with that names
   # Claude or Anthropic, or --author / --trailer / GIT_AUTHOR_NAME / GIT_COMMITTER_NAME carrying those names.
   # Prose that merely mentions them, and paths like /private/tmp/claude-502/x, are not attribution.
-  # shortcut: a trailer line is recognised by its first word right after a quote or line start; fine as an accident guard, go back to parsing -m values if it must resist deliberate evasion
+  # shortcut: [已評估] a trailer line is recognised by its first word right after a quote or line start; fine as an accident guard, parsing -m values would not stop -F <file> or an editor message, so deliberate evasion is the commit-msg hook's job
   NAMES='(claude|anthropic)'
   VALUE='("[^"]*|'"'"'[^'"'"']*|[^[:space:]"'"'"']*)'
   # A trailer line starts after a quote, a real newline, or a literal \n / \r (printf, echo -e, $'…'); leading blanks are allowed.
