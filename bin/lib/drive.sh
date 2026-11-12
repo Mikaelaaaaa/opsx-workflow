@@ -30,7 +30,11 @@ opsx_drive() {
     i=$((i+1))
     dispatched "$repo" "$slug" || { say "drive: $repo/$slug 不在 dispatch.json（停了或被清掉），結束"; return 0; }
     # dispatch 送完第一句不等就起 drive；herdr 不分辨是哪一輪，agent 還在跑時送同一句會排在後面，之後每句都差一輪
-    if [ "$settled" = 0 ]; then herdr_step "$slug" agent wait "$slug" || return 0; settled=1; fi
+    # wait 沒成功不算 settled：herdr_step 退避過了，下一輪重等。卡目錄不在時照常往下，讓下面的目錄檢查結束 drive
+    if [ "$settled" = 0 ]; then
+      herdr_step "$slug" agent wait "$slug" || return 0
+      if [ "$HERDR_STEP_OK" = 1 ]; then settled=1; elif [ -d "$d" ]; then continue; fi
+    fi
     # 啟動時目錄在，所以現在不在只會是歸檔或被刪；stage_of 分不出這兩種和「還沒建殼」，不能靠它。放在 settle 之後：agent 跑 /archive 的那一輪也要看得到
     if [ ! -d "$d" ]; then
       if compgen -G "$top/openspec/changes/archive/????-??-??-$slug" >/dev/null; then say "drive: $slug 已歸檔，結束"
@@ -132,6 +136,7 @@ opsx_drive() {
 
 # 跑一個 herdr 呼叫。回 1 表示 pane 沒了、drive 該結束；其他情況回 0，HERDR_STEP_OK 說這次呼叫本身成不成功。
 # 錯誤一律先等過再回，迴圈才不會在同一個錯誤上空轉。
+# 睡過就把呼叫者 opsx_drive 的 local settled 設回 0（bash 動態作用域，跟讀 $poll 一樣）：睡的時候 agent 可能起了新 turn，回迴圈頂端要重等。
 herdr_step() { # <slug> <herdr args…>
   local slug="$1" err code; shift
   HERDR_STEP_OK=0; HERDR_STEP_TIMEOUT=0
@@ -148,14 +153,14 @@ herdr_step() { # <slug> <herdr args…>
     agent_blocked)
       say "drive: $slug 在終端機等待輸入，等人在 pane 處理完"
       coordinate_kick "$slug"
-      herdr agent wait "$slug" --until working >/dev/null 2>&1 && herdr agent wait "$slug" >/dev/null 2>&1 || sleep "$poll"
+      herdr agent wait "$slug" --until working >/dev/null 2>&1 && herdr agent wait "$slug" >/dev/null 2>&1 || { sleep "$poll"; settled=0; }
       return 0 ;;
     *)
       # relaunch 讓 claude /exit 的空窗：結束，relaunch 結束時會起新的 drive，不睡完再送階段指令
       if [ "$code" = agent_not_running ] && drive_relaunching "$DRIVE_REPO" "$slug"; then
         say "drive: $slug 的 claude 在 relaunch 空窗（agent_not_running，relaunching_at 未過期），結束，relaunch 會起新的 drive"; return 1
       fi
-      say "drive: herdr $1 $2 回 ${code:-$err}，等 $poll 秒"; sleep "$poll"; return 0 ;;
+      say "drive: herdr $1 $2 回 ${code:-$err}，等 $poll 秒"; sleep "$poll"; settled=0; return 0 ;;
   esac
 }
 
