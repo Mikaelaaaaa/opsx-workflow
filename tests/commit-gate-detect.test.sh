@@ -41,5 +41,25 @@ out="$(cg 'git -c k=v commit -m x')"; assert_eq "$(decision "$out")" deny "sessi
 out="$(cg 'git -C /abs/my\ dir commit -m x')"; assert_eq "$(decision "$out")" deny "反斜線跳脫空白的 -C 路徑要 deny"
 reason "$out" | grep -q '不含空白的字面路徑' || fail "deny 要說明改法: $(reason "$out")"
 out="$(cg 'git --git-dir=/abs/a\ b commit -m x')"; assert_eq "$(decision "$out")" deny "反斜線跳脫空白的 --git-dir 路徑要 deny"
+
+# command-gate-bypass：commit 實際作用的目錄。cgin <session cwd> <指令>
+cgin() { run_hook openspec-commit-gate.sh "$(j "$1" "{\"command\":$(printf '%s' "$2" | jq -Rs .)}")"; }
+# 連續的 cd、含 .. 的 cd、pushd 都要疊起來（wt 在卡的 branch 上且 tasks 已勾；session 在 main 的 $R）
+out="$(cgin "$R" "cd $FX && cd wt && git commit -m x")"; assert_eq "$(decision "$out")" allow "兩個 cd 要疊起來: $(reason "$out")"
+out="$(cgin "$R" "cd $FX/wt/.. && cd wt && git commit -m x")"; assert_eq "$(decision "$out")" allow "cd 含 .. 要疊起來: $(reason "$out")"
+out="$(cgin "$R" "pushd $FX/wt && git commit -m x")"; assert_eq "$(decision "$out")" allow "pushd 要當成 cd: $(reason "$out")"
+out="$(cgin "$R" "cd $FX/wt && cd $R && git commit -m x")"; assert_eq "$(decision "$out")" deny "最後 cd 回 main，要擋"
+out="$(cgin "$R" 'pushd "$X" && git commit -m x')"; assert_eq "$(decision "$out")" deny "pushd 的目錄讀不出來要 deny"
+# --git-dir 與 --work-tree 決定作用的 repo（session cwd 不是 repo 時也一樣）
+out="$(cgin "$FX" "git --git-dir=$R/.git commit -m x")"; assert_eq "$(decision "$out")" deny "--git-dir 指到 main 上的 repo 要擋: $(reason "$out")"
+out="$(cgin "$FX" "git --work-tree=$R commit -m x")"; assert_eq "$(decision "$out")" deny "--work-tree 指到 main 上的 repo 要擋: $(reason "$out")"
+out="$(cgin "$FX" "git --work-tree=$FX/wt commit -m x")"; assert_eq "$(decision "$out")" allow "--work-tree 指到卡的 worktree 照放行: $(reason "$out")"
+out="$(cgin "$R" "git --git-dir=/abs/bare.git commit -m x")"; assert_eq "$(decision "$out")" deny "--git-dir 不是 <repo>/.git 讀不出作用的 repo，要 deny"
+# 別名：把 commit 設成別名，之後的別名 commit 會繞過閘門，設定當下就擋
+for c in 'git config alias.ci commit' 'git config --global alias.ci commit' 'git -c alias.ci=commit ci -m x' 'git config alias.ci "!git commit"'; do
+  out="$(cgin "$R" "$c")"; assert_eq "$(decision "$out")" deny "別名設成 commit 要擋：${c}｜$(reason "$out")"
+  reason "$out" | grep -q '別名' || fail "deny 要說明別名: $(reason "$out")"
+done
+out="$(cgin "$R" 'git config alias.st status')"; assert_eq "$out" "" "別名指到別的指令不出聲"
 git -C "$R" worktree remove --force "$FX/wt"
 echo "commit-gate-detect ok"

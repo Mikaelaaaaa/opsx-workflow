@@ -12,8 +12,14 @@ tok='(\\.|[^[:space:]\\])+'
 valued='-C|-c|--git-dir|--work-tree|--namespace|--super-prefix|--config-env|--exec-path'
 opt="(${valued})[[:space:]]+${tok}|--[a-z][a-z-]*(=${tok})?|-[A-Za-z]"
 commit_re="(^|[[:space:];&|(])git(([[:space:]]+(${opt}))*)[[:space:]]+commit([[:space:]]|\$)"
-[[ "$sk" =~ $commit_re ]] || exit 0
-m0="${BASH_REMATCH[0]}"; opts="${BASH_REMATCH[2]}"
+is_commit=0; m0=''; opts=''
+if [[ "$sk" =~ $commit_re ]]; then is_commit=1; m0="${BASH_REMATCH[0]}"; opts="${BASH_REMATCH[2]}"; fi
+# 把 commit 設成 git 別名（config alias.ci commit、-c alias.ci=commit ci）：之後用別名 commit 時骨架裡沒有 commit，閘門看不到。
+# 別名的值常含空白、會被骨架換成空字串，所以看原指令。
+alias_re="(^|[[:space:];&|(])git[[:space:]]([^;&|]*[[:space:]])?alias\\.[[:alnum:]_-]+[=[:space:]]+[\"']?!?(git[[:space:]]+)?commit([[:space:]\"']|\$)"
+is_alias=0
+[[ "$cmd" =~ $alias_re ]] && is_alias=1
+[ "$is_commit" = 1 ] || [ "$is_alias" = 1 ] || exit 0
 
 # commit 實際作用的目錄決定對卡，不是 session cwd；hook_cwd 認 OPSX_CWD
 join_dir() { case "$2" in /*) printf '%s' "$2" ;; *) printf '%s/%s' "$1" "$2" ;; esac; }
@@ -21,24 +27,33 @@ unreadable_dir() { case "$1" in *[\"\'\$\`~\\]*|*[*?\[\{]*) return 0 ;; esac; re
 check_dir() { # <路徑>：讀不出來就記進 bad_dirs
   case "$1" in
     '""'|"''") bad_dirs="$bad_dirs 引號包住的路徑" ;;
+    -) bad_dirs="$bad_dirs 'cd -'（上一個目錄讀不出來）" ;;
     *) if unreadable_dir "$1"; then bad_dirs="$bad_dirs '$1'"; fi ;;
   esac
 }
 unset OPSX_CWD
 bad_dirs=''
 before=" ${sk%%"$m0"*}"
-after_cd="${before##*[[:space:];&|(]cd[[:space:]]}"
-cd_dir=''
-[ "$after_cd" != "$before" ] && cd_dir="${after_cd%%[[:space:];&|)]*}"
-check_dir "$cd_dir"
-# 依序走過全域選項：-C 的目錄照順序收，--git-dir 的路徑只檢查讀不讀得出來（作用目錄仍看 -C 與 cd）
+# commit 前面的 cd 與 pushd 照順序疊起來（cd a && cd b 的 b 是相對 a）
+dtok='(\\.|[^[:space:];&|)\\])+'
+cd_re="(^|[[:space:];&|(])(cd|pushd)[[:space:]]+(${dtok})"
+cd_dirs=()
+rest_cd="$before"
+while [[ "$rest_cd" =~ $cd_re ]]; do
+  check_dir "${BASH_REMATCH[3]}"; cd_dirs+=("${BASH_REMATCH[3]}")
+  rest_cd="${rest_cd#*"${BASH_REMATCH[0]}"}"
+done
+# 依序走過全域選項：-C 的目錄照順序收；--git-dir 與 --work-tree 決定作用的 repo
 c_dirs=()
+gitdir_v=''; wt_v=''
 rest="$opts"
 while [ -n "${rest//[[:space:]]/}" ]; do
   if [[ "$rest" =~ ^[[:space:]]+-C[[:space:]]+(${tok}) ]]; then
     check_dir "${BASH_REMATCH[1]}"; c_dirs+=("${BASH_REMATCH[1]}")
   elif [[ "$rest" =~ ^[[:space:]]+--git-dir(=|[[:space:]]+)(${tok}) ]]; then
-    check_dir "${BASH_REMATCH[2]}"
+    check_dir "${BASH_REMATCH[2]}"; gitdir_v="${BASH_REMATCH[2]}"
+  elif [[ "$rest" =~ ^[[:space:]]+--work-tree(=|[[:space:]]+)(${tok}) ]]; then
+    check_dir "${BASH_REMATCH[2]}"; wt_v="${BASH_REMATCH[2]}"
   elif [[ "$rest" =~ ^[[:space:]]+(${valued})[[:space:]]+${tok} ]]; then :
   elif [[ "$rest" =~ ^[[:space:]]+--[a-z][a-z-]*(=${tok})? ]]; then :
   elif [[ "$rest" =~ ^[[:space:]]+-[A-Za-z] ]]; then :
@@ -47,9 +62,18 @@ while [ -n "${rest//[[:space:]]/}" ]; do
 done
 if [ -z "$bad_dirs" ]; then
   target="$(hook_cwd)"
-  [ -n "$cd_dir" ] && target="$(join_dir "$target" "$cd_dir")"
+  for d in "${cd_dirs[@]+"${cd_dirs[@]}"}"; do target="$(join_dir "$target" "$d")"; done
   for d in "${c_dirs[@]+"${c_dirs[@]}"}"; do target="$(join_dir "$target" "$d")"; done
-  [ -d "$target" ] && export OPSX_CWD="$target"
+  if [ -n "$wt_v" ]; then
+    target="$(join_dir "$target" "$wt_v")"
+  elif [ -n "$gitdir_v" ]; then
+    gd="$(join_dir "$target" "$gitdir_v")"
+    case "$gd" in
+      */.git) target="${gd%/.git}" ;;
+      *) bad_dirs="$bad_dirs '--git-dir ${gitdir_v}'（不是 <repo>/.git）" ;;
+    esac
+  fi
+  [ -n "$bad_dirs" ] || ! [ -d "$target" ] || export OPSX_CWD="$target"
 fi
 
 top="$(repo_top)"
@@ -58,8 +82,12 @@ if [ ! -f "$top/openspec/workplan.yaml" ]; then
   ctx PreToolUse "opsx commit 閘門未啟用：這個 repo 還沒有 openspec/workplan.yaml（第一次 /opsx-workflow:propose 後自動生效）"; exit 0
 fi
 
+if [ "$is_alias" = 1 ]; then
+  deny "opsx commit 閘門：指令把 commit 設成 git 別名，之後用別名 commit 時骨架裡沒有 commit，會繞過閘門。直接寫 git commit，不要設別名。"
+fi
+
 if [ -n "$bad_dirs" ]; then
-  deny "opsx commit 閘門：指令裡的目錄（${bad_dirs# }）含空白、引號、變數、~ 或萬用字元，閘門讀不到 commit 實際作用的 repo。改用不含空白的字面路徑（git -C /abs/path commit 或 cd /abs/path && git commit）。"
+  deny "opsx commit 閘門：指令裡的目錄（${bad_dirs# }）讀不出 commit 實際作用的 repo：含空白、引號、變數、~ 或萬用字元，或 --git-dir 不是 <repo>/.git，或 cd -。改用不含空白的字面路徑（git -C /abs/path commit 或 cd /abs/path && git commit）。"
 fi
 
 if printf '%s' "$cmd" | grep -q '\[no-change\]'; then
