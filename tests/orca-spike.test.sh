@@ -4,6 +4,8 @@
 #   「過或不過要附證據」「socket 不過就停」「socket 過了不能跳項」「結論對得回紀錄」「有項目沒過就不能結論為換」
 # 儲存格裡不能有 |：awk 用 | 切欄。
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+# 固定 C locale：fixture 與 check_record 都要在 launchd、CI 那種沒有 UTF-8 locale 的環境下照樣對
+export LC_ALL=C
 
 DOC="$OPSX_ROOT/docs/orca-spike.md"
 ITEMS='socket 連線、socket 重開後、自訂啟動參數、啟動參數重開後、worker_done 叫醒、escalation 叫醒、授權閘門、orca serve 常駐'
@@ -81,11 +83,15 @@ mk_record "$r" 授權閘門 不過 空 不換 授權閘門;                check
 # --- Requirement「socket 不過就停」：socket 不過時其餘七項都未驗、原因是 socket 不過；socket 過時不能拿這個原因跳項 ---
 SOCKET_STOP='socket 不過，依派工指示停下'
 printf '| 項目 | 指令 | 輸出 | 判定 | 原因 |\n|---|---|---|---|---|\n| socket 連線 | `orca status` | EPERM | 不過 | |\n' > "$FX/stop.md"
-printf '%s\n' "${ITEMS#socket 連線、}" | tr '、' '\n' | sed "s/.*/| & | | | 未驗 | $SOCKET_STOP |/" >> "$FX/stop.md"
+rest="${ITEMS#socket 連線、}"
+printf '%s\n' "${rest//、/$'\n'}" | sed "s/.*/| & | | | 未驗 | $SOCKET_STOP |/" >> "$FX/stop.md"
 printf '\n結論：不換\n依據：socket 連線\n' >> "$FX/stop.md"
 check_record "$FX/stop.md" >/dev/null || fail "socket 不過、其餘未驗 要 PASS: $(check_record "$FX/stop.md")"
 sed 's/^| 授權閘門 | | | 未驗 | .*/| 授權閘門 | `echo x` | x | 過 | |/' "$FX/stop.md" > "$FX/stop-ran.md"
 out="$(check_record "$FX/stop-ran.md")" && fail "socket 不過後還驗了別項 要 FAIL"
+case "$out" in *"授權閘門"*) ;; *) fail "要指出是哪一項: $out";; esac
+sed 's/^| 授權閘門 | | | 未驗 | .*/| 授權閘門 | | | 未驗 | 不需要 |/' "$FX/stop.md" > "$FX/stop-other-reason.md"
+out="$(check_record "$FX/stop-other-reason.md")" && fail "socket 不過、未驗原因不是 socket 不過 要 FAIL"
 case "$out" in *"授權閘門"*) ;; *) fail "要指出是哪一項: $out";; esac
 sed 's/^| socket 連線 | `orca status` | EPERM | 不過 |/| socket 連線 | `orca status` | runtimeReachable: true | 過 |/' "$FX/stop.md" > "$FX/skip.md"
 check_record "$FX/skip.md" >/dev/null && fail "socket 過卻用 socket 不過當原因跳項 要 FAIL"
@@ -94,6 +100,9 @@ check_record "$FX/skip.md" >/dev/null && fail "socket 過卻用 socket 不過當
 mk_record "$r" 授權閘門 過 指令與輸出 不換 授權閘門
 grep -v '^| orca serve 常駐 ' "$r" > "$FX/missing.md"; check_record "$FX/missing.md" >/dev/null && fail "少一列 要 FAIL"
 mk_record "$r" 授權閘門 過 指令與輸出 不換 不存在的項目;      check_record "$r" >/dev/null && fail "依據找不到 要 FAIL"
+mk_record "$r" 授權閘門 過 指令與輸出 不換 ''
+out="$(check_record "$r")" && fail "依據空白 要 FAIL"
+case "$out" in *"結論沒有依據"*) ;; *) fail "要說結論沒有依據: $out";; esac
 mk_record "$r" 授權閘門 不過 指令與輸出 換 授權閘門;          check_record "$r" >/dev/null && fail "有不過卻結論換 要 FAIL"
 mk_record "$r" 授權閘門 未驗 原因 換 授權閘門;                check_record "$r" >/dev/null && fail "有未驗卻結論換 要 FAIL"
 mk_record "$r" 授權閘門 未驗 原因 換 授權閘門

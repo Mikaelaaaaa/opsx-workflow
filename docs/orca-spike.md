@@ -14,7 +14,7 @@
 |---|---|---|---|---|
 | socket 連線 | `orca status`（單獨一個 Bash 呼叫） | `runtimeReachable: true`、`runtimeConnectionState: connected`、`runtimeState: ready` | 過 | |
 | socket 重開後 | `orca status --json`；`ls ~/Library/Application\ Support/orca/` | `reachable: true`、`connectionState: connected`，但 `app.pid` 仍是 69717，socket 仍是 10:34 建的 `o-69717-11d4.sock`，`orcad.lock` 的 pid 也是 69717 | 未驗 | 使用者 13:3x 按 Cmd+Q 再打開，但 app 主 process 沒有退出（pid 與 socket 檔名都沒變），所以沒驗到 socket 換檔名的情況。照 D1，excludedCommands 比對的是指令，不是 socket 路徑，換檔名理論上不影響，這點是推論 |
-| 自訂啟動參數 | `orca terminal create --command "cd …/repo && claude --settings …/settings.json --permission-mode dontAsk --add-dir …/extra"`，再 `orca orchestration worker-start --terminal <handle> --spec-file spec-a.md` | worker 回報：`printenv ORCA_SPIKE_MARK` 印出 settings 裡設的 `settings-loaded-91ab`；Read `extra/marker.txt` 讀到 `add-dir-marker-7c3f`；Write 被拒，訊息 `Permission to use Write has been denied because Claude Code is running in don't ask mode.`；狀態列 `don't ask on` | 過 | |
+| 自訂啟動參數 | `orca terminal create --command "cd …/repo && claude --settings …/settings.json --permission-mode dontAsk --add-dir …/extra"`，再 `orca orchestration worker-start --terminal <handle> --spec-file spec-a.md` | worker 回報：`printenv ORCA_SPIKE_MARK` 印出 settings 裡設的 `settings-loaded-91ab`；Read `extra/marker.txt` 讀到 `add-dir-marker-7c3f`；Write 被拒，訊息 `Permission to use Write has been denied because Claude Code is running in don't ask mode.`；狀態列 `don't ask on` | 過 | 只在走 `orca terminal create --command "claude …"` 再 `worker-start --terminal` 時成立；`worker-start --agent claude` 只收 `--model`、`--effort` |
 | 啟動參數重開後 | `orca terminal list --json` 比對重開前後；`orca terminal send` 問 orca-spike-a 的 claude 剛才 `printenv ORCA_SPIKE_MARK` 印了什麼，再跑一次 | 五個 terminal 的 handle、ptyId、incarnationId 都和重開前相同，`connected: true`；orca-spike-a 憑記憶答 `settings-loaded-91ab`，重跑也印 `settings-loaded-91ab`，狀態列 `don't ask on`，scrollback 從 TASK 到 13:16 的 worker_done 都在 | 未驗 | 使用者 13:3x 按 Cmd+Q 再打開，但 app 主 process 沒有退出（pid 69717 不變），跟 socket 重開後同一個原因，沒驗到真的重開。驗到的是：關掉視窗再打開之後，terminal 與裡面的 claude（對話、`--settings`、dontAsk）都還在 |
 | worker_done 叫醒 | Orca terminal 裡的 claude 協調者跑 `orca orchestration worker-start --spec 'Immediately report worker_done with the body hello-wake…' --terminal <worker A>`，然後結束回合 | Orca 在協調者輸入 `You have 1 orchestration message. Run orca orchestration check --run run_3b59d68a045a.`，協調者回 `WOKE hello-wake`；信箱 `msg_b8ebe93e8773` 的 `delivered_at` 有值 | 過 | 只在協調者是 Orca 裡的 agent terminal 時成立。herdr pane 裡的協調者下 `worker-start` 回 `no_active_sender_terminal`；綁一般 terminal 當協調者，`delivered_at` 是 null（見下一節） |
 | escalation 叫醒 | 同一個協調者派 worker：`orca orchestration ask` 問 `escalation test, reply PONG`，拿到答案再送 worker_done | 問題 `msg_4b4a230c4112` 叫醒協調者，協調者 `orca orchestration reply` PONG；回覆叫醒 worker，worker 送 worker_done `got-PONG`，再叫醒協調者，協調者回 `WOKE2 got-PONG` | 過 | |
@@ -39,7 +39,9 @@
 
 授權閘門與 orca serve 常駐是因為不換才沒驗，不拿來當依據。
 
-Orca 當工作台時，terminal 在 Cmd+Q 再打開之後活下來，claude 的對話、`--settings` 與 dontAsk 都還在。terminal 由獨立的 terminal daemon 持有（`daemon/daemon-v55.pid`：pid 66203，11/11 17:22 啟動，由 `Orca Terminal Host.app` 起），不歸視窗管。不過這次 Cmd+Q 連 app 主 process（pid 69717）都沒有結束，所以這次只證明 terminal 熬過關視窗再打開；app 主 process 真的換 pid、或重開機之後 terminal 還在不在，都沒有驗。
+Orca 當工作台時，terminal 在 Cmd+Q 再打開之後活下來，claude 的對話、`--settings` 與 dontAsk 都還在。`daemon/daemon-v55.pid` 記的 terminal daemon 是 pid 66203，11/11 17:22 啟動，比 app 主 process 早，spawner 是 `Orca Terminal Host.app`。由此推論 terminal 由這個 daemon 持有、不歸視窗管；sandbox 不准 `ps`，沒驗 ptyId 屬於哪個 process。不過這次 Cmd+Q 連 app 主 process（pid 69717）都沒有結束，所以這次只證明 terminal 熬過關視窗再打開；app 主 process 真的換 pid、或重開機之後 terminal 還在不在，都沒有驗。
+
+下面的依據指的是這兩列原因欄裡的條件（協調者要在 Orca 裡、參數要繞道 `terminal create`），不是它們判「過」本身。
 
 結論：不換
 依據：worker_done 叫醒、自訂啟動參數
