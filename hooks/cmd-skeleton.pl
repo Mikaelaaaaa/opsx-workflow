@@ -13,6 +13,7 @@ use FindBin;
 require "$FindBin::Bin/cmd-lex.pl";    # skip_dq、paren_body
 
 use constant MAX_DEPTH => 3;
+use constant MAX_BYTES => 32768;
 my $SQ = "'";
 my $RUNS_STRING = qr/(?:\b(?:bash|sh|zsh|dash|ksh)(?:\s+-\S+)*?\s+-\w*c\w*\s+|\beval\s+)$/;
 my $EXECUTOR = qr/\b(?:bash|sh|zsh|dash|ksh|eval|source|psql|mysql|sqlite3|ssh|python[0-9]?|node|perl|ruby)\b/;
@@ -82,21 +83,48 @@ sub in_code {
     return $i == $pos;    # 最後一次跳脫把 $pos 吃掉了：這個位置是被跳脫的字元
 }
 
-# heredoc 開頭：只認 in_code 的位置；本體到單獨一行的結尾字為止。整段換成 heredoc() 的結果
+# heredoc 的分隔字照 bash：整個字去掉引號與反斜線之後的樣子（'E'F、E\OF 都是 EF 與 EOF，EOF-X 就是 EOF-X）
+sub unquote_word {
+    my ($w) = @_;
+    my ($out, $i) = ('', 0);
+    while ($i < length $w) {
+        my $c = substr $w, $i, 1;
+        if ($c eq '\\') { $out .= substr($w, $i + 1, 1); $i += 2; next }
+        if ($c eq '$' && substr($w, $i + 1, 1) =~ /^[\x27"]$/) { $i++; next }   # $'EOF'、$"EOF"：$ 不算分隔字的一部分
+        if ($c eq $SQ || $c eq '"') {
+            my $end = index $w, $c, $i + 1;
+            $end = length $w if $end < 0;
+            $out .= substr $w, $i + 1, $end - $i - 1;
+            $i = $end + 1;
+            next;
+        }
+        $out .= $c;
+        $i++;
+    }
+    return $out;
+}
+
+my $HEREDOC_WORD = qr/(?>(?:\$?'[^']*'|\$?"[^"]*"|[^\s;&|<>()\\'"]|\\.)+)/;
+
+# 由左到右把每一段 heredoc 換成 heredoc() 的結果；只認 in_code 的開頭（引號、註解、跳脫內的不算）。
+# 開頭沒有結尾行的原樣留下，繼續找後面的
 sub strip_heredocs {
     my ($s, $depth) = @_;
     my ($out, $copied) = ('', 0);
-    while ($s =~ /(?<!<)<<-?\s*([\x27"]?)(\w+)\1/g) {
-        my ($start, $opener_end, $quote, $tag) = ($-[0], $+[0], $1, $2);
+    while ($s =~ /(?<!<)<<-?[ \t]*($HEREDOC_WORD)/g) {
+        my ($start, $opener_end, $word) = ($-[0], $+[0], $1);
         next unless in_code($s, $start);
         my $nl = index $s, "\n", $opener_end;
         next if $nl < 0;
-        next unless substr($s, $nl + 1) =~ /\A(.*?)\n[ \t]*\Q$tag\E[ \t]*(?:\n|\z)/s;
+        # $'…\x41…' 的跳脫 bash 會展開，這裡不展開：算不準分隔字就不剝本體（fail-closed）
+        next if $word =~ /\$['"]/ && $word =~ /\\/;
+        my $delim = unquote_word($word);
+        next unless substr($s, $nl + 1) =~ /\A(.*?)\n[ \t]*\Q$delim\E[ \t]*(?:\n|\z)/s;
         my ($body, $consumed) = ($1, $+[0]);
         my $line_start = $start;
         $line_start-- while $line_start > 0 && substr($s, $line_start - 1, 1) ne "\n";
         $out .= substr($s, $copied, $line_start - $copied);
-        $out .= heredoc('', substr($s, $line_start, $start - $line_start), substr($s, $start, $nl - $start), $quote, $body, $depth);
+        $out .= heredoc('', substr($s, $line_start, $start - $line_start), substr($s, $start, $nl - $start), $word =~ /[\x27"\\]/ ? $SQ : '', $body, $depth);
         $copied = $nl + 1 + $consumed;
         pos($s) = $copied;
     }
@@ -162,4 +190,5 @@ sub skeleton {
 
 local $/;
 my $cmd = <STDIN> // '';
-print skeleton($cmd, 0);
+# shortcut: 沒結尾的 heredoc 開頭每個都重掃後面全文（二次方），hook 逾時等於放行，所以超過上限就原樣輸出（引號與 heredoc 本體都不去除，比對只會更嚴）；真有超過 32KB 的指令，分次執行或請人放行
+print length($cmd) > MAX_BYTES ? $cmd : skeleton($cmd, 0);

@@ -14,6 +14,11 @@
         同一個卡鎖內讀那一段、用 common.sh 的 new_shell 建殼、刪那一段；印新殼 slug。找不到那段退出 2，不建殼。
     $OPSX_PY -I inboxmerge.py evidence <卡目錄> <行>
         卡鎖內把一行插進 `## 證據` 段最後一行非空內容之後（opsx merge-card）。沒有證據段退出 1。
+    $OPSX_PY -I inboxmerge.py carry <目標卡目錄> <來源 inbox 檔> <來源 slug>
+        來源卡的 kind_of_work / impact / evidence / priority 覆寫併進目標卡 frontmatter（opsx merge-card，來源捨棄成功之後；來源 inbox 已複製出來）：
+        kind_of_work 取較高，impact 取聯集，evidence 依 " ; " 去重接在後面，priority 取較高。
+    $OPSX_PY -I inboxmerge.py carry-check <目標卡目錄> <來源 inbox 檔> <來源 slug>
+        同上但不寫檔：只驗欄位合格與目標有 frontmatter（opsx merge-card，捨棄來源之前）。
     $OPSX_PY -I inboxmerge.py drop <卡目錄> <理由> -- <歸檔指令…>
         卡鎖內重查併入段（有就退出 1）、寫 outcome: declined 與 ## 捨棄理由、跑歸檔指令，鎖到指令結束才放。指令失敗退出 3。
 兩個 agent 可能同時併進同一張卡：鎖在卡目錄上（inbox.md 會被原子替換換掉 inode，鎖它本身擋不住），鎖內重讀再改。
@@ -28,6 +33,7 @@ import sys
 import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import priority  # noqa: E402
 import safefile  # noqa: E402
 
 HEAD = re.compile(r"^## ")
@@ -242,6 +248,75 @@ def evidence(card_dir: str, line: str) -> None:
         safefile.write_atomic(inbox, "\n".join(lines))
 
 
+def rewrite_frontmatter(text: str, updates: dict, where: str) -> str:
+    """frontmatter 裡 updates 的 key 改成同一行的 key: value（原本巢狀的縮排續行一併拿掉）；原本沒有的接在結尾 --- 前。
+    where 是檔案路徑，沒有 frontmatter（第一行不是 ---，或沒有結尾 ---）時訊息指名它。"""
+    lines = text.split("\n")
+    end = next((i for i, x in enumerate(lines[1:], 1) if x.strip() == "---"), None)
+    if lines[0].strip() != "---" or end is None:
+        raise ValueError("%s 沒有 frontmatter（第一行要是 ---，並且有結尾的 ---）" % where)
+    out, seen, skipping = [lines[0]], set(), False
+    for x in lines[1:end]:
+        if x[:1] in (" ", "\t") and x.strip():
+            if not skipping:
+                out.append(x)
+            continue
+        key = x.partition(":")[0].strip()
+        skipping = key in updates
+        if skipping:
+            out.append("%s: %s" % (key, updates[key]))
+            seen.add(key)
+        else:
+            out.append(x)
+    out += ["%s: %s" % (k, v) for k, v in updates.items() if k not in seen]
+    return "\n".join(out + lines[end:])
+
+
+def facts(slug: str, text: str) -> dict:
+    """{kind, impact 清單, evidence, priority, reason}；欄位不合格丟 ValueError，訊息指名卡與欄位。"""
+    try:
+        got = priority.facts_of(slug, text)
+    except priority.PriorityError as e:
+        raise ValueError(str(e)) from e
+    fm, nested = priority.frontmatter(text)
+    ev = fm.get("evidence") or (priority.nested_impact(slug, nested["impact"])[1] if "impact" in nested else "")
+    return {"kind": got["kind"], "impact": got["impact"], "evidence": ev, "priority": got["priority"], "reason": got["priority_reason"]}
+
+
+def carry(target_dir: str, source_inbox: str, source_slug: str, write: bool = True) -> None:
+    """來源卡的事實欄位併進目標卡 frontmatter：kind_of_work 取較高（incident 高於 planned），impact 取聯集，
+    evidence 依 " ; " 分段去重後接在後面，來源的 priority 覆寫比目標高（或目標沒有）就連同理由帶過去。
+    來源沒有事實（planned、沒有 impact、沒有 evidence、沒有覆寫）就在解析目標之前返回，目標一個位元組都不動。
+    等級由 opsx priority 從併完的欄位算。priority 覆寫只在比目標的有效等級（目標的覆寫，沒有就用併完的 kind 與 impact 算的等級）高時才帶過去。
+    shortcut: 有效等級不看 workplan 的 milestone 位置，覆寫可能壓過目標因 milestone 得到的較高等級；併卡的來源與目標都在收件匣時沒差，到進了 workplan 的卡才要升級成用 priority.levels(top)
+    write=False 只驗兩張卡的欄位合格、目標有 frontmatter（opsx merge-card 在捨棄來源之前呼叫），不寫檔。"""
+    inbox = os.path.join(target_dir, "inbox.md")
+    with open(source_inbox, encoding="utf-8") as f:
+        s = facts(source_slug, f.read())
+    if s["kind"] == "planned" and not (s["impact"] or s["evidence"] or s["priority"]):
+        return
+    with safefile.CardLock(target_dir):
+        with open(inbox, encoding="utf-8") as f:
+            text = f.read()
+        t = facts(os.path.basename(target_dir), text)
+        updates = {}
+        if s["kind"] == "incident" and t["kind"] != "incident":
+            updates["kind_of_work"] = "incident"
+        impact = t["impact"] + [x for x in s["impact"] if x not in t["impact"]]
+        parts = [x for x in dict.fromkeys(p for e in (t["evidence"], s["evidence"]) for p in e.split(" ; ")) if x]
+        evidence = " ; ".join(parts)
+        if impact != t["impact"]:
+            updates["impact"] = ", ".join(impact)
+        if evidence != t["evidence"] or "impact" in updates:   # 目標原本用巢狀寫法時，evidence 要跟著 impact 一起改成同一行
+            updates["evidence"] = evidence
+        effective = t["priority"] or priority.rule_level("incident" if "kind_of_work" in updates else t["kind"], impact, None, None)[0]
+        if s["priority"] and priority.LEVELS.index(s["priority"]) < priority.LEVELS.index(effective):
+            updates.update({"priority": s["priority"], "priority_reason": "併自 %s：%s" % (source_slug, s["reason"])})
+        new = rewrite_frontmatter(text, updates, inbox)
+        if write and new != text:
+            safefile.write_atomic(inbox, new)
+
+
 def drop(card_dir: str, reason: str, argv: list) -> int:
     """在卡鎖內重查併入段、寫 outcome 與捨棄理由、跑 argv（歸檔），到 argv 結束才放鎖。argv 失敗回 3。"""
     inbox = os.path.join(card_dir, "inbox.md")
@@ -261,10 +336,10 @@ def drop(card_dir: str, reason: str, argv: list) -> int:
 def main() -> None:
     args = sys.argv[1:]
     cmd = args[0] if args else ""
-    want = {"append": 9, "card": 3, "remove": 3, "ids": 2, "evidence": 3, "split-out": 4}
+    want = {"append": 9, "card": 3, "remove": 3, "ids": 2, "evidence": 3, "split-out": 4, "carry": 4, "carry-check": 4}
     ok = len(args) >= 5 and args[3] == "--" if cmd == "drop" else cmd in want and len(args) == want[cmd]
     if not ok:
-        sys.exit("用法：inboxmerge.py append <卡目錄> <基本 id> <ISO 時間> <來源> <kind_of_work> <evidence> <type> <一句話> | card <卡目錄> <id> | remove <卡目錄> <id> | ids <卡目錄> | evidence <卡目錄> <行> | split-out <卡目錄> <id> <repo 根> | drop <卡目錄> <理由> -- <歸檔指令…>")
+        sys.exit("用法：inboxmerge.py append <卡目錄> <基本 id> <ISO 時間> <來源> <kind_of_work> <evidence> <type> <一句話> | card <卡目錄> <id> | remove <卡目錄> <id> | ids <卡目錄> | evidence <卡目錄> <行> | carry <目標卡目錄> <來源 inbox 檔> <來源 slug> | carry-check <目標卡目錄> <來源 inbox 檔> <來源 slug> | split-out <卡目錄> <id> <repo 根> | drop <卡目錄> <理由> -- <歸檔指令…>")
     try:
         if cmd == "append":
             print(append(*args[1:]))
@@ -272,6 +347,10 @@ def main() -> None:
             split_out(*args[1:])
         elif cmd == "evidence":
             evidence(*args[1:])
+        elif cmd == "carry":
+            carry(*args[1:])
+        elif cmd == "carry-check":
+            carry(*args[1:], write=False)
         elif cmd == "drop":
             sys.exit(drop(args[1], args[2], args[4:]))
         elif cmd == "card":

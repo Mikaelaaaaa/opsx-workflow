@@ -57,13 +57,11 @@ printf '{"Agentory-AI/eval-core":{"mode":"autopilot","grants":[],"herdr_name":"f
 printf '{"permissions":{"allow":["Bash(git add:*)","Bash(git commit:*)"]}}' > "$OPSX_STATE_DIR/settings/Agentory-AI-fsess-autopilot.json"
 out="$(gg 'git add a.txt && git commit -m x && git push')"; assert_eq "$(decision "$out")" allow "feature session 要用 feature 名找 settings: $(reason "$out")"
 out="$(gg 'git -C . merge origin/main && git push')"; assert_eq "$(decision "$out")" deny "feature session 的 settings 也要擋 allow 外的段"
-# MR 留言（/pr 步 5c）：整條只能是那個形狀才明說放行；夾帶別的指令或 .. 不輸出 allow，交給 dontAsk 的 settings 去拒
+# MR 留言不是第二級：有 mr 授權時閘門也不輸出 allow，交給 dontAsk 的 settings 去拒
 printf '[repos."Agentory-AI"]\npush = false\nmr = false\nmigrate = false\n' > "$OPSX_STATE_DIR/grants.toml"
 card_grants '["mr"]'
-out="$(gg 'gh pr comment 159 --body-file openspec/changes/x/logic-map.md')"
-printf '%s' "$out" | jq -e '.hookSpecificOutput.permissionDecision=="allow"' >/dev/null || fail "MR 留言單條要明說放行（輸出：${out}）"
-for c in 'gh pr comment 159 --body-file x.md; ./evil' 'gh pr comment 159 --body-file x.md && ./evil' 'gh pr comment 159 --body-file ../x.md'; do
-  out="$(gg "$c")"; assert_eq "$out" "" "MR 留言不能夾帶別的指令或 ..，閘門不放行（${c}）"
+for c in 'gh pr comment 159 --body-file openspec/changes/x/logic-map.md' 'gh pr comment 159 --edit-last --body-file x.md'; do
+  out="$(gg "$c")"; assert_eq "$out" "" "MR 留言閘門不放行（${c}）"
 done
 card_grants '[]'
 

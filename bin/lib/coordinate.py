@@ -30,6 +30,10 @@ REDISPATCH_MINUTES = 10
 STUCK_GATE = re.compile(r"^卡在接 /(explore|grill|propose|apply|review|pr|babysit)(?: #\d+)?$")   # openspec-stop-gate.sh write_auto_gate 的標題
 # relaunch 失敗後同一個 pane 不再試的時間；跟重派同一個節流，不會每輪對壞掉的 pane 送 Esc、/exit
 RELAUNCH_MINUTES = REDISPATCH_MINUTES
+# relaunch.sh 寫的是當下時間，晚於現在超過這麼久的 relaunching_at 不可能是它寫的
+CLOCK_SKEW_MINUTES = 1
+# pid_t 是 32 位元有號整數，os.kill 收更大的值會 OverflowError
+PID_MAX = 2**31 - 1
 # 真實訊息是 `Usage limit reached[ again] · …`，前面只有 Claude Code 畫的 ⎿ │ 與空白；引用、清單、diff 行都不算
 USAGE_LIMIT_LINE = re.compile(r"[\s⎿│]*Usage limit reached(?: again)?\s*·")
 USAGE_LIMIT_STALE_MINUTES = 30
@@ -57,6 +61,14 @@ GATE_HUMAN = {
 
 class CoordinateError(Exception):
     """這一輪讀不到該讀的狀態：寫 log、非 0 結束，不對任何卡動手。"""
+
+
+class DispatchFieldError(Exception):
+    """dispatch.json 某個條目的欄位格式不合：只停那一張卡，記 ?? 並通知，這輪其他卡照跑。"""
+
+    def __init__(self, key, field, value, reason):
+        super().__init__("dispatch.json 條目 %s 的 %s=%s：%s" % (key, field, json.dumps(value, ensure_ascii=False), reason))
+        self.key, self.field, self.value = key, field, value
 
 
 class Round:
@@ -539,6 +551,14 @@ class Round:
             del self.memo["_usage_limit"]
         return False
 
+    def merged_into_main(self, top, slug):
+        """waits-on 的卡合進 main 了：workplan 裡它所屬的 PR 是 merged，或它已歸檔（is_archived）而且不是被捨棄的。
+        workplan 與 archive 都沒有它（卡名寫錯、還沒進 workplan）算沒合，維持停 pane。"""
+        pr = pr_of(self.workplan(top), slug)
+        if pr is not None and pr.get("status") == "merged":
+            return True
+        return is_archived(top, slug) and not archived_declined(top, slug)
+
     def note_stuck_gates(self, live):
         """用量上限期間 Stop hook 開的「卡在接」gate：hook 跑在上限訊息寫進 transcript 之前，看不到上限。
         暫停期間代答的 prompt 會被上限吃掉，drive 看到「重做」階段沒動又開 gate，所以這時只記下，恢復後才答。"""
@@ -562,7 +582,10 @@ class Round:
             for gate in answered:
                 stage = STUCK_GATE.match(gate).group(1)
                 self.log("-- %s 用量上限已過，hook 開的 gate「%s」代答重做" % (key, gate))
-                self.answer(c, repo_paths[c["repo"]], gate, "重做 /opsx-workflow:%s（用量上限期間 hook 開的 gate，額度恢復後繼續）" % stage)
+                try:
+                    self.answer(c, repo_paths[c["repo"]], gate, "重做 /opsx-workflow:%s（用量上限期間 hook 開的 gate，額度恢復後繼續）" % stage)
+                except DispatchFieldError as e:
+                    self.bad_dispatch(c, e)
             if answered:
                 self.stuck_answered.add(key)
                 try:
@@ -579,6 +602,10 @@ class Round:
             self.answer(c, top, w["gate_id"], verdict[1], grant=verdict[2])
             return
         q = w.get("question") or ""
+        if verdict[0] == "park" and self.merged_into_main(top, verdict[1]):
+            self.log("✓ %s gate %s 等的 %s 已合進 main，答掉，不停 pane" % (key, w["gate_id"], verdict[1]))
+            self.answer(c, top, w["gate_id"], "%s 已合進 main" % verdict[1])
+            return
         if verdict[0] == "park":
             self.log("⏳ %s gate %s 等 %s，先停 pane，有卡合進 main 那輪再派：%s" % (key, w["gate_id"], verdict[1], q[:100]))
             rc, _, _ = self.act(["opsx", "stop", c["slug"], "--repo", top])
@@ -657,10 +684,17 @@ class Round:
         """opsx relaunch 正在重開這張卡的 pane：回 (條目 key, relaunching_at)，否則 None。
         過了 RELAUNCH_MINUTES 的是被 kill 的 relaunch 留下的，不算。"""
         for k in self.pane_chain(c):
-            at = (self.dispatch_file.get(k) or {}).get("relaunching_at")
-            if at and self.now - datetime.datetime.fromisoformat(at) < datetime.timedelta(minutes=RELAUNCH_MINUTES):
-                return k, at
+            entry = self.dispatch_file.get(k) or {}
+            at = parse_relaunching_at(k, entry, self.now)
+            if at and self.now - at < datetime.timedelta(minutes=RELAUNCH_MINUTES):
+                return k, entry["relaunching_at"]
         return None
+
+    def bad_dispatch(self, c, e):
+        """卡的 dispatch.json 欄位格式不合：這輪不對它做死了沒、在不在 relaunch、重派的判斷，記 ?? 並通知。
+        同一張卡、欄位、原值只通知一次；沒有人修之前每輪都會記 ??。"""
+        self.log("?? %s %s，這輪不處理這張卡" % (card_key(c), e))
+        self.notify(c, "bad-dispatch", "%s/%s=%s" % (e.key, e.field, json.dumps(e.value, ensure_ascii=False)), "dispatch.json 欄位不合", one_line(str(e)))
 
     def redispatch(self, c, top, why):
         # relaunch 的空窗裡 claude 已經 /exit，看起來就是 agent 不在、或代答送不到；這時收掉 pane 會打斷 relaunch
@@ -1130,6 +1164,13 @@ def is_archived(top, name):
     return not os.path.isdir(os.path.join(changes, name)) and bool(glob.glob(os.path.join(changes, "archive", "????-??-??-" + glob.escape(name))))
 
 
+def archived_declined(top, name):
+    """最新一份同名歸檔是被捨棄的（opsx drop、opsx merge-card 會在 .openspec.yaml 寫 outcome: declined），不是合進 main。
+    名字被捨棄過又重做的卡，看最新那份。"""
+    dirs = sorted(glob.glob(os.path.join(top, "openspec", "changes", "archive", "????-??-??-" + glob.escape(name))))
+    return bool(dirs) and bool(re.search(r"^outcome:\s*declined\s*$", priority.read_text(os.path.join(dirs[-1], ".openspec.yaml")), re.M))
+
+
 def waiting_on(prs, slug):
     """depends-on 裡有這張卡所屬的 PR、自己還沒 merged 的 PR 名。"""
     pr = pr_of(prs, slug)
@@ -1176,12 +1217,44 @@ def claude_argv(info):
     return hits[0]["argv"]
 
 
-def drive_dead(disp):
-    pid = disp.get("drive_pid")
-    if not pid:
+def parse_drive_pid(key, entry):
+    """dispatch.json 條目的 drive_pid：缺或 null 回 None，大於 0 的整數回它，其餘 raise DispatchFieldError。
+    drive.sh 用 null 清 pid，所以 null 與缺都是「沒有」。"""
+    pid = entry.get("drive_pid")
+    if pid is None:
+        return None
+    if type(pid) is not int:
+        raise DispatchFieldError(key, "drive_pid", pid, "要是整數")
+    if not 0 < pid <= PID_MAX:
+        raise DispatchFieldError(key, "drive_pid", pid, "要在 1 到 %d 之間" % PID_MAX)
+    return pid
+
+
+def parse_relaunching_at(key, entry, now):
+    """dispatch.json 條目的 relaunching_at：缺或 null 回 None，帶時區、不晚於 now 加 CLOCK_SKEW_MINUTES 的 ISO 8601 字串回 datetime，其餘 raise DispatchFieldError。
+    relaunch.sh 用 pop 清標記，所以 null 與缺都是「沒有」。"""
+    at = entry.get("relaunching_at")
+    if at is None:
+        return None
+    if not isinstance(at, str):
+        raise DispatchFieldError(key, "relaunching_at", at, "要是 ISO 8601 字串")
+    try:
+        parsed = datetime.datetime.fromisoformat(at)
+    except ValueError as e:
+        raise DispatchFieldError(key, "relaunching_at", at, "不是 ISO 8601：%s" % e) from e
+    if parsed.tzinfo is None:
+        raise DispatchFieldError(key, "relaunching_at", at, "沒有時區")
+    if parsed - now > datetime.timedelta(minutes=CLOCK_SKEW_MINUTES):
+        raise DispatchFieldError(key, "relaunching_at", at, "晚於現在超過 %d 分鐘" % CLOCK_SKEW_MINUTES)
+    return parsed
+
+
+def drive_dead(key, disp):
+    pid = parse_drive_pid(key, disp)
+    if pid is None:
         return False
     try:
-        os.kill(int(pid), 0)
+        os.kill(pid, 0)
     except ProcessLookupError:
         return True
     except PermissionError:
@@ -1257,7 +1330,10 @@ def one_round(state, dry):
         if not w:
             r.forget_waiting(c, live)
         if c["dispatch"] and w and w["type"] != "可以合併" and not paused and card_key(c) not in r.stuck_answered:
-            r.handle_gate(c, repo_paths[c["repo"]])
+            try:
+                r.handle_gate(c, repo_paths[c["repo"]])
+            except DispatchFieldError as e:
+                r.bad_dispatch(c, e)
         if c["mr"] and c["mr"]["state"] == "ready":
             # 推了新 commit 再全綠是新的一次可以合併，所以綁 head sha
             r.notify(c, "ready", c["mr"]["head_sha"], "可以合併", "看板按「合併」：" + c["mr"]["url"])
@@ -1266,12 +1342,16 @@ def one_round(state, dry):
     for c in live:
         if paused or not c["dispatch"] or card_key(c) in r.memo["_parked"]:
             continue
-        if c["agent_status"] == "unknown":
-            r.redispatch(c, repo_paths[c["repo"]], "agent 不在 herdr 裡（pane %s）" % c["dispatch"].get("pane"))
-        elif drive_dead(c["dispatch"]):
-            r.redispatch(c, repo_paths[c["repo"]], "drive pid %s 已經不在" % c["dispatch"]["drive_pid"])
-        else:
-            r.check_args(c, repo_paths[c["repo"]])
+        try:
+            dead = drive_dead(card_key(c), c["dispatch"])
+            if c["agent_status"] == "unknown":
+                r.redispatch(c, repo_paths[c["repo"]], "agent 不在 herdr 裡（pane %s）" % c["dispatch"].get("pane"))
+            elif dead:
+                r.redispatch(c, repo_paths[c["repo"]], "drive pid %s 已經不在" % c["dispatch"]["drive_pid"])
+            else:
+                r.check_args(c, repo_paths[c["repo"]])
+        except DispatchFieldError as e:
+            r.bad_dispatch(c, e)
     if not paused:
         r.dispatch_features(repo_paths, r.dispatch_new(live, repo_paths), r.working(live))
     r.act(["opsx", "reap"])   # 失敗 act 已經記 log；孤兒的判斷與關閉條件都在 opsx reap

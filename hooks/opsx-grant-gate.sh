@@ -83,7 +83,7 @@ PY
 }
 # autopilot 用 dontAsk 起，不在 settings allow 的指令 Claude 直接拒；所以有授權的動作要由這裡明說 allow，
 # 板上事後給的「這次 / 這張卡」授權才生效。等整條指令所有檢查都過了才 allow，一段有授權不能替後面那段放行。
-GRANTED=0; MERGE_GATED=0; MR_COMMENT=0
+GRANTED=0; MERGE_GATED=0
 GRANTED_ACTIONS=()   # 這條指令已查過、有授權的 action；「這次」授權查一次就用掉，逐段涵蓋只看這份清單，不再問授權
 allow() { jq -n '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"allow",permissionDecisionReason:"opsx 授權閘門：有授權"}}'; exit 0; }
 
@@ -209,7 +209,7 @@ testpath_needs_grant() { # <絕對路徑>
   [ "$(git -C "$base" rev-parse --show-toplevel 2>/dev/null || true)" = "$wtop" ] || return 1
   if [ "$missing" = 0 ]; then
     # :(glob) 的 * 不跨 /，所以只列這一層；樣式跟檔名 case 同一組
-    tracked="$(git -C "$base" ls-files -- ':(glob)*.test.*' ':(glob)*.spec.*' ':(glob)test_*.py' ':(glob)*_test.*')" || deny "opsx 授權閘門：git ls-files 失敗（${base}），分不出這一層有沒有既有測試，先擋下"
+    tracked="$(git -C "$base" ls-files -- ':(glob,icase)*.test.*' ':(glob,icase)*.spec.*' ':(glob,icase)test_*.py' ':(glob,icase)*_test.*')" || deny "opsx 授權閘門：git ls-files 失敗（${base}），分不出這一層有沒有既有測試，先擋下"
     [ -n "$tracked" ] && return 1
   fi
   return 0
@@ -263,26 +263,25 @@ if [ "$tool" = "Bash" ]; then
     [ "$UNMAPPED" = 1 ] && level3 "merge"
     merge_gate && { GRANTED=1; MERGE_GATED=1; }
   fi
-  printf '%s' "$l3" | grep -qE "${GIT_PUSH}.*(--force|-f\\b|\\+[a-zA-Z])" && level3 "force-push"
+  # push 的旗標與 refspec 照 shell 解析完的樣子比（hooks/cmd-normalize.pl：去引號與反斜線、併續行；"main"、\main、$'main'、'+feat/x' 才跟 main、+feat/x 一樣被認出來）；
+  # 旗標只在同一段 push 裡找，後面串的指令自己的 -f、+5 不算。git 與 push 之間的全域選項（-C、-c、--git-dir 等）照 GIT_PUSH 認
+  l3n="$(cmd_l3norm "$cmd")" || deny "opsx 授權閘門：perl 執行失敗，讀不到指令內容，先擋下。確認 perl 可用"
+  push_args="${GIT_PUSH}([[:space:]][^;&|]*)?[[:space:]]"
+  printf '%s' "$l3n" | grep -qE "${push_args}(--force[^[:space:]]*|--mirror|-[a-zA-Z]*f[a-zA-Z]*|\\+[^[:space:]]+)([[:space:]]|\$)" && level3 "force-push"
+  printf '%s' "$l3n" | grep -qE "${push_args}--(receive-pack|exec)(=|[[:space:]]|\$)" && level3 "push 帶會執行程式的參數"
+  printf '%s' "$l3n" | grep -qE "${push_args}--all([[:space:]]|\$)" && level3 "push --all"
   # 同一段 push 內，refspec 目標是 main / master 才算；分支名只含 main 片段、push 以外的 main 字樣不算（hooks/security-guard.sh 同一條）
   push_main="${GIT_PUSH}\\b[^;&|]*[[:space:]:+\"']"'(refs/heads/)?(main|master)([^A-Za-z0-9._/:-]|$)'
-  printf '%s' "$l3" | grep -qE "$push_main" && level3 "push main"
-  # push 帶別的程式（--receive-pack、--exec、帶程式的 ssh 指令）或推全部分支（--all、--mirror）：push 授權蓋不掉
-  printf '%s' "$l3" | grep -qE "${GIT_PUSH}[^;&|]*[[:space:]]--(receive-pack|exec)" && level3 "push --receive-pack"
-  printf '%s' "$l3" | grep -qE "${GIT_PUSH}[^;&|]*[[:space:]]--(all|mirror)\\b" && level3 "push --all / --mirror"
+  printf '%s' "$l3n" | grep -qE "$push_main" && level3 "push main"
+  # 帶程式的 ssh 指令（GIT_SSH_COMMAND、core.sshCommand）讓 push 去執行任意程式：push 授權蓋不掉
   printf '%s' "$l3" | grep -qE "(GIT_SSH_COMMAND|GIT_SSH|core\\.sshCommand)=" && printf '%s' "$l3" | grep -qE "${GIT_PUSH}" && level3 "push 帶 ssh 指令"
   printf '%s' "$l3" | grep -qiE '(^|\s|/)deploy(\.sh)?(\s|$)' && level3 "deploy"
   printf '%s' "$l3" | grep -qiE 'drop\s+(table|database|schema)|truncate\s+table|db:reset' && level3 "刪資料"
-  printf '%s' "$l3" | grep -qE 'sops\s+(-e|--encrypt|edit)|\.gitlab-ci\.yml|\.github/workflows' && level3 "改 CI / secrets"
+  printf '%s' "$l3" | grep -qiE 'sops\s+(-e|--encrypt|edit)|\.gitlab-ci\.yml|\.github/workflows' && level3 "改 CI / secrets"
   [ "$UNMAPPED" = 1 ] && exit 0
   # 第二級
   printf '%s' "$sk" | grep -qE "$RE_PUSH" && level2 push "git push"
   printf '%s' "$sk" | grep -qE "$RE_MR" && level2 mr "開 / 改 MR"
-  # MR 留言（/pr 步 5c 的邏輯表）：只認這兩種形狀，且整條指令只能是它，所以錨定原文，不走逐段判斷。路徑不准含 ..。
-  # GitLab 的路徑在引號裡骨架看不到；形狀之外的 glab api（例如打 /merge）不分類，settings 也沒有 glab api 規則，dontAsk 會拒。
-  gh_comment='^gh pr comment [0-9]+( --edit-last)? --body-file [A-Za-z0-9_./-]+ *$'
-  glab_note='^glab api --method (POST|PUT) "projects/:id/merge_requests/[0-9]+/notes(/[0-9]+)?" --field body=@[A-Za-z0-9_./-]+ *$'
-  if [[ $cmd != *..* && ( $cmd =~ $gh_comment || $cmd =~ $glab_note ) ]]; then level2 mr "留言到 MR"; MR_COMMENT=1; fi
   printf '%s' "$sk" | grep -qE "$RE_MIGRATE" && level2 migrate "本機 migrate"
   printf '%s' "$sk" | grep -qE "$RE_DELETE" && level2 delete "刪檔（rm -r/-f）"
   printf '%s' "$sk" | grep -qE "$RE_INSTALL" && level2 install "裝套件"
@@ -293,7 +292,6 @@ if [ "$tool" = "Bash" ]; then
   # 一段有授權不能替整串放行：串起來的指令每一段都要有授權、屬於不用授權的小指令、或在 dispatch 給這個 agent 的 settings allow 裡
   if [ "$GRANTED" = 1 ]; then
     [ "$MERGE_GATED" = 1 ] && allow
-    [ "$MR_COMMENT" = 1 ] && allow
     if first_uncovered_segment; then
       [ -z "$UNCOVERED_ACTION" ] || deny "opsx 授權閘門：指令裡有一段「${UNCOVERED}」要授權（第二級），$repo 沒有長期授權、這張卡也沒有。gate 寫 action: ${UNCOVERED_ACTION}。$GATE_MSG"
       deny "opsx 授權閘門：這條指令有一段不在這個 agent 的 settings allow 裡：「${UNCOVERED}」。把它拆成單獨一條指令；它需要授權的話，$GATE_MSG"
@@ -305,6 +303,7 @@ fi
 
 if [ "$tool" = "Edit" ] || [ "$tool" = "Write" ]; then
   [ -n "$file" ] || exit 0
+  shopt -s nocasematch   # APFS 預設不分大小寫：.Env 與 .env 是同一個檔
   case "$file" in
     *.gitlab-ci.yml|*/.github/workflows/*|*secrets*|*.sops.*|*/sops/*) level3 "改 CI / secrets（${file}）" ;;
     *.env.example) exit 0 ;;

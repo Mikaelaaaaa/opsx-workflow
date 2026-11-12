@@ -30,7 +30,7 @@
 source "$OPSX_ROOT/bin/lib/mr.sh"
 
 opsx_collect() {
-  local root="$HOME/code" state="$OPSX_STATE_DIR"
+  local root="${OPSX_CODE_ROOT:-$HOME/code}" state="$OPSX_STATE_DIR"
   while [ $# -gt 0 ]; do
     case "$1" in
       --root) root="$2"; shift 2 ;;

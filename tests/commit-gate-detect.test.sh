@@ -56,7 +56,7 @@ out="$(cgin "$FX" "git --work-tree=$R commit -m x")"; assert_eq "$(decision "$ou
 out="$(cgin "$FX" "git --work-tree=$FX/wt commit -m x")"; assert_eq "$(decision "$out")" allow "--work-tree 指到卡的 worktree 照放行: $(reason "$out")"
 out="$(cgin "$R" "git --git-dir=/abs/bare.git commit -m x")"; assert_eq "$(decision "$out")" deny "--git-dir 不是 <repo>/.git 讀不出作用的 repo，要 deny"
 # 別名：把 commit 設成別名，之後的別名 commit 會繞過閘門，設定當下就擋
-for c in 'git config alias.ci commit' 'git config --global alias.ci commit' 'git -c alias.ci=commit ci -m x' 'git config alias.ci "!git commit"'; do
+for c in 'git config alias.ci commit' 'git config --global alias.ci commit' 'git config alias.ci "!git commit"'; do
   out="$(cgin "$R" "$c")"; assert_eq "$(decision "$out")" deny "別名設成 commit 要擋：${c}｜$(reason "$out")"
   reason "$out" | grep -q '別名' || fail "deny 要說明別名: $(reason "$out")"
 done

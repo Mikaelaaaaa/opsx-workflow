@@ -6,20 +6,28 @@ source "$(dirname "${BASH_SOURCE[0]}")/_lib.sh"
 
 cmd="$(hook_cmd)"
 sk="$(cmd_skeleton "$cmd")" || deny "opsx commit 閘門：perl 執行失敗，讀不到指令骨架，先擋下。確認 perl 可用"
-# git 與 commit 之間可以夾全域選項：-c k=v、-C <dir>（可重複）、--git-dir[=]<d>、--work-tree[=]<d>、--namespace[=]<n>、--no-pager 這類不帶值的長選項。
+# git 的寫法：反引號、$(…)、\git、絕對路徑都算；git 與 commit 之間可以夾全域選項：-c k=v、-C <dir>（可重複）、--git-dir[=]<d>、--work-tree[=]<d>、--namespace[=]<n>、--no-pager 這類不帶值的長選項。
 # 值可以含反斜線跳脫的字元（\ 加任一字元算同一個字），這樣跳脫空白的路徑也讀得到、交給 unreadable_dir 擋。
+# -c alias.<名>=… 可以把任何字變成 commit，只要出現就當成 commit 處理（寧可誤擋）。
+git_word='(^|[^[:alnum:]_./-])(\\|/[^[:space:];&|()`$]*/)?git'
 tok='(\\.|[^[:space:]\\])+'
 valued='-C|-c|--git-dir|--work-tree|--namespace|--super-prefix|--config-env|--exec-path'
 opt="(${valued})[[:space:]]+${tok}|--[a-z][a-z-]*(=${tok})?|-[A-Za-z]"
-commit_re="(^|[[:space:];&|(])git(([[:space:]]+(${opt}))*)[[:space:]]+commit([[:space:]]|\$)"
-is_commit=0; m0=''; opts=''
-if [[ "$sk" =~ $commit_re ]]; then is_commit=1; m0="${BASH_REMATCH[0]}"; opts="${BASH_REMATCH[2]}"; fi
-# 把 commit 設成 git 別名（config alias.ci commit、-c alias.ci=commit ci）：之後用別名 commit 時骨架裡沒有 commit，閘門看不到。
+commit_re="${git_word}(([[:space:]]+(${opt}))*)[[:space:]]+commit([[:space:]]|\$)"
+alias_re="${git_word}([[:space:]]+[^;&|]*)?[[:space:]]-c[[:space:]]+alias\\."
+# 把 commit 寫進 git 設定成別名（git config alias.ci commit）：之後用別名 commit 時骨架裡沒有 commit，閘門看不到，所以設定當下就擋。
 # 別名的值常含空白、會被骨架換成空字串，所以看原指令。
-alias_re="(^|[[:space:];&|(])git[[:space:]]([^;&|]*[[:space:]])?alias\\.[[:alnum:]_-]+[=[:space:]]+[\"']?!?(git[[:space:]]+)?commit([[:space:]\"']|\$)"
+persist_re="(^|[[:space:];&|(])git[[:space:]]([^;&|]*[[:space:]])?config[[:space:]]([^;&|]*[[:space:]])?alias\\.[[:alnum:]_-]+[=[:space:]]+[\"']?!?(git[[:space:]]+)?commit([[:space:]\"']|\$)"
 is_alias=0
-[[ "$cmd" =~ $alias_re ]] && is_alias=1
-[ "$is_commit" = 1 ] || [ "$is_alias" = 1 ] || exit 0
+[[ "$cmd" =~ $persist_re ]] && is_alias=1
+m0=''; opts=''
+if [[ "$sk" =~ $commit_re ]]; then
+  m0="${BASH_REMATCH[0]}"; opts="${BASH_REMATCH[3]}"
+elif [[ "$sk" =~ $alias_re ]]; then
+  m0="${BASH_REMATCH[0]}"; opts=''
+elif [ "$is_alias" != 1 ]; then
+  exit 0
+fi
 
 # commit 實際作用的目錄決定對卡，不是 session cwd；hook_cwd 認 OPSX_CWD
 join_dir() { case "$2" in /*) printf '%s' "$2" ;; *) printf '%s/%s' "$1" "$2" ;; esac; }
