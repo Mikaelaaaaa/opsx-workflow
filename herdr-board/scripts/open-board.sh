@@ -45,7 +45,35 @@ frag=()   # fragment 不進 server log、不進 Referer
 [ -n "$token" ] && frag+=("token=${token}")
 [ -n "$card" ] && frag+=("card=$(python3 -I -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1], safe="/"))' "$card")")
 open_url="$url"; [ ${#frag[@]} -gt 0 ] && open_url="${url}#$(IFS='&'; printf '%s' "${frag[*]}")"
-if command -v open >/dev/null 2>&1; then open "$open_url"
+
+orca_fail() { # orca_fail <步驟> <orca stdout>：不退回系統瀏覽器，免得看板開在使用者沒在看的地方
+  echo "opsx board: orca $1 失敗，沒有改用系統瀏覽器" >&2
+  [ -n "$2" ] && printf '%s\n' "$2" >&2
+  cat "$orca_err" >&2; rm -f "$orca_err"; exit 1
+}
+# 只有 Orca terminal 有 ORCA_TERMINAL_HANDLE；tab create 不收 --focus，要拿 browserPageId 再 tab switch
+if [ -n "${ORCA_TERMINAL_HANDLE:-}" ]; then
+  orca_err="$(mktemp "${TMPDIR:-/tmp}/opsx-orca-tab.XXXXXX")"
+  # Orca 的 Electron 殼成功時也在 stderr 印 codesign 雜訊，JSON 只從 stdout 讀
+  created="$(orca tab create --url "$open_url" --json 2>"$orca_err")" || orca_fail "tab create" "$created"
+  page="$(python3 -I -c '
+import json, sys
+raw = sys.argv[1]
+try:
+    d = json.loads(raw)
+except json.JSONDecodeError:
+    sys.exit("orca tab create 的輸出不是 JSON，拿不到 result.browserPageId")
+result = d["result"] if isinstance(d, dict) and "result" in d else None
+if not isinstance(result, dict) or "browserPageId" not in result:
+    sys.exit("orca tab create 回的 JSON 沒有 result.browserPageId")
+page = result["browserPageId"]
+if not isinstance(page, str) or not page:
+    sys.exit(f"orca tab create 回的 result.browserPageId 不是非空字串：{page!r}")
+print(page)
+' "$created")" || orca_fail "tab create" "$created"
+  switched="$(orca tab switch --page "$page" --focus 2>"$orca_err")" || orca_fail "tab switch" "$switched"
+  rm -f "$orca_err"
+elif command -v open >/dev/null 2>&1; then open "$open_url"
 elif command -v xdg-open >/dev/null 2>&1; then xdg-open "$open_url"
 else echo "opsx board: 沒有 open 或 xdg-open，自己開 $open_url" >&2; exit 1; fi
 echo "opsx 看板：${url}（server pid $(cat "$pidfile")，log ${logfile}）"

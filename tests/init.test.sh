@@ -558,4 +558,75 @@ assert_eq "$(printf '%s\n' "$outt" | grep '略過' | grep -c customer)" 0 "非�
 assert_eq "$(printf '%s\n' "$outt" | grep -c '略過.*obsidian\|obsidian.*略過')" 1 "非互動訊息提 obsidian"
 assert_not_grep '^# \[customer\]' "$FX/st-tpl/sources.toml"
 assert_grep 'customer.*on-hold' "$FX/st-tpl/sources.toml"
+
+# --- repo 層登記進 Orca（specs/orca-repo-register）---
+use_fakes orca
+RG="$(mk_repo orca-r)"; cd "$RG"; export OPSX_FAKE_ORCA_REPO="$RG"
+reminder_in() { case "$1" in *Orca*".claude/worktrees/*"*) ;; *) return 1 ;; esac; }
+# repo 尚未登記：repo add --path <top>、印提醒、rc 0
+export OPSX_FAKE_ORCA_LOG="$FX/orca-unregistered.log"
+outo="$(OPSX_FAKE_ORCA=unregistered opsx init 2>&1)"; assert_eq "$?" 0 "orca 未登記時 init rc：$outo"
+assert_grep "^repo list --json$" "$OPSX_FAKE_ORCA_LOG"
+assert_grep "^repo add --path $RG --json$" "$OPSX_FAKE_ORCA_LOG"
+reminder_in "$outo" || fail "要提醒在 Orca 側欄把 .claude/worktrees/* 設成顯示：$outo"
+case "$outo" in *SecCodeCheckValidity*) fail "orca 成功時 stderr 的 codesign 雜訊不該印出來：$outo" ;; esac
+# repo 已登記：不重登，說 Orca 已有，仍提醒
+export OPSX_FAKE_ORCA_LOG="$FX/orca-registered.log"
+outo="$(OPSX_FAKE_ORCA=registered opsx init 2>&1)"; assert_eq "$?" 0 "orca 已登記時 init rc：$outo"
+assert_not_grep "repo add" "$OPSX_FAKE_ORCA_LOG"
+case "$outo" in *"Orca 已有 orca-r"*) ;; *) fail "要說 Orca 已有這個 repo：$outo" ;; esac
+reminder_in "$outo" || fail "已登記也要提醒：$outo"
+# orca 叫不到（沙盒內 EPERM）：stderr 一行警告帶 orca 的錯誤、請在一般 terminal 重跑；不 repo add、不提醒、rc 0
+export OPSX_FAKE_ORCA_LOG="$FX/orca-denied.log"
+outo="$(OPSX_FAKE_ORCA=denied opsx init 2>"$FX/orca.err")"; assert_eq "$?" 0 "orca 叫不到時 init 仍要成功：$(cat "$FX/orca.err")"
+assert_grep "runtime_access_denied" "$FX/orca.err"
+assert_grep "一般 terminal.*opsx init" "$FX/orca.err"
+assert_eq "$(grep -c 'runtime_access_denied' "$FX/orca.err")" 1 "警告只有一行：$(cat "$FX/orca.err")"
+assert_not_grep "repo add" "$OPSX_FAKE_ORCA_LOG"
+reminder_in "$outo" && fail "沒登記成功不該印側欄提醒：$outo"
+# repo add 失敗：同樣 warn、rc 0、不提醒
+export OPSX_FAKE_ORCA_LOG="$FX/orca-add-denied.log"
+outo="$(OPSX_FAKE_ORCA=add-denied opsx init 2>"$FX/orca.err")"; assert_eq "$?" 0 "repo add 失敗時 init 仍要成功：$(cat "$FX/orca.err")"
+assert_grep "repo add.*runtime_access_denied" "$FX/orca.err"
+assert_grep "一般 terminal.*opsx init" "$FX/orca.err"
+reminder_in "$outo" && fail "repo add 失敗不該印側欄提醒：$outo"
+# repo list 沒有 result.repos：當失敗、點名欄位，不當成沒登記
+export OPSX_FAKE_ORCA_LOG="$FX/orca-no-repos.log"
+outo="$(OPSX_FAKE_ORCA=no-repos opsx init 2>"$FX/orca.err")"; assert_eq "$?" 0 "result.repos 缺時 init 仍要成功：$(cat "$FX/orca.err")"
+assert_grep "result.repos" "$FX/orca.err"
+assert_not_grep "repo add" "$OPSX_FAKE_ORCA_LOG"
+reminder_in "$outo" && fail "result.repos 缺時不該印側欄提醒：$outo"
+# Orca 只登記了名字以這個 repo 開頭的另一個 repo：不算已登記，仍 repo add 這個 repo
+export OPSX_FAKE_ORCA_LOG="$FX/orca-prefix.log"
+outo="$(OPSX_FAKE_ORCA=prefix opsx init 2>&1)"; assert_eq "$?" 0 "Orca 只有 <repo>-old 時 init rc：$outo"
+assert_grep "^repo add --path $RG --json$" "$OPSX_FAKE_ORCA_LOG"
+case "$outo" in *"Orca 已有"*) fail "Orca 只有 <repo>-old 時不該說已有：$outo" ;; esac
+# 以上每一次都不設 external worktree 可見性，也不 repo set
+cat "$FX"/orca-*.log > "$FX/orca-all.log"
+assert_grep "^repo add" "$FX/orca-all.log"
+assert_not_grep "--external-worktree-visibility" "$FX/orca-all.log"
+assert_not_grep "^repo set" "$FX/orca-all.log"
+# PATH 上沒有 orca：印略過、rc 0。含 orca 的目錄換成替身目錄（symlink 原目錄裡除了 orca 的每個檔），同目錄的 git、openspec 等照樣找得到
+NOORCA="$(python3 -I - "$PATH" "$FX/noorca" <<'PY'
+import os, sys
+path, base = sys.argv[1], sys.argv[2]
+dirs = []
+for i, d in enumerate(path.split(":")):
+    if not os.access(os.path.join(d, "orca"), os.X_OK):
+        dirs.append(d)
+        continue
+    stand_in = os.path.join(base, str(i))
+    os.makedirs(stand_in)
+    for name in os.listdir(d):
+        if name != "orca":
+            os.symlink(os.path.join(d, name), os.path.join(stand_in, name))
+    dirs.append(stand_in)
+print(":".join(dirs))
+PY
+)"
+command -v git >/dev/null || fail "測試前提：PATH 上要有 git"
+PATH="$NOORCA" command -v orca >/dev/null && fail "替身 PATH 不該找得到 orca：$NOORCA"
+PATH="$NOORCA" command -v git >/dev/null || fail "替身 PATH 要保留 git：$NOORCA"
+outo="$(PATH="$NOORCA" opsx init 2>&1)"; assert_eq "$?" 0 "沒有 orca 時 init rc：$outo"
+case "$outo" in *"沒有 orca"*"Orca 登記略過"*) ;; *) fail "要說沒有 orca、Orca 登記略過：$outo" ;; esac
 echo ok

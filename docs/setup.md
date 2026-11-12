@@ -19,6 +19,8 @@
 
 herdr socket 不在使用者層標準設定裡：能連它的 session 可以用 `herdr pane run` 在沒有沙盒的 pane 裡跑指令。一般 agent 的 herdr 動作照原設計走 `hooks/opsx-herdr-queue.sh`；只有主控 session（opsx coordinator）要開 socket，`opsx init --global` 會把設定寫到 `~/.local/state/opsx/coordinator-settings.json`，主控 session 在 herdr pane 裡跑 `opsx lead [<repo 路徑>]` 啟動：它在目前 workspace 開一個新 tab，用 herdr 名 `opsx-coordinator` 起 `claude --settings ~/.local/state/opsx/coordinator-settings.json --add-dir ~/.local/state/opsx`，第一句載入 `/opsx-workflow:lead`（協調者的職責與回報格式）；已經在跑就只告訴你它在哪個 pane。**opsx 只追加、不刪除**：如果你以前手動在使用者層 settings 的 `sandbox.network.allowUnixSockets` 加過 herdr socket，要自己刪掉，否則每個 session 都還能連 herdr，上面的隔離不成立。
 
+裝了 Orca（PATH 上有 `orca`）時，`opsx init` 會用 `orca repo add --path <repo 根目錄>` 把 repo 登記進 Orca，已登記就說已有。卡的 worktree 放在 `.claude/worktrees/<slug>`，Orca 把它算成內建來源 `.claude/worktrees/*`，這個來源預設隱藏、CLI 改不到：要在 Orca 側欄把它設成顯示一次（也可以設成全域預設），之後卡的 worktree 才會出現在側欄、點了就開。opsx 不設 `--external-worktree-visibility`，免得別的 session 的暫存 worktree 也出現。沒有 `orca` 就略過；Orca 沒開、或在 Claude 沙盒內跑 init（orca 會 EPERM）時只警告一行，init 照樣成功，Orca 開著時在一般 terminal 重跑 `opsx init` 就好。
+
 新電腦 onboarding：裝好 plugin → `opsx init --global` → 每個 repo 根目錄 `opsx init` → `opsx init --check` 確認和標準設定一致（只讀；缺什麼逐項印出，exit 1）。要改全部機器的設定，改 `templates/settings.opsx.json`、再各跑一次 `opsx init --global`，不要手改各台的 settings。
 
 `opsx init --global` 與 `opsx init --check` 也會掃使用者層（`$CLAUDE_CONFIG_DIR/skills/`，沒設用 `~/.claude/skills/`）與 repo 內 `.claude/skills/`，跟插件 `skills/` 同名的逐項警告；只警告，不影響 exit code，不動你的檔案。
