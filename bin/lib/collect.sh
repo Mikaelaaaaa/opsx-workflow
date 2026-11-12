@@ -422,9 +422,8 @@ def progress_class(c):
     # 看 mr.state 不看 waiting：有 open gate 時 waiting 是那個 gate，協調者仍照 mr.state 發「可以合併」
     if c["mr"] and c["mr"].get("state") == "ready": return "mergeable"
     if w:
-        verdict = gaterule.decide(w)
-        # 沒派出的卡協調者不會答它的 gate，只剩人能答；停 pane 等別張卡的不算
-        if verdict[0] == "human" or (not c["dispatch"] and verdict[0] != "park"): return "waiting_on_you"
+        # gate 一律由人答；停 pane 等別張卡的不算
+        if gaterule.decide(w)[0] == "human": return "waiting_on_you"
     if c["stage"] in ("review", "pr", "babysit"): return "testing"
     if c["dispatch"]: return "developing"
     return "not_dispatched"

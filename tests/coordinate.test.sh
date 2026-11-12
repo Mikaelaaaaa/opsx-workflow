@@ -387,17 +387,25 @@ assert_grep "^opsx dispatch d --agent claude --mode autopilot --kind dev --repo 
 cp "$WP0" "$R/openspec/workplan.yaml"
 rm -f "$MEMO" "$DISP"
 
-# --- 答 gate：授權題允許這次 ---
+# --- 任何開著的 gate 都不代答，只記 ?? 並通知（gate-rule：任何開著的 gate 都不代答） ---
 mkcard a1
-cards '[{"slug":"a1","section":"待處理","dispatch":'"$D"',"agent_status":"idle","waiting":{"type":"等待授權","gate_id":"g1","action":"push","question":"要 push","recommended":null,"options":["這次"]}}]'
-round || fail "rc: $(cat "$FX/out")"
-assert_grep "^opsx answer a1 --gate g1 --grant this --repo $R -- 允許\$" "$OPSX_FAKE_LOG"
-
-# --- 答 gate：action 不是閘門會查的動作（沙盒 / dontAsk 擋下的授權題）→ 照樣回「允許」，但不帶 --grant（grant-action） ---
-cards '[{"slug":"a1","section":"待處理","dispatch":'"$D"',"agent_status":"idle","waiting":{"type":"等待授權","gate_id":"g2","action":"run-tests","question":"要跑測試","recommended":null,"options":["拒絕"]}}]'
-round || fail "rc: $(cat "$FX/out")"
-assert_grep "^opsx answer a1 --gate g2 --repo $R -- 允許\$" "$OPSX_FAKE_LOG"
-assert_eq "$(count '^opsx answer .*--grant')" 0 "表外 action 不帶 --grant：$(cat "$OPSX_FAKE_LOG")"
+sweep() { # <gate id> <waiting 的其餘欄位 JSON 片段>
+  : > "$OPSX_FAKE_LOG"; : > "$LOG"; rm -f "$MEMO"
+  cards '[{"slug":"a1","section":"待處理","dispatch":'"$D"',"agent_status":"idle","waiting":{"gate_id":"'"$1"'",'"$2"'}}]'
+  round || fail "$1 rc: $(cat "$FX/out")"
+  assert_eq "$(count '^opsx answer')" 0 "$1 不代答：$(cat "$OPSX_FAKE_LOG")"
+  grep '??' "$LOG" | grep a1 | grep -q "$1" || fail "$1 要記 ?? 與 gate id：$(cat "$LOG")"
+  assert_eq "$(count '^notification show')" 1 "$1 要通知一次：$(cat "$OPSX_FAKE_LOG")"
+}
+sweep g1 '"type":"等待授權","action":"push","question":"要 push","recommended":null,"options":["這次"]'
+sweep g2 '"type":"等待授權","action":"run-tests","question":"要跑測試","recommended":null,"options":["拒絕"]'
+sweep g3 '"type":"等待決定","question":"選哪個","recommended":"用 A","options":["用 A","B"]'
+sweep g4 '"type":"等待決定","question":"這要真機跑一次嗎","recommended":"跑","options":["跑","不跑"]'
+sweep g6 '"type":"等待決定","question":"可以 push 嗎","recommended":"用 A","options":["用 A"]'
+sweep g7 '"type":"等待決定","question":"選哪個","recommended":null,"options":["甲","乙"]'
+sweep orca-allow-scope '"type":"等待決定","question":"範圍要不要收窄？","recommended":"A。收窄","options":["A","B","C"]'
+sweep split '"type":"等待決定","question":"照這個拆法建殼、寫 workplan？","recommended":"照這個拆法","options":["照這個拆法"]'
+rm -f "$MEMO"
 
 # --- 答 gate：合併的授權題不代答（合併永遠由人按，D3） ---
 cards '[{"slug":"a1","section":"待處理","dispatch":'"$D"',"agent_status":"idle","waiting":{"type":"等待授權","gate_id":"g8","action":"merge","question":"要合併","recommended":null,"options":["這次"]}}]'
@@ -431,11 +439,6 @@ done
 cards '[{"slug":"a1","section":"待處理","dispatch":null,"waiting":{"type":"等待授權","gate_id":"g1","action":"push","question":"要 push","recommended":null,"options":["這次"]}}]'
 round || fail "rc: $(cat "$FX/out")"
 assert_eq "$(count '^opsx answer')" 0 "沒派出去的不答"
-
-# --- 答 gate：真機題標等使用者驗 ---
-cards '[{"slug":"a1","section":"待處理","dispatch":'"$D"',"agent_status":"idle","waiting":{"type":"等待決定","gate_id":"g2","question":"這要真機跑一次嗎","recommended":"跑","options":["跑","不跑"]}}]'
-round || fail "rc: $(cat "$FX/out")"
-grep '^opsx answer a1 --gate g2 ' "$OPSX_FAKE_LOG" | grep '等使用者驗' | grep -q 'report.md' || fail "真機題的答案：$(cat "$OPSX_FAKE_LOG")"
 
 # --- type 不明、needs: run 的 gate 不代答（gate-type-normalize）：答案會變成指令原文或寫進不明的 gate ---
 : > "$OPSX_FAKE_LOG"; : > "$LOG"
@@ -475,21 +478,6 @@ for gid in "drive-review-1" "卡在接 /apply #1" "卡在接 /review"; do
   round || fail "${gid} 第二輪 rc: $(cat "$FX/out")"
   assert_eq "$(count '^notification show')" 0 "${gid} 第二輪不重送：$(cat "$OPSX_FAKE_LOG")"
 done
-# 其他 decision gate 照原規則答（標題只是長得像也一樣）
-for gid in "g-drive-review-1" "drive-review"; do
-  : > "$OPSX_FAKE_LOG"; : > "$LOG"
-  cards '[{"slug":"a1","section":"待處理","dispatch":'"$D"',"agent_status":"idle","waiting":{"type":"等待決定","needs":null,"gate_id":"'"$gid"'","question":"選哪個","recommended":"甲","options":["甲","乙"]}}]'
-  round || fail "${gid} rc: $(cat "$FX/out")"
-  assert_grep "^opsx answer a1 --gate ${gid} --repo $R -- 甲\$" "$OPSX_FAKE_LOG"
-done
-
-# --- 答 gate：沒有建議就答第一個選項；answer 失敗不換參數重送 ---
-cards '[{"slug":"a1","section":"待處理","dispatch":'"$D"',"agent_status":"idle","waiting":{"type":"等待決定","gate_id":"g3","question":"選哪個","recommended":null,"options":["甲","乙"]}}]'
-round || fail "rc: $(cat "$FX/out")"
-assert_grep "^opsx answer a1 --gate g3 --repo $R -- 甲\$" "$OPSX_FAKE_LOG"
-OPSX_TEST_FAIL_answer="answer: boom" round || fail "rc: $(cat "$FX/out")"
-assert_eq "$(count '^opsx answer')" 1 "answer 失敗不重送"
-grep '??' "$LOG" | grep -q boom || fail "answer 失敗記 ??：$(cat "$LOG")"
 
 # --- 答 gate：終端機等待輸入只記 ?? ---
 cards '[{"slug":"a1","section":"待處理","dispatch":'"$D"',"agent_status":"blocked","waiting":{"type":"終端機等待輸入","gate_id":null,"question":"agent 在終端機等輸入","recommended":"開啟 pane","options":["開啟 pane"]}}]'
@@ -523,15 +511,16 @@ assert_grep "^opsx stop p1 --repo $R\$" "$OPSX_FAKE_LOG"
 assert_eq "$(count '^notification show')" 0 "waits-on 的 gate 不通知：$(cat "$OPSX_FAKE_LOG")"
 rm -f "$MEMO"; : > "$OPSX_FAKE_LOG"; : > "$LOG"
 
-# --- waits-on 的卡已合進 main（workplan merged 或已歸檔）：答掉 gate、不停 pane、不記 parked（waits-on-auto-release）---
+# --- waits-on 的卡已合進 main（workplan merged 或已歸檔）：通知人回 gate、不答、不停 pane、不記 parked（waits-on-auto-release）---
 cp "$R/openspec/workplan.yaml" "$FX/workplan.waits"
 W1='[{"slug":"p1","section":"待處理","dispatch":'"$D"',"agent_status":"idle","waiting":{"type":"等待決定","needs":null,"waits_on":"a","gate_id":"g9","question":"等 a 合進 main 之後再做","recommended":null,"options":["等"]}}]'
 printf 'created: 2026-11-07\n\nfeatures:\n  - name: fa\n    prs:\n      - name: a\n        branch: feat/a/m\n        status: merged\n        depends-on: []\n        changes:\n          - name: a\n            status: done\n' > "$R/openspec/workplan.yaml"
 cards "$W1"
 round || fail "waits-on 已合 rc: $(cat "$FX/out")"
 assert_eq "$(count '^opsx stop')" 0 "依賴卡已合不停 pane：$(cat "$OPSX_FAKE_LOG")"
-assert_eq "$(count '^opsx answer p1 --gate g9 --repo ')" 1 "要答掉 g9：$(cat "$OPSX_FAKE_LOG")"
-grep '^opsx answer p1 ' "$OPSX_FAKE_LOG" | grep -qF 'a 已合進 main' || fail "答案要點名那張卡：$(cat "$OPSX_FAKE_LOG")"
+assert_eq "$(count '^opsx answer')" 0 "依賴卡已合也不答 g9：$(cat "$OPSX_FAKE_LOG")"
+assert_eq "$(count '^notification show \[demo/p1\] gate g9 ')" 1 "依賴卡已合要通知人回 g9：$(cat "$OPSX_FAKE_LOG")"
+grep '??' "$LOG" | grep p1 | grep g9 | grep -qF 'a 已合進 main' || fail "log 要點名那張卡：$(cat "$LOG")"
 assert_eq "$(memo_get _parked demo/p1)" "" "已合不記 parked"
 rm -f "$MEMO"
 # 已歸檔（workplan 裡沒有）也算
@@ -541,7 +530,8 @@ mkdir -p "$R/openspec/changes/archive/2026-11-11-a"
 cards "$W1"
 round || fail "waits-on 已歸檔 rc: $(cat "$FX/out")"
 assert_eq "$(count '^opsx stop')" 0 "依賴卡已歸檔不停 pane：$(cat "$OPSX_FAKE_LOG")"
-assert_eq "$(count '^opsx answer p1 --gate g9 --repo ')" 1 "已歸檔要答掉 g9：$(cat "$OPSX_FAKE_LOG")"
+assert_eq "$(count '^opsx answer')" 0 "已歸檔也不答 g9：$(cat "$OPSX_FAKE_LOG")"
+assert_eq "$(count '^notification show \[demo/p1\] gate g9 ')" 1 "已歸檔要通知：$(cat "$OPSX_FAKE_LOG")"
 rm -rf "$R/openspec/changes/archive/2026-11-11-a"; rm -f "$MEMO"
 # 被捨棄（outcome: declined，opsx drop / merge-card 的歸檔）不算合進 main：照舊停 pane
 mkdir -p "$R/openspec/changes/archive/2026-11-11-a"; printf 'schema: opsx\noutcome: declined\n' > "$R/openspec/changes/archive/2026-11-11-a/.openspec.yaml"
@@ -556,24 +546,27 @@ round || fail "waits-on 同名卡還在 rc: $(cat "$FX/out")"
 assert_grep "^opsx stop p1 --repo $R\$" "$OPSX_FAKE_LOG"; assert_eq "$(count '^opsx answer')" 0 "同名卡還在不答：$(cat "$OPSX_FAKE_LOG")"
 rm -rf "$R/openspec/changes/archive/2026-11-11-a" "$R/openspec/changes/a"; rm -f "$MEMO"
 [ ! -d "$FX/changes-a.save" ] || mv "$FX/changes-a.save" "$R/openspec/changes/a"
-# 被捨棄過又重做、最新一份歸檔是正常合併的：算已合，答 gate、不停 pane
+# 被捨棄過又重做、最新一份歸檔是正常合併的：算已合，通知、不停 pane
 [ ! -d "$R/openspec/changes/a" ] || mv "$R/openspec/changes/a" "$FX/changes-a.save"
 mkdir -p "$R/openspec/changes/archive/2026-11-01-a" "$R/openspec/changes/archive/2026-11-10-a"
 printf 'schema: opsx\noutcome: declined\n' > "$R/openspec/changes/archive/2026-11-01-a/.openspec.yaml"; printf 'schema: opsx\n' > "$R/openspec/changes/archive/2026-11-10-a/.openspec.yaml"
 cards "$W1"
 round || fail "waits-on 先被捨棄後重做 rc: $(cat "$FX/out")"
 assert_eq "$(count '^opsx stop')" 0 "最新歸檔正常就不停 pane：$(cat "$OPSX_FAKE_LOG")"
-assert_eq "$(count '^opsx answer p1 --gate g9 --repo ')" 1 "要答掉 g9：$(cat "$OPSX_FAKE_LOG")"
+assert_eq "$(count '^opsx answer')" 0 "最新歸檔正常也不答：$(cat "$OPSX_FAKE_LOG")"
+assert_eq "$(count '^notification show \[demo/p1\] gate g9 ')" 1 "最新歸檔正常要通知：$(cat "$OPSX_FAKE_LOG")"
 rm -rf "$R/openspec/changes/archive/2026-11-01-a" "$R/openspec/changes/archive/2026-11-10-a"; rm -f "$MEMO"
 [ ! -d "$FX/changes-a.save" ] || mv "$FX/changes-a.save" "$R/openspec/changes/a"
-# gate 還開著（collect 要等 answer 生效才會關它）、pane 剛重派：連跑兩輪都不停 pane
+# gate 還開著、等人回：連跑兩輪都不停 pane、不答，只通知一次
 printf 'created: 2026-11-07\n\nfeatures:\n  - name: fa\n    prs:\n      - name: a\n        branch: feat/a/m\n        status: merged\n        depends-on: []\n' > "$R/openspec/workplan.yaml"
 cards "$W1"
 round || fail "剛重派第一輪 rc: $(cat "$FX/out")"
-assert_eq "$(count '^opsx stop')" 0 "剛重派的 pane 第一輪不能被停：$(cat "$OPSX_FAKE_LOG")"
+assert_eq "$(count '^opsx stop')" 0 "第一輪不能停 pane：$(cat "$OPSX_FAKE_LOG")"
+assert_eq "$(count '^notification show')" 1 "第一輪通知一次：$(cat "$OPSX_FAKE_LOG")"
 round || fail "剛重派第二輪 rc: $(cat "$FX/out")"
 assert_eq "$(count '^opsx stop')" 0 "gate 還開著的第二輪也不能停 pane：$(cat "$OPSX_FAKE_LOG")"
-assert_eq "$(count '^opsx answer p1 --gate g9 --repo ')" 1 "每輪各答一次：$(cat "$OPSX_FAKE_LOG")"
+assert_eq "$(count '^opsx answer')" 0 "兩輪都不答：$(cat "$OPSX_FAKE_LOG")"
+assert_eq "$(count '^notification show')" 0 "第二輪不重送通知：$(cat "$OPSX_FAKE_LOG")"
 rm -f "$MEMO"
 # 還沒合（PR 是 in-progress）：照舊停 pane、記 parked、不答
 printf 'created: 2026-11-07\n\nfeatures:\n  - name: fa\n    prs:\n      - name: a\n        branch: feat/a/m\n        status: in-progress\n        depends-on: []\n' > "$R/openspec/workplan.yaml"
@@ -600,25 +593,24 @@ cards "[$P1]"
 round || fail "rc: $(cat "$FX/out")"
 assert_eq "$(count '^opsx dispatch')" 0 "沒東西合不重派 parked"; assert_eq "$(count '^opsx answer')" 0
 
-# --- parked：有東西合了（被等的卡由它自己的 agent /archive，workplan 的 PR 變 merged），先答那個 gate 再重派，沿用原 agent ---
+# --- parked：有東西合了（被等的卡由它自己的 agent /archive，workplan 的 PR 變 merged），只通知人回 gate，不答不派 ---
 sed -i '' '/- name: g$/,/status:/s/status: pending/status: merged/' "$R/openspec/workplan.yaml"
 cards "[$P1]"
 round || fail "rc: $(cat "$FX/out")"
-got="$(grep -E '^opsx (answer|dispatch) p1' "$OPSX_FAKE_LOG" | sed -E 's/ -- .*$//')"
-assert_eq "$got" "opsx answer p1 --gate g7 --repo $R
-opsx dispatch p1 --agent codex --mode autopilot --kind dev --repo $R" "先答 gate 再派：$(cat "$OPSX_FAKE_LOG")"
-grep '^opsx answer p1 ' "$OPSX_FAKE_LOG" | grep -q '合進 main 的 PR：g。' || fail "答案要說停下之後合了哪幾個 PR：$(cat "$OPSX_FAKE_LOG")"
-assert_eq "$(memo_get _parked demo/p1)" "" "重派後 memo 不再有 parked"
-
-# --- parked：答了 gate 但派不出去，下一輪 gate 已不是 open，只重試 dispatch ---
-cp "$FX/memo.parked" "$MEMO"
-cards "[$P1]"
-OPSX_TEST_FAIL_dispatch="dispatch: agent_pane_busy" round || fail "rc: $(cat "$FX/out")"
-assert_eq "$(count '^opsx answer p1')" 1 "第一輪答 gate"
-[ -n "$(memo_get _parked demo/p1)" ] || fail "派不出去 parked 要留著：$(cat "$MEMO")"
-cards '[{"slug":"p1","section":"待指派","dispatch":null}]'
+assert_eq "$(count '^opsx (answer|dispatch) p1')" 0 "gate 還開著不答也不派：$(cat "$OPSX_FAKE_LOG")"
+assert_eq "$(count '^notification show \[demo/p1\] gate g7 ')" 1 "要通知人回 g7：$(cat "$OPSX_FAKE_LOG")"
+grep '??' "$LOG" | grep p1 | grep -qF '合進 main 的 PR：g' || fail "log 要說停下之後合了哪幾個 PR：$(cat "$LOG")"
+[ -n "$(memo_get _parked demo/p1)" ] || fail "gate 沒人答 parked 要留著：$(cat "$MEMO")"
 round || fail "rc: $(cat "$FX/out")"
-assert_eq "$(count '^opsx answer p1')" 0 "已答過不再答：$(cat "$OPSX_FAKE_LOG")"
+assert_eq "$(count '^notification show')" 0 "第二輪不重送：$(cat "$OPSX_FAKE_LOG")"
+
+# --- parked：人答了 gate 但派不出去，parked 留著，下一輪重試 dispatch ---
+cp "$FX/memo.parked" "$MEMO"
+cards '[{"slug":"p1","section":"待指派","dispatch":null}]'
+OPSX_TEST_FAIL_dispatch="dispatch: agent_pane_busy" round || fail "rc: $(cat "$FX/out")"
+assert_eq "$(count '^opsx answer p1')" 0 "人答的 gate 不再答：$(cat "$OPSX_FAKE_LOG")"
+[ -n "$(memo_get _parked demo/p1)" ] || fail "派不出去 parked 要留著：$(cat "$MEMO")"
+round || fail "rc: $(cat "$FX/out")"
 assert_grep "^opsx dispatch p1 --agent codex " "$OPSX_FAKE_LOG"
 assert_eq "$(memo_get _parked demo/p1)" "" "派出去後清 parked"
 
@@ -783,14 +775,14 @@ round || fail "rc: $(cat "$FX/out")"
 assert_eq "$(count '^opsx dispatch')" 0 "workplan 不合格整個 repo 不派：$(cat "$OPSX_FAKE_LOG")"
 grep '??' "$LOG" | grep 'demo/card-a' | grep -q 'current_milestone' || fail "要記 ?? 含卡名與欄位：$(cat "$LOG")"
 
-# parked 的 P2 卡照樣重派：人派出去、coordinate 自己停下等別張合併的，不是新派工
+# parked 的 P2 卡照樣重派：人派出去、coordinate 自己停下等別張合併的，人答了 gate 之後重派，不是新派工
 cat "$WP1" > "$R/openspec/workplan.yaml"
 printf '  - name: other\n    prs:\n      - name: done-pr\n        branch: feat/done-pr/m\n        status: merged\n        depends-on: []\n        changes:\n          - name: done-pr\n            status: done\n' >> "$R/openspec/workplan.yaml"
 printf '{"_parked":{"demo/card-p2":{"at":"2026-11-10T10:00:00+08:00","gate":"g9","merged":[]}},"_redispatched":{}}' > "$MEMO"
 printf '{"demo/card-p2":{"mode":"stopped","agent":"claude","pane":"w1:p9","drive_pid":null}}' > "$DISP"
-cards '[{"slug":"card-p2","section":"待處理","open_gates":[{"id":"g9","opened_at":null}],"waiting":{"type":"等待決定","waits_on":"done-pr","gate_id":"g9","question":"等 done-pr 合進 main 之後再做","recommended":null,"options":["等"]}}]'
+cards '[{"slug":"card-p2","section":"待指派","dispatch":null}]'
 round || fail "rc: $(cat "$FX/out")"
-assert_grep '^opsx answer card-p2 --gate g9 ' "$OPSX_FAKE_LOG"
+assert_eq "$(count '^opsx answer')" 0 "parked 的 P2 卡不代答：$(cat "$OPSX_FAKE_LOG")"
 assert_grep '^opsx dispatch card-p2 ' "$OPSX_FAKE_LOG"
 cp "$WP0" "$R/openspec/workplan.yaml"
 rm -f "$MEMO"; printf '{}' > "$DISP"
@@ -1210,12 +1202,12 @@ assert_eq "$(count '^opsx dispatch q1 ')" 1 "上限 3 派"
 cards "[$(busy r1),$(busy r2),{\"slug\":\"q1\"},{\"slug\":\"q2\"},{\"slug\":\"q3\"}]"
 round || fail "rc: $(cat "$FX/out")"
 assert_eq "$(count '^opsx dispatch')" 1 "本輪已派的也算進同時數：$(cat "$OPSX_FAKE_LOG")"
-# 本輪代答喚醒的卡也算：四張 working，兩張 idle 等可代答的 gate，上限 6
+# 有 gate 的 idle 卡不算在跑：四張 working，兩張 idle 等人回 gate，上限 6，q1 照派
 printf '6\n' > "$MW"
 cards "[$(busy r1),$(busy r2),$(busy r3),$(busy r4),{\"slug\":\"r5\",\"section\":\"待處理\",\"dispatch\":$D,\"agent_status\":\"idle\",\"waiting\":$GATE},{\"slug\":\"r6\",\"section\":\"待處理\",\"dispatch\":$D,\"agent_status\":\"idle\",\"waiting\":$GATE},{\"slug\":\"q1\"}]"
 round || fail "rc: $(cat "$FX/out")"
-assert_eq "$(count '^opsx answer')" 2 "兩個 gate 都代答：$(cat "$OPSX_FAKE_LOG")"
-assert_eq "$(count '^opsx dispatch')" 0 "代答喚醒的兩張算進同時數，q1 不派：$(cat "$OPSX_FAKE_LOG")"
+assert_eq "$(count '^opsx answer')" 0 "兩個 gate 都不代答：$(cat "$OPSX_FAKE_LOG")"
+assert_eq "$(count '^opsx dispatch q1 ')" 1 "等人回 gate 的兩張不算在跑，q1 照派：$(cat "$OPSX_FAKE_LOG")"
 # 開 session 也照同時上限：上限 2、兩張在跑，feature g 排第一的是 P1 就下輪；是 P0 照開
 auto_wp merged; mkcard m3; rm -f "$MEMO"; printf '{}' > "$DISP"
 printf '2\n' > "$MW"
@@ -1283,7 +1275,7 @@ kill -9 "$HOLDER"; wait "$HOLDER" 2>/dev/null
 assert_file "$LOCK"
 round || fail "rc: $(cat "$FX/out")"
 assert_eq "$(ends)" 1 "持有者死掉的 lock 要接手跑完：$(cat "$LOG")"
-assert_grep "^opsx answer a1 --gate g1 --grant this --repo $R -- 允許\$" "$OPSX_FAKE_LOG"
+assert_grep '^notification show \[demo/a1\] gate g1 ' "$OPSX_FAKE_LOG"
 lock_free || fail "跑完要放掉 lock"
 rm -f "$MEMO"
 
@@ -1310,12 +1302,13 @@ wait_for " lock 放掉" 'lock_free'
 grep -E '== (coordinator 開始|結束)' "$LOG" | sed -E 's/^.*== (coordinator 開始|結束).*$/\1/' > "$FX/order"
 assert_eq "$(tr '\n' '|' < "$FX/order")" "coordinator 開始|結束|" "log 依序有開始與結束：$(cat "$LOG")"
 
-# --- kick 那輪照規則答 gate ---
+# --- kick 那輪照規則通知 gate、不代答 ---
 rm -f "$MEMO"; : > "$OPSX_FAKE_LOG"; : > "$LOG"
 bash "$OPSX_ROOT/bin/opsx" coordinate --kick > "$FX/out" 2>&1 || fail "kick rc: $(cat "$FX/out")"
 wait_for " kick 那輪結束" '[ "$(ends)" = 1 ]'
 wait_for " lock 放掉" 'lock_free'
-assert_grep "^opsx answer a1 --gate g1 --grant this --repo $R -- 允許\$" "$OPSX_FAKE_LOG"
+assert_eq "$(count '^opsx answer')" 0 "kick 那輪不代答：$(cat "$OPSX_FAKE_LOG")"
+assert_grep '^notification show \[demo/a1\] gate g1 ' "$OPSX_FAKE_LOG"
 
 # --- kick 起不來：記一行原因，仍以 0 結束 ---
 : > "$LOG"; rm -f "$OPSX_STATE_DIR/coordinate.out"; mkdir "$OPSX_STATE_DIR/coordinate.out"
@@ -1369,11 +1362,11 @@ round --dry || fail "dry rc: $(cat "$FX/out")"
 assert_grep 'DRY herdr agent prompt opsx-coordinator \[demo/a1\]' "$FX/out"
 assert_eq "$(notes)" 0 "dry 不送"; assert_no_file "$MEMO"
 
-# --- 代答的 gate 不通知 ---
+# --- 授權 gate 也通知、不代答 ---
 cards "$A1_GRANT"
 round || fail "rc: $(cat "$FX/out")"
-assert_grep '^opsx answer a1 --gate g1 --grant this ' "$OPSX_FAKE_LOG"
-assert_eq "$(notes)" 0 "代答的不通知：$(cat "$OPSX_FAKE_LOG")"
+assert_eq "$(count '^opsx answer')" 0 "授權 gate 不代答：$(cat "$OPSX_FAKE_LOG")"
+assert_eq "$(notes)" 1 "授權 gate 要通知：$(cat "$OPSX_FAKE_LOG")"
 rm -f "$MEMO"
 
 # --- 通知失敗下一輪再試 ---
@@ -1462,13 +1455,10 @@ assert_grep "^opsx stop u --repo $R\$" "$OPSX_FAKE_LOG"; assert_grep '^opsx disp
 assert_eq "$(notes)" 0 "重派成功不通知"
 rm -f "$MEMO"
 
-# --- 單卡同一輪重派兩次：gate 答不出去（agent_not_found）又 agent_status unknown，只派一次、不通知 ---
-cards '[{"slug":"u","section":"進行中","dispatch":'"$D"',"agent_status":"unknown","waiting":{"type":"等待授權","gate_id":"g1","action":"x","question":"允許嗎","recommended":null,"options":[]}}]'
-OPSX_TEST_FAIL_answer=agent_not_found round || fail "rc: $(cat "$FX/out")"
-assert_eq "$(count '^opsx dispatch')" 1 "同一輪只重派一次：$(cat "$OPSX_FAKE_LOG")"
-assert_eq "$(notes)" 0 "同一輪第二次要求重派不通知：$(cat "$OPSX_FAKE_LOG")"
-assert_grep '這輪不再派' "$LOG"
-# 對照：下一輪、十分鐘內又掛，照樣通知一次
+# --- 重派過的卡下一輪、十分鐘內又掛，通知一次 ---
+cards '[{"slug":"u","section":"進行中","dispatch":'"$D"',"agent_status":"unknown"}]'
+round || fail "rc: $(cat "$FX/out")"
+assert_eq "$(count '^opsx dispatch')" 1 "第一次掛掉重派：$(cat "$OPSX_FAKE_LOG")"
 cards '[{"slug":"u","section":"進行中","dispatch":'"$D"',"agent_status":"unknown"}]'
 round || fail "rc: $(cat "$FX/out")"
 assert_eq "$(count '^opsx dispatch')" 0 "下一輪十分鐘內不重派"
@@ -2129,13 +2119,7 @@ OPSX_TEST_PROCESS_INFO_ERR=pane_not_found round || fail "rc: $(cat "$FX/out")"
 assert_eq "$(notes)" 1 "清掉後再判不了要再通知"
 rm -f "$MEMO"
 
-# 同一輪剛代答喚醒的卡，collect 的 idle 已經過時：不讀 process-info、不 relaunch（review R1.3）
-cards '[{"slug":"ra","section":"待處理","dispatch":{"mode":"autopilot","agent":"claude","pane":"w1:p1","drive_pid":null},"agent_status":"idle","waiting":{"type":"等待授權","gate_id":"g1","action":"x","question":"允許嗎","recommended":null,"options":[]}}]'
-OPSX_TEST_PROCESS_INFO="$FX/pi-lost.json" round || fail "rc: $(cat "$FX/out")"
-assert_grep '^opsx answer ra --gate g1 ' "$OPSX_FAKE_LOG"
-assert_eq "$(count 'process-info')" 0 "代答過的卡這輪不讀：$(cat "$OPSX_FAKE_LOG")"
-assert_eq "$(relaunches)" 0 "代答過的卡這輪不 relaunch"
-rm -f "$MEMO" "$SET"
+rm -f "$SET"
 
 # fan-out 子卡（via 父卡、herdr 名是父卡、沒有 feature）：settings 檔用根條目 par 的名字，兩張子卡共用 pane 一輪只看一次（review R1.1）
 FAN='"mode":"autopilot","agent":"claude","pane":"w1:pP","drive_pid":null'
@@ -2166,16 +2150,8 @@ OPSX_TEST_PROCESS_INFO="$FX/pi-lost.json" round || fail "rc: $(cat "$FX/out")"
 assert_eq "$(relaunches)" 1 "遺失時 relaunch 一次"
 rm -f "$MEMO" "$SET"
 
-# session 成員 m1、m2 共用 pane，只有 m1 的 gate 被代答：整個 pane 這輪都不看（review R2.1）
-SET="$OPSX_STATE_DIR/settings/demo-g-autopilot.json"; printf '{}' > "$SET"; printf '{}' > "$DISP"
-cards '[{"slug":"m1","section":"待處理","dispatch":'"$GRD"',"agent_status":"idle","waiting":{"type":"等待授權","gate_id":"g1","action":"x","question":"允許嗎","recommended":null,"options":[]}},{"slug":"m2","section":"進行中","dispatch":'"$GRD"',"agent_status":"idle"}]'
-OPSX_TEST_PROCESS_INFO="$FX/pi-lost.json" round || fail "rc: $(cat "$FX/out")"
-assert_grep '^opsx answer m1 --gate g1 ' "$OPSX_FAKE_LOG"
-assert_eq "$(count 'process-info')" 0 "同 pane 的另一張成員卡也不讀：$(cat "$OPSX_FAKE_LOG")"
-assert_eq "$(relaunches)" 0 "同 pane 剛代答過，不 relaunch"
-rm -f "$MEMO"
-
 # 收尾 m3 時叫醒 session g 做 m4：同 pane 還在 idle 的成員 m9 這輪也不讀（review R2.1）
+SET="$OPSX_STATE_DIR/settings/demo-g-autopilot.json"; printf '{}' > "$SET"; printf '{}' > "$DISP"
 mkcard m3 m4 m9; mkdir -p "$R/.claude/worktrees/g"
 wake_wp pending; wake_disp autopilot
 cards "[$(merged m3 2026-11-07T12:00:00Z "$GM" '"idle"'),{\"slug\":\"m4\"},{\"slug\":\"m9\",\"section\":\"進行中\",\"dispatch\":$GM,\"agent_status\":\"idle\"}]"
@@ -2214,14 +2190,6 @@ round || fail "rc: $(cat "$FX/out")"
 got="$(grep -E '^opsx (stop|dispatch)' "$OPSX_FAKE_LOG")"
 assert_eq "$got" "opsx stop ra --repo $R
 opsx dispatch ra --agent claude --mode autopilot --kind dev --repo $R" "relaunch 標記過期照常重派"
-rm -f "$MEMO"
-
-# 代答遇到 agent_not_found，1 分鐘前開始 relaunch：不 stop
-rl_disp 1
-cards '[{"slug":"ra","section":"待處理","dispatch":{"mode":"autopilot","agent":"claude","pane":"w1:p1","drive_pid":null},"agent_status":"idle","waiting":{"type":"等待授權","gate_id":"g1","action":"x","question":"允許嗎","recommended":null,"options":[]}}]'
-OPSX_TEST_FAIL_answer=agent_not_found round || fail "rc: $(cat "$FX/out")"
-assert_grep '^opsx answer ra ' "$OPSX_FAKE_LOG"
-assert_eq "$(ecount '^opsx (stop|dispatch)')" 0 "代答送不到但在 relaunch 中不重派：$(cat "$OPSX_FAKE_LOG")"
 rm -f "$MEMO"
 
 # relaunch 中的卡也不讀 process-info（沒過期的 relaunching_at 不判定）
@@ -2316,21 +2284,5 @@ rm -f "$MEMO"; a_disp "\"$(shift_at 30)\""; a_unknown
 round || fail "rc: $(cat "$FX/out")"
 assert_not_grep '?? demo/a' "$LOG"
 assert_eq "$(ecount '^opsx (stop|dispatch)')" 0 "超前 30 秒仍是 relaunch 中，不重派：$(cat "$OPSX_FAKE_LOG")"
-
-# 壞的 relaunching_at 也不能讓代答送不到那條路徑拋例外
-rm -f "$MEMO"; a_disp '"not-a-time"'
-cards '[{"slug":"a","section":"待處理","dispatch":{"mode":"autopilot","agent":"claude","pane":"w1:p1","drive_pid":null},"agent_status":"idle","waiting":{"type":"等待授權","gate_id":"g1","action":"x","question":"允許嗎","recommended":null,"options":[]}}]'
-OPSX_TEST_FAIL_answer=agent_not_found round || fail "代答送不到遇壞的 relaunching_at 整輪要跑完：$(cat "$FX/out")"
-assert_eq "$(ecount '^opsx (stop|dispatch)')" 0 "代答路徑遇壞值不重派：$(cat "$OPSX_FAKE_LOG")"
-
-# 用量上限過後代答「卡在接」gate，送不到又遇壞的 relaunching_at：整輪跑完，不重派，記 ?? 並通知
-AR="$FX/agent-read.txt"; export OPSX_TEST_AGENT_READ="$AR"; printf 'ok\n' > "$AR"
-STUCK='卡在接 /apply #1'
-printf '{"_usage_limit":{"seen_at":"%s","resets_at":"%s"},"_limit_stuck":{"demo/a":["%s"]}}' "$(ago 70)" "$(ago 10)" "$STUCK" > "$MEMO"
-a_disp '"not-a-time"'
-cards '[{"slug":"a","section":"待處理","dispatch":{"mode":"autopilot","agent":"claude","pane":"w1:p1","drive_pid":null},"agent_status":"idle","open_gates":[{"id":"'"$STUCK"'","opened_at":null}]}]'
-OPSX_TEST_FAIL_answer=agent_not_found round || fail "卡在接代答遇壞的 relaunching_at 整輪要跑完：$(cat "$FX/out")"
-assert_eq "$(ecount '^opsx (stop|dispatch)')" 0 "卡在接代答路徑遇壞值不重派：$(cat "$OPSX_FAKE_LOG")"
-grep -F '?? demo/a' "$LOG" | grep -qF relaunching_at || fail "卡在接代答路徑也要有 ?? 含 relaunching_at：$(cat "$LOG")"
 rm -f "$MEMO"; printf '{}' > "$DISP"
 echo "coordinate: ok"

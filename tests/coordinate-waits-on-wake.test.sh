@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# parked 的卡只被 gate 的 waits-on 指名的那張 merged 喚醒；對不到任何 PR 時照任何新 merged 的 PR 喚醒。
+# parked 的卡只被 gate 的 waits-on 指名的那張 merged 喚醒（通知人回 gate）；對不到任何 PR 時照任何新 merged 的 PR 喚醒。
 # 驗收：openspec/changes/me-20261111-1824/specs/coordinate-waits-on-wake/spec.md
 source "$(dirname "${BASH_SOURCE[0]}")/coordinate-fixture.sh"
 
@@ -62,25 +62,37 @@ round || fail "rc: $(cat "$FX/out")"
 assert_eq "$(count '^opsx dispatch')" 0 "y-pr 合了不該喚醒等 x-pr 的卡：$(cat "$OPSX_FAKE_LOG")"
 assert_eq "$(count '^opsx answer')" 0 "也不該答 gate"
 
-# 等的那張合併：喚醒，先答 gate 再派
+# 喚醒＝通知人回 gate：gate 由人答，這裡不答、gate 還開著也不派
+woken() { # <說明>
+  assert_eq "$(count '^opsx (answer|dispatch)')" 0 "$1：不答也不派：$(cat "$OPSX_FAKE_LOG")"
+  assert_grep '^notification show \[demo/card-a\] gate g9 ' "$OPSX_FAKE_LOG"
+}
+
+# 等的那張合併：喚醒
 wp merged merged; parked ',"waits_on":"x-pr"'; waiting '"x-pr"'
 round || fail "rc: $(cat "$FX/out")"
-assert_grep '^opsx answer card-a --gate g9 ' "$OPSX_FAKE_LOG"
-assert_grep '^opsx dispatch card-a ' "$OPSX_FAKE_LOG"
+woken "等的那張合併"
 
 # 等的那張在停下前就已合併（parked 記錄的 merged 已含它）：waits-on 的條件已滿足，要喚醒
-wp merged pending; parked ',"waits_on":"x-pr"'; printf '{"_parked":{"demo/card-a":{"at":"2026-11-10T10:00:00+08:00","gate":"g9","merged":["x-pr"],"waits_on":"x-pr"}},"_redispatched":{}}' > "$MEMO"; waiting '"x-pr"'
+wp merged pending; printf '{"_parked":{"demo/card-a":{"at":"2026-11-10T10:00:00+08:00","gate":"g9","merged":["x-pr"],"waits_on":"x-pr"}},"_redispatched":{}}' > "$MEMO"; waiting '"x-pr"'
 round || fail "rc: $(cat "$FX/out")"
-assert_grep '^opsx dispatch card-a ' "$OPSX_FAKE_LOG"
+woken "停下前就已合併"
 
 # waits-on 對不到任何 PR：照任何新合併的 PR 喚醒，記 ??
 wp pending merged; parked ',"waits_on":"nope"'; waiting '"nope"'
 round || fail "rc: $(cat "$FX/out")"
-assert_grep '^opsx dispatch card-a ' "$OPSX_FAKE_LOG"
+woken "waits-on 對不到 PR"
 grep '??' "$LOG" | grep -q 'nope' || fail "要記 ?? 並點名 nope：$(cat "$LOG")"
 
 # 沒有 waits-on（舊的 parked 記錄）：任何新合併的 PR 都喚醒
 wp pending merged; parked ''; waiting 'null'
 round || fail "rc: $(cat "$FX/out")"
+woken "沒有 waits-on"
+
+# 人答了 gate（collect 給「待指派」、沒有 open gate）：照派卡規則重派，不答
+wp merged merged; parked ',"waits_on":"x-pr"'
+cards '[{"slug":"card-a","section":"待指派","dispatch":null}]'
+round || fail "rc: $(cat "$FX/out")"
+assert_eq "$(count '^opsx answer')" 0 "人答過的 gate 不再答：$(cat "$OPSX_FAKE_LOG")"
 assert_grep '^opsx dispatch card-a ' "$OPSX_FAKE_LOG"
 echo "coordinate-waits-on-wake ok"

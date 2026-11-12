@@ -742,20 +742,20 @@ printf '# report\n\n## MR\nhttps://gitlab.example.com/acmecorp/r/-/merge_request
 # m-gate：派出，needs: run 的 gate（純函式說留給人）
 D=$(pc10 r m-gate); printf '## 1\n\n- [ ] 1.1 a\n' > "$D/tasks.md"
 printf '## g1\ntype: decision\nstatus: open\nneeds: run\n問題: 跑 x？\n建議: bash x.sh\n' > "$D/gates.md"
-# m-free：沒派出，會被代答的 gate：沒人會答，算等你
+# m-free：沒派出、有一般決定題的 gate，算等你
 D=$(pc10 r m-free); printf '## 1\n\n- [ ] 1.1 a\n' > "$D/tasks.md"
 printf '## g1\ntype: decision\nstatus: open\n問題: 哪個？\n選項: 用 A (Recommended) | 用 B\n' > "$D/gates.md"
 # m-review：tasks 全勾、tests 綠
 D=$(pc10 r m-review); printf '## 1\n\n- [x] 1.1 a\n' > "$D/tasks.md"
 printf '{"phase":"apply","tests":"green","at":"2026-11-11T10:00:00+08:00"}' > "$D/status.json"
-# m-apply：派出、apply 中；m-auto：派出、apply 中、gate 會被代答，照 stage 歸
+# m-apply：派出、apply 中；m-auto：派出、apply 中、有一般決定題的 gate：協調者不代答，算等你
 D=$(pc10 r m-apply); printf '## 1\n\n- [ ] 1.1 a\n' > "$D/tasks.md"
 D=$(pc10 r m-auto); printf '## 1\n\n- [ ] 1.1 a\n' > "$D/tasks.md"
 printf '## g1\ntype: decision\nstatus: open\n問題: 哪個？\n建議: 用 A\n' > "$D/gates.md"
 # m-park：dispatch stopped，waits-on 的 gate（建議含合併字，仍是 park）
 D=$(pc10 r m-park); printf '## 1\n\n- [ ] 1.1 a\n' > "$D/tasks.md"
 printf '## g1\ntype: decision\nstatus: open\nwaits-on: m-apply\n問題: 等 m-apply\n建議: 等 m-apply 合併後繼續\n' > "$D/gates.md"
-# m-ready-gate：派出、MR 全綠、另有會代答的 gate：照 D3 看 mr.state，算可合併
+# m-ready-gate：派出、MR 全綠、另有 open 的 gate：照 D3 看 mr.state，算可合併
 D=$(pc10 r m-ready-gate); printf '## 1\n\n- [x] 1.1 a\n' > "$D/tasks.md"
 printf '# report\n\n## MR\nhttps://gitlab.example.com/acmecorp/r/-/merge_requests/7\n' > "$D/report.md"
 printf '## g1\ntype: decision\nstatus: open\n問題: 哪個？\n建議: 用 A\n' > "$D/gates.md"
@@ -834,8 +834,8 @@ J="$(opsx collect --root "$R10" --state "$S10")"; assert_eq "$?" 0 "progress col
 pclass() { q "$(card "$J" r "$1")" progress_class; }
 # 五類各一張
 assert_eq "$(pclass m-merge) $(pclass m-gate) $(pclass m-review) $(pclass m-apply) $(pclass m-idle)" "mergeable waiting_on_you testing developing not_dispatched"
-# 沒派出的卡有 gate 算等你；會代答的 gate 照 stage 歸；waits-on 停著的卡算還沒派
-assert_eq "$(pclass m-free) $(pclass m-auto) $(pclass m-park)" "waiting_on_you developing not_dispatched"
+# 有 gate 的卡不論派沒派出都算等你；waits-on 停著的卡算還沒派
+assert_eq "$(pclass m-free) $(pclass m-auto) $(pclass m-park)" "waiting_on_you waiting_on_you not_dispatched"
 # MR ready 有 open gate 仍是可合併；stage pr 的留給人 gate 排在測試中之前；終端機等待輸入算等你
 assert_eq "$(pclass m-ready-gate) $(pclass m-pr-run) $(pclass m-block)" "mergeable waiting_on_you waiting_on_you"
 assert_eq "$(q "$(card "$J" r m-pr-run)" stage) $(q "$(card "$J" r m-block)" waiting.type)" "pr 終端機等待輸入" "fixture 真的走到 pr 與 blocked"
@@ -844,7 +844,7 @@ assert_eq "$(pclass m-later) $(pclass loose) $(pclass m-split)" "null null null"
 assert_eq "$(card "$J" r a)" null "子殼不是卡"
 # 相加等於剩幾張；workplan 排了沒殼的項目（merged 與已歸檔的不算）
 P="$(q "$J" progress.r)"
-assert_eq "$(q "$P" mergeable) $(q "$P" waiting_on_you) $(q "$P" testing) $(q "$P" developing) $(q "$P" not_dispatched)" "2 4 1 2 3"
+assert_eq "$(q "$P" mergeable) $(q "$P" waiting_on_you) $(q "$P" testing) $(q "$P" developing) $(q "$P" not_dispatched)" "2 5 1 1 3"
 assert_eq "$(q "$P" not_dispatched_planned)" '["web-x"]'
 assert_eq "$(q "$P" remaining) $(q "$P" milestone) $(q "$P" goal)" "12 1.0 能開單出貨"
 # 沒設 current milestone：milestone、goal 為 null，兩張活卡都算（含不在 workplan 的）
