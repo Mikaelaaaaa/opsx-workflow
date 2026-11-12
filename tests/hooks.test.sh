@@ -802,6 +802,17 @@ printf '{"tool_name":"Write","tool_input":{"file_path":"%s"}}' "$G" | CLAUDE_PLU
 assert_eq "$(cat "$FX/victim")" "keep me" "gate-ts: 帶 pid 的舊檔名上的 symlink 不能被寫"
 assert_grep '^opened_at: 2026-11-06T14:05:00+08:00$' "$G"
 rm -f "$G".tmp.* "$G".warn.*
+# gate-timestamp 改寫走 safefile replace：權限位元保留（0640 改寫後還是 0640）
+printf '## g1\ntype: decision\nstatus: open\n' > "$G"; chmod 640 "$G"
+gt "$G" >/dev/null
+assert_grep '^opened_at: 2026-11-06T14:05:00+08:00$' "$G"
+assert_eq "$(python3 -I -c 'import os,sys;print(oct(os.stat(sys.argv[1]).st_mode & 0o777))' "$G")" "0o640" "gate-ts: 改寫後 gates.md 權限要保留 0640"
+# gates.md 本身是 symlink：目標檔的內容不能被改
+printf '## g1\ntype: decision\nstatus: open\n' > "$FX/victim"; victim_sum="$(shasum "$FX/victim")"
+rm -f "$G"; ln -s "$FX/victim" "$G"
+gt "$G" >/dev/null
+assert_eq "$(shasum "$FX/victim")" "$victim_sum" "gate-ts: gates.md 是 symlink 時目標不能被寫"
+rm -f "$G"
 
 # gate type：同義詞改正、表外與沒寫只提醒（gate-type-normalize）。提醒走 PostToolUse 的 additionalContext，退出碼永遠 0
 gts() { printf '{"cwd":"%s","tool_name":"Write","tool_input":{"file_path":"%s"},"hook_event_name":"PostToolUse"}' "$R" "$1" | CLAUDE_PLUGIN_ROOT="$GP" OPSX_NOW=2026-11-06T14:05:00+08:00 bash "$H/gate-timestamp.sh" 2>/dev/null; }
