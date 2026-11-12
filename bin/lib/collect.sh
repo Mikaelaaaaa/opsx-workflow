@@ -91,10 +91,10 @@ opsx_collect() {
   OPSX_C_WORK="$work" OPSX_C_STATE="$state" OPSX_C_HERDR_ERR="$herdr_err" OPSX_C_NOW="$now" OPSX_C_LIB="$OPSX_ROOT/bin/lib" "$OPSX_PY" -I - <<'PY'
 import datetime, json, os, re, sys, tomllib
 sys.path.insert(0, os.environ["OPSX_C_LIB"])
+import chain
 import gaterule
 import gatetype
 import grantactions
-from chain import load_workplan
 
 sys.path.insert(0, os.path.join(os.environ["OPSX_ROOT"], "bin", "lib"))
 import inboxmerge
@@ -395,7 +395,7 @@ for repo in repos:
     wp_path = os.path.join(repo_paths[repo], "openspec", "workplan.yaml")
     if not os.path.exists(wp_path): continue
     try:
-        features = wp_list(load_workplan(wp_path), "features", "workplan")
+        features = wp_list(chain.load_workplan(wp_path), "features", "workplan")
         mine = []
         for f in features:
             prs = wp_list(f, "prs", "feature %s" % f["name"])
@@ -416,15 +416,15 @@ for repo in repos:
 PROGRESS_CLASSES = ("mergeable", "waiting_on_you", "testing", "developing", "not_dispatched")
 ARCHIVED_NAME = re.compile(r"^\d{4}-\d{2}-\d{2}-(.+)$")
 
-def progress_class(c):
+def progress_class(c, top, prs):
     """由上往下取第一個符合的；不看協調者在不在跑、不看 agent_status。dispatch 為 None 包含 stopped。"""
     w = c["waiting"]
     # 看 mr.state 不看 waiting：有 open gate 時 waiting 是那個 gate，協調者仍照 mr.state 發「可以合併」
     if c["mr"] and c["mr"].get("state") == "ready": return "mergeable"
     if w:
+        # gate 一律由人答。停 pane 等別張卡的，等的卡合進 main 之後協調者會通知人回，那時才算等你
         verdict = gaterule.decide(w)
-        # 沒派出的卡協調者不會答它的 gate，只剩人能答；停 pane 等別張卡的不算
-        if verdict[0] == "human" or (not c["dispatch"] and verdict[0] != "park"): return "waiting_on_you"
+        if verdict[0] == "human" or chain.merged_into_main(top, prs, verdict[1]): return "waiting_on_you"
     if c["stage"] in ("review", "pr", "babysit"): return "testing"
     if c["dispatch"]: return "developing"
     return "not_dispatched"
@@ -442,11 +442,12 @@ for repo in repos:
     current = plan["current"] if plan else None
     scoped = [f for f in (plan["features"] if plan else []) if not current or f.get("milestone") == current]
     owned = {pr["name"] for f in scoped for pr in f.get("prs") or []} if current else None
+    prs = [pr for f in (plan["features"] if plan else []) for pr in f.get("prs") or []]
     counts = dict.fromkeys(PROGRESS_CLASSES, 0)
     for c in cards:
         if c["repo"] != repo: continue
         live = not c["archived"] and c["stage"] not in ("archive", "split")
-        c["progress_class"] = progress_class(c) if live and (owned is None or c["slug"] in owned) else None
+        c["progress_class"] = progress_class(c, repo_paths[repo], prs) if live and (owned is None or c["slug"] in owned) else None
         if c["progress_class"]: counts[c["progress_class"]] += 1
     planned = [pr["name"] for f in scoped for pr in f.get("prs") or []
                if pr.get("status") != "merged" and not has_shell(repo_paths[repo], pr["name"])]
