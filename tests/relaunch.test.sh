@@ -139,6 +139,40 @@ assert_not_grep '^tab close' "$OPSX_FAKE_LOG"
 assert_not_grep '^pane close' "$OPSX_FAKE_LOG"
 unset OPSX_TEST_BUSY_LEFT
 
+# --- /exit 後 herdr 還沒放掉名字：agent_name_taken 兩次再成功 ---
+export OPSX_TEST_TAKEN_LEFT="$FX/taken-left"; echo 2 > "$OPSX_TEST_TAKEN_LEFT"; : > "$OPSX_FAKE_LOG"
+out="$(opsx relaunch retry-backoff 2>&1)"; assert_eq "$?" 0 "name_taken 兩次再成功: $out"
+assert_eq "$(grep -c '^agent start retry-backoff ' "$OPSX_FAKE_LOG")" 3 "兩次 name_taken 加一次成功 = 三次 agent start"
+assert_not_grep '^tab close' "$OPSX_FAKE_LOG"
+assert_not_grep '^pane close' "$OPSX_FAKE_LOG"
+# busy 與 name_taken 共用同一個六次：各回三次就用完
+echo 3 > "$OPSX_TEST_TAKEN_LEFT"; export OPSX_TEST_BUSY_LEFT="$FX/busy-left"; echo 3 > "$OPSX_TEST_BUSY_LEFT"; : > "$OPSX_FAKE_LOG"
+out="$(opsx relaunch retry-backoff 2>&1)"; [ $? -ne 0 ] || fail "共用計數用完要失敗: $out"
+assert_eq "$(grep -c '^agent start retry-backoff ' "$OPSX_FAKE_LOG")" 6 "busy 加 name_taken 共六次後放棄"
+unset OPSX_TEST_BUSY_LEFT
+# 一直被占：六次後失敗，印 herdr 的錯誤與 pane 畫面，標記清掉，不關 tab 或 pane
+echo 99 > "$OPSX_TEST_TAKEN_LEFT"; : > "$OPSX_FAKE_LOG"
+out="$(OPSX_TEST_PANE_TEXT='$ claude-pane-screen-xyz' opsx relaunch retry-backoff 2>&1)"; [ $? -ne 0 ] || fail "一直 name_taken 要失敗: $out"
+assert_eq "$(grep -c '^agent start retry-backoff ' "$OPSX_FAKE_LOG")" 6 "name_taken 六次後放棄"
+case "$out" in *agent_name_taken*claude-pane-screen-xyz*) ;; *) fail "要印 herdr 錯誤與 pane 畫面: $out" ;; esac
+assert_not_grep '^tab close' "$OPSX_FAKE_LOG"
+assert_not_grep '^pane close' "$OPSX_FAKE_LOG"
+python3 -I -c 'import json,sys;e=json.load(open(sys.argv[1]))["Acmecorp-CS/retry-backoff"];assert "relaunching_at" not in e,e' "$J" || fail "失敗後要清掉標記"
+unset OPSX_TEST_TAKEN_LEFT
+
+# --- 可重開的狀態：idle、blocked、done 都照常送鍵並成功 ---
+for st in idle blocked done; do
+  mk_agents "$OPSX_TEST_HERDR_AGENTS" w1:pE "$st" "$SID"; : > "$OPSX_FAKE_LOG"
+  out="$(opsx relaunch retry-backoff 2>&1)"; assert_eq "$?" 0 "$st 要能重開: $out"
+  assert_grep '^pane send-text w1:pE /exit' "$OPSX_FAKE_LOG"
+  assert_grep '^agent start retry-backoff ' "$OPSX_FAKE_LOG"
+done
+# 拒絕訊息列出可重開的全部狀態
+mk_agents "$OPSX_TEST_HERDR_AGENTS" w1:pE working "$SID"
+out="$(opsx relaunch retry-backoff 2>&1)"
+case "$out" in *idle*blocked*done*) ;; *) fail "拒絕訊息要列出 idle、blocked、done: $out" ;; esac
+mk_agents "$OPSX_TEST_HERDR_AGENTS" w1:pE idle "$SID"
+
 # --- drive 先停、後起：條目的 drive_pid 是活著的行程 ---
 # 行程不掛在測試 shell 底下，被 kill 後才不會留成 zombie（zombie 對 kill -0 還是成功）
 # fd 全部導走：不然它握著 run.sh 收輸出的 pipe，測試失敗時要等它睡完
