@@ -196,8 +196,8 @@ out="$(stop_reason "$d" "$slug" "$stage")"
 bg_wait=""
 if [ -n "$out" ] && st_background_running "$(jqr '.transcript_path')"; then out=""; bg_wait=1; fi
 if [ -z "$out" ]; then
-  # 「卡在接」gate 開著時留標記：答覆後第一次要擋的 Stop 是對答覆的回應，不計次
-  if stuck_gate_any_open "$d"; then printf 'gate-open 0 - -\n' | opsx_replace "$state"; else rm -f "$state"; fi
+  # 背景工作在跑、「卡在接」gate 開著：次數不動也不歸零，答覆後的第一輪才分得出來
+  if [ -z "$bg_wait" ] && ! stuck_gate_any_open "$d"; then rm -f "$state"; fi
   say_once "[$slug] 停住：$(wait_reason "$d" "$stage")"
   exit 0
 fi
@@ -211,11 +211,6 @@ fp="$(tasks_done "$d")"
 [ "$want" = facts ] && fp="$fp-$(printf '%s' "$reason" | wc -l | tr -d ' ')"
 last_stage=""; n=0; gated="-"; last_fp=""
 [ -f "$state" ] && read -r last_stage n gated last_fp < "$state"
-if [ "$last_stage" = gate-open ] && ! stuck_gate_any_open "$d"; then
-  printf '%s 0 - %s\n' "$want" "$fp" | opsx_replace "$state"
-  say_once "[$slug] 停住：「卡在接」gate 剛答覆，這一輪不計次"
-  exit 0
-fi
 if [ "$last_stage" != "$want" ] || [ "$last_fp" != "$fp" ]; then n=0; gated="-"; fi
 
 if [ "$n" -ge "$MAX_BLOCKS" ]; then
@@ -225,7 +220,12 @@ if [ "$n" -ge "$MAX_BLOCKS" ]; then
     say_once "[$slug] 停住：連續 ${n} 次沒接 ${want}，已開「卡在接」gate"
     exit 0
   fi
-  n=0; gated="-"   # gate 被回答了，重算
+  if [ "$gated" = gated ]; then   # gate 剛被回答：這一輪是回應它，放行一次不計次，下一輪從 0 重算
+    printf '%s 0 - %s\n' "$want" "$fp" | opsx_replace "$state"
+    say_once "[$slug] 停住：「卡在接 /${want}」gate 剛答覆，這一輪不計次"
+    exit 0
+  fi
+  n=0; gated="-"
 fi
 
 mkdir -p "$(dirname "$state")"

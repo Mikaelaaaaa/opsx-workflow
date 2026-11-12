@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 # Stop hook：背景工作（Monitor、背景 Bash、背景 subagent）還在跑，或剛答覆完「卡在接」gate 的那一輪，都不算沒接站。
-# 驗收：openspec/changes/me-20261112-1052/specs/stop-gate-background-wait/spec.md
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 H="$OPSX_ROOT/hooks"
 export CLAUDE_PLUGIN_ROOT="$OPSX_ROOT"
@@ -68,16 +67,66 @@ row "沒有通知" allow 5
 row "status 是 running" allow 5 running
 row "119 分鐘前啟動" allow 119
 row "121 分鐘前啟動" block 121
+row "啟動時間在未來" block -10
+
+# 兩個 task-id：終態通知只結束自己那一個
+rm -rf "$STOP_STATE"; { start_monitor job1; start_monitor job2; notify job1 completed; } > "$T"
+out="$(sg "$T")"; assert_eq "$(decision "$out")" allow "job1 結束 job2 還在跑要放行: $out"
+rm -rf "$STOP_STATE"; { start_monitor job1; start_monitor job2; notify job2 completed; } > "$T"
+out="$(sg "$T")"; assert_eq "$(decision "$out")" allow "job2 結束 job1 還在跑要放行: $out"
+rm -rf "$STOP_STATE"; { start_monitor job1; start_monitor job2; notify job1 completed; notify job2 failed; } > "$T"
+out="$(sg "$T")"; assert_eq "$(decision "$out")" block "兩個都結束要擋: $out"
+# 前景 subagent 的結果也有 agentId，但 status 不是 async_launched
+rm -rf "$STOP_STATE"; printf '{"type":"user","timestamp":"%s","toolUseResult":{"status":"completed","agentId":"fg1"}}\n' "$(ago 5)" > "$T"
+out="$(sg "$T")"; assert_eq "$(decision "$out")" block "前景 subagent 不算背景工作: $out"
+# 壞行不拖垮整份判斷：截斷的半行、字串型 toolUseResult、沒有毫秒的時間戳
+rm -rf "$STOP_STATE"; { printf '{"type":"us\n'; printf '{"type":"user","toolUseResult":"Error: nope"}\n'; start_monitor job1; } > "$T"
+out="$(sg "$T")"; assert_eq "$(decision "$out")" allow "壞行旁邊的背景工作仍要放行: $out"
+rm -rf "$STOP_STATE"; printf '{"type":"user","timestamp":"%s","toolUseResult":{"taskId":"job1","timeoutMs":900000,"persistent":false}}\n' "$(ago 5 | sed 's/\.000Z$/Z/')" > "$T"
+out="$(sg "$T")"; assert_eq "$(decision "$out")" allow "沒有毫秒的時間戳要放行: $out"
+rm -rf "$STOP_STATE"; printf '{"type":"us\n' > "$T"
+out="$(sg "$T")"; assert_eq "$(decision "$out")" block "只有壞行要擋: $out"
+
+# 20 MB 的 transcript：只讀尾端，要在 hook 的 10 秒上限內判完
+rm -rf "$STOP_STATE"; { yes '{"type":"assistant","message":"filler"}' | head -c 20000000; start_monitor job1; } > "$T"
+SECONDS=0; out="$(sg "$T")"
+assert_eq "$(decision "$out")" allow "大 transcript 尾端的背景工作要放行: $out"
+[ "$SECONDS" -le 3 ] || fail "大 transcript 判斷花了 ${SECONDS} 秒，hook 上限 10 秒"
+
+# 7200 秒邊界：直接呼叫函式，now 明給
+printf '{"type":"user","timestamp":"2026-11-12T00:00:00.000Z","toolUseResult":{"taskId":"job1","timeoutMs":900000,"persistent":false}}\n' > "$T"
+E="$(python3 -I -c 'import datetime; print(int(datetime.datetime(2026, 11, 12, tzinfo=datetime.timezone.utc).timestamp()))')"
+running() { ( source "$OPSX_ROOT/bin/lib/stage.sh"; st_background_running "$T" "$1" ); }
+assert_rc 0 running "$((E + 7200))"
+assert_rc 1 running "$((E + 7201))"
+assert_rc 1 running "$((E - 1))"
+
+# --- 背景放行不重設擋的次數：擋、擋、背景放行、背景結束、再擋，第 3 次擋之後要開 gate ---
+rm -rf "$STOP_STATE"; rm -f "$C/gates.md"; : > "$T"
+out="$(sg "$T")"; assert_eq "$(decision "$out")" block "計數 1"
+out="$(sg "$T")"; assert_eq "$(decision "$out")" block "計數 2"
+start_monitor job1 > "$T"
+out="$(sg "$T")"; assert_eq "$out" "" "背景放行"
+: > "$T"
+out="$(sg "$T")"; assert_eq "$(decision "$out")" block "背景結束後第 3 次擋"
+out="$(sg "$T")"; assert_eq "$out" "" "第 3 次之後開 gate 放行"
+assert_eq "$(stuck_gates)" 1 "背景放行不能把次數歸零"
 
 # --- 答覆「卡在接」gate 那一輪不計次 ---
 rm -rf "$STOP_STATE"; rm -f "$C/gates.md"; : > "$T"
 for i in 1 2 3; do out="$(sg "$T")"; assert_eq "$(decision "$out")" block "gate 前第 $i 次擋"; done
 out="$(sg "$T")"; assert_eq "$out" "" "擋滿後開 gate 放行"
 assert_eq "$(stuck_gates)" 1 "擋滿開一張 gate"
-# gate 還沒答：維持放行，不再開
+# gate 寫完立刻被答覆（中間沒有別的 Stop）：答覆那一輪放行一次，不開新 gate
+sed 's/^status: open$/status: answered/' "$C/gates.md" > "$C/gates.md.new" && mv "$C/gates.md.new" "$C/gates.md"
+out="$(sg "$T")"; assert_eq "$out" "" "gate 寫完立刻答覆，那一輪放行一次"
+assert_eq "$(stuck_gates)" 1 "答覆那一輪不開新 gate"
+# 還沒答覆的 gate：維持放行，不再開，答覆後仍然放行一次
+rm -rf "$STOP_STATE"; rm -f "$C/gates.md"
+for i in 1 2 3; do out="$(sg "$T")"; done
+out="$(sg "$T")"; assert_eq "$out" "" "擋滿後開 gate 放行（第二輪）"
 out="$(sg "$T")"; assert_eq "$out" "" "gate open 時放行"
 assert_eq "$(stuck_gates)" 1 "gate open 時不再開"
-# 答覆：第一次 Stop 放行一次，不開新 gate
 sed 's/^status: open$/status: answered/' "$C/gates.md" > "$C/gates.md.new" && mv "$C/gates.md.new" "$C/gates.md"
 out="$(sg "$T")"; assert_eq "$out" "" "答覆那一輪放行一次"
 assert_eq "$(stuck_gates)" 1 "答覆那一輪不開新 gate"

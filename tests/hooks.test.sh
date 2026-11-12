@@ -1293,8 +1293,9 @@ assert_eq "$(grep -c '^## 卡在接 /apply' "$C/gates.md")" 1 "stop: 狀態檔�
 # gate 開著時再停（gated 路徑）：放行、不寫第二個、狀態不變
 out="$(KEEP=1 sg)"; assert_eq "$out" "" "stop: gated 後 gate 還開著放行"
 assert_eq "$(cut -d' ' -f1,2,3 "$STOP_STATE/Acmecorp-AI-eval-core")" "apply 3 gated" "stop: gated 狀態保留"
-# 人答完：次數歸零，重新擋，不寫新 gate
+# 人答完：回應答覆的那一輪放行一次，次數歸零，之後重新擋，不寫新 gate
 sed -i.bak 's/^status: open$/status: answered/' "$C/gates.md"; rm -f "$C/gates.md.bak"
+out="$(KEEP=1 sg)"; assert_eq "$out" "" "stop: gate 答完的第一輪放行"
 out="$(KEEP=1 sg)"; assert_eq "$(decision "$out")" block "stop: gate 答完後 apply 站重新擋"
 assert_eq "$(cut -d' ' -f1,2 "$STOP_STATE/Acmecorp-AI-eval-core")" "apply 1" "stop: 答完後次數從 1 起算"
 assert_eq "$(grep -c '^## 卡在接 /apply' "$C/gates.md")" 1 "stop: 答完後不寫新 gate"
