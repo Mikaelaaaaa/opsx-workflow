@@ -310,7 +310,7 @@ const api={
   async post(action,body){const r=await fetch('/api/'+action,{method:'POST',headers:{'X-Opsx-Token':token(),'Content-Type':'application/json'},body:JSON.stringify(body)});const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(action+' '+r.status+'：'+(j.error||j.stderr||''));if(!j.ok)throw new Error((j.stderr||j.stdout||'opsx '+action+' 失敗').trim());return j;}
 };
 let data={generated_at:null,scopes:[],cards:[],sessions:[],unmatched_agents:[],errors:[],legacy:{},worktrees_skipped:[]};let lastRaw='';
-const ui={tab:'home',deepLink:deepLinkAtLoad,scope:'all',ws:null,repo:null,sel:null,open:null,doneOpen:false,busy:false,logFilter:'all',drop:null,dropText:'',merge:null,mergeInto:'',fileRepo:{},prio:null,prioText:'',prioLevel:null,progressClass:null};
+const ui={tab:'home',deepLink:deepLinkAtLoad,scope:'all',ws:null,repo:null,sel:null,open:null,doneOpen:false,debtRepo:null,busy:false,logFilter:'all',drop:null,dropText:'',merge:null,mergeInto:'',fileRepo:{},prio:null,prioText:'',prioLevel:null,progressClass:null};
 let tl=null;let tlErr='';let bannerClosed=false;let seenAt=null;  /* 這頁最後一次送給 /api/seen 的時間 */
 const outputs={};  /* 卡 key → {ok, text} 或 {ok:false, error}；抽屜打開時才抓 */
 const REFRESH_MS=5000;
@@ -590,8 +590,18 @@ const INBOX_GROUPS=[
   ['agent 回報','agent、audit、deepen 寫的卡',s=>/^(agent|audit|deepen):/.test(s)],
   ['我新增','＋新增或貼上的',s=>s==='me'||s==='paste'],
   ['同步來源','GitLab · GitHub 指派給你的 issue',s=>/^(gitlab|github):/.test(s)],
-  ['技術債','code 裡的 shortcut: 註解',s=>/^shortcut:/.test(s)],
 ];
+/* 技術債 start */
+/* code 裡的 shortcut: 註解不開卡：sync 寫快照，collect 的 debt 是 {repo: [{file,line,limit,trigger}]}；收件匣只顯示各 repo 的數量，點開看清單 */
+const debtTotal=d=>Object.values(d||{}).reduce((n,h)=>n+h.length,0);
+function debtRows(d,openRepo){
+  return Object.keys(d||{}).filter(r=>d[r].length).sort().map(r=>{
+    const isOpen=openRepo===r;
+    const list=isOpen?d[r].map(h=>`<div class="row"><div class="main"><div class="l1"><span class="title">${esc(h.file)}:${esc(h.line)}</span><span class="meta">${esc(h.limit)}${h.trigger?' · 升級：'+esc(h.trigger):''}</span></div></div></div>`).join(''):'';
+    return `<div class="row"><div class="main"><div class="l1"><button class="tg" data-act="debt-toggle" data-repo="${esc(r)}" aria-expanded="${isOpen}"><span class="chev"></span><span class="title">${esc(r)}</span></button><span class="n">${d[r].length}</span></div></div></div>${list}`;
+  }).join('');
+}
+/* 技術債 end */
 function inboxGroup(c){const g=INBOX_GROUPS.find(g=>c.source&&g[2](c.source));return g?g[0]:'其他';}
 function rowInbox(c){
   const gone=c.upstream==='closed'?'上游已關閉':c.stale?'註解已刪':'';
@@ -649,7 +659,8 @@ function renderInbox(){
   const groups=[...INBOX_GROUPS.map(g=>[g[0],g[1]]),['其他','inbox.md 沒有認得的 source']];
   return groups.map(([name,sub])=>{const cs=I.filter(c=>inboxGroup(c)===name);
     if(name==='其他'&&!cs.length)return '';
-    return panel(name,cs.length,sub,cs.length?cs.map(rowInbox).join(''):'<div class="empty">沒有</div>');}).reduce((h,x)=>h+x,pre);
+    return panel(name,cs.length,sub,cs.length?cs.map(rowInbox).join(''):'<div class="empty">沒有</div>');}).reduce((h,x)=>h+x,pre)
+    +panel('技術債',debtTotal(data.debt),'code 裡的 shortcut: 註解，不開卡；要處理哪條自己開卡',debtTotal(data.debt)?debtRows(data.debt,ui.debtRepo):'<div class="empty">沒有</div>');
 }
 /* ---------- 紀錄 tab：opsx timeline，開 tab 才拉 ---------- */
 const LOG_FILTERS=[['all','全部'],['you','你回的'],['agent','替你做的決定'],['merge','指派與合併']];
@@ -1014,6 +1025,7 @@ document.addEventListener('click',e=>{
   if(btn){
     e.stopPropagation();const a=btn.dataset.act;
     if(a==='done-toggle'){ui.doneOpen=!ui.doneOpen;render();return;}
+    if(a==='debt-toggle'){ui.debtRepo=ui.debtRepo===btn.dataset.repo?null:btn.dataset.repo;render();return;}
     if(a==='close'){closeDrawer();return;}
     if(a==='dlg-cancel'){closeDispatch();return;}
     if(a==='dlg-go'){doDispatch();return;}

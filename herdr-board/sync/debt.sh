@@ -3,10 +3,11 @@
 # shortcut comments and print one JSON line per hit.
 #
 # Source: ponytail skills/ponytail-debt/SKILL.md @ 96608e0 (the grep and the
-# ceiling / upgrade-trigger parse). The board's daily sync turns each line into
-# an inbox card (type: debt) whose source id is
-#   shortcut:<repo>:<file>:<sha1(comment text)[:8]>
-# The line number is not part of the id (it drifts); it is carried separately.
+# ceiling / upgrade-trigger parse). `opsx sync --source debt` writes the hits of
+# every repo to <state>/debt.json; the board shows only the count per repo and
+# the list behind it. A shortcut opens no inbox card: the person decides which
+# one to work on. A comment carrying [已評估] was judged and kept on purpose and
+# is skipped here.
 #
 # Output fields:
 #   repo        repo directory name under ~/code

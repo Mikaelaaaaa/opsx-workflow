@@ -1,11 +1,11 @@
 """opsx sync 的本體：撈來源、以 inbox.md 的 source 去重、建殼或更新、寫 sync.log。由 bin/lib/sync.sh 叫。
 
 每個來源產生一串 item（dict），欄位統一：source、repo、path（repo 根）、slug、type、title、body（## 內文，debt 沒有）、
-evidence（## 證據）、extra（寫進 frontmatter 的欄位）。gitlab / github 由 herdr-board/sync/{gitlab,github}.sh 撈，debt 由 debt.sh，
-obsidian 由 obsidian.py。
+evidence（## 證據）、extra（寫進 frontmatter 的欄位）。gitlab / github 由 herdr-board/sync/{gitlab,github}.sh 撈，obsidian 由 obsidian.py。
+debt（code 裡的 shortcut: 註解）不開卡：debt.sh 掃到的寫成 <state>/debt.json 快照，看板只顯示各 repo 的數量與清單。
 去重索引：所有 repo 的 openspec/changes/*/inbox.md 與 archive/*/inbox.md，加上 <state>/unfiled/ 與 unfiled/dropped/，source → 檔。
 沒有 repo 的 item（path 為 None）不建殼，寫進待分類 <state>/unfiled/<slug>.md，等 opsx file 選 repo。
-上游變動只標記不動作（board-inbox D4）：已歸檔的卡不改；issue 關閉寫 upstream: closed，註解不見了寫 stale: true，再出現就拿掉；
+上游變動只標記不動作（board-inbox D4）：已歸檔的卡不改；issue 關閉寫 upstream: closed；
 issue 內容較新時，還沒 explore 的卡重寫一句話與內文，explore 過的只在證據追加一行。
 同一時間只跑一支：<state>/sync.lock 上的非阻塞 fcntl.flock，拿不到就退出 3。specs/board-sync。
 """
@@ -155,10 +155,11 @@ def build_index(repos: dict[str, pathlib.Path], state: pathlib.Path) -> dict[str
     return index
 
 
-def debt_items(opsx_root: pathlib.Path, repos: dict[str, pathlib.Path], tally: Tally) -> tuple[list[dict], set[str]]:
-    """對 repos 所在的每個上層目錄跑一次 herdr-board/sync/debt.sh（它一次掃一層），只留 repos 裡的 hit。
-    也回這次真的掃過的 repo 名（stale 只標在掃過的 repo）。"""
-    items, scanned = [], set()
+def debt_snapshot(opsx_root: pathlib.Path, repos: dict[str, pathlib.Path], tally: Tally) -> tuple[dict[str, list[dict]], set[str]]:
+    """對 repos 所在的每個上層目錄跑一次 herdr-board/sync/debt.sh（它一次掃一層），只留 repos 裡的 hit，依 repo 分組。
+    也回這次真的掃過的 repo 名（掃失敗的 repo 保留上次的快照）。"""
+    snapshot: dict[str, list[dict]] = {}
+    scanned: set[str] = set()
     for root in sorted({top.parent for top in repos.values()}):
         p = subprocess.run(["bash", str(opsx_root / "herdr-board" / "sync" / "debt.sh"), str(root)], capture_output=True, text=True)
         if p.returncode != 0:
@@ -170,14 +171,26 @@ def debt_items(opsx_root: pathlib.Path, repos: dict[str, pathlib.Path], tally: T
             hit = json.loads(raw)
             if hit["repo"] not in here:
                 continue
-            fields = {"line": str(hit["line"]), "limit": hit["limit"], "trigger": hit["trigger"], "no-trigger": "true" if hit["no_trigger"] else "false"}
-            items.append({
-                "source": "shortcut:%s:%s:%s" % (hit["repo"], hit["file"], hit["hash"]),
-                "repo": hit["repo"], "path": repos[hit["repo"]], "slug": "debt-%s" % hit["hash"], "type": "技術債",
-                "title": hit["comment"], "body": None, "evidence": "- `%s:%s`：%s" % (hit["file"], hit["line"], hit["comment"]),
-                "extra": fields,
-            })
-    return items, scanned
+            snapshot.setdefault(hit["repo"], []).append(
+                {"file": hit["file"], "line": hit["line"], "comment": hit["comment"], "limit": hit["limit"], "trigger": hit["trigger"]})
+    for hits in snapshot.values():
+        hits.sort(key=lambda h: (h["file"], h["line"]))
+    return snapshot, scanned
+
+
+def write_debt_snapshot(state: pathlib.Path, snapshot: dict[str, list[dict]], scanned: set[str], repos: dict[str, pathlib.Path]) -> None:
+    """<state>/debt.json：這次掃過的 repo 用新的，沒掃到的（debt.sh 失敗）留上次的，已經不在 repos 的丟掉。看板只顯示數量與清單，不開卡。"""
+    path = state / "debt.json"
+    kept: dict[str, list[dict]] = {}
+    if path.exists():
+        try:
+            old = json.loads(path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            old = {}   # 快照是衍生資料，壞了就整份重寫
+        if isinstance(old, dict):
+            kept = {r: h for r, h in old.items() if r in repos and r not in scanned}
+    kept.update(snapshot)
+    safefile.write_atomic(str(path), json.dumps(kept, ensure_ascii=False, indent=2, sort_keys=True) + "\n")
 
 
 def issue_items(opsx_root: pathlib.Path, kind: str, state: pathlib.Path, repos: dict[str, pathlib.Path], tally: Tally) -> tuple[list[dict], dict[str, str]]:
@@ -266,18 +279,6 @@ def file_unfiled(state: pathlib.Path, item: dict, today: str) -> pathlib.Path:
             path = unfiled / ("%s-%d.md" % (item["slug"], n))
 
 
-def update_debt(entry: dict, item: dict) -> bool:
-    """回 True 表示改了檔。"""
-    path = entry["path"]
-    with safefile.CardLock(str(path.parent)):
-        old = path.read_text(encoding="utf-8")
-        new = fm_set(fm_set(old, "line", item["extra"]["line"]), "stale", None)
-        if new == old:
-            return False
-        safefile.write_atomic(str(path), new)
-    return True
-
-
 def update_issue(entry: dict, item: dict) -> bool:
     """回 True 表示改了檔。重開的 issue 拿掉 upstream: closed；內容較新時照 D4 改。"""
     path = entry["path"]
@@ -333,23 +334,6 @@ def mark_closed(opsx_root: pathlib.Path, kind: str, index: dict, seen: set[str],
         tally.updated += 1
 
 
-def mark_stale(index: dict, seen: set[str], scanned: set[str], tally: Tally) -> None:
-    for src, entry in index.items():
-        if entry["frozen"] or src in seen or not src.startswith("shortcut:"):
-            continue
-        if src.split(":", 2)[1] not in scanned:
-            continue
-        try:
-            with safefile.CardLock(str(entry["path"].parent)):
-                text = entry["path"].read_text(encoding="utf-8")
-                if fm_get(text, "stale") == "true":
-                    continue
-                safefile.write_atomic(str(entry["path"]), fm_set(text, "stale", "true"))
-        except FileNotFoundError:
-            continue
-        tally.updated += 1
-
-
 def main() -> int:
     ap = argparse.ArgumentParser(prog="opsx sync")
     ap.add_argument("--state", type=pathlib.Path, required=True)
@@ -374,15 +358,14 @@ def main() -> int:
 
     wanted = (a.source,) if a.source else SOURCES
     items: list[dict] = []
-    scanned: set[str] = set()
     listed: dict[str, dict[str, str]] = {}
     for kind in ("gitlab", "github"):
         if kind in wanted:
             got, listed[kind] = issue_items(a.opsx_root, kind, a.state, repos, tally)
             items += got
     if "debt" in wanted:
-        got, scanned = debt_items(a.opsx_root, repos, tally)
-        items += got
+        snapshot, scanned = debt_snapshot(a.opsx_root, repos, tally)
+        write_debt_snapshot(a.state, snapshot, scanned, repos)
     if "obsidian" in wanted:
         items += obsidian_items(a.opsx_root, a.state, tally)
 
@@ -410,7 +393,7 @@ def main() -> int:
             tally.unchanged += 1
             continue
         try:
-            changed = update_debt(entry, item) if src.startswith("shortcut:") else update_issue(entry, item)
+            changed = update_issue(entry, item)
         except FileNotFoundError:
             tally.unchanged += 1
             continue
@@ -422,8 +405,6 @@ def main() -> int:
             tally.unchanged += 1
     for kind, got in listed.items():
         mark_closed(a.opsx_root, kind, index, seen, got, tally)
-    if "debt" in wanted:
-        mark_stale(index, seen, scanned, tally)
 
     # 一次同步一列，source 是 sync；customer 的提示是另一列，collect 只認 sync 那列
     rows = [("sync", tally.created, tally.summary())]

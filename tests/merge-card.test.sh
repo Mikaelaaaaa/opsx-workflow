@@ -122,6 +122,9 @@ rm -rf "$CH/$S" "$CH/$N"
 COMMENT='單 worker, 跑第二個 instance 時改 redis'
 H="$(printf '%s' "$COMMENT" | shasum -a 1 | cut -c1-8)"
 echo "# shortcut: $COMMENT" > "$A/x.py"
+# 之前 sync 開出來的 debt 卡（現在 sync 不再開，這裡手寫一張同樣形狀的）
+mkdir -p "$CH/debt-$H"; printf 'schema: opsx\ncreated: 2026-11-10\nkind: dev\n' > "$CH/debt-$H/.openspec.yaml"
+printf -- '---\ntype: 技術債\nsource: shortcut:a:x.py:%s\nline: 1\n---\n\n## 一句話\n\n%s\n\n## 證據\n\n- x.py:1\n' "$H" "$COMMENT" > "$CH/debt-$H/inbox.md"
 out="$(opsx sync --root "$ROOT" --source debt 2>&1)"; assert_eq "$?" 0 "sync: $out"
 assert_file "$CH/debt-$H/inbox.md"
 out="$(opsx merge-card "debt-$H" --into "$Y" --repo "$A" 2>&1)"; assert_eq "$?" 0 "merge-card debt: $out"

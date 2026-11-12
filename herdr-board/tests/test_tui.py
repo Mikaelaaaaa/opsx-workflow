@@ -58,6 +58,16 @@ class RowsTest(unittest.TestCase):
         slugs = [r["card"]["slug"] for r in tm.rows(DATA, done_open=True, inbox_open=True) if r["kind"] == "card"]
         self.assertEqual(slugs[-2:], ["inbox1", "done1"])
 
+    def test_inbox_open_lists_shortcut_counts_per_repo(self):
+        hit = {"file": "x.py", "line": 1, "limit": "l", "trigger": "t"}
+        data = {**DATA, "debt": {"a": [hit, hit], "b": [hit], "c": []}}
+        debt = [r for r in tm.rows(data, done_open=False, inbox_open=True) if r["kind"] == "debt"]
+        self.assertEqual([(r["repo"], r["count"]) for r in debt], [("a", 2), ("b", 1)], "只列有 shortcut 的 repo，數量照筆數")
+        self.assertIn("2", debt[0]["text"])
+        self.assertEqual([r for r in tm.rows(data, done_open=False) if r["kind"] == "debt"], [], "收件匣收起時不列")
+        self.assertEqual([r for r in tm.rows(DATA, done_open=False, inbox_open=True) if r["kind"] == "debt"], [], "沒有 debt 鍵（舊資料）不列")
+        self.assertEqual(tm.enter(debt[0]), None, "Enter 在 shortcut 行什麼都不做")
+
     def test_done_open_lists_done_cards(self):
         slugs = [r["card"]["slug"] for r in tm.rows(DATA, done_open=True) if r["kind"] == "card"]
         self.assertEqual(slugs[-1], "done1")

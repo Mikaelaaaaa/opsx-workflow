@@ -112,7 +112,7 @@ def progress_lines(data: dict, scope: str | None) -> list[str]:
 
 
 def rows(data: dict, done_open: bool, inbox_open: bool = False, scope: str | None = None) -> list[dict]:
-    """[{kind: 'header', section, count} | {kind: 'session', session, key, text} | {kind: 'card', card, key, text}]，
+    """[{kind: 'header', section, count} | {kind: 'session', session, key, text} | {kind: 'card', card, key, text} | {kind: 'debt', repo, count, key, text}]，
     待處理在最上，收件匣與已完成預設收起。收進 session 的主 change 卡不單獨一行。scope 不是全部時只留範圍內 repo 的卡與 session。"""
     repos = scope_repos(data, scope)
     cards = [c for c in data.get("cards") or [] if not c.get("session") and (repos is None or c.get("repo") in repos)]
@@ -133,6 +133,12 @@ def rows(data: dict, done_open: bool, inbox_open: bool = False, scope: str | Non
         for c in group:
             out.append({"kind": "card", "card": c, "key": "%s/%s" % (c.get("repo"), c.get("slug")),
                         "mark": MARK[section], "text": _line(c)})
+        if section == "收件匣":
+            # code 裡的 shortcut: 註解不開卡，只列各 repo 的數量（清單在網頁上）
+            for repo, hits in sorted((data.get("debt") or {}).items()):
+                if hits and (repos is None or repo in repos):
+                    out.append({"kind": "debt", "repo": repo, "count": len(hits), "key": "debt:%s" % repo,
+                                "mark": MARK[section], "text": "技術債 · %s %d 處 shortcut" % (repo, len(hits))})
     return out
 
 
