@@ -6,6 +6,7 @@
 #   grill / propose / pr / babysit 站該 invoke 下一站而沒有會擋的 open gate；
 #   babysit 站若 forge 說 MR 已合併（workplan 還沒標 merged），下一站改成 /archive。
 # 同一站最多擋 MAX_BLOCKS 次，再停就由這支 hook 寫「卡在接 /<站>」gate 放行；不看 stop_hook_active。
+# 背景工作（Monitor、背景 Bash、背景 subagent）還在跑，或「卡在接」gate 剛答覆的那一輪，都放行且不計次。
 # 要求檔 §8.5。
 source "$(dirname "${BASH_SOURCE[0]}")/_lib.sh"
 source "$OPSX_ROOT/bin/lib/common.sh"
@@ -120,6 +121,12 @@ titled_gate_open() { # <dir> <站>
   awk -v t="## 卡在接 /$2" '/^## /{cur = ($0 == t || index($0, t " #") == 1)} cur && /^status:[ \t]*open[ \t]*$/{found = 1} END{exit !found}' "$1/gates.md"
 }
 
+# 任何一站的「卡在接」gate 有沒有 open
+stuck_gate_any_open() { # <dir>
+  [ -f "$1/gates.md" ] || return 1
+  awk '/^## /{cur = ($0 ~ /^## 卡在接 \//)} cur && /^status:[ \t]*open[ \t]*$/{found = 1} END{exit !found}' "$1/gates.md"
+}
+
 # 標題帶流水號：答完的舊 gate 跟新 gate 同名的話，opsx answer 只找得到第一個。
 # 取現有 #N 的最大值加一（gates.md 少了較早的 gate 時數量會小於最大號）；沒有數字的舊標題算 1。
 write_auto_gate() { # <dir> <slug> <站>；站是 facts 時問的是事實欄位，不是接站
@@ -151,6 +158,7 @@ wait_reason() { # <dir> <站>
   if [ "$(st_open_gates_blocking "$1")" -gt 0 ]; then printf '等人答 gate（%s 站）' "$2"
   elif st_subagent_running "$1"; then printf '等背景 subagent（%s 站）' "$2"
   elif st_review_running "$1"; then printf '等 reviewer（%s 站）' "$2"
+  elif [ -n "$bg_wait" ]; then printf '等背景工作（%s 站）' "$2"
   elif [ "$2" = babysit ]; then printf 'babysit 一輪做完，等 MR 合併'
   else printf '%s 站放行，沒有要擋的條件' "$2"
   fi
@@ -184,8 +192,12 @@ case "$lost_rc" in
 esac
 
 out="$(stop_reason "$d" "$slug" "$stage")"
+# 背景工作還在跑：agent 只能等通知，這一輪不算沒接站
+bg_wait=""
+if [ -n "$out" ] && st_background_running "$(jqr '.transcript_path')"; then out=""; bg_wait=1; fi
 if [ -z "$out" ]; then
-  rm -f "$state"
+  # 「卡在接」gate 開著時留標記：答覆後第一次要擋的 Stop 是對答覆的回應，不計次
+  if stuck_gate_any_open "$d"; then printf 'gate-open 0 - -\n' | opsx_replace "$state"; else rm -f "$state"; fi
   say_once "[$slug] 停住：$(wait_reason "$d" "$stage")"
   exit 0
 fi
@@ -199,6 +211,11 @@ fp="$(tasks_done "$d")"
 [ "$want" = facts ] && fp="$fp-$(printf '%s' "$reason" | wc -l | tr -d ' ')"
 last_stage=""; n=0; gated="-"; last_fp=""
 [ -f "$state" ] && read -r last_stage n gated last_fp < "$state"
+if [ "$last_stage" = gate-open ] && ! stuck_gate_any_open "$d"; then
+  printf '%s 0 - %s\n' "$want" "$fp" | opsx_replace "$state"
+  say_once "[$slug] 停住：「卡在接」gate 剛答覆，這一輪不計次"
+  exit 0
+fi
 if [ "$last_stage" != "$want" ] || [ "$last_fp" != "$fp" ]; then n=0; gated="-"; fi
 
 if [ "$n" -ge "$MAX_BLOCKS" ]; then

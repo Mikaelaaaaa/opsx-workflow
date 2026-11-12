@@ -1230,8 +1230,9 @@ assert_grep '^type: decision$' "$C/gates.md"; assert_grep '^問題: ' "$C/gates.
 assert_eq "$( source "$OPSX_ROOT/bin/lib/stage.sh"; st_open_gates "$C" )" 1 "stop: 自動 gate 被 st_open_gates 數到"
 out="$(KEEP=1 sg)"; assert_eq "$out" "" "stop: 第 5 次放行"
 assert_eq "$(grep -c '^## 卡在接 /propose' "$C/gates.md")" 1 "stop: 不寫第二個 gate"
-# gate 被回答後次數歸零：再擋，不再寫新 gate
+# gate 被回答後：回應答覆的那一輪放行一次不計次，之後次數從 0 重算：再擋，不再寫新 gate
 sed -i.bak 's/^status: open$/status: answered/' "$C/gates.md"; rm -f "$C/gates.md.bak"
+out="$(KEEP=1 sg)"; assert_eq "$out" "" "stop: gate 答完的第一輪放行"
 out="$(KEEP=1 sg)"; assert_eq "$(decision "$out")" block "stop: gate 答完後重新擋"
 assert_eq "$(grep -c '^## 卡在接 /propose' "$C/gates.md")" 1 "stop: 答完後第一次擋不寫新 gate"
 # 第二輪擋滿：新 gate 的標題要跟答完的不同，opsx answer 才找得到

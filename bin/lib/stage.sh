@@ -38,6 +38,23 @@ st_subagent_running() { # <主殼目錄>
   done
   return 1
 }
+# session 還有沒結束的背景工作（Monitor、背景 Bash、背景 subagent）：transcript 裡啟動過、且沒有終態通知的 task-id。
+# 啟動取 toolUseResult 的 taskId / backgroundTaskId / 非同步 agentId，結束取 queue-operation 裡 <task-notification> 的 completed|failed|killed|stopped。
+# 讀不到 transcript 就是沒有背景工作可言，回 1。
+# shortcut: 啟動超過 120 分鐘沒有終態通知就不算在跑，persistent Monitor 不會結束；有心跳之後改看心跳
+st_background_running() { # <transcript> [now epoch]
+  [ -f "${1:-}" ] || return 1
+  jq -s -e --argjson now "${2:-$(date +%s)}" '
+    [ .[] | select(.toolUseResult | type == "object") | . as $l | .toolUseResult
+      | (.taskId // .backgroundTaskId // (if .status == "async_launched" then .agentId else null end))
+      | select(. != null)
+      | {id: ., at: ($l.timestamp | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601)} ] as $started
+    | [ .[] | select(.type == "queue-operation") | .content | strings | select(contains("<task-notification>"))
+        | select(capture("<status>(?<s>[^<]+)</status>").s | test("^(completed|failed|killed|stopped)$"))
+        | capture("<task-id>(?<i>[^<]+)</task-id>").i ] as $ended
+    | any($started[]; (.id as $i | ($ended | index($i)) == null) and ($now - .at) >= 0 and ($now - .at) <= 7200)
+  ' "$1" >/dev/null 2>&1
+}
 st_tasks_open() { [ -f "$1/tasks.md" ] || { printf 0; return; }; grep -cE '^\s*- \[ \]' "$1/tasks.md" || true; }
 st_tasks_done() { [ -f "$1/tasks.md" ] || { printf 0; return; }; grep -cE '^\s*- \[x\]' "$1/tasks.md" || true; }
 st_pending_nonempty() {
