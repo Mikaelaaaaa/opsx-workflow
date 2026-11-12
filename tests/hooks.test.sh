@@ -337,6 +337,8 @@ for c in 'git push gitlab feat/x 2>&1 | tail -n +5' 'git push -u gitlab feat/x &
 done
 out="$(gg Bash "$(cmdj 'git push gitlab feat/x && rm -rf /tmp/a')")"; assert_eq "$(decision "$out")" deny "grant: 串的 rm -rf 沒授權還是要擋（第二級）"
 reason "$out" | grep -qF 'force-push' && fail "grant: rm -rf 不是 force-push：$(reason "$out")"
+# 這份 settings 只給上面幾條用；留著的話 stop 閘門會把 eval-core 當成「有 settings 的 autopilot 卡」去查 claude 的啟動參數
+rm -rf "$OPSX_STATE_DIR/settings"
 # 檔名樣式不分大小寫（APFS 預設不分）
 for f in /x/.Env /x/.ENV.local /x/Secrets.yaml /x/.GitLab-CI.yml; do
   out="$(gg Write "{\"file_path\":\"$f\",\"content\":\"A=1\"}")"; assert_eq "$(decision "$out")" deny "grant: Write $f 要照 .env / CI / secrets 擋"
