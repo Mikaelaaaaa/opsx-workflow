@@ -185,6 +185,18 @@ reset; out="$( ( runtime_open r/card-a --kind claude --workspace-create scam-gua
 case "$out" in *ws=w9) ;; *) fail "create 交出新 id：$out" ;; esac
 assert_eq "$(head -2 "$OPSX_FAKE_LOG")" "workspace create --label scam-guard --cwd /top --no-focus
 tab create --workspace w9 --cwd /wt --label card-a --no-focus" "create 的 argv"
+# --on-workspace-created：新 id 建好就呼叫，在 tab create 之前；它失敗就結束、不開 tab
+on_created() { printf 'created %s %s\n' "$1" "$2" >> "$OPSX_FAKE_LOG"; }
+on_created_fail() { return 1; }
+reset; ( runtime_open r/card-a --kind claude --workspace-create scam-guard /top --on-workspace-created on_created --cwd /wt --label card-a ) >/dev/null 2>&1 || fail "--on-workspace-created rc"
+assert_eq "$(head -3 "$OPSX_FAKE_LOG")" "workspace create --label scam-guard --cwd /top --no-focus
+created scam-guard w9
+tab create --workspace w9 --cwd /wt --label card-a --no-focus" "回呼在 workspace 建好之後、tab create 之前"
+reset; out="$( (runtime_open r/card-a --kind claude --workspace-create scam-guard /top --on-workspace-created on_created_fail --cwd /wt --label card-a) 2>&1)"; [ $? -ne 0 ] || fail "回呼失敗要非 0"
+case "$out" in *on_created_fail*) ;; *) fail "回呼失敗的訊息要有函式名：$out" ;; esac
+assert_not_grep '^tab create' "$OPSX_FAKE_LOG"
+reset; (runtime_open r/card-a --kind claude --workspace-id w5 --on-workspace-created on_created --cwd /wt --label card-a) >/dev/null 2>&1 && fail "--on-workspace-created 只配 --workspace-create"
+assert_eq "$(calls)" "" "--on-workspace-created 配錯不叫 herdr"
 reset; out="$( (runtime_open r/card-a --kind claude --workspace-label nope --cwd /wt --label card-a) 2>&1)"; [ $? -ne 0 ] || fail "沒有的 label 要非 0"
 case "$out" in *nope*acmecorp-ai*) ;; *) fail "要列出現有 label：$out" ;; esac
 assert_not_grep '^tab create' "$OPSX_FAKE_LOG"

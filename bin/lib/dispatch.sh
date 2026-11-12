@@ -159,7 +159,7 @@ PY
     ws_arg=(--workspace-label "$ws")
   else
     ws="$repo"
-    ws_arg=(--workspace-create "$repo" "$top")
+    ws_arg=(--workspace-create "$repo" "$top" --on-workspace-created dispatch_record_workspace)
   fi
 
   launch_args "$agent" "$model" "$mode" "$repo" "$slug" "$top"
@@ -167,14 +167,6 @@ PY
   runtime_open "$me_key" --kind "$agent" "${ws_arg[@]}" --cwd "$wt" --label "$slug" -- "${LAUNCH_ARGS[@]}" \
     || die "dispatch: herdr agent start 失敗：herdr 已經有叫 ${slug} 的 agent，dispatch.json 沒記：${HERDR_TAKEN_AT}。關掉那個 pane 再派"
   local pane="$RUNTIME_PANE" tab="$RUNTIME_TAB" ws_id="$RUNTIME_WORKSPACE_ID"
-  # 新 workspace 建成功才記 label：先記的話 create 失敗一次，之後每次派工都找不到這個 label。
-  # 記不下來時收掉剛開的 tab（dispatch.json 還沒有這張卡，只能直接叫 herdr），workspace 留著由人收
-  if [ "${ws_arg[0]}" = --workspace-create ]; then
-    { grep -q '^\[repos\]' "$OPSX_STATE_DIR/workspaces.toml" 2>/dev/null || printf '\n[repos]\n' | opsx_append "$OPSX_STATE_DIR/workspaces.toml"; } \
-      && printf '"%s" = "%s"\n' "$repo" "$ws" | opsx_append "$OPSX_STATE_DIR/workspaces.toml" \
-      || { herdr tab close "$tab" >/dev/null 2>&1 || true; die "dispatch: 寫不進 $OPSX_STATE_DIR/workspaces.toml；新 workspace ${ws}（${ws_id}）已開，tab 已收"; }
-    say "dispatch: 新 workspace ${ws}（${ws_id}）記進 workspaces.toml"
-  fi
 
   # dispatch.json
   # 一般卡一筆。feature session 另有自己的條目 <repo>/@<feature>（pane 層的欄位），每個能開工的主 change 再各一筆：
@@ -288,4 +280,11 @@ try:
 except tomllib.TOMLDecodeError as e:
     sys.exit("dispatch: workspaces.toml 壞了：%s" % e)
 PY
+}
+# runtime_open 的 --on-workspace-created：新 workspace 一建好就記 label，在開 tab 之前。
+# 早於 create 記，create 失敗後每次派工都找不到這個 label；晚到 agent 起來才記，開 agent 失敗一次重派就多開一個同名 workspace
+dispatch_record_workspace() { # <label> <workspace id>
+  grep -q '^\[repos\]' "$OPSX_STATE_DIR/workspaces.toml" 2>/dev/null || printf '\n[repos]\n' | opsx_append "$OPSX_STATE_DIR/workspaces.toml" || die "dispatch: 寫不進 $OPSX_STATE_DIR/workspaces.toml"   # 第二台機器沒跑過 init 時檔案是空的
+  printf '"%s" = "%s"\n' "$1" "$1" | opsx_append "$OPSX_STATE_DIR/workspaces.toml" || die "dispatch: 寫不進 $OPSX_STATE_DIR/workspaces.toml"
+  say "dispatch: 新 workspace ${1}（${2}）記進 workspaces.toml"
 }

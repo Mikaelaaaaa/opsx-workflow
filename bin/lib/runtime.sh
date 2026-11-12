@@ -104,13 +104,14 @@ runtime_notify() { # <標題> <內文> [--sound <名>]
 
 # 開 agent：在 workspace 開一個 tab，在它的 root pane 起 agent。workspace 三選一：
 #   --workspace-id <id>；--workspace-label <label>（workspace list 換 id，沒有這個 label 就列出現有的並結束）；
-#   --workspace-create <label> <cwd>（開新的 workspace）。
+#   --workspace-create <label> <cwd>（開新的 workspace）。--on-workspace-created <函式名> 只配 --workspace-create：
+#   新 id 拿到就以 <label> <id> 呼叫它，在開 tab 之前，呼叫者在這裡記下新 workspace；它失敗就結束、不開 tab。
 # 成功設 RUNTIME_PANE、RUNTIME_TAB、RUNTIME_WORKSPACE_ID。agent 名只從卡片身分推、不讀 dispatch.json：
 # 派工時舊條目的 herdr_name 是上一次派工的（續接改名、feature 成員），新的 agent 用卡自己的名字。
 # shell 還沒到 prompt 時 herdr 回 agent_pane_busy，同一個 pane 最多試六次；起不來就收掉剛開的 tab（不留空 tab 給人收）並結束。
 # 名字已被占用（agent_name_taken）時收掉 tab、把另一個的位置放進 HERDR_TAKEN_AT、回 3：該怎麼說由呼叫者決定。
 runtime_open() { # <對象> --kind <kind> <workspace 旗標> --cwd <dir> --label <tab label> [-- agent 參數…]
-  local who name kind="" cwd="" label="" ws_id="" ws_label="" ws_create="" ws_create_cwd="" nws=0 tabjson pane tab out try=1 screen
+  local who name kind="" cwd="" label="" ws_id="" ws_label="" ws_create="" ws_create_cwd="" on_created="" nws=0 tabjson pane tab out try=1 screen
   case "${1:-}" in
     --agent) [ -n "${2:-}" ] || die "runtime_open: --agent 後面要有 agent 名"; who="$2"; name="$2"; shift 2 ;;
     */*) who="$1"; name="${1##*/}"; name="${name#@}"; shift ;;
@@ -119,7 +120,7 @@ runtime_open() { # <對象> --kind <kind> <workspace 旗標> --cwd <dir> --label
   while [ $# -gt 0 ]; do
     case "$1" in
       --workspace-create) [ $# -ge 3 ] || die "${who}: runtime_open 的 --workspace-create 後面要有 <label> <cwd>" ;;
-      --kind|--cwd|--label|--workspace-id|--workspace-label) [ $# -ge 2 ] || die "${who}: runtime_open 的 $1 後面要有值" ;;
+      --kind|--cwd|--label|--workspace-id|--workspace-label|--on-workspace-created) [ $# -ge 2 ] || die "${who}: runtime_open 的 $1 後面要有值" ;;
     esac
     case "$1" in
       --kind) kind="$2"; shift 2 ;;
@@ -128,12 +129,14 @@ runtime_open() { # <對象> --kind <kind> <workspace 旗標> --cwd <dir> --label
       --workspace-id) ws_id="$2"; nws=$((nws + 1)); shift 2 ;;
       --workspace-label) ws_label="$2"; nws=$((nws + 1)); shift 2 ;;
       --workspace-create) ws_create="$2"; ws_create_cwd="$3"; nws=$((nws + 1)); shift 3 ;;
+      --on-workspace-created) on_created="$2"; shift 2 ;;
       --) shift; break ;;
       *) die "${who}: runtime_open 不認得的參數 $1" ;;
     esac
   done
   [ "$nws" -eq 1 ] || die "${who}: runtime_open 要剛好一個 --workspace-id、--workspace-label 或 --workspace-create"
   [ -n "$kind" ] && [ -n "$cwd" ] && [ -n "$label" ] || die "${who}: runtime_open 要有 --kind、--cwd、--label"
+  [ -z "$on_created" ] || [ -n "$ws_create" ] || die "${who}: runtime_open 的 --on-workspace-created 只配 --workspace-create"
 
   if [ -n "$ws_label" ]; then
     ws_id="$(OPSX_WSJSON="$(herdr workspace list 2>/dev/null || true)" OPSX_WS="$ws_label" OPSX_WHO="$who" "$OPSX_PY" -I - <<'PY'
@@ -153,6 +156,7 @@ PY
   elif [ -n "$ws_create" ]; then
     ws_id="$(herdr workspace create --label "$ws_create" --cwd "$ws_create_cwd" --no-focus 2>/dev/null | jq -r '.result.workspace.workspace_id // .result.workspace_id // .result.workspace // empty' 2>/dev/null || true)"
     [ -n "$ws_id" ] || die "${who}: herdr workspace create 沒回 workspace id"
+    [ -z "$on_created" ] || "$on_created" "$ws_create" "$ws_id" || die "${who}: 新 workspace ${ws_create}（${ws_id}）已開，${on_created} 失敗，不開 tab"
   fi
 
   # 真格式：result.root_pane.pane_id（w1:pE）、result.tab.tab_id（w1:tB）。沒有 tab id 就不起 agent：失敗時會關不掉剛開的 tab
