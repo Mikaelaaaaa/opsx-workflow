@@ -66,7 +66,10 @@ except json.JSONDecodeError:
 result = d["result"] if isinstance(d, dict) and "result" in d else None
 if not isinstance(result, dict) or "browserPageId" not in result:
     sys.exit("orca tab create 回的 JSON 沒有 result.browserPageId")
-print(result["browserPageId"])
+page = result["browserPageId"]
+if not isinstance(page, str) or not page:
+    sys.exit(f"orca tab create 回的 result.browserPageId 不是非空字串：{page!r}")
+print(page)
 ' "$created")" || orca_fail "tab create" "$created"
   switched="$(orca tab switch --page "$page" --focus 2>"$orca_err")" || orca_fail "tab switch" "$switched"
   rm -f "$orca_err"

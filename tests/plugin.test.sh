@@ -16,6 +16,8 @@ case "$1 $2:${OPSX_TEST_ORCA_FAIL:-}" in
   "tab create:nopage") echo '{"id":"r1","ok":true,"result":{}}';;
   "tab create:nullresult") echo '{"id":"r1","ok":true,"result":null}';;
   "tab create:nojson") echo 'not json';;
+  "tab create:nullpage") echo '{"id":"r1","ok":true,"result":{"browserPageId":null}}';;
+  "tab create:emptypage") echo '{"id":"r1","ok":true,"result":{"browserPageId":""}}';;
   "tab create:"*) echo '{"id":"r1","ok":true,"result":{"browserPageId":"page-9"}}';;
   "tab switch:"*) echo '{"id":"r2","ok":true,"result":{}}';;
   *) echo "fake orca: 沒教過 [$*]" >&2; exit 2;;
@@ -142,13 +144,14 @@ for f in create switch; do
 done
 assert_grep "^tab switch --page page-9 --focus\$" "$OPSX_TEST_ORCA_LOG"   # 上一輪是 switch 失敗：tab 已開，仍算失敗
 # tab create 以 0 結束但 stdout 不能用：點名 result.browserPageId、附原始輸出，不印 traceback、不退回 open
-for f in nopage nullresult nojson; do
-  : > "$FX/open.log"
+for f in nopage nullresult nojson nullpage emptypage; do
+  : > "$FX/open.log"; : > "$OPSX_TEST_ORCA_LOG"
   err="$(ORCA_TERMINAL_HANDLE=term-1 OPSX_TEST_ORCA_FAIL=$f bash "$OPSX_ROOT/herdr-board/scripts/open-board.sh" 2>&1 >/dev/null)"; rc=$?
   [ "$rc" -ne 0 ] || fail "tab create 回 $f 要非零結束：$err"
   case "$err" in *result.browserPageId*) ;; *) fail "tab create 回 $f 時 stderr 要點出 result.browserPageId：$err";; esac
   case "$err" in *Traceback*) fail "tab create 回 $f 時不該印 Python traceback：$err";; esac
   assert_eq "$(cat "$FX/open.log")" "" "tab create 回 $f 不退回 open"
+  assert_not_grep "^tab switch" "$OPSX_TEST_ORCA_LOG"
 done
 # orca 的 stderr 暫存檔不用 state 目錄裡的固定檔名：那個位置被佔掉時 Orca 分支照樣能開
 mkdir -p "$OPSX_STATE_DIR/orca-tab.err"; : > "$OPSX_TEST_ORCA_LOG"
