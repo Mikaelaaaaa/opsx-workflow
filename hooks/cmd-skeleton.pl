@@ -52,15 +52,80 @@ sub heredoc {
     return $out;
 }
 
+# $s 的 $pos 這個位置在 shell 眼中是不是一般的指令文字：不在引號或註解裡，也沒有被反斜線跳脫
+sub in_code {
+    my ($s, $pos) = @_;
+    my $i = 0;
+    while ($i < $pos) {
+        my $c = substr $s, $i, 1;
+        if ($c eq '\\') { $i += 2; next }
+        if ($c eq $SQ) {
+            my $end = index $s, $SQ, $i + 1;
+            return 0 if $end < 0 || $end >= $pos;
+            $i = $end + 1;
+            next;
+        }
+        if ($c eq '"') {
+            my $end = skip_dq($s, $i);
+            return 0 if $end >= $pos;
+            $i = $end + 1;
+            next;
+        }
+        if ($c eq '#' && ($i == 0 || substr($s, $i - 1, 1) =~ /[\s;&|()]/)) {
+            my $end = index $s, "\n", $i;
+            return 0 if $end < 0 || $end >= $pos;
+            $i = $end + 1;
+            next;
+        }
+        $i++;
+    }
+    return $i == $pos;    # 最後一次跳脫把 $pos 吃掉了：這個位置是被跳脫的字元
+}
+
+# heredoc 開頭：只認 in_code 的位置；本體到單獨一行的結尾字為止。整段換成 heredoc() 的結果
+sub strip_heredocs {
+    my ($s, $depth) = @_;
+    my ($out, $copied) = ('', 0);
+    while ($s =~ /(?<!<)<<-?\s*([\x27"]?)(\w+)\1/g) {
+        my ($start, $opener_end, $quote, $tag) = ($-[0], $+[0], $1, $2);
+        next unless in_code($s, $start);
+        my $nl = index $s, "\n", $opener_end;
+        next if $nl < 0;
+        next unless substr($s, $nl + 1) =~ /\A(.*?)\n[ \t]*\Q$tag\E[ \t]*(?:\n|\z)/s;
+        my ($body, $consumed) = ($1, $+[0]);
+        my $line_start = $start;
+        $line_start-- while $line_start > 0 && substr($s, $line_start - 1, 1) ne "\n";
+        $out .= substr($s, $copied, $line_start - $copied);
+        $out .= heredoc('', substr($s, $line_start, $start - $line_start), substr($s, $start, $nl - $start), $quote, $body, $depth);
+        $copied = $nl + 1 + $consumed;
+        pos($s) = $copied;
+    }
+    return $out . substr($s, $copied);
+}
+
 sub skeleton {
     my ($s, $depth) = @_;
     return $s if $depth > MAX_DEPTH;
-    $s =~ s/(^|\n)([^\n]*?)(?<!<)(<<-?\s*([\x27"]?)(\w+)\4[^\n]*)\n(.*?)\n[ \t]*\5[ \t]*(?:\n|\z)/heredoc($1, $2, $3, $4, $6, $depth)/sge;
+    $s = strip_heredocs($s, $depth);
     my ($out, $i, $n) = ('', 0, length $s);
     while ($i < $n) {
         my $c = substr $s, $i, 1;
-        if ($c eq '\\') { $out .= substr($s, $i, 2); $i += 2; next }
+        if ($c eq '\\') {
+            my $next = substr $s, $i + 1, 1;
+            # c\ommit：bash 把 \o 當 o。含 / 的字是路徑，保留跳脫，commit 閘門靠它認出讀不出來的目錄
+            if ($next =~ /^\w$/ && $out !~ m{[^\s]*/[^\s]*\z}) { $out .= $next }
+            elsif ($next eq "\n") { }                     # 行尾續行：bash 把反斜線與換行整個拿掉
+            else { $out .= "\\$next" }
+            $i += 2;
+            next;
+        }
         my $prev = $i ? substr($s, $i - 1, 1) : '';
+        if ($c eq $SQ && $prev =~ /[\w]/) {
+            # g''it、g'i't：緊貼著字的單引號片段是指令字的一部分，沒有空白就去掉引號
+            my $end = index $s, $SQ, $i + 1;
+            my $body = $end < 0 ? '' : substr($s, $i + 1, $end - $i - 1);
+            if ($end >= 0 && $body =~ /^[^\s\\\$`"']*$/) { $out .= $body; $i = $end + 1; next }
+        }
         if ($c eq $SQ && $prev !~ /[\w\\]/) {
             my $end = index $s, $SQ, $i + 1;
             if ($end >= 0) {
