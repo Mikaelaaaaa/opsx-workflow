@@ -42,18 +42,35 @@ for repo_dir in "$root"/*/; do
 	# The grep from ponytail-debt, run with the repo as cwd so paths are relative.
 	# --no-index --exclude-standard: respect .gitignore, skip .git.
 	# Agent worktrees under .claude/worktrees/ are copies of the same tree; skip them.
-	# Only a real comment counts: the quotes before the marker must pair up, so a
-	# marker inside a string (`echo "# shortcut: …"` in a test fixture) is skipped
-	# while `x = "a"  # shortcut: …` is kept.
+	# Only a real comment counts: scan the text before the marker left to right and
+	# skip the hit when the marker sits inside a quote (`echo "# shortcut: …"` in a
+	# test fixture), while `x = "a"  # shortcut: …` and `"can't"  # shortcut: …`
+	# are kept. A backslash escapes the next character; a lone single quote with no
+	# closing partner (an apostrophe, a Rust lifetime) is not a quote.
 	(cd "$repo_dir" && git grep --no-index --exclude-standard -nE '(#|//|/[*]) ?(shortcut|ponytail):' -- . ':!.claude/worktrees' 2>/dev/null || true) |
 	awk -v sq="'" '{
 		t = $0; sub(/^[^:]*:[0-9]+:/, "", t)
 		if (!match(t, /(#|\/\/|\/\*) ?(shortcut|ponytail):/)) next
-		p = substr(t, 1, RSTART - 1)
-		q = p; d = gsub(/"/, "", q)
-		q = p; s = gsub(sq, "", q)
-		q = p; b = gsub(/`/, "", q)
-		if (d % 2 == 0 && s % 2 == 0 && b % 2 == 0) print
+		m = RSTART; n = length(t); inside = 0; i = 1
+		while (i < m) {
+			c = substr(t, i, 1)
+			if (c == "\\") { i += 2; continue }
+			if (c != "\"" && c != "`" && c != sq) { i++; continue }
+			k = i + 1; closed = 0
+			while (k <= n) {
+				ch = substr(t, k, 1)
+				if (ch == "\\") { k += 2; continue }
+				if (ch == c) { closed = 1; break }
+				k++
+			}
+			if (closed) {
+				if (k > m) { inside = 1; break }
+				i = k + 1; continue
+			}
+			if (c == sq) { i++; continue }
+			inside = 1; break
+		}
+		if (!inside) print
 	}' |
 	while IFS= read -r hit; do
 		file="${hit%%:*}"

@@ -74,9 +74,12 @@ assert_eq "$(files_of)" "['f4.py']" "改成已評估標記後離開快照"
 printf '%s\n' 'URL = "http://10.0.0.1"  # shortcut: 字串後面的註解, 該進' > "$A/f6.py"
 printf '%s\n' "log.info('start')  # shortcut: 單引號字串後面, 該進" > "$A/f7.py"
 printf '%s\n' "print('# shortcut: 在字串裡, 不該進')" > "$A/f8.py"
+printf '%s\n' 'msg = "can'"'"'t connect"  # shortcut: 雙引號裡有撇號, 該進' > "$A/f9.py"
+printf '%s\n' "fn f(x: &'a str) // shortcut: Rust 生命週期的單引號, 該進" > "$A/f10.rs"
+printf '%s\n' 'q = "a \" b"  # shortcut: 跳脫的雙引號, 該進' > "$A/f11.py"
 sync_debt >/dev/null 2>&1
-assert_eq "$(files_of)" "['f4.py', 'f6.py', 'f7.py']" "字串後面的真註解進快照，標記在字串裡的不進"
-: > "$A/f6.py"; : > "$A/f7.py"; : > "$A/f8.py"
+assert_eq "$(files_of)" "['f10.rs', 'f11.py', 'f4.py', 'f6.py', 'f7.py', 'f9.py']" "字串後面的真註解進快照，標記在字串裡的不進"
+: > "$A/f6.py"; : > "$A/f7.py"; : > "$A/f8.py"; : > "$A/f9.py"; : > "$A/f10.rs"; : > "$A/f11.py"
 : > "$A/f1.sh"; : > "$A/f2.py"; : > "$A/f3.py"; : > "$A/f4.py"
 
 # --- debt.json 是 symlink：換成一般檔，目標不變 ---
