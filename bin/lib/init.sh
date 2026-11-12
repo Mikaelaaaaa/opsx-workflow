@@ -107,7 +107,7 @@ $term_line
 claude_settings_file() { printf '%s/settings.json' "${CLAUDE_CONFIG_DIR:-$HOME/.claude}"; }
 
 # 插件 skill 名 → 撞到的 Claude Code 內建指令；沒撞印空。
-# shortcut: 手維護的已知表，內建指令改名或新增時更新；Claude Code 沒有可查的清單
+# shortcut: [已評估] 手維護的已知表，內建指令改名或新增時更新；Claude Code 沒有可查的清單
 builtin_command_for() { # <skill 名>
   case "$1" in
     review) printf 'code-review' ;;

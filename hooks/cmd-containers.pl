@@ -8,7 +8,7 @@
 # 其餘一律原樣複製（引號字串整段複製，不往裡面找），認不得的寫法留在文字裡，所以第三級會比對到它（fail-closed）。
 # 字串只有在不會被 shell 展開時才算資料：單引號內一律是資料；雙引號內含 $ 或反引號就不扣，
 # 唯一例外是 git commit 標準寫法 "$(cat <<'DELIM' … DELIM)"（帶引號的 delimiter，結尾行之後緊接 )"）。
-# shortcut: 指令超過 MAX_BYTES 就整段原樣輸出（不扣任何容器）；heredoc 開頭的結尾行搜尋對沒有結尾的重複 opener 是 O(N²)，hook 逾時等同放行，所以用長度上限擋；真的要在第三級字樣旁寫超過 32KB 的檔，改成分次寫或請人放行
+# shortcut: [已評估] 指令超過 MAX_BYTES 就整段原樣輸出（不扣任何容器）；heredoc 開頭的結尾行搜尋對沒有結尾的重複 opener 是 O(N²)，hook 逾時等同放行，所以用長度上限擋；真的要在第三級字樣旁寫超過 32KB 的檔，改成分次寫或請人放行
 use strict;
 use warnings;
 use FindBin;

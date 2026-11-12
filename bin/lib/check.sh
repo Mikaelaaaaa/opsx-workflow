@@ -116,7 +116,7 @@ check_merged() { # <卡目錄>：一個沒去處的 id 印一行
 
 # 步驟名與順序要跟 skills/explore/SKILL.md 的 Steps 表、schemas/opsx/templates/explore.md 一致
 # 新卡（created: 晚於 2026-11-10）才查；舊卡與沒有 created: 的卡不印。stage、Stop hook、opsx check 都走這裡。
-# shortcut: 日期門檻，進行中的舊卡都歸檔後拿掉
+# shortcut: [已評估] 日期門檻，進行中的舊卡都歸檔後拿掉（~/code/Agentory-AI-langflow 等 repo 還有數十張 2026-11-10 之前的進行中卡，現在拿掉會讓它們全部被擋）
 check_explore() { # <卡目錄>：explore.md 不存在什麼都不印；存在就逐步檢查 ## 步驟，缺行、留白、skip 沒原因各印一行
   [ -f "$1/explore.md" ] && [ -f "$1/.openspec.yaml" ] || return 0
   local line created=""
