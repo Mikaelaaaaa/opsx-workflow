@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# 假 orca：把每個呼叫記到 $OPSX_FAKE_ORCA_LOG，依 $OPSX_FAKE_ORCA 回 Orca 1.4.256 實跑的 JSON 形狀。測試用。
+#   registered    repo list 有 path 等於 $OPSX_FAKE_ORCA_REPO 的項目
+#   unregistered  repo list 只有別的 repo；repo add 成功
+#   denied        repo list 失敗（沙盒內實跑的 runtime_access_denied）
+#   add-denied    repo list 同 unregistered，repo add 失敗
+#   no-repos      repo list 成功但 result 沒有 repos
+printf '%s\n' "$*" >> "${OPSX_FAKE_ORCA_LOG:?}"
+# 真 orca 的 Electron 殼每次都在 stderr 印 codesign 雜訊
+echo 'SecCodeCheckValidity: fake codesign noise' >&2
+denied() { echo '{"ok":false,"error":{"code":"runtime_access_denied","message":"Permission denied connecting to Orca (EPERM)"}}'; exit 1; }
+case "${OPSX_FAKE_ORCA:?} $1 $2" in
+  "registered repo list") echo '{"id":"r1","ok":true,"result":{"repos":[{"id":"a","path":"/elsewhere","kind":"git"},{"id":"b","path":"'"${OPSX_FAKE_ORCA_REPO:?}"'","kind":"git"}]}}' ;;
+  "unregistered repo list"|"add-denied repo list") echo '{"id":"r1","ok":true,"result":{"repos":[{"id":"a","path":"/elsewhere","kind":"git"}]}}' ;;
+  "no-repos repo list") echo '{"id":"r1","ok":true,"result":{}}' ;;
+  "denied repo list"|"add-denied repo add") denied ;;
+  *" repo add") echo '{"id":"r2","ok":true,"result":{"repo":{"id":"c","path":"'"$4"'","kind":"git"}}}' ;;
+  *) echo "fake orca: 沒有這個情境：$OPSX_FAKE_ORCA $*" >&2; exit 64 ;;
+esac

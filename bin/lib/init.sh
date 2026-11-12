@@ -351,6 +351,7 @@ init_repo() {
   fi
 
   register_source "$top" "$name"
+  register_orca "$top" "$name"
   merge_claude_settings "$OPSX_PY" --add-dir "$top"
   warn_untrusted "$top"
   register_workspace "$name"
@@ -443,6 +444,48 @@ register_source() { # <top> <name>
   # gitlab 來源要自己填 GitLab 帳號名：opsx 不用 @me（它要打 /user，token 沒有 User: Read 會 403），沒填時 opsx sync 會報錯
   [ "$kind" != gitlab ] || printf '# assignee = "<GitLab 帳號名>"   # 取消註解並填上，opsx sync 用它篩指派給你的 issue\n' >> "$f"
   say "init: sources.toml +$kind:$project"
+}
+
+# Orca 側欄只列登記過的 repo。卡的 worktree 在 Orca 的內建來源 .claude/worktrees/*，那個來源預設隱藏、CLI 改不到，
+# 所以登記之後只能提醒使用者在 Orca UI 打開；不碰 --external-worktree-visibility，免得別的 session 的暫存 worktree 也秀進側欄。
+# Orca 叫不到（沒開、在 Claude 沙盒內 EPERM）只 warn，init 照樣成功。
+register_orca() { # <top> <name>
+  local top="$1" name="$2" out found err
+  if ! command -v orca >/dev/null 2>&1; then say "init: 沒有 orca，Orca 登記略過"; return; fi
+  err="$(mktemp "${TMPDIR:-/tmp}/opsx-orca.XXXXXX")"
+  # JSON 只在 stdout；Orca 的 Electron 殼每次都在 stderr 印 codesign 訊息
+  if ! out="$(orca repo list --json 2>"$err")"; then orca_unreachable "repo list" "$out" "$err"; return; fi
+  if ! found="$(orca_has_repo "$top" "$out" 2>&1)"; then orca_unreachable "repo list" "$found" "$err"; return; fi
+  if [ "$found" = yes ]; then say "init: Orca 已有 $name"
+  elif out="$(orca repo add --path "$top" --json 2>"$err")"; then say "init: Orca 登記 ${name}（orca repo add --path ${top}）"
+  else orca_unreachable "repo add" "$out" "$err"; return; fi
+  rm -f "$err"
+  say "init: 卡的 worktree 要在 Orca 側欄看得到，請在 Orca 側欄把 .claude/worktrees/* 來源設成顯示（設一次就好，也可以設成全域預設）"
+}
+
+orca_unreachable() { # <子指令> <stdout> <stderr 檔>
+  local msg="$2 $(cat "$3")"
+  rm -f "$3"
+  warn "Orca 登記沒做：orca $1 失敗（${msg//$'\n'/ }）。Orca 開著時在一般 terminal（不是 Claude 沙盒內）重跑 opsx init"
+}
+
+# 印 yes / no：orca repo list --json 的 result.repos 有沒有 path 等於 <top> 的項目；欄位不在就失敗並點名
+orca_has_repo() { # <top> <repo list 的 JSON>
+  "$OPSX_PY" -I - "$1" "$2" <<'PY'
+import json, sys
+top, raw = sys.argv[1], sys.argv[2]
+try:
+    d = json.loads(raw)
+except json.JSONDecodeError as e:
+    sys.exit(f"orca repo list --json 的輸出不是 JSON（{e}）：{raw}")
+result = d["result"] if isinstance(d, dict) and "result" in d else None
+if not isinstance(result, dict) or not isinstance(result.get("repos"), list):
+    sys.exit(f"orca repo list --json 沒有 result.repos：{raw}")
+for r in result["repos"]:
+    if not isinstance(r, dict) or "path" not in r:
+        sys.exit(f"orca repo list --json 的 result.repos[] 有項目沒有 path：{raw}")
+print("yes" if any(r["path"] == top for r in result["repos"]) else "no")
+PY
 }
 
 register_workspace() { # <name>

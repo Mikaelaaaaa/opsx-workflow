@@ -12,6 +12,8 @@ unset OPSX_CARD              # dispatch 的 agent 帶著它跑測試；opsx new 
 export HERDR_ENV=""          # status.sh 的 pane metadata 鏡像認它；collect 不看它
 # 測試裡永遠不碰真 herdr：PATH 最前放一支一定失敗的；要成功的測試自己 use_fakes herdr（放得更前）
 mkdir -p "$FX/failbin"; printf '#!/usr/bin/env bash\necho "herdr: test isolation, no real herdr" >&2\nexit 1\n' > "$FX/failbin/herdr"; chmod +x "$FX/failbin/herdr"
+# orca 同理：opsx init 會 orca repo add，真的 orca 會把 fixture repo 登記進使用者的 Orca。要成功的測試 use_fakes orca
+printf '#!/usr/bin/env bash\necho "orca: test isolation, no real orca" >&2\nexit 1\n' > "$FX/failbin/orca"; chmod +x "$FX/failbin/orca"
 # 每個測試的 nohup 都是假的、一律失敗：agent 沙盒 pane 裡的真 nohup 就是這樣，產品程式不能靠它起背景程序
 printf '#!/usr/bin/env bash\nexec bash "%s/tests/fakes/nohup" "$@"\n' "$OPSX_ROOT" > "$FX/failbin/nohup"; chmod +x "$FX/failbin/nohup"
 export OPSX_NONINTERACTIVE=1 # init 不問問題
