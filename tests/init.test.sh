@@ -595,13 +595,38 @@ export OPSX_FAKE_ORCA_LOG="$FX/orca-no-repos.log"
 outo="$(OPSX_FAKE_ORCA=no-repos opsx init 2>"$FX/orca.err")"; assert_eq "$?" 0 "result.repos 缺時 init 仍要成功：$(cat "$FX/orca.err")"
 assert_grep "result.repos" "$FX/orca.err"
 assert_not_grep "repo add" "$OPSX_FAKE_ORCA_LOG"
+reminder_in "$outo" && fail "result.repos 缺時不該印側欄提醒：$outo"
+# Orca 只登記了名字以這個 repo 開頭的另一個 repo：不算已登記，仍 repo add 這個 repo
+export OPSX_FAKE_ORCA_LOG="$FX/orca-prefix.log"
+outo="$(OPSX_FAKE_ORCA=prefix opsx init 2>&1)"; assert_eq "$?" 0 "Orca 只有 <repo>-old 時 init rc：$outo"
+assert_grep "^repo add --path $RG --json$" "$OPSX_FAKE_ORCA_LOG"
+case "$outo" in *"Orca 已有"*) fail "Orca 只有 <repo>-old 時不該說已有：$outo" ;; esac
 # 以上每一次都不設 external worktree 可見性，也不 repo set
 cat "$FX"/orca-*.log > "$FX/orca-all.log"
 assert_grep "^repo add" "$FX/orca-all.log"
 assert_not_grep "--external-worktree-visibility" "$FX/orca-all.log"
 assert_not_grep "^repo set" "$FX/orca-all.log"
-# PATH 上沒有 orca：印略過、rc 0
-NOORCA="$(python3 -I -c 'import os,sys; print(":".join(d for d in sys.argv[1].split(":") if not os.access(os.path.join(d, "orca"), os.X_OK)))' "$PATH")"
+# PATH 上沒有 orca：印略過、rc 0。含 orca 的目錄換成替身目錄（symlink 原目錄裡除了 orca 的每個檔），同目錄的 git、openspec 等照樣找得到
+NOORCA="$(python3 -I - "$PATH" "$FX/noorca" <<'PY'
+import os, sys
+path, base = sys.argv[1], sys.argv[2]
+dirs = []
+for i, d in enumerate(path.split(":")):
+    if not os.access(os.path.join(d, "orca"), os.X_OK):
+        dirs.append(d)
+        continue
+    stand_in = os.path.join(base, str(i))
+    os.makedirs(stand_in)
+    for name in os.listdir(d):
+        if name != "orca":
+            os.symlink(os.path.join(d, name), os.path.join(stand_in, name))
+    dirs.append(stand_in)
+print(":".join(dirs))
+PY
+)"
+command -v git >/dev/null || fail "測試前提：PATH 上要有 git"
+PATH="$NOORCA" command -v orca >/dev/null && fail "替身 PATH 不該找得到 orca：$NOORCA"
+PATH="$NOORCA" command -v git >/dev/null || fail "替身 PATH 要保留 git：$NOORCA"
 outo="$(PATH="$NOORCA" opsx init 2>&1)"; assert_eq "$?" 0 "沒有 orca 時 init rc：$outo"
 case "$outo" in *"沒有 orca"*"Orca 登記略過"*) ;; *) fail "要說沒有 orca、Orca 登記略過：$outo" ;; esac
 echo ok

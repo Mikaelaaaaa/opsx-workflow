@@ -6,7 +6,7 @@ FAKES="$OPSX_ROOT/tests/fakes"; mkdir -p "$FX/fakebin" "$OPSX_STATE_DIR"
 printf '#!/usr/bin/env bash\nexec bash "%s/herdr" "$@"\n' "$FAKES" > "$FX/fakebin/herdr"
 printf '#!/usr/bin/env bash\nprintf "open %%s\\n" "$*" >> "%s"\n' "$FX/open.log" > "$FX/fakebin/open"   # 假的 macOS open
 printf '#!/usr/bin/env bash\nprintf "xdg-open %%s\\n" "$*" >> "%s"\n' "$FX/open.log" > "$FX/fakebin/xdg-open"
-# 假的 orca：參數記到 OPSX_TEST_ORCA_LOG；OPSX_TEST_ORCA_FAIL=create|switch 讓那一步失敗，nopage 讓 tab create 回沒有 browserPageId 的 JSON
+# 假的 orca：參數記到 OPSX_TEST_ORCA_LOG；OPSX_TEST_ORCA_FAIL=create|switch 讓那一步失敗，nopage / nullresult / nojson 讓 tab create 以 0 結束但回不能用的 stdout
 cat > "$FX/fakebin/orca" <<'SH'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "$OPSX_TEST_ORCA_LOG"
@@ -14,6 +14,8 @@ echo "codesign noise" >&2   # 真的 Orca Electron 殼成功時 stderr 也有雜
 case "$1 $2:${OPSX_TEST_ORCA_FAIL:-}" in
   "tab create:create"|"tab switch:switch") echo '{"ok":false}'; echo "runtime_access_denied" >&2; exit 1;;
   "tab create:nopage") echo '{"id":"r1","ok":true,"result":{}}';;
+  "tab create:nullresult") echo '{"id":"r1","ok":true,"result":null}';;
+  "tab create:nojson") echo 'not json';;
   "tab create:"*) echo '{"id":"r1","ok":true,"result":{"browserPageId":"page-9"}}';;
   "tab switch:"*) echo '{"id":"r2","ok":true,"result":{}}';;
   *) echo "fake orca: 沒教過 [$*]" >&2; exit 2;;
@@ -139,11 +141,20 @@ for f in create switch; do
   assert_eq "$(cat "$FX/open.log")" "" "orca tab $f 失敗不退回 open / xdg-open"
 done
 assert_grep "^tab switch --page page-9 --focus\$" "$OPSX_TEST_ORCA_LOG"   # 上一輪是 switch 失敗：tab 已開，仍算失敗
-: > "$FX/open.log"
-err="$(ORCA_TERMINAL_HANDLE=term-1 OPSX_TEST_ORCA_FAIL=nopage bash "$OPSX_ROOT/herdr-board/scripts/open-board.sh" 2>&1 >/dev/null)"; rc=$?
-[ "$rc" -ne 0 ] || fail "tab create 沒回 browserPageId 要非零結束：$err"
-case "$err" in *browserPageId*) ;; *) fail "沒有 browserPageId 時 stderr 要點出缺的欄位：$err";; esac
-assert_eq "$(cat "$FX/open.log")" "" "沒有 browserPageId 不退回 open"
+# tab create 以 0 結束但 stdout 不能用：點名 result.browserPageId、附原始輸出，不印 traceback、不退回 open
+for f in nopage nullresult nojson; do
+  : > "$FX/open.log"
+  err="$(ORCA_TERMINAL_HANDLE=term-1 OPSX_TEST_ORCA_FAIL=$f bash "$OPSX_ROOT/herdr-board/scripts/open-board.sh" 2>&1 >/dev/null)"; rc=$?
+  [ "$rc" -ne 0 ] || fail "tab create 回 $f 要非零結束：$err"
+  case "$err" in *result.browserPageId*) ;; *) fail "tab create 回 $f 時 stderr 要點出 result.browserPageId：$err";; esac
+  case "$err" in *Traceback*) fail "tab create 回 $f 時不該印 Python traceback：$err";; esac
+  assert_eq "$(cat "$FX/open.log")" "" "tab create 回 $f 不退回 open"
+done
+# orca 的 stderr 暫存檔不用 state 目錄裡的固定檔名：那個位置被佔掉時 Orca 分支照樣能開
+mkdir -p "$OPSX_STATE_DIR/orca-tab.err"; : > "$OPSX_TEST_ORCA_LOG"
+out="$(ORCA_TERMINAL_HANDLE=term-1 bash "$OPSX_ROOT/herdr-board/scripts/open-board.sh" 2>&1)"; assert_eq "$?" 0 "state 裡有 orca-tab.err 目錄時 Orca 分支: $out"
+assert_grep "^tab switch --page page-9 --focus\$" "$OPSX_TEST_ORCA_LOG"
+rmdir "$OPSX_STATE_DIR/orca-tab.err"
 # --- 沒有 open / xdg-open：非零結束、網址寫到 stderr，呼叫的人（TUI 的 o）才不會當成開好了 ---
 mkdir -p "$FX/noopen"
 for t in bash dirname cat mkdir seq sleep rmdir curl grep tail nohup; do ln -sf "$(command -v "$t")" "$FX/noopen/$t"; done

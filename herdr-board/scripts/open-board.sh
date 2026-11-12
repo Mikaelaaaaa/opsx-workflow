@@ -53,15 +53,20 @@ orca_fail() { # orca_fail <步驟> <orca stdout>：不退回系統瀏覽器，�
 }
 # 只有 Orca terminal 有 ORCA_TERMINAL_HANDLE；tab create 不收 --focus，要拿 browserPageId 再 tab switch
 if [ -n "${ORCA_TERMINAL_HANDLE:-}" ]; then
-  orca_err="$state/orca-tab.err"   # 拿著 board.lock，同時只有一支 open-board 寫它
+  orca_err="$(mktemp "${TMPDIR:-/tmp}/opsx-orca-tab.XXXXXX")"
   # Orca 的 Electron 殼成功時也在 stderr 印 codesign 雜訊，JSON 只從 stdout 讀
   created="$(orca tab create --url "$open_url" --json 2>"$orca_err")" || orca_fail "tab create" "$created"
   page="$(python3 -I -c '
 import json, sys
-d = json.loads(sys.argv[1])
-if "browserPageId" not in d.get("result", {}):
+raw = sys.argv[1]
+try:
+    d = json.loads(raw)
+except json.JSONDecodeError:
+    sys.exit("orca tab create 的輸出不是 JSON，拿不到 result.browserPageId")
+result = d["result"] if isinstance(d, dict) and "result" in d else None
+if not isinstance(result, dict) or "browserPageId" not in result:
     sys.exit("orca tab create 回的 JSON 沒有 result.browserPageId")
-print(d["result"]["browserPageId"])
+print(result["browserPageId"])
 ' "$created")" || orca_fail "tab create" "$created"
   switched="$(orca tab switch --page "$page" --focus 2>"$orca_err")" || orca_fail "tab switch" "$switched"
   rm -f "$orca_err"
