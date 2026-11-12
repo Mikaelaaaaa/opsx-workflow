@@ -22,7 +22,7 @@ assert_eq "$(lost claude --settings /state/settings/other.json)" True "帶了別
 assert_eq "$(lost claude --settings "$S.bak")" True "路徑只是前綴相同不算"
 assert_eq "$(lost claude --settings-x "$S")" True "旗標名只是前綴相同不算"
 
-V=/Users/x/.local/share/claude/versions/2.1.322
+V=/Users/me/.local/share/claude/versions/2.1.322
 assert_eq "$(lost "$V" --model m --settings "$S")" False "argv[0] 是 claude 的版本執行檔、帶了該卡的 settings"
 assert_eq "$(lost "$V" --model m)" True "argv[0] 是 claude 的版本執行檔、沒帶 settings"
 out="$(lost /x/other/versions/1 --settings "$S")"; case "$out" in ERR:*argv\[0\]*/x/other/versions/1*) ;; *) fail "不是 claude 的版本目錄要點名欄位與值：$out" ;; esac
