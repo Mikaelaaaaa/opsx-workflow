@@ -4,9 +4,9 @@ source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 use_fakes herdr ps
 export OPSX_FAKE_LOG="$FX/herdr.log"; : > "$OPSX_FAKE_LOG"
 J="$OPSX_STATE_DIR/dispatch.json"
-KEY=Agentory-CS/retry-backoff
+KEY=Acmecorp-CS/retry-backoff
 
-R="$(mk_repo Agentory-CS)"
+R="$(mk_repo Acmecorp-CS)"
 mkdir -p "$R/openspec/changes/retry-backoff"
 printf 'schema: opsx\nkind: bug-fix\n' > "$R/openspec/changes/retry-backoff/.openspec.yaml"
 cd "$R"

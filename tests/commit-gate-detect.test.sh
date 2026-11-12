@@ -10,7 +10,7 @@ j() { python3 -I -c 'import json,sys;print(json.dumps(dict(cwd=sys.argv[1],tool_
 decision() { [ -z "$1" ] && { echo allow; return; }; printf '%s' "$1" | jq -r '.hookSpecificOutput.permissionDecision // .decision // "allow"'; }
 reason() { printf '%s' "$1" | jq -r '.hookSpecificOutput.permissionDecisionReason // .reason // .hookSpecificOutput.additionalContext // ""'; }
 
-R="$(mk_repo Agentory-AI git@gitlab.tsg-navigator.com:agentory/Agentory-AI.git)"
+R="$(mk_repo Acmecorp-AI git@gitlab.example.com:acmecorp/Acmecorp-AI.git)"
 C="$R/openspec/changes/eval-core"; mk_change "$R" eval-core
 printf 'prs:\n  - name: eval-core\n    status: in-progress\n' > "$R/openspec/workplan.yaml"
 printf '## 1. x\n\n- [ ] 1.1 a\n' > "$C/tasks.md"

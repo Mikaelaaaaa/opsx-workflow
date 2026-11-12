@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # PreToolUse(Bash)：git commit 時，branch 要對到卡且 tasks.md 有勾才放行；子殼 branch（<主>--<子>）只要求 tasks.md 存在。
 # repo 沒有 workplan.yaml → 不擋（印一行「閘門未啟用」）。對不到 → deny；訊息帶 [no-change] 放行並記 bypass.log。
-# 只看 branch 不看 index（Agentory-AI 的 pathspec commit 照用）。要求檔 §8.5。
+# 只看 branch 不看 index（Acmecorp-AI 的 pathspec commit 照用）。要求檔 §8.5。
 source "$(dirname "${BASH_SOURCE[0]}")/_lib.sh"
 
 cmd="$(hook_cmd)"

@@ -8,7 +8,7 @@ export PATH="$FX/fakebin:$PATH"
 export OPSX_FAKE_LOG="$FX/herdr.log"; : > "$OPSX_FAKE_LOG"
 export OPSX_DRIVE_POLL=0 OPSX_DRIVE_MAX=20
 
-R="$(mk_repo Agentory-CS)"; C="$R/openspec/changes/retry-backoff"; mkdir -p "$C" "$OPSX_STATE_DIR"
+R="$(mk_repo Acmecorp-CS)"; C="$R/openspec/changes/retry-backoff"; mkdir -p "$C" "$OPSX_STATE_DIR"
 KL="$FX/kick.log"; : > "$KL"
 cat > "$FX/fakebin/opsx" <<EOF
 #!/usr/bin/env bash
@@ -17,10 +17,10 @@ exec bash "$OPSX_ROOT/bin/opsx" "\$@"
 EOF
 chmod +x "$FX/fakebin/opsx"
 printf 'schema: opsx\nkind: bug-fix\n' > "$C/.openspec.yaml"
-MARK="$OPSX_STATE_DIR/args-lost/Agentory-CS-retry-backoff"
+MARK="$OPSX_STATE_DIR/args-lost/Acmecorp-CS-retry-backoff"
 reset() {
   printf '## 1\n\n- [ ] 1.1 a\n  - 驗收：R1\n  - 測試：t.py\n' > "$C/tasks.md"; rm -f "$C/gates.md" "$C/status.json" "$C/report.md"
-  printf '{"Agentory-CS/retry-backoff":{"mode":"drive","pane":"p42","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"
+  printf '{"Acmecorp-CS/retry-backoff":{"mode":"drive","pane":"p42","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"
   : > "$OPSX_FAKE_LOG"; : > "$KL"
 }
 # 假 agent 收到指令不動；等 agent 開工時把卡從 dispatch.json 拿掉，讓 drive 結束

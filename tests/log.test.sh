@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # opsx log：decisions.tsv 的列格式 ts · who · tag · 文字 · 證據（specs/opsx-log「decisions.tsv 的列格式」）。
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
-R="$(mk_repo Agentory-AI)"; mk_change "$R" eval-core; cd "$R"
+R="$(mk_repo Acmecorp-AI)"; mk_change "$R" eval-core; cd "$R"
 T="$R/openspec/changes/eval-core/decisions.tsv"
 
 # 寫一列
@@ -63,14 +63,14 @@ ev = d["events"]
 assert len(ev) == 4, ev
 assert ev[0]["text"] == "從外面寫", ev[0]          # 新的在前；同一秒的列，檔案裡後寫的在前
 e = [x for x in ev if x["tag"] == "替你決定"][0]
-assert e == {**e, "repo": "Agentory-AI", "slug": "eval-core", "archived": False, "who": "claude",
+assert e == {**e, "repo": "Acmecorp-AI", "slug": "eval-core", "archived": False, "who": "claude",
              "text": "選了 SQLite", "evidence": "bench.txt", "source": "decisions"}, e
 assert d["errors"] == [] and d["last_seen"] is None, d
 PY
 
 # --sync：寫 <state>/sync.log 一列四欄；新卡數要是非負整數
-opsx log --sync gitlab 3 "Agentory-CS 三張新 issue" || fail "sync rc"
-assert_eq "$(tail -1 "$OPSX_STATE_DIR/sync.log" | cut -f2-4)" $'gitlab\t3\tAgentory-CS 三張新 issue'
+opsx log --sync gitlab 3 "Acmecorp-CS 三張新 issue" || fail "sync rc"
+assert_eq "$(tail -1 "$OPSX_STATE_DIR/sync.log" | cut -f2-4)" $'gitlab\t3\tAcmecorp-CS 三張新 issue'
 assert_eq "$(tail -1 "$OPSX_STATE_DIR/sync.log" | awk -F'\t' '{print NF}')" 4
 cp "$OPSX_STATE_DIR/sync.log" "$FX/sync-before"
 assert_rc 2 opsx log --sync gitlab many "x"

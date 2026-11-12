@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # opsx timeline：舊列、表頭、時區、archive、--since、last-seen、讀不了的檔（specs/opsx-log「時間軸」）。
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
-R="$(mk_repo Agentory-AI)"; C="$R/openspec/changes"
+R="$(mk_repo Acmecorp-AI)"; C="$R/openspec/changes"
 mkdir -p "$C/x" "$C/archive/2026-11-06-y" "$C/bad"
 {
   printf 'ts\tphase\tdecision\twhy\tevidence\tresult\n'

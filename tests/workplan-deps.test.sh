@@ -6,7 +6,7 @@ use_fakes herdr glab gh
 export OPSX_FAKE_LOG="$FX/fake.log"; : > "$OPSX_FAKE_LOG"
 H="$OPSX_ROOT/hooks"; export CLAUDE_PLUGIN_ROOT="$OPSX_ROOT"
 
-R="$(mk_repo Agentory-AI)"; mkdir -p "$R/openspec/changes"
+R="$(mk_repo Acmecorp-AI)"; mkdir -p "$R/openspec/changes"
 cat > "$R/openspec/workplan.yaml" <<'EOF'
 created: 2026-11-10
 

@@ -153,7 +153,7 @@ PY
   # codex 沒有 router hook：把同一批規則放進 worktree。worktree 已在也寫（重派可能換模式）
   if [ "$agent" = codex ]; then place_agents_md "$wt" "$mode" || die "dispatch: AGENTS.md 放不進 $wt"; fi
 
-  # workspace：workspaces.toml 記的是 label（人看的，例 agnetory-ai），herdr 的 tab create 只吃 id（w1），
+  # workspace：workspaces.toml 記的是 label（人看的，例 acmecorp-ai），herdr 的 tab create 只吃 id（w1），
   # 所以用 `herdr workspace list`（result.workspaces[].{label,workspace_id}，2026-11-06 實跑）換；沒掛就開一個以 repo 為 label 的
   local ws ws_id; ws="$(workspace_for "$repo")"
   if [ -n "$ws" ]; then

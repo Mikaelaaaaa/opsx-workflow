@@ -103,7 +103,7 @@ RE_DELETE="${CMD_START}rm\\s+-(r|f|rf|fr)\\b"
 RE_INSTALL='(pnpm (add|install|i)\b|npm (install|i|ci)\b|uv (add|sync)|pip install|yarn add|brew install)'
 RE_REBASE="${CMD_START}git\\s+rebase(\\s|;|&|\\||\$)"
 RE_EXTERNAL='(curl|wget|http)\s+'
-RE_LOCAL='localhost|127\.0\.0\.1|litellm\.agentory\.cc'
+RE_LOCAL='localhost|127\.0\.0\.1'
 
 # 這段文字落在任何第二級類別（授權在整串逐條查過了，走到這裡的都有）
 l2_text_matches() { # <段>

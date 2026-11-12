@@ -43,7 +43,7 @@ printf '{"o/ar":{"pane":"w1:p1","mode":"autopilot"},"o/ar2":{"pane":"w1:p8","mod
   agent w1:p8 working "$O/.claude/worktrees/ar2"; printf ','
   agent w1:p3 idle "$O/.claude/worktrees/st"; printf ','
   agent w1:p5 idle /Users/me/notes; printf ','
-  agent w1:p7 idle /Users/me/code/gmtc-rag; printf ','
+  agent w1:p7 idle /Users/me/code/rag-demo; printf ','
   agent w1:pA idle "$O/.claude/worktrees/p"
   printf '],"type":"agent_list"}}'; } > "$FX/agents.json"
 export HERDR_ENV=1 OPSX_TEST_HERDR_AGENTS="$FX/agents.json"

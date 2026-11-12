@@ -10,15 +10,15 @@ decision() { [ -z "$1" ] && { echo allow; return; }; printf '%s' "$1" | jq -r '.
 reason() { printf '%s' "$1" | jq -r '.hookSpecificOutput.permissionDecisionReason // .reason // ""'; }
 cmdj() { printf '{"command":%s}' "$(printf '%s' "$1" | jq -Rs .)"; }
 
-R="$(mk_repo Agentory-AI git@gitlab.tsg-navigator.com:agentory/Agentory-AI.git)"
+R="$(mk_repo Acmecorp-AI git@gitlab.example.com:acmecorp/Acmecorp-AI.git)"
 mk_change "$R" eval-core
 mkdir -p "$OPSX_STATE_DIR/settings"
 PD="${OPSX_STATE_DIR}-protected"; mkdir -p "$PD"
-printf '{"Agentory-AI/eval-core":{"mode":"autopilot","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"
-printf '[repos."Agentory-AI"]\npush = true\nmr = false\nmigrate = false\n' > "$OPSX_STATE_DIR/grants.toml"
+printf '{"Acmecorp-AI/eval-core":{"mode":"autopilot","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"
+printf '[repos."Acmecorp-AI"]\npush = true\nmr = false\nmigrate = false\n' > "$OPSX_STATE_DIR/grants.toml"
 # dispatch 給這個 agent 的 settings：autopilot 直接做的那一級（bin/lib/launch.sh write_settings 的子集）
-SETTINGS="$OPSX_STATE_DIR/settings/Agentory-AI-eval-core-autopilot.json"
+SETTINGS="$OPSX_STATE_DIR/settings/Acmecorp-AI-eval-core-autopilot.json"
 printf '{"permissions":{"allow":["Read","Bash(git add:*)","Bash(git commit:*)","Bash(git merge:*)","Bash(git status:*)","Bash(git push:*)","Bash(cat:*)","Bash(git branch:*)"]}}' > "$SETTINGS"
-card_grants() { printf '{"Agentory-AI/eval-core":{"grants":%s}}' "$1" > "$PD/authz.json"; }
+card_grants() { printf '{"Acmecorp-AI/eval-core":{"grants":%s}}' "$1" > "$PD/authz.json"; }
 card_grants '[]'
 gg() { run_hook opsx-grant-gate.sh "$(j "${2:-$R}" Bash "$(cmdj "$1")")"; }
