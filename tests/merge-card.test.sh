@@ -26,7 +26,7 @@ assert_grep '^outcome: declined$' "$D/.openspec.yaml"
 assert_grep '^## 捨棄理由$' "$D/inbox.md"; assert_grep "^併入 a/$Y\$" "$D/inbox.md"
 assert_eq "$(last_evidence "$CH/$Y/inbox.md")" "- 併進：a/$X · source: github:o/r#12 · https://github.com/o/r/issues/12"
 assert_grep '^- 既有的證據$' "$CH/$Y/inbox.md"
-assert_eq "$(awk '/^## 派工指示$/{f=1;next} f && NF' "$CH/$Y/inbox.md")" "- 先做 A" "派工指示段不動"
+assert_eq "$(awk '/^## 派工指示$/{f=1;next} /^## /{f=0} f && NF' "$CH/$Y/inbox.md")" "- 先做 A" "派工指示段不動"
 assert_eq "$(grep -c '併進：' "$CH/$Y/inbox.md")" 1 "證據行只寫一次"
 tail -1 "$CH/$Y/decisions.tsv" | grep -q $'\t你\t已決定\t併進：a/'"$X"$'\t' || fail "目標 decisions.tsv 最後一列：$(tail -1 "$CH/$Y/decisions.tsv")"
 assert_eq "$(shasum "$CH/$Y/.openspec.yaml")" "$yaml_before" "目標 .openspec.yaml 不變"
@@ -42,8 +42,41 @@ archived "$M" >/dev/null
 export OPSX_TEST_NOW="2026-11-10 09:05"; E="$(opsx new --repo "$A" -- 空證據的目標)"
 export OPSX_TEST_NOW="2026-11-10 09:06"; F="$(opsx new --repo "$A" -- 併進空證據)"
 assert_rc 0 opsx merge-card "$F" --into "$E" --repo "$A"
-assert_eq "$(awk '/^## 證據$/{f=1} f' "$CH/$E/inbox.md")" "$(printf '## 證據\n\n- 併進：a/%s · source: me' "$F")"
+assert_eq "$(awk '/^## 證據$/{f=1} /^## 併入：/{f=0} f' "$CH/$E/inbox.md")" "$(printf '## 證據\n\n- 併進：a/%s · source: me' "$F")"
 rm -rf "$CH/$E"
+
+# --- 來源卡全文進併入段（board-actions「merge-card 帶來源卡全文進併入段」）---
+export OPSX_TEST_NOW="2026-11-10 09:07"; G="$(opsx new --repo "$A" -- 目標卡)"; export OPSX_TEST_NOW="2026-11-10 09:08"; H="$(opsx new --repo "$A" -- 來源要帶全文)"
+printf -- '---\ntype: bug\nsource: me\nkind_of_work: planned\n---\n\n## 一句話\n\nX 壞了\n\n## 證據\n\n- foo.py:3\n- id: 假 id\n' > "$CH/$H/inbox.md"
+assert_rc 0 opsx merge-card "$H" --into "$G" --repo "$A"
+assert_grep '^## 併入：[^ ]* me$' "$CH/$G/inbox.md"
+assert_grep '^- id: ' "$CH/$G/inbox.md"
+assert_grep '^- kind_of_work: planned$' "$CH/$G/inbox.md"
+assert_grep '^- type: bug$' "$CH/$G/inbox.md"
+assert_grep 'X 壞了' "$CH/$G/inbox.md"
+assert_grep 'foo.py:3' "$CH/$G/inbox.md"
+assert_eq "$(grep -c '^- id: ' "$CH/$G/inbox.md")" 1 "來源證據裡長得像 id 的行不能多出一個假 id"
+assert_grep "^- 併進：a/$H · source: me" "$CH/$G/inbox.md"
+# 併入段沒有 task 時 opsx check 點名（propose 的檢查認得它）
+printf '## 1. x\n\n- [ ] 1.1 a\n  - 驗收：R\n  - 測試：無 · x\n' > "$CH/$G/tasks.md"
+out="$(cd "$A" && opsx check "$G" 2>&1)"; case "$out" in *"沒有去處"*) ;; *) fail "opsx check 要點名沒有去處的併入：$out" ;; esac
+rm -rf "$CH/$G"
+
+# --- 目標已有 tasks.md 或已拆：捨棄來源之前就拒絕，兩張卡都不動 ---
+export OPSX_TEST_NOW="2026-11-10 09:09"; T="$(opsx new --repo "$A" -- 已開工的目標)"; export OPSX_TEST_NOW="2026-11-10 09:10"; U="$(opsx new --repo "$A" -- 要併的來源)"
+printf '## 1. x\n' > "$CH/$T/tasks.md"
+before="$(snap)"
+err="$(opsx merge-card "$U" --into "$T" --repo "$A" 2>&1)" && fail "目標已有 tasks.md 要退出非零"
+case "$err" in *tasks.md*) ;; *) fail "訊息要含 tasks.md：$err" ;; esac
+assert_eq "$(snap)" "$before" "目標已有 tasks.md：兩張卡都不動"
+rm -rf "$CH/$T"
+export OPSX_TEST_NOW="2026-11-10 09:11"; T="$(opsx new --repo "$A" -- 已拆的目標)"
+printf -- '---\nsource: me\nsplit_into: p1, p2\n---\n\n## 一句話\n\nx\n\n## 證據\n\n' > "$CH/$T/inbox.md"
+before="$(snap)"
+err="$(opsx merge-card "$U" --into "$T" --repo "$A" 2>&1)" && fail "目標已拆要退出非零"
+case "$err" in *split_into*) ;; *) fail "訊息要含 split_into：$err" ;; esac
+assert_eq "$(snap)" "$before" "目標已拆：兩張卡都不動"
+rm -rf "$CH/$T" "$CH/$U"
 
 # --- 用法說明有 merge-card ---
 opsx --help | grep -q '^  merge-card ' || fail "opsx --help 要列 merge-card"

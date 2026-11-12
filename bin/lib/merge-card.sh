@@ -46,7 +46,11 @@ opsx_merge-card() {
   cp "$s_inbox" "$MERGE_CARD_COPY" || die "merge-card: 複製來源 inbox 失敗：$s_inbox"
   "$OPSX_PY" -I "$OPSX_ROOT/bin/lib/inboxmerge.py" carry-check "$ch/$into" "$MERGE_CARD_COPY" "$src" || die "merge-card: 來源 $src 的事實欄位併不進 $into，兩張卡都沒動"
 
+  "$OPSX_PY" -I "$OPSX_ROOT/bin/lib/inboxmerge.py" open-check "$ch/$into" || die "merge-card: 目標 $into 不收併入，兩張卡都沒動"
+
   opsx_drop "$src" --repo "$top" -- "併入 $repo/$into"
+  "$OPSX_PY" -I "$OPSX_ROOT/bin/lib/inboxmerge.py" append-full "$ch/$into" "$MERGE_CARD_COPY" "$src" "$(now_iso)" >/dev/null \
+    || die "merge-card: $repo/$src 已歸檔，但全文寫不進 ${t_inbox}；請手動把 $src 的一句話與證據以 ## 併入： 段補進去"
   "$OPSX_PY" -I "$OPSX_ROOT/bin/lib/inboxmerge.py" carry "$ch/$into" "$MERGE_CARD_COPY" "$src" \
     || die "merge-card: $repo/$src 已歸檔，但事實欄位寫不進 ${t_inbox}；請手動把來源的 kind_of_work / impact / evidence 補進去"
 
