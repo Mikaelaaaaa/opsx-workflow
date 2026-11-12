@@ -31,4 +31,17 @@ has_commit "$(printf 'cat <<-EOF\n\tgit commit -m x\n\tEOF')" && fail "<<- 的 h
 has_commit "$(printf 'bash <<EOF\ngit commit -m x\nEOF')" || fail "餵給 bash 的 heredoc 本體要保留"
 # 同一行有真 heredoc、前面還有被引號包住的 <<
 has_commit "$(printf 'echo "a <<b" ; cat <<EOF\ngit commit -m x\nEOF')" && fail "引號內的 << 之後的真 heredoc 本體要去掉"
+# --- R1.1：$'…\'…' 裡的 \' 是字面引號，<<EOF 還在字串裡，後一行的 commit 仍在骨架 ---
+has_commit $'echo $\'\\\'<<EOF\'\ngit commit -m x\nEOF' || fail "ANSI-C 引號內的 <<EOF 吞掉了 commit：$(skel $'echo $\'\\\'<<EOF\'\ngit commit -m x\nEOF')"
+# --- R1.1：一串沒有結尾的 <<a 不能讓骨架變慢（hook 逾時等於放行）---
+big="$(perl -e 'print "git commit -m x; :", "<<a " x 10900')"
+t0=$SECONDS; skel "$big" >/dev/null; elapsed=$((SECONDS - t0))
+[ "$elapsed" -le 3 ] || fail "32KB 的一串 <<a 骨架花了 ${elapsed} 秒（要線性）"
+has_commit "$big" || fail "那串 <<a 之前的 git commit 不能不見"
+
+# --- R1.2：指令位置的 \<字母> 還原，含 ; && 之後與絕對路徑的 git；參數位置的路徑字保留跳脫 ---
+has_commit 'cd /tmp;g\it commit -m x' || fail '; 之後的 g\it：'"$(skel 'cd /tmp;g\it commit -m x')"
+has_commit 'cd /tmp&&g\it commit -m x' || fail '&& 之後的 g\it：'"$(skel 'cd /tmp&&g\it commit -m x')"
+has_commit '/usr/bin/g\it commit -m x' || fail '絕對路徑的 g\it：'"$(skel '/usr/bin/g\it commit -m x')"
+case "$(skel 'git -C /tmp/a\b commit -m x')" in *'/tmp/a\b'*) ;; *) fail "參數位置的路徑字要保留跳脫：$(skel 'git -C /tmp/a\b commit -m x')" ;; esac
 echo "cmd-skeleton ok"

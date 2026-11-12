@@ -53,34 +53,35 @@ sub heredoc {
     return $out;
 }
 
-# $s 的 $pos 這個位置在 shell 眼中是不是一般的指令文字：不在引號或註解裡，也沒有被反斜線跳脫
-sub in_code {
-    my ($s, $pos) = @_;
+# 一次走過整串，回傳等長的字串：第 i 個字元是 '1' 表示 $s 的第 i 個位置在 shell 眼中是一般的指令文字，
+# '0' 表示在引號（含 $'…'，裡面的 \' 是字面引號）或註解裡，或是被反斜線跳脫的字元。線性，heredoc 開頭一個一個查表
+sub code_mask {
+    my ($s) = @_;
+    my $n = length $s;
+    my $mask = '1' x $n;
     my $i = 0;
-    while ($i < $pos) {
+    while ($i < $n) {
         my $c = substr $s, $i, 1;
-        if ($c eq '\\') { $i += 2; next }
-        if ($c eq $SQ) {
-            my $end = index $s, $SQ, $i + 1;
-            return 0 if $end < 0 || $end >= $pos;
-            $i = $end + 1;
+        if ($c eq '\\') { substr($mask, $i + 1, 1) = '0' if $i + 1 < $n; $i += 2; next }
+        my $end;
+        if ($c eq '$' && substr($s, $i + 1, 1) eq $SQ) {
+            $end = $i + 2;
+            $end += substr($s, $end, 1) eq '\\' ? 2 : 1 while $end < $n && substr($s, $end, 1) ne $SQ;
+        } elsif ($c eq $SQ) {
+            $end = index $s, $SQ, $i + 1;
+        } elsif ($c eq '"') {
+            $end = skip_dq($s, $i);
+        } elsif ($c eq '#' && ($i == 0 || substr($s, $i - 1, 1) =~ /[\s;&|()]/)) {
+            $end = index $s, "\n", $i;
+        } else {
+            $i++;
             next;
         }
-        if ($c eq '"') {
-            my $end = skip_dq($s, $i);
-            return 0 if $end >= $pos;
-            $i = $end + 1;
-            next;
-        }
-        if ($c eq '#' && ($i == 0 || substr($s, $i - 1, 1) =~ /[\s;&|()]/)) {
-            my $end = index $s, "\n", $i;
-            return 0 if $end < 0 || $end >= $pos;
-            $i = $end + 1;
-            next;
-        }
-        $i++;
+        $end = $n - 1 if $end < 0 || $end >= $n;    # 沒結尾的引號或註解一路到尾
+        substr($mask, $i, $end - $i + 1) = '0' x ($end - $i + 1);
+        $i = $end + 1;
     }
-    return $i == $pos;    # 最後一次跳脫把 $pos 吃掉了：這個位置是被跳脫的字元
+    return $mask;
 }
 
 # heredoc 的分隔字照 bash：整個字去掉引號與反斜線之後的樣子（'E'F、E\OF 都是 EF 與 EOF，EOF-X 就是 EOF-X）
@@ -111,11 +112,12 @@ my $HEREDOC_WORD = qr/(?>(?:\$?'[^']*'|\$?"[^"]*"|[^\s;&|<>()\\'"]|\\.)+)/;
 sub strip_heredocs {
     my ($s, $depth) = @_;
     my ($out, $copied) = ('', 0);
+    my $mask = code_mask($s);
     while ($s =~ /(?<!<)<<-?[ \t]*($HEREDOC_WORD)/g) {
         my ($start, $opener_end, $word) = ($-[0], $+[0], $1);
-        next unless in_code($s, $start);
         my $nl = index $s, "\n", $opener_end;
         next if $nl < 0;
+        next unless substr($mask, $start, 1) eq '1';
         # $'…\x41…' 的跳脫 bash 會展開，這裡不展開：算不準分隔字就不剝本體（fail-closed）
         next if $word =~ /\$['"]/ && $word =~ /\\/;
         my $delim = unquote_word($word);
@@ -140,8 +142,12 @@ sub skeleton {
         my $c = substr $s, $i, 1;
         if ($c eq '\\') {
             my $next = substr $s, $i + 1, 1;
-            # c\ommit：bash 把 \o 當 o。含 / 的字是路徑，保留跳脫，commit 閘門靠它認出讀不出來的目錄
-            if ($next =~ /^\w$/ && $out !~ m{[^\s]*/[^\s]*\z}) { $out .= $next }
+            # c\ommit、g\it：bash 把 \o 當 o。參數位置含 / 的字是路徑，保留跳脫，commit 閘門靠它認出讀不出來的目錄；
+            # 指令位置（行首或 ; & | ( 之後）的字一律還原，絕對路徑的 /usr/bin/g\it 也是
+            # 只看 $out 最後 256 字：每個反斜線都掃整串 $out 會變成二次方
+            my $tail = substr $out, -256;
+            my $cmdpos = (length($out) <= 256 && $tail =~ /\A\s*[^\s;&|()]*\z/) || $tail =~ /[;&|(\n]\s*[^\s;&|()]*\z/;
+            if ($next =~ /^\w$/ && ($cmdpos || $tail !~ m{[^\s]*/[^\s]*\z})) { $out .= $next }
             elsif ($next eq "\n") { }                     # 行尾續行：bash 把反斜線與換行整個拿掉
             else { $out .= "\\$next" }
             $i += 2;
