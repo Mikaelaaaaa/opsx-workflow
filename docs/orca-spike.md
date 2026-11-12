@@ -6,7 +6,7 @@
 
 - 這個 session 的 sandbox 擋 unix socket。使用者在 `~/.claude-work/settings.json` 加了 `sandbox.excludedCommands: "orca *"`，又暫時在 `permissions.allow` 加了 `Bash(orca:*)`。後者在 spike 結束後由協調者拿掉。
 - `"orca *"` 只比對得到單獨下的 orca 指令。前面接 `cd … &&`、後面接 pipe，或參數裡有 `$'…'`，整串指令都留在 sandbox 裡跑，回 `Permission denied connecting to Orca (EPERM)`。
-- worker 用拋棄式目錄 `/tmp/claude-502/orca-spike/repo`，不碰 inbox 的卡。授權閘門那項必須在有 autopilot 卡的 repo 裡跑，所以用這張卡的 worktree。
+- worker 用拋棄式目錄 `/tmp/<user>/orca-spike/repo`，不碰 inbox 的卡。授權閘門那項必須在有 autopilot 卡的 repo 裡跑，所以用這張卡的 worktree。
 
 ## 驗證紀錄
 
@@ -26,7 +26,7 @@
 - 協調者必須是 Orca 管的 terminal。herdr pane 裡的 session 跑 `worker-start` 回 `no_active_sender_terminal: Could not determine the calling terminal for this orchestration command.`。用 `--from` 綁一個跑 `cat` 的 Orca terminal 當協調者，ask 和 worker_done 都進了 Run 信箱，但 `delivered_at` 是 null：Orca 只叫醒它認得的 agent，不會叫醒一般 terminal。換句話說，opsx 的協調者要搬進 Orca 裡跑，叫醒才有用。
 - `worker-start --agent claude` 沒有傳任意 CLI 參數的旗標，只有 `--model` 和 `--effort`。要帶 `--settings`、`--permission-mode`、`--add-dir`，只能先 `orca terminal create --command "claude …"`，再用 `worker-start --terminal <handle>` 把任務交給它。
 - 新目錄的 claude 會先停在信任對話框。`orca terminal create` 起的 worker 要有人在對話框按確認（這次用 `orca terminal send --text j` 加 `--enter`）。`worker-start --agent claude --worktree current` 解析成家目錄，worker 卡在同一個對話框，回 `start_failed`、`Agent startup blocked: agent-trust-workspace`。opsx 現在用 launch 預先寫入信任，換成 Orca 也要做同一件事。
-- `--worktree current` 對 sandbox 外的 orca 來說是家目錄（`orca worktree current` 回 `path: /Users/mikaela_lin`），不是呼叫者的 worktree。
+- `--worktree current` 對 sandbox 外的 orca 來說是家目錄（`orca worktree current` 回 `path: $HOME`），不是呼叫者的 worktree。
 
 ## 結論
 
