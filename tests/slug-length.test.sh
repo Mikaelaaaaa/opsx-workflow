@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# 卡名上限：每個入口對 33 字的 slug 都拒絕、訊息指名 slug 與原文，不改檔；32 字通過；文件寫的上限跟規則一致。
-# 驗收：specs/slug-length-guard/spec.md（grill D1：維持 [a-z][a-z0-9_-]{0,31}，總長 32 字，不截短不放寬）
+# 卡名上限：建立與派工的入口對 33 字的 slug 都拒絕、訊息指名 slug 與原文，不改檔；32 字通過；propose 文件寫的上限跟規則一致。
+# 驗收：specs/slug-length-guard/spec.md（規則 [a-z][a-z0-9_-]{0,31}，總長 32 字；看板收的長度由 board-long-slug 管，不在這裡）
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 mkdir -p "$OPSX_STATE_DIR"
 ROOT="$FX/code"; mkdir -p "$ROOT"
@@ -41,8 +41,7 @@ python3 -I -c 'import sys;sys.path.insert(0, sys.argv[1]);import chain;l,k=sys.a
 out="$(opsx note "$OK32" --repo "$A" -- 給你的話 2>&1)" && fail "卡不存在 note 要失敗"
 case "$out" in *"slug 要符合"*) fail "32 字不能被格式檢查拒絕：$out" ;; esac
 
-# 文件寫的上限等於規則
+# propose 文件寫的上限等於規則
 RULE='[a-z][a-z0-9_-]{0,31}'
 grep -qF "$RULE" "$OPSX_ROOT/skills/propose/SKILL.md" || fail "skills/propose/SKILL.md 要寫 $RULE"
-grep -qF 'SLUG_RE = re.compile(r"^'"$RULE"'$")' "$OPSX_ROOT/herdr-board/server.py" || fail "herdr-board/server.py 的 SLUG_RE 要是 $RULE"
 echo ok
