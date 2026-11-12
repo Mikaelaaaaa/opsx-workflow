@@ -42,6 +42,12 @@ for i in 1 2 3 4 5; do
 done
 assert_no_file "$C/gates.md"
 assert_grep "參數遺失" "$CL"
+assert_file "$OPSX_STATE_DIR/args-lost/Agentory-AI-eval-core"   # drive 靠這個標記知道參數遺失
+
+# 重新啟動後有帶 settings：標記清掉
+fresh
+OPSX_FAKE_PS="claude --settings $S" stop >/dev/null
+assert_no_file "$OPSX_STATE_DIR/args-lost/Agentory-AI-eval-core"
 
 # 認不得（不是 claude 的 cmdline）：照舊擋，回報原因，不放行
 fresh

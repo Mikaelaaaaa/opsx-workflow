@@ -83,14 +83,168 @@ PY
 }
 # autopilot 用 dontAsk 起，不在 settings allow 的指令 Claude 直接拒；所以有授權的動作要由這裡明說 allow，
 # 板上事後給的「這次 / 這張卡」授權才生效。等整條指令所有檢查都過了才 allow，一段有授權不能替後面那段放行。
-GRANTED=0
+GRANTED=0; MERGE_GATED=0; MR_COMMENT=0
+GRANTED_ACTIONS=()   # 這條指令已查過、有授權的 action；「這次」授權查一次就用掉，逐段涵蓋只看這份清單，不再問授權
 allow() { jq -n '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"allow",permissionDecisionReason:"opsx 授權閘門：有授權"}}'; exit 0; }
 
 level2() { # <action> <label>
   local rc=0
   has_grant "$repo" "$slug" "$1" || rc=$?
-  case "$rc" in 0) GRANTED=1; return 0 ;; 3) ;; *) deny "$PY_FAIL" ;; esac
+  case "$rc" in 0) GRANTED=1; GRANTED_ACTIONS+=("$1"); return 0 ;; 3) ;; *) deny "$PY_FAIL" ;; esac
   deny "opsx 授權閘門：「$2」要授權（第二級），$repo 沒有長期授權、這張卡也沒有。gate 寫 action: $1。$GATE_MSG"
+}
+
+# 第二級的樣式：整串逐條查授權與逐段查涵蓋共用同一組
+CMD_START='(^|[[:space:];&|(`]|\$\()'   # 命令可以緊接在 ; & | ( ` $( 後面，不一定隔著空白
+RE_PUSH="${CMD_START}git\\s+push(\\s|;|&|\\||\$)"
+RE_MR='(glab mr (create|update)|gh pr (create|edit)|glab issue (note|comment)|gh issue comment)'
+RE_MIGRATE='db:migrate|drizzle-kit (migrate|push)|alembic upgrade'
+RE_DELETE="${CMD_START}rm\\s+-(r|f|rf|fr)\\b"
+RE_INSTALL='(pnpm (add|install|i)\b|npm (install|i|ci)\b|uv (add|sync)|pip install|yarn add|brew install)'
+RE_REBASE="${CMD_START}git\\s+rebase(\\s|;|&|\\||\$)"
+RE_EXTERNAL='(curl|wget|http)\s+'
+RE_LOCAL='localhost|127\.0\.0\.1|litellm\.agentory\.cc'
+
+# 這段文字落在任何第二級類別（授權在整串逐條查過了，走到這裡的都有）
+l2_text_matches() { # <段>
+  printf '%s' "$1" | grep -qE "$RE_PUSH|$RE_MR|$RE_MIGRATE|$RE_DELETE|$RE_INSTALL|$RE_REBASE" && return 0
+  printf '%s' "$1" | grep -qE "$RE_EXTERNAL" && ! printf '%s' "$1" | grep -qE "$RE_LOCAL" && return 0
+  return 1
+}
+
+# dispatch 給這個 agent 的 settings 的 Bash allow 樣式（bin/lib/launch.sh write_settings 寫的），要用到才讀
+ALLOW_LOADED=0; ALLOW_PATTERNS=()
+load_allow() {
+  [ "$ALLOW_LOADED" = 1 ] && return 0
+  # feature session 的 settings 檔以 feature 名寫（dispatch.sh 把 feature 當 slug），條目的 herdr_name 就是那個名字
+  local name f raw line
+  name="$(jq -r --arg k "$repo/$slug" '.[$k].herdr_name // .[$k].feature // empty' "$OPSX_STATE_DIR/dispatch.json")" || deny "opsx 授權閘門：讀不到 dispatch.json 裡 ${repo}/${slug} 的 herdr 名，先擋下"
+  f="$OPSX_STATE_DIR/settings/$repo-${name:-$slug}-$mode.json"
+  [ -r "$f" ] || deny "opsx 授權閘門：串起來的指令有幾段要查這個 agent 的 settings allow，讀不到 ${f}，先擋下。把指令拆開，每條單獨送"
+  raw="$(jq -r '.permissions.allow[]? | select(startswith("Bash(")) | .[5:-1]' "$f")" || deny "opsx 授權閘門：${f} 不是合法 JSON，讀不到 allow，先擋下"
+  while IFS= read -r line; do [ -z "$line" ] || ALLOW_PATTERNS+=("$line"); done <<< "$raw"
+  ALLOW_LOADED=1
+}
+in_allow() { # <段>：Bash(<前綴>:*) 看前綴，Bash(<整句>) 看相等
+  local p prefix
+  for p in ${ALLOW_PATTERNS[@]+"${ALLOW_PATTERNS[@]}"}; do
+    case "$p" in
+      *:\*) prefix="${p%:\*}"; case "$1" in "$prefix"|"$prefix "*) return 0 ;; esac ;;
+      *) [ "$1" = "$p" ] && return 0 ;;
+    esac
+  done
+  return 1
+}
+# 把指令拆成段，第一個沒涵蓋的存進 UNCOVERED（它缺的授權 action 存進 UNCOVERED_ACTION，是 allow 外的段則為空）、回 0；都涵蓋回 1。
+# 涵蓋：段屬於某個第二級類別而且那個類別有授權；是不碰網路的小指令，而且沒有寫檔目標或目標都已授權；是 cp、mv、tee、git mv，而且目標都已授權；或在 settings allow 裡
+L2_ACTIONS=(push mr migrate delete install rebase)
+L2_REGEXES=("$RE_PUSH" "$RE_MR" "$RE_MIGRATE" "$RE_DELETE" "$RE_INSTALL" "$RE_REBASE")
+action_granted() { # <action>：整串逐條查授權時已放行的 action
+  local a
+  for a in ${GRANTED_ACTIONS[@]+"${GRANTED_ACTIONS[@]}"}; do [ "$a" = "$1" ] && return 0; done
+  return 1
+}
+UNCOVERED=""; UNCOVERED_ACTION=""
+WRITE_GRANTED=()   # bash_write_checks 查過授權、放行的寫檔目標；小指令的重導向與 cp、mv、tee 的目標都在這裡才算涵蓋
+write_target_ok() { # <目標>：已授權，或是這幾個裝置本身
+  local w
+  case "$1" in /dev/null|/dev/stdout|/dev/stderr|/dev/tty|/dev/fd/[0-9]*) return 0 ;; esac
+  for w in ${WRITE_GRANTED[@]+"${WRITE_GRANTED[@]}"}; do [ "$w" = "$1" ] && return 0; done
+  return 1
+}
+first_uncovered_segment() {
+  local segs seg i matched info kind targets t ungranted n
+  segs="$(cmd_skeleton "$cmd" | "$OPSX_PY" -I "$OPSX_ROOT/bin/lib/cmdsegments.py" split)" || deny "opsx 授權閘門：拆不開指令的段（${OPSX_PY} cmdsegments.py split 失敗），先擋下"
+  while IFS= read -r seg; do
+    [ -n "$seg" ] || continue
+    matched=0
+    for i in "${!L2_ACTIONS[@]}"; do
+      printf '%s' "$seg" | grep -qE "${L2_REGEXES[$i]}" || continue
+      matched=1
+      if ! action_granted "${L2_ACTIONS[$i]}"; then UNCOVERED="$seg"; UNCOVERED_ACTION="${L2_ACTIONS[$i]}"; return 0; fi
+    done
+    if printf '%s' "$seg" | grep -qE "$RE_EXTERNAL" && ! printf '%s' "$seg" | grep -qE "$RE_LOCAL"; then
+      matched=1
+      if ! action_granted external; then UNCOVERED="$seg"; UNCOVERED_ACTION=external; return 0; fi
+    fi
+    [ "$matched" = 1 ] && continue
+    # 命令種類與寫檔目標（cmdsegments.py segment）：小指令不在 settings allow，帶重導向就得靠已授權的目標涵蓋；cp、mv、tee、git mv 同理
+    info="$(printf '%s' "$seg" | "$OPSX_PY" -I "$OPSX_ROOT/bin/lib/cmdsegments.py" segment)" || deny "opsx 授權閘門：讀不懂這段指令的寫檔目標（cmdsegments.py segment 失敗）：${seg}，先擋下"
+    kind="${info%%$'\n'*}"; targets=""
+    case "$info" in *$'\n'*) targets="${info#*$'\n'}" ;; esac
+    ungranted=0; n=0
+    while IFS= read -r t; do
+      [ -n "$t" ] || continue
+      n=$((n + 1)); write_target_ok "$t" || ungranted=1
+    done <<< "$targets"
+    case "$kind" in
+      cd|echo|pwd|true|false|date|basename|dirname) [ "$ungranted" = 0 ] && continue ;;
+      writer) [ "$ungranted" = 0 ] && [ "$n" -gt 0 ] && continue ;;
+    esac
+    load_allow
+    in_allow "$seg" && continue
+    UNCOVERED="$seg"; UNCOVERED_ACTION=""; return 0
+  done <<< "$segs"
+  return 1
+}
+
+# 測試檔放非慣例位置：所在那一層（不含子目錄）在 cwd 所在 worktree 的追蹤檔裡沒有測試檔。要授權回 0，不用回 1。
+# 檔名要先確認像測試、而且是 mapped 的卡（呼叫者做），git 才不會對每個檔都跑。
+testpath_needs_grant() { # <絕對路徑>
+  local file="$1" wtop base missing real tracked
+  wtop="$(git -C "$(hook_cwd)" rev-parse --show-toplevel 2>/dev/null || true)"
+  [ -n "$wtop" ] || return 1
+  case "$file" in /*) ;; *) deny "opsx 授權閘門：file_path 不是絕對路徑（${file}），分不出它在哪個 worktree，先擋下。用絕對路徑" ;; esac
+  # 下面往上找目錄是逐段剪字串，`..` 會讓它爬到跟檔案實際位置不同的地方
+  case "$file" in */../*|*/..) deny "opsx 授權閘門：file_path 含 ..（${file}），分不出它實際在哪個 worktree，先擋下。用不含 .. 的絕對路徑" ;; esac
+  # 目錄還不存在時往上找最近存在的那層，用它判斷屬於哪個 worktree；進不去就擋，不讓 git 默默失敗後放行
+  base="${file%/*}"; missing=0
+  while [ -n "$base" ] && [ ! -d "$base" ]; do base="${base%/*}"; missing=1; done
+  real="$(cd "${base:-/}" && pwd -P)" || deny "opsx 授權閘門：進不了 ${base:-/}，分不出 ${file} 屬於哪個 worktree，先擋下"
+  base="$real"
+  [ "$(git -C "$base" rev-parse --show-toplevel 2>/dev/null || true)" = "$wtop" ] || return 1
+  if [ "$missing" = 0 ]; then
+    # :(glob) 的 * 不跨 /，所以只列這一層；樣式跟檔名 case 同一組
+    tracked="$(git -C "$base" ls-files -- ':(glob,icase)*.test.*' ':(glob,icase)*.spec.*' ':(glob,icase)test_*.py' ':(glob,icase)*_test.*')" || deny "opsx 授權閘門：git ls-files 失敗（${base}），分不出這一層有沒有既有測試，先擋下"
+    [ -n "$tracked" ] && return 1
+  fi
+  return 0
+}
+
+# Bash 指令的寫檔目標（cmdsegments.py writes）套用 Edit / Write 同一套 env 與 test-path 判斷。
+# 目錄讀不出來（含變數、命令替換、萬用字元、~、..）而檔名是 env 或測試檔時 deny；檔名本身讀不出來的不管。
+# shortcut: 只看檔名像 env 或測試的目標，其餘寫檔不查；cwd 之後的 cd 不追蹤（相對路徑照 session cwd 解），等有人靠 cd 繞過再補
+bash_write_checks() {
+  local targets t name lname dir abs
+  targets="$(cmd_skeleton "$cmd" | "$OPSX_PY" -I "$OPSX_ROOT/bin/lib/cmdsegments.py" writes)" || deny "opsx 授權閘門：讀不懂指令的寫檔目標（cmdsegments.py writes 失敗），先擋下"
+  while IFS= read -r t; do
+    [ -n "$t" ] || continue
+    case "$t" in /dev/null|/dev/stdout|/dev/stderr|/dev/tty|/dev/fd/[0-9]*) continue ;; esac
+    name="${t##*/}"; dir="${t%/*}"; [ "$dir" = "$t" ] && dir=""
+    # 檔名整個被引號包住（骨架把含 $ 或空白的字串換成 ""）：原文提到 env 或測試檔的樣子就當成讀不到，不放行
+    case "$name" in
+      *\"*|*\'*)
+        if printf '%s' "$cmd" | grep -qE '\.env|\.test\.|\.spec\.|_test\.|test_[A-Za-z0-9_]*\.py'; then
+          deny "opsx 授權閘門：Bash 寫的目標被引號或變數包住，讀不到實際檔名，而指令提到 env 或測試檔，分不出是不是要授權的寫入，先擋下。改用不含變數的字面路徑"
+        fi
+        continue ;;
+    esac
+    lname="$(printf '%s' "$name" | tr '[:upper:]' '[:lower:]')"   # macOS 預設的檔案系統不分大小寫，.Env 與 .env 是同一個檔
+    case "$lname" in
+      *.env.example) continue ;;
+      *.env|*.env.*) ;;
+      *.test.*|*.spec.*|test_*.py|*_test.*) ;;
+      *) continue ;;
+    esac
+    case "$dir" in
+      *[\$\`\*\?\[\{~\\\"\']*|..|../*|*/..|*/../*) deny "opsx 授權閘門：Bash 寫「${t}」，目錄讀不到（含變數、命令替換、萬用字元、~ 或 ..），分不出它是不是 env 或沒有測試的目錄，先擋下。改用不含這些的字面路徑" ;;
+    esac
+    case "$t" in /*) abs="$t" ;; *) abs="$(hook_cwd)/$t" ;; esac
+    case "$lname" in
+      *.env|*.env.*) level2 env "Bash 寫 ${t}"; WRITE_GRANTED+=("$t") ;;
+      *) if testpath_needs_grant "$abs"; then level2 test-path "Bash 把測試檔寫進沒有既有測試的目錄（${t}）"; WRITE_GRANTED+=("$t"); fi ;;
+    esac
+  done <<< "$targets"
 }
 
 if [ "$tool" = "Bash" ]; then
@@ -103,7 +257,7 @@ if [ "$tool" = "Bash" ]; then
   # 第三級（merge 放行後不 exit，其餘檢查照跑）
   if printf '%s' "$l3" | grep -qE '(glab mr merge|gh pr merge)'; then
     [ "$UNMAPPED" = 1 ] && level3 "merge"
-    merge_gate && GRANTED=1
+    merge_gate && { GRANTED=1; MERGE_GATED=1; }
   fi
   # push 的旗標與 refspec 照 shell 解析完的樣子比（hooks/cmd-normalize.pl：去引號與反斜線、併續行；"main"、\main、$'main'、'+feat/x' 才跟 main、+feat/x 一樣被認出來）；
   # 旗標只在同一段 push 裡找，後面串的指令自己的 -f、+5 不算
@@ -119,20 +273,30 @@ if [ "$tool" = "Bash" ]; then
   printf '%s' "$l3" | grep -qiE 'sops\s+(-e|--encrypt|edit)|\.gitlab-ci\.yml|\.github/workflows' && level3 "改 CI / secrets"
   [ "$UNMAPPED" = 1 ] && exit 0
   # 第二級
-  printf '%s' "$sk" | grep -qE '(^|\s|&&|;)git\s+push(\s|$)' && level2 push "git push"
-  printf '%s' "$sk" | grep -qE '(glab mr (create|update)|gh pr (create|edit)|glab issue (note|comment)|gh issue comment)' && level2 mr "開 / 改 MR"
-  # MR 留言（/pr 步 5c 的邏輯表）：只認這兩種形狀，且整條指令只能是它。GRANTED 之後 allow() 放行整串，
-  # 骨架比對會讓 `gh pr comment …; <別的指令>` 把別的指令一起放行，所以錨定原文。路徑不准含 ..。
+  printf '%s' "$sk" | grep -qE "$RE_PUSH" && level2 push "git push"
+  printf '%s' "$sk" | grep -qE "$RE_MR" && level2 mr "開 / 改 MR"
+  # MR 留言（/pr 步 5c 的邏輯表）：只認這兩種形狀，且整條指令只能是它，所以錨定原文，不走逐段判斷。路徑不准含 ..。
   # GitLab 的路徑在引號裡骨架看不到；形狀之外的 glab api（例如打 /merge）不分類，settings 也沒有 glab api 規則，dontAsk 會拒。
   gh_comment='^gh pr comment [0-9]+( --edit-last)? --body-file [A-Za-z0-9_./-]+ *$'
   glab_note='^glab api --method (POST|PUT) "projects/:id/merge_requests/[0-9]+/notes(/[0-9]+)?" --field body=@[A-Za-z0-9_./-]+ *$'
-  [[ $cmd != *..* && ( $cmd =~ $gh_comment || $cmd =~ $glab_note ) ]] && level2 mr "留言到 MR"
-  printf '%s' "$sk" | grep -qE 'db:migrate|drizzle-kit (migrate|push)|alembic upgrade' && level2 migrate "本機 migrate"
-  printf '%s' "$sk" | grep -qE '(^|\s|&&|;)rm\s+-(r|f|rf|fr)\b' && level2 delete "刪檔（rm -r/-f）"
-  printf '%s' "$sk" | grep -qE '(pnpm (add|install|i)\b|npm (install|i|ci)\b|uv (add|sync)|pip install|yarn add|brew install)' && level2 install "裝套件"
-  printf '%s' "$sk" | grep -qE '(^|\s|&&|;)git\s+rebase(\s|$)' && level2 rebase "git rebase"
-  printf '%s' "$sk" | grep -qE '(curl|wget|http)\s+' && ! printf '%s' "$sk" | grep -qE 'localhost|127\.0\.0\.1|litellm\.agentory\.cc' && level2 external "呼叫外部 API"
-  [ "$GRANTED" = 1 ] && allow
+  if [[ $cmd != *..* && ( $cmd =~ $gh_comment || $cmd =~ $glab_note ) ]]; then level2 mr "留言到 MR"; MR_COMMENT=1; fi
+  printf '%s' "$sk" | grep -qE "$RE_MIGRATE" && level2 migrate "本機 migrate"
+  printf '%s' "$sk" | grep -qE "$RE_DELETE" && level2 delete "刪檔（rm -r/-f）"
+  printf '%s' "$sk" | grep -qE "$RE_INSTALL" && level2 install "裝套件"
+  printf '%s' "$sk" | grep -qE "$RE_REBASE" && level2 rebase "git rebase"
+  printf '%s' "$sk" | grep -qE "$RE_EXTERNAL" && ! printf '%s' "$sk" | grep -qE "$RE_LOCAL" && level2 external "呼叫外部 API"
+  # 寫檔目標：Edit / Write 查的 env 與 test-path，改用 Bash 寫（重導向、tee、cp、mv、git mv）也一樣要查。先用骨架裡有沒有這些字眼擋掉大多數指令，不白起 python
+  if printf '%s' "$sk" | grep -qE '>|tee|(cp|mv)[[:space:]]'; then bash_write_checks; fi
+  # 一段有授權不能替整串放行：串起來的指令每一段都要有授權、屬於不用授權的小指令、或在 dispatch 給這個 agent 的 settings allow 裡
+  if [ "$GRANTED" = 1 ]; then
+    [ "$MERGE_GATED" = 1 ] && allow
+    [ "$MR_COMMENT" = 1 ] && allow
+    if first_uncovered_segment; then
+      [ -z "$UNCOVERED_ACTION" ] || deny "opsx 授權閘門：指令裡有一段「${UNCOVERED}」要授權（第二級），$repo 沒有長期授權、這張卡也沒有。gate 寫 action: ${UNCOVERED_ACTION}。$GATE_MSG"
+      deny "opsx 授權閘門：這條指令有一段不在這個 agent 的 settings allow 裡：「${UNCOVERED}」。把它拆成單獨一條指令；它需要授權的話，$GATE_MSG"
+    fi
+    allow
+  fi
   exit 0
 fi
 
@@ -144,26 +308,10 @@ if [ "$tool" = "Edit" ] || [ "$tool" = "Write" ]; then
     *.env.example) exit 0 ;;
     *.env|*.env.*) [ "$UNMAPPED" = 1 ] && exit 0; level2 env "寫 $file"; allow ;;
   esac
-  # 測試檔放非慣例位置：所在那一層（不含子目錄）在 cwd 所在 worktree 的追蹤檔裡沒有測試檔。
-  # 先看檔名，git 只在像測試時才跑。
+  # 先看檔名，git 只在像測試時才跑
   case "${file##*/}" in *.test.*|*.spec.*|test_*.py|*_test.*) ;; *) exit 0 ;; esac
   [ "$UNMAPPED" = 1 ] && exit 0
-  wtop="$(git -C "$(hook_cwd)" rev-parse --show-toplevel 2>/dev/null || true)"
-  [ -n "$wtop" ] || exit 0
-  case "$file" in /*) ;; *) deny "opsx 授權閘門：file_path 不是絕對路徑（${file}），分不出它在哪個 worktree，先擋下。用絕對路徑" ;; esac
-  # 下面往上找目錄是逐段剪字串，`..` 會讓它爬到跟檔案實際位置不同的地方
-  case "$file" in */../*|*/..) deny "opsx 授權閘門：file_path 含 ..（${file}），分不出它實際在哪個 worktree，先擋下。用不含 .. 的絕對路徑" ;; esac
-  # 目錄還不存在時往上找最近存在的那層，用它判斷屬於哪個 worktree；進不去就擋，不讓 git 默默失敗後放行
-  base="${file%/*}"; missing=0
-  while [ -n "$base" ] && [ ! -d "$base" ]; do base="${base%/*}"; missing=1; done
-  real="$(cd "${base:-/}" && pwd -P)" || deny "opsx 授權閘門：進不了 ${base:-/}，分不出 ${file} 屬於哪個 worktree，先擋下"
-  base="$real"
-  [ "$(git -C "$base" rev-parse --show-toplevel 2>/dev/null || true)" = "$wtop" ] || exit 0
-  if [ "$missing" = 0 ]; then
-    # :(glob) 的 * 不跨 /，所以只列這一層；樣式跟上面的檔名 case 同一組
-    tracked="$(git -C "$base" ls-files -- ':(glob,icase)*.test.*' ':(glob,icase)*.spec.*' ':(glob,icase)test_*.py' ':(glob,icase)*_test.*')" || deny "opsx 授權閘門：git ls-files 失敗（${base}），分不出這一層有沒有既有測試，先擋下"
-    [ -n "$tracked" ] && exit 0
-  fi
+  testpath_needs_grant "$file" || exit 0
   level2 test-path "測試檔寫進沒有既有測試的目錄（${file}）"
   allow
 fi

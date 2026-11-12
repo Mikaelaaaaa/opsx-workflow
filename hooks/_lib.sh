@@ -118,5 +118,11 @@ args_lost_status() { # <repo> <slug> <mode>
   line="$(ps -o args= -p "$PPID" 2>&1)" || { printf 'ps 失敗：%s' "$line"; return 2; }
   out="$(printf '%s\n' "$line" | "$OPSX_PY" -I "$OPSX_ROOT/bin/lib/argslost.py" "$settings" 2>&1)" || rc=$?
   [ "$rc" -le 1 ] || printf '%s' "$out"
+  # 判出結果就留標記給 drive 看（drive 在 agent 外面，看不到 agent 的 argv）：遺失就建，有帶就刪，認不得不動
+  local mark="$OPSX_STATE_DIR/args-lost/$1-$2"
+  case "$rc" in
+    1) mkdir -p "${mark%/*}"; : > "$mark" ;;
+    0) rm -f "$mark" ;;
+  esac
   return "$rc"
 }

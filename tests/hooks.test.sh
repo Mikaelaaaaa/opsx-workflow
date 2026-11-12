@@ -329,8 +329,11 @@ for c in $'git push gitlab \\\n--force feat/x' $'git push gitlab \\\n-f feat/x' 
   out="$(gg Bash "$(cmdj "$c")")"; assert_eq "$(decision "$out")" deny "grant: $c 不能放行"
 done
 # 第三級的 force 旗標只看同一段 push：後面串的指令自己的 -f、+5 不算
+# 串起來的段要查 agent 的 settings allow，所以先給一份讓 tail、echo、ls 在 allow 裡
+mkdir -p "$OPSX_STATE_DIR/settings"
+printf '{"permissions":{"allow":["Bash(tail:*)","Bash(echo:*)","Bash(ls:*)"]}}' > "$OPSX_STATE_DIR/settings/Agentory-AI-eval-core-autopilot.json"
 for c in 'git push gitlab feat/x 2>&1 | tail -n +5' 'git push -u gitlab feat/x && echo "see +1" && ls -lf'; do
-  out="$(gg Bash "$(cmdj "$c")")"; assert_eq "$(decision "$out")" allow "grant: $c 的 push 本身沒有 force，不能當第三級擋"
+  out="$(gg Bash "$(cmdj "$c")")"; assert_eq "$(decision "$out")" allow "grant: $c 的 push 本身沒有 force，不能當第三級擋：$(reason "$out")"
 done
 out="$(gg Bash "$(cmdj 'git push gitlab feat/x && rm -rf /tmp/a')")"; assert_eq "$(decision "$out")" deny "grant: 串的 rm -rf 沒授權還是要擋（第二級）"
 reason "$out" | grep -qF 'force-push' && fail "grant: rm -rf 不是 force-push：$(reason "$out")"

@@ -605,4 +605,11 @@ t.join(10)
 assert out[0] == (0, "新建 0 · 更新 0 · 沒變 1 · 錯誤 0"), out
 ' "$OPSX_ROOT" "$FX/mid" "$OPSX_STATE_DIR" || fail "卡在同步中途被歸檔"
 
+# --- issue 內文含 U+2028：只按換行切 JSON 行，sync 不崩潰（me-20261111-1824 G1）---
+printf '[{"iid":777,"title":"含行分隔符","description":"前\xe2\x80\xa8後","state":"opened","updated_at":"2026-11-07T10:00:00Z","web_url":"https://gitlab.example/g/x/-/issues/777","labels":[]}]' > "$OPSX_TEST_ISSUES/a.json"
+printf '[]' > "$OPSX_TEST_ISSUES/Agentory-CS.json"; rm -f "$OPSX_TEST_ISSUES/wt.json"   # wt.json 是上面 worktree 那段留下的壞 JSON（gl 的第 4 個參數被當成 labels）
+out="$(opsx sync --root "$ROOT" --source gitlab 2>&1)"; assert_eq "$?" 0 "U+2028 的 issue 不該讓 sync 崩潰：$out"
+[ -f "$CH/gl-a-777/inbox.md" ] || fail "U+2028 的 issue 要建殼：${out}"
+assert_eq "$(awk -F'\t' '$2=="sync"' "$LOG" | tail -1 | cut -f1 | wc -l | tr -d ' ')" 1 "sync.log 要有這次的列"
+
 echo ok
