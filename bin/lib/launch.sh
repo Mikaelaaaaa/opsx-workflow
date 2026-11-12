@@ -10,7 +10,7 @@ launch_args() { # <agent> <model> <mode> <repo> <herdr 名> <主 repo>
   if [ "$agent" = claude ]; then
     LAUNCH_ARGS+=(--model "$model")
     local settings="$OPSX_STATE_DIR/settings/$repo-$name-$mode.json"; ensure_dir "$(dirname "$settings")"
-    write_settings "$settings" "$repo" "$top/openspec" "$mode"
+    write_settings "$settings" "$repo" "$top/openspec" "$mode" "$name"
     if [ "$mode" != interactive ]; then LAUNCH_ARGS+=(--permission-mode dontAsk); fi   # dontAsk：不在 allow 的直接拒絕不跳框；跳框會讓 herdr 判 blocked，drive 送不進下一句
     LAUNCH_ARGS+=(--settings "$settings")
     # Claude Code 的沙盒只准寫 working directories；卡的檔在主 repo 的 openspec/（worktree 裡沒有），hook 消耗 once 與 status 鏡像寫 state dir。
@@ -23,17 +23,18 @@ launch_args() { # <agent> <model> <mode> <repo> <herdr 名> <主 repo>
   fi
 }
 
-write_settings() { # <file> <repo> <主 repo openspec 目錄> <mode>：autopilot 直接做那級 allow，永遠要人那級 deny；repo 永遠的授權也進 allow。interactive 只寫可寫目錄
-  OPSX_REPO="$2" OPSX_SD="$OPSX_STATE_DIR" OPSX_MODE="$4" "$OPSX_PY" -I - "$1" "$3" <<'PY'
+write_settings() { # <file> <repo> <主 repo openspec 目錄> <mode> <herdr 名>：autopilot 直接做那級 allow，永遠要人那級 deny；repo 永遠的授權也進 allow。interactive 只寫可寫目錄。兩種模式都寫 env OPSX_CARD，opsx new 靠它認出 dispatch 的 agent
+  OPSX_REPO="$2" OPSX_SD="$OPSX_STATE_DIR" OPSX_MODE="$4" OPSX_NAME="$5" "$OPSX_PY" -I - "$1" "$3" <<'PY'
 import json,os,sys,tomllib
 sys.path.insert(0, os.path.join(os.environ["OPSX_ROOT"], "bin", "lib")); import safefile
 sd=os.environ["OPSX_SD"]; repo=os.environ["OPSX_REPO"]
 dirs=[sys.argv[2],sd]
+env={"OPSX_CARD":os.environ["OPSX_NAME"]}
 if os.environ["OPSX_MODE"]=="interactive":
-    safefile.write_atomic(sys.argv[1], json.dumps({"permissions":{"additionalDirectories":dirs}},indent=2))
+    safefile.write_atomic(sys.argv[1], json.dumps({"env":env,"permissions":{"additionalDirectories":dirs}},indent=2))
     sys.exit(0)
 allow=["Read","Edit","Write","Glob","Grep","Bash(git status:*)","Bash(git diff:*)","Bash(git log:*)","Bash(git add:*)","Bash(git commit:*)","Bash(git checkout:*)","Bash(git worktree:*)",
-       "Bash(pnpm test:*)","Bash(pnpm vitest:*)","Bash(pnpm build:*)","Bash(pnpm lint:*)","Bash(pnpm typecheck:*)","Bash(npx vitest:*)","Bash(pytest:*)","Bash(uv run:*)","Bash(ruff:*)","Bash(go test:*)",
+       "Bash(pnpm test:*)","Bash(pnpm vitest:*)","Bash(TEST_DATABASE_URL=* pnpm vitest:*)","Bash(TEST_DATABASE_URL=* pnpm test:*)","Bash(pnpm build:*)","Bash(pnpm lint:*)","Bash(pnpm typecheck:*)","Bash(npx vitest:*)","Bash(pytest:*)","Bash(uv run:*)","Bash(ruff:*)","Bash(go test:*)",
        "Bash(openspec:*)","Bash(opsx:*)","Bash(ls:*)","Bash(cat:*)","Bash(grep:*)","Bash(rg:*)","Bash(find:*)","Bash(node:*)","Bash(python3:*)",
        "Bash(jq:*)","Bash(head:*)","Bash(tail:*)","Bash(wc:*)","Bash(sed -n:*)","Bash(diff:*)","Bash(sort:*)","Bash(bash tests/:*)","Bash(herdr agent:*)","Bash(herdr pane read:*)",
        "Bash(git show:*)","Bash(git branch:*)","Bash(git rev-parse:*)","Bash(git fetch:*)","Bash(git merge-base:*)","Bash(git merge:*)","Bash(git remote:*)","Bash(mkdir:*)",
@@ -46,8 +47,8 @@ try:
     g=tomllib.load(open(os.path.join(sd,"grants.toml"),"rb")).get("repos",{}).get(repo,{})
     if g.get("push"): allow.append("Bash(git push:*)")
     if g.get("mr"): allow+=["Bash(glab mr create:*)","Bash(glab mr update:*)","Bash(gh pr create:*)","Bash(gh pr edit:*)","Bash(glab issue note:*)","Bash(glab issue comment:*)","Bash(gh issue comment:*)"]   # gh pr comment 與 glab api 不進 allow：規則放行形狀之外的寫法（-R other/repo、merge?x=/notes/1）
-    if g.get("migrate"): allow+=["Bash(pnpm db:migrate:*)","Bash(alembic upgrade:*)"]
+    if g.get("migrate"): allow+=["Bash(pnpm db:migrate:*)","Bash(pnpm --filter @agentory/db run db:migrate:*)","Bash(alembic upgrade:*)"]
 except FileNotFoundError: pass
-safefile.write_atomic(sys.argv[1], json.dumps({"permissions":{"allow":allow,"deny":deny,"additionalDirectories":dirs}},indent=2))
+safefile.write_atomic(sys.argv[1], json.dumps({"env":env,"permissions":{"allow":allow,"deny":deny,"additionalDirectories":dirs}},indent=2))
 PY
 }
