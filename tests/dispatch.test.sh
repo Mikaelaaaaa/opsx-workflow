@@ -10,6 +10,7 @@ export PATH="$FX/fakebin:$PATH"
 export OPSX_FAKE_LOG="$FX/herdr.log"; : > "$OPSX_FAKE_LOG"
 export OPSX_USER=mikaela
 export OPSX_DRIVE_MAX=0   # autopilot 會在背景起 drive；0 輪讓它登記完就結束，不在 fixture 上跑迴圈
+export OPSX_DRIVE_POLL=0  # drive 起來第一次送出前會先睡間隔下限；要跑 1 輪的案例不能真的睡預設的 300 秒
 wait_drive() { # <repo> <slug>：等背景 drive 跑完（log 出現結束那行），最多 5 秒
   local f="$OPSX_STATE_DIR/drive-$1-$2.log" n=0
   until grep -q '跑滿 [01] 輪' "$f" 2>/dev/null; do n=$((n+1)); [ $n -lt 50 ] || fail "drive 沒在背景起來：$f"; sleep 0.1; done
