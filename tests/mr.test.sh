@@ -146,6 +146,12 @@ stale_cache; mkdir "$CACHE.lock"; sleep 30 & LIVE=$!; printf '%s\n' "$LIVE" > "$
 OPSX_MR_CACHE_TTL=60 OPSX_MR_STALE_OK=1 mr_json "$C" >/dev/null; sleep 0.5
 assert_eq "$(grep -c '^mr view' "$OPSX_FAKE_LOG" || true)" 0 "持有者 pid 還活著不能接手"
 kill "$LIVE"; rm -f "$CACHE.lock/pid"; rmdir "$CACHE.lock"
+# pid 還活著但 lock 已超過 120 秒（pid 被別的行程重用、或持有者掛住）：當死鎖接手
+stale_cache; mkdir "$CACHE.lock"; sleep 30 & LIVE=$!; printf '%s\n' "$LIVE" > "$CACHE.lock/pid"; touch -t 202601010000 "$CACHE.lock"
+OPSX_MR_CACHE_TTL=60 OPSX_MR_STALE_OK=1 mr_json "$C" >/dev/null
+wait_unlock "$CACHE.lock"
+assert_eq "$(grep -c '^mr view' "$OPSX_FAKE_LOG" || true)" 1 "pid 活著但鎖超過 120 秒要接手重抓"
+kill "$LIVE"
 # 背景重抓開起來後 lock 裡有它的 pid
 stale_cache
 PATH="$SLOWBIN:$PATH" OPSX_MR_CACHE_TTL=60 OPSX_MR_STALE_OK=1 mr_json "$C" >/dev/null

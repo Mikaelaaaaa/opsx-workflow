@@ -41,19 +41,21 @@ mr_age() { # <path> 印距 mtime 幾秒
 mr_refresh_bg() { # <card dir> <cache>
   local lock="$2.lock"
   if ! mkdir "$lock" 2>/dev/null; then
-    # 持有者把自己的 pid 寫在 lock/pid：pid 活著就讓它抓；已經不在就立即接手。
+    # 持有者把自己的 pid 寫在 lock/pid：pid 已經不在就立即接手；pid 還活著也只讓它抓 120 秒（pid 可能被別的行程重用，
+    # 活著的重抓有 OPSX_MR_TIMEOUT=60 秒的上限，不會超過這個時間）。
     # 還沒有 pid 檔是持有者剛 mkdir、還沒寫 pid 的空窗，等到 lock 超過 120 秒才當死鎖
     local holder=""
     [ ! -f "$lock/pid" ] || holder="$(cat "$lock/pid")"
     if [ -n "$holder" ]; then
-      ! kill -0 "$holder" 2>/dev/null || return 0
+      if kill -0 "$holder" 2>/dev/null; then [ "$(mr_age "$lock")" -ge 120 ] || return 0; fi
     else
       [ "$(mr_age "$lock")" -ge 120 ] || return 0
     fi
     rm -f "$lock/pid"; rmdir "$lock" 2>/dev/null; mkdir "$lock" 2>/dev/null || return 0
   fi
   OPSX_MR_TIMEOUT=60 perl -MPOSIX -e 'POSIX::setsid(); exec @ARGV' bash "$OPSX_ROOT/bin/opsx" mr "$1" --refresh "$lock" </dev/null >/dev/null 2>&1 &
-  printf '%s\n' "$!" > "$lock/pid"
+  # 背景行程可能已經跑完並拿掉 lock：目錄還在才寫
+  if [ -d "$lock" ]; then printf '%s\n' "$!" > "$lock/pid" 2>/dev/null; fi
 }
 
 # opsx mr <card dir> [--refresh [<lock>]]：印 mr_json；--refresh 跳過快取重抓、寫快取；帶 <lock> 時最後放掉那個鎖（mr_refresh_bg 拿的）
