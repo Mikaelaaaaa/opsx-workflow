@@ -346,7 +346,7 @@ class Round:
             self.dispatch_file[child] = new
             self.woken_cards.add(child)
             # 用 session 條目找名字：dry-run 不寫子卡條目，用子卡 key 會退回子卡 slug
-            rc, out, err = self.act(runtime.prompt("[%s] /opsx-workflow:%s %s" % (slug, self.stages[child], slug), card="%s/@%s" % (c["repo"], feature), dispatch=path))
+            rc, out, err = self.act(runtime.prompt("[%s] /opsx-workflow:%s %s" % (slug, self.stages[child], slug), "nowait", card="%s/@%s" % (c["repo"], feature), dispatch=path))
             if rc != 0:
                 self.log("?? %s 送不到 session %s，條目已寫，下一輪由 session 重派接手：%s" % (child, feature, (err or out)[:200]))
             else:
@@ -447,7 +447,7 @@ class Round:
     def send_notification(self, key, title, body):
         if key in self.memo["_notified"]:
             return
-        rc, out, err = self.act(runtime.prompt("%s：%s" % (title, body), agent=COORDINATOR))
+        rc, out, err = self.act(runtime.prompt("%s：%s" % (title, body), "nowait", agent=COORDINATOR))
         if rc != 0 and any(code in out + err for code in COORDINATOR_UNAVAILABLE):
             rc, out, err = self.act(runtime.notify(title, body, sound="request"))
         if rc != 0:
