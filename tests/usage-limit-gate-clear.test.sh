@@ -12,13 +12,14 @@ mkcard r1
 stuck_card() { cards '[{"slug":"r1","section":"待處理","dispatch":'"$D"',"agent_status":"idle","open_gates":[{"id":"'"$GATE"'","opened_at":null}],"waiting":{"type":"等待決定","needs":null,"waits_on":null,"gate_id":"'"$GATE"'","question":"卡在哪","recommended":null,"options":["重做"]}}]'; }
 seed_chain() { mkdir -p "$OPSX_STATE_DIR/stop-chain"; printf 'apply 3 gated 1\n' > "$CHAIN"; }
 gate_notes() { grep -F '[demo/r1] gate 卡在接' "$OPSX_FAKE_LOG" | grep -c 'notification show' || true; }
-printf '{}' > "$DISP"
+printf '{"demo/r1":%s}' "$D" > "$DISP"
 
 # 上限期間不通知不答（反例）：上限訊息在 pane 尾巴，gate 是卡在接
 rm -f "$MEMO"; printf '%s\n' "$LIMIT_MSG" > "$AR"; stuck_card; seed_chain
 round || fail "rc: $(cat "$FX/out")"
 assert_eq "$(count '^opsx answer')" 0 "暫停期間不代答：$(cat "$OPSX_FAKE_LOG")"
 assert_eq "$(gate_notes)" 0 "暫停期間不為 gate 通知：$(cat "$OPSX_FAKE_LOG")"
+assert_eq "$(grep '^agent read' "$OPSX_FAKE_LOG")" "agent read w1:p1 --lines 10 --format text" "pane 從 dispatch.json 的 demo/r1 條目來"
 assert_file "$CHAIN"
 
 # 恢復後通知不答（正例）：重置時刻已過、畫面乾淨、gate 仍 open
@@ -29,4 +30,11 @@ assert_eq "$(gate_notes)" 1 "恢復後通知人一次：$(cat "$OPSX_FAKE_LOG")"
 assert_file "$CHAIN"
 round || fail "rc: $(cat "$FX/out")"
 assert_eq "$(gate_notes)" 0 "第二輪不重送：$(cat "$OPSX_FAKE_LOG")"
+
+# dispatch.json 沒有這張卡的條目：畫面讀不到，記 ?? 看下一張，不暫停
+rm -f "$MEMO"; printf '%s\n' "$LIMIT_MSG" > "$AR"; printf '{}' > "$DISP"; stuck_card
+round || fail "rc: $(cat "$FX/out")"
+assert_eq "$(count '^agent read')" 0 "查不到 pane 不讀：$(cat "$OPSX_FAKE_LOG")"
+grep '??' "$LOG" | grep -q 'demo/r1 的畫面讀不到' || fail "查不到 pane 要記 ??：$(cat "$LOG")"
+assert_eq "$(memo_get _usage_limit seen_at)" "" "查不到 pane 不算到上限"
 echo "usage-limit-gate-clear ok"

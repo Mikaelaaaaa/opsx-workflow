@@ -12,6 +12,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import jsonfile  # noqa: E402
+import runtime  # noqa: E402
 import safefile  # noqa: E402
 
 
@@ -109,15 +110,24 @@ class Reaper:
             self.note(o, text)
 
     def close(self, o):
+        key = "%s/%s" % (o["repo"], o["slug"])
+        # runtime 從 dispatch.json 讀 pane；collect 之後重派過的話那是新 pane，關下去會關掉剛派出的 agent
+        try:
+            argv = runtime.close("pane", card=key, dispatch=self.dispatch_path)
+        except runtime.MissingHandle:
+            self.skip(o, "條目已換 pane（dispatch.json 已沒有 %s 的 pane），不關" % key)
+            return
+        if argv[-1] != o["pane"]:
+            self.skip(o, "條目已換 pane（%s 現在是 %s），不關" % (key, argv[-1]))
+            return
         text = "孤兒 pane %s 關掉（%s）" % (o["pane"], o["reason"])
         if self.dry:
             print("DRY herdr pane close %s（%s/%s，%s）" % (o["pane"], o["repo"], o["slug"], o["reason"]))
             return
-        rc, _, err = run(["herdr", "pane", "close", o["pane"]])
+        rc, _, err = run(argv)
         if rc != 0:
             # shortcut: [已評估] 任何失敗都當 pane 已不在，spec 這樣定；錯誤文字留在 log，之後若出現關不掉的真錯誤再分碼
             text += "；herdr 回錯，當作 pane 已不在：%s" % err[:120]
-        key = "%s/%s" % (o["repo"], o["slug"])
         jsonfile.update(self.dispatch_path, MarkReaped(key, now_iso()))
         card = os.path.join(self.repo_paths[o["repo"]], "openspec", "changes", o["slug"])
         if os.path.isdir(card):

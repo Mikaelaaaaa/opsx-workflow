@@ -20,6 +20,7 @@ import chain  # noqa: E402
 import gaterule  # noqa: E402
 import jsonfile  # noqa: E402
 import priority  # noqa: E402
+import runtime  # noqa: E402
 import safefile  # noqa: E402
 
 MAX_DISPATCH = 6
@@ -344,7 +345,8 @@ class Round:
                 jsonfile.update(path, functools.partial(put_entry, key=child, entry=new))
             self.dispatch_file[child] = new
             self.woken_cards.add(child)
-            rc, out, err = self.act(["herdr", "agent", "prompt", feature, "[%s] /opsx-workflow:%s %s" % (slug, self.stages[child], slug)])
+            # 用 session 條目找名字：dry-run 不寫子卡條目，用子卡 key 會退回子卡 slug
+            rc, out, err = self.act(runtime.prompt("[%s] /opsx-workflow:%s %s" % (slug, self.stages[child], slug), card="%s/@%s" % (c["repo"], feature), dispatch=path))
             if rc != 0:
                 self.log("?? %s 送不到 session %s，條目已寫，下一輪由 session 重派接手：%s" % (child, feature, (err or out)[:200]))
             else:
@@ -445,9 +447,9 @@ class Round:
     def send_notification(self, key, title, body):
         if key in self.memo["_notified"]:
             return
-        rc, out, err = self.act(["herdr", "agent", "prompt", COORDINATOR, "%s：%s" % (title, body)])
+        rc, out, err = self.act(runtime.prompt("%s：%s" % (title, body), agent=COORDINATOR))
         if rc != 0 and any(code in out + err for code in COORDINATOR_UNAVAILABLE):
-            rc, out, err = self.act(["herdr", "notification", "show", title, "--body", body, "--sound", "request"])
+            rc, out, err = self.act(runtime.notify(title, body, sound="request"))
         if rc != 0:
             self.log("?? 通知 %s 送不出去，下一輪再送：%s" % (key, (err or out).replace("\n", " ")[:200]))
             return
@@ -495,7 +497,12 @@ class Round:
             if not pane or pane in panes:
                 continue
             panes.add(pane)
-            rc, out, err = self.run(["herdr", "agent", "read", pane, "--lines", "10", "--format", "text"])
+            try:
+                argv = runtime.read(card=card_key(c), dispatch=os.path.join(self.state, "dispatch.json"), lines=10)
+            except runtime.MissingHandle as e:
+                self.log("?? %s 的畫面讀不到，用量上限看不了：%s" % (card_key(c), e))
+                continue
+            rc, out, err = self.run(argv)
             if rc != 0:
                 self.log("?? %s 的畫面讀不到，用量上限看不了：%s" % (card_key(c), err[:200]))
                 continue
