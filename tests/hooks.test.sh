@@ -1396,6 +1396,13 @@ assert_eq "$(cat "$OPSX_FAKE_LOG")" "" "別的指令不叫 herdr"; assert_file "
 out="$(post "opsx chain p")"
 assert_eq "$(cat "$OPSX_FAKE_LOG")" "$(printf 'agent rename p qc\nagent prompt qc /apply qc')" "依序執行佇列"
 assert_no_file "$QD/Acmecorp-AI-qc.tsv"
+# 送話的對象是佇列裡寫的名字，不讀 dispatch.json（D2）：條目的 herdr_name 是 other 也照樣送給 qc
+cp "$OPSX_STATE_DIR/dispatch.json" "$FX/dispatch.qc.bak"
+printf '{"Acmecorp-AI/qc":{"herdr_name":"other","pane":"w1:pZ"}}' > "$OPSX_STATE_DIR/dispatch.json"
+mkq; : > "$OPSX_FAKE_LOG"; out="$(post "opsx chain p")"
+assert_eq "$(cat "$OPSX_FAKE_LOG")" "$(printf 'agent rename p qc\nagent prompt qc /apply qc')" "佇列送話不看 dispatch.json 的 herdr_name"
+assert_not_grep '^agent prompt other' "$OPSX_FAKE_LOG"
+cp "$FX/dispatch.qc.bak" "$OPSX_STATE_DIR/dispatch.json"
 # herdr 失敗：停在那一步，佇列留成 .failed，decisions 記一行，additionalContext 說失敗
 mkq; : > "$OPSX_FAKE_LOG"; out="$(OPSX_TEST_RENAME_FAIL=1 post "opsx chain p")"
 assert_not_grep '^agent prompt' "$OPSX_FAKE_LOG"

@@ -29,6 +29,7 @@ opsx_drive() {
   while [ "$i" -lt "$max" ]; do
     i=$((i+1))
     dispatched "$repo" "$slug" || { say "drive: $repo/$slug 不在 dispatch.json（停了或被清掉），結束"; return 0; }
+    drive_not_own_agent "$repo" "$slug" && return 0
     # dispatch 送完第一句不等就起 drive；herdr 不分辨是哪一輪，agent 還在跑時送同一句會排在後面，之後每句都差一輪
     # wait 沒成功不算 settled：herdr_step 退避過了，下一輪重等。卡目錄不在時照常往下，讓下面的目錄檢查結束 drive
     if [ "$settled" = 0 ]; then
@@ -265,6 +266,22 @@ dispatched() { # <repo> <slug>
   OPSX_KEY="$1/$2" "$OPSX_PY" -I - "$OPSX_STATE_DIR/dispatch.json" <<'PY'
 import json,os,sys
 d=json.load(open(sys.argv[1])); c=d.get(os.environ["OPSX_KEY"]); sys.exit(0 if c is not None and c.get("mode") != "stopped" else 1)
+PY
+}
+
+# 代管卡（via）與已交接的父卡（handed_to）的 herdr_name 是 session 或子卡的 agent，drive 對它送話會打到別人的 pane。
+# 是這兩種就印一行說明並回 0，呼叫者結束 drive；不 kick coordinate，因為沒有東西壞掉
+drive_not_own_agent() { # <repo> <slug>
+  OPSX_KEY="$1/$2" "$OPSX_PY" -I - "$OPSX_STATE_DIR/dispatch.json" <<'PY'
+import json, os, sys
+key = os.environ["OPSX_KEY"]
+e = json.load(open(sys.argv[1]))[key]
+if e.get("via"):
+    print("drive: %s 由 %s 代管，沒有自己的 agent，結束" % (key, e["via"]))
+elif e.get("handed_to"):
+    print("drive: %s 已交接給 %s，結束" % (key, "、".join(e["handed_to"])))
+else:
+    sys.exit(1)
 PY
 }
 
