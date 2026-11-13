@@ -79,4 +79,15 @@ printf '# report\n### 待修（範圍內）\n- a.sh:1 x\n' > "$C/report.md"
 rm -f "$C/gates.md"; rm -rf "$STOP_STATE"
 out="$(sg)"; printf '%s' "$out" | jq -r '.reason' | grep -q '待修（範圍內）' || fail "沒 gate 時待修要擋: $out"
 printf "$DECISION" > "$C/gates.md"; five_allowed "待修一項 + decision"
+
+# 「卡在接」開著時再開一個等人的 gate：照樣放行，不寫第二個「卡在接」
+rm -f "$C/report.md"; tests_is red
+printf '## 卡在接 /apply #1\ntype: decision\nstatus: open\n問題: opsx：eval-core 連續 3 次停在 /opsx-workflow:apply 之前沒有 invoke，卡在哪？\n\n' > "$C/gates.md"
+printf "$APPROVAL" >> "$C/gates.md"
+rm -rf "$STOP_STATE"
+for i in 1 2 3 4 5; do
+  out="$(sg)"; assert_eq "$(decision "$out")" allow "卡在接 + approval：第 ${i} 次要放行: $out"
+done
+assert_eq "$(grep -c '^## 卡在接' "$C/gates.md")" 1 "卡在接 + approval：不寫第二個「卡在接」"
+assert_no_file "$STOP_STATE/Acmecorp-AI-eval-core"
 echo "stop-gate-open-gate ok"

@@ -59,6 +59,7 @@ blocked "$out" || fail "pane 的 claude 有帶要照舊擋：$out"
 printf '%s' "$out" | jq -r '.reason' | grep -q '/opsx-workflow:apply' || fail "要叫接 /apply：$out"
 case "$(cat "$CL")" in *"參數遺失"*) fail "pane 的 claude 有帶不回報參數遺失：$(cat "$CL")" ;; esac
 assert_no_file "$OPSX_STATE_DIR/args-lost/Acmecorp-AI-eval-core"
+assert_grep "^pane process-info --pane w1:p1$" "$CL"   # 問的是 dispatch.json 記的那個 pane
 
 # pane 讀不到：判不了，照擋並回報原因，不回報參數遺失、不留標記
 pane_unknown() { # <說明> → 呼叫前設好 env 或 dispatch.json

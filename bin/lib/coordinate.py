@@ -707,7 +707,7 @@ class Round:
             return
         try:
             lost = args_lost(claude_argv(json.loads(out)), settings)
-        except (CoordinateError, ValueError) as e:
+        except ValueError as e:
             self.args_unknown(c, key, pane, "unknown", str(e))
             return
         if not lost:
