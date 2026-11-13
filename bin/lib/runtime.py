@@ -42,9 +42,13 @@ def _need(who, kind, value):
     return value
 
 
-def prompt(text, *, card=None, agent=None, dispatch=None):
-    _, name, _, _ = _target(card, agent, dispatch)
-    return ["herdr", "agent", "prompt", name, text]
+def prompt(text, mode, *, card=None, agent=None, dispatch=None):
+    """mode 必填，是 "wait" 或 "nowait"：漏寫時看不出呼叫者要不要等 agent 做完。"""
+    who, name, _, _ = _target(card, agent, dispatch)
+    if mode not in ("wait", "nowait"):
+        raise ValueError("runtime: %s 的模式只有 wait、nowait，收到：%r" % (who, mode))
+    argv = ["herdr", "agent", "prompt", name, text]
+    return argv + ["--wait"] if mode == "wait" else argv
 
 
 def read(*, card=None, agent=None, dispatch=None, lines=None):

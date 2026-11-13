@@ -25,7 +25,7 @@ cat > "$J" <<'EOF'
 EOF
 row() { # <key> <名> <pane>
   reset
-  runtime_prompt "$1" hi >/dev/null || fail "$1 傳話 rc"
+  runtime_prompt "$1" hi nowait >/dev/null || fail "$1 傳話 rc"
   runtime_read "$1" >/dev/null || fail "$1 讀畫面 rc"
   assert_eq "$(calls)" "agent prompt $2 hi
 pane read $3" "$1 的 argv"
@@ -37,31 +37,31 @@ row r/@feat-x feat-x w1:p3
 row r/renamed other w1:p4
 
 # --- 沒有條目的卡：傳話用 slug；讀畫面查不到 pane，非 0、stderr 含卡片身分、不叫 herdr ---
-reset; runtime_prompt r/fresh hi >/dev/null || fail "沒有條目的卡傳話 rc"
+reset; runtime_prompt r/fresh hi nowait >/dev/null || fail "沒有條目的卡傳話 rc"
 assert_eq "$(calls)" "agent prompt fresh hi" "沒有條目的卡傳話用 slug"
 reset; err="$( (runtime_read r/fresh) 2>&1 >/dev/null)"; [ $? -ne 0 ] || fail "沒有條目的卡讀畫面要非 0"
 case "$err" in *r/fresh*) ;; *) fail "錯誤訊息要有卡片身分：$err" ;; esac
 assert_eq "$(calls)" "" "查不到 pane 不叫 herdr"
 # dispatch.json 不存在：名字照樣推得出來
 mv "$J" "$J.bak"
-reset; runtime_prompt r/@feat-y hi >/dev/null || fail "dispatch.json 不存在時傳話 rc"
+reset; runtime_prompt r/@feat-y hi nowait >/dev/null || fail "dispatch.json 不存在時傳話 rc"
 assert_eq "$(calls)" "agent prompt feat-y hi" "沒有 dispatch.json 時 @feature 去掉 @"
 reset; (runtime_close r/card-a tab) >/dev/null 2>&1 && fail "沒有 dispatch.json 時關 tab 要非 0"
 assert_eq "$(calls)" "" "沒有 dispatch.json 時不叫 herdr"
 mv "$J.bak" "$J"
 # 不是卡片身分的字（沒有 /）不當成卡
-reset; (runtime_prompt card-a hi) >/dev/null 2>&1 && fail "沒有 / 的對象要非 0"
+reset; (runtime_prompt card-a hi nowait) >/dev/null 2>&1 && fail "沒有 / 的對象要非 0"
 assert_eq "$(calls)" "" "對象不是卡片身分不叫 herdr"
 
 # --- 不是卡的 agent：--agent 指名，不讀 dispatch.json ---
-reset; OPSX_TEST_COORDINATOR_UP=1 runtime_prompt --agent opsx-coordinator "[x] 停住" >/dev/null || fail "--agent 傳話 rc"
+reset; OPSX_TEST_COORDINATOR_UP=1 runtime_prompt --agent opsx-coordinator "[x] 停住" nowait >/dev/null || fail "--agent 傳話 rc"
 assert_eq "$(calls)" "agent prompt opsx-coordinator [x] 停住" "對協調者傳話"
 assert_eq "$(argv_calls)" $'agent\x1fprompt\x1fopsx-coordinator\x1f[x] 停住' "含空白的一行原樣是一個參數"
-reset; OPSX_TEST_COORDINATOR_UP=1 runtime_prompt --agent opsx-coordinator hi >/dev/null
+reset; OPSX_TEST_COORDINATOR_UP=1 runtime_prompt --agent opsx-coordinator hi nowait >/dev/null
 assert_eq "$(calls)" "agent prompt opsx-coordinator hi" "agent 參數不被當成卡片身分（r/opsx-coordinator 的 herdr_name 是 zzz）"
 # 壞的 JSON、又有 opsx-coordinator 這個 key：--agent 只要讀了 dispatch.json 就會失敗或改名
 cp "$J" "$J.good"; printf '{"opsx-coordinator": {"herdr_name": "zzz"}' > "$J"
-reset; OPSX_TEST_COORDINATOR_UP=1 runtime_prompt --agent opsx-coordinator hi >/dev/null || fail "--agent 在壞的 dispatch.json 下要 rc 0"
+reset; OPSX_TEST_COORDINATOR_UP=1 runtime_prompt --agent opsx-coordinator hi nowait >/dev/null || fail "--agent 在壞的 dispatch.json 下要 rc 0"
 assert_eq "$(argv_calls)" $'agent\x1fprompt\x1fopsx-coordinator\x1fhi' "--agent 不讀 dispatch.json"
 mv "$J.good" "$J"
 reset; (runtime_read --agent opsx-coordinator) >/dev/null 2>&1 && fail "--agent 沒有 pane，讀畫面要非 0"
@@ -73,7 +73,7 @@ verb() { # <期望 argv> <動詞與參數…>
   reset; "$@" >/dev/null || fail "$* rc"
   assert_eq "$(calls)" "$want" "$*"
 }
-verb "agent prompt card-a hi" runtime_prompt r/card-a hi
+verb "agent prompt card-a hi" runtime_prompt r/card-a hi nowait
 verb "pane read w1:p1" runtime_read r/card-a
 verb "agent read w1:p1 --lines 10 --format text" runtime_read r/card-a --lines 10
 OPSX_TEST_AGENT_GET_RAW='{}' verb "agent get card-a" runtime_get r/card-a
@@ -112,8 +112,28 @@ assert_eq "$(calls)" "pane send-keys w1:p1 esc" "esc 失敗後不送 /exit 與 e
 
 # --- 傳話失敗時回傳 herdr 的錯誤 ---
 echo agent_not_found > "$FX/prompt-err"
-reset; err="$(OPSX_TEST_PROMPT_ERR="$FX/prompt-err" runtime_prompt r/card-a hi 2>&1 >/dev/null)"; [ $? -ne 0 ] || fail "herdr 失敗時傳話要非 0"
+reset; err="$(OPSX_TEST_PROMPT_ERR="$FX/prompt-err" runtime_prompt r/card-a hi nowait 2>&1 >/dev/null)"; [ $? -ne 0 ] || fail "herdr 失敗時傳話要非 0"
 case "$err" in *'"code":"agent_not_found"'*) ;; *) fail "要原樣交出 herdr 的錯誤：$err" ;; esac
+
+# --- 模式決定帶不帶 --wait ---
+verb "agent prompt card-a hi --wait" runtime_prompt r/card-a hi wait
+assert_eq "$(argv_calls)" $'agent\x1fprompt\x1fcard-a\x1fhi\x1f--wait' "--wait 是最後一個獨立參數"
+OPSX_TEST_COORDINATOR_UP=1 verb "agent prompt opsx-coordinator hi" runtime_prompt --agent opsx-coordinator hi nowait
+verb "agent prompt fresh hi --wait" runtime_prompt r/fresh hi wait
+
+# --- 模式不對就不送：rc 2、stderr 寫出收到的值、不叫 herdr ---
+bad_mode() { # <stderr 要含的字> <模式參數…>
+  local want="$1" err rc; shift
+  reset; err="$(runtime_prompt r/card-a hi "$@" 2>&1 >/dev/null)"; rc=$?
+  assert_eq "$rc" 2 "模式 [$*] 的 rc"
+  case "$err" in *"$want"*) ;; *) fail "模式 [$*] 的錯誤要含 $want：$err" ;; esac
+  assert_eq "$(calls)" "" "模式 [$*] 不叫 herdr"
+}
+bad_mode wait
+bad_mode yes yes
+bad_mode --wait --wait
+bad_mode Wait Wait
+bad_mode wait ""
 
 # --- 回報協調者：走 --agent opsx-coordinator；送不出去記 coordinator.log、回 1 ---
 reset; OPSX_TEST_COORDINATOR_UP=1 coordinator_say "[c] 停住" || fail "協調者在時要回 0"
