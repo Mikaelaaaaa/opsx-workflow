@@ -81,7 +81,7 @@ PY
 
   # session id 只在 claude 還活著時拿得到（/exit 之後就沒了），而且 agent list 只能用 pane_id 對
   local agents sid
-  agents="$(herdr agent list 2>&1)" || die "relaunch: herdr agent list 失敗：$agents"
+  agents="$(runtime_list 2>&1)" || die "relaunch: herdr agent list 失敗：$agents"
   sid="$(OPSX_AGENTS="$agents" OPSX_PANE="$pane" "$OPSX_PY" -I - <<'PY'
 import json, os, sys
 pane = os.environ["OPSX_PANE"]
@@ -138,9 +138,8 @@ PY
   [ -z "$drive_pid" ] || relaunch_mark "$key" "unset-drive:$drive_pid"
 
   local out
-  out="$(herdr pane send-keys "$pane" esc 2>&1)" || relaunch_fail "$d" "$pane" "send-keys esc 失敗：$out"
-  out="$(herdr pane send-text "$pane" /exit 2>&1)" || relaunch_fail "$d" "$pane" "send-text /exit 失敗：$out"
-  out="$(herdr pane send-keys "$pane" enter 2>&1)" || relaunch_fail "$d" "$pane" "send-keys enter 失敗：$out"
+  # $key 的條目就是上面讀出 $pane 的那一筆，/exit 送到的是同一個 pane
+  out="$(runtime_close "$key" exit 2>&1 >/dev/null)" || relaunch_fail "$d" "$key" "$pane" "送 /exit 失敗：$out"
 
   # /exit 後 shell 還沒回到提示字元（agent_pane_busy）、herdr 還沒放掉名字（agent_name_taken）都重試，共用一個計數；
   # 失敗時不關 tab：那是原本的 pane。dispatch 的 name_taken 是真有人占著，所以這裡不共用 runtime_open
@@ -149,12 +148,12 @@ PY
     case "$out" in
       *agent_pane_busy*|*agent_name_taken*) if [ "$try" -lt 6 ]; then try=$((try + 1)); sleep "${OPSX_DISPATCH_RETRY_SLEEP:-1}"; continue; fi ;;
     esac
-    relaunch_fail "$d" "$pane" "herdr agent start 失敗（第 ${try} 次）：$out"
+    relaunch_fail "$d" "$key" "$pane" "herdr agent start 失敗（第 ${try} 次）：$out"
   done
 
   local p
   for p in "${prompts[@]}"; do
-    out="$(herdr agent prompt "$name" "$p" 2>&1)" || relaunch_fail "$d" "$pane" "herdr agent prompt「${p}」失敗：$out"
+    out="$(runtime_prompt "$key" "$p" nowait 2>&1)" || relaunch_fail "$d" "$key" "$pane" "herdr agent prompt「${p}」失敗：$out"
   done
   log_row "$d" 你 已指派 "relaunch：pane ${pane} 接回 session ${sid}，送 ${prompts[*]}" "claude · ${mode} · ${model}"
   say "relaunch: $repo/$slug → pane $pane 接回 session ${sid}，送 ${prompts[*]}"
@@ -162,21 +161,21 @@ PY
   # 跟 dispatch 一樣：代管多張卡的 pane 不起 drive；pid 由 drive 自己登記
   if [ -z "$via" ] && [ "$mode" = autopilot ]; then
     local drivelog="$OPSX_STATE_DIR/drive-$repo-$slug.log"
-    [ ! -L "$drivelog" ] || relaunch_fail "$d" "$pane" "refuse to write through symlink: ${drivelog}（pane 已接回，drive 沒起）"
+    [ ! -L "$drivelog" ] || relaunch_fail "$d" "$key" "$pane" "refuse to write through symlink: ${drivelog}（pane 已接回，drive 沒起）"
     ( trap '' HUP; exec bash "$OPSX_ROOT/bin/opsx" drive "$slug" --repo "$top" ) < /dev/null >> "$drivelog" 2>&1 &
     say "relaunch: drive 跑起來了（pid $!），log 在 $drivelog"
   fi
 }
 
 # 送鍵之後的失敗：pane 可能停在 shell 或半開的 claude，印畫面給人接手、卡上記一列，pane 不關
-relaunch_fail() { # <card dir> <pane> <原因>
+relaunch_fail() { # <card dir> <卡片身分> <pane（只給訊息用）> <原因>
   local screen
-  # pane 已壞時 pane read 會失敗，當成沒輸出，不讓診斷蓋掉原本的錯誤
-  screen="$(herdr pane read "$2" 2>/dev/null | tail -20)" || screen=""
+  # pane 已壞時讀畫面會失敗，當成沒輸出，不讓診斷蓋掉原本的錯誤
+  screen="$(runtime_read "$2" 2>/dev/null | tail -20)" || screen=""
   [ -n "${screen//[[:space:]]/}" ] || screen="pane 沒有任何輸出"
-  log_row "$1" 你 已指派 "relaunch 失敗：$3" "pane $2"
-  die "relaunch: $3
-pane $2 留著沒關，到 pane 手動處理。pane 畫面（最後 20 行）：
+  log_row "$1" 你 已指派 "relaunch 失敗：$4" "pane $3"
+  die "relaunch: $4
+pane $3 留著沒關，到 pane 手動處理。pane 畫面（最後 20 行）：
 ${screen}"
 }
 

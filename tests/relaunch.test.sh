@@ -320,4 +320,25 @@ assert_not_grep '^tab close' "$OPSX_FAKE_LOG"
 out="$(OPSX_TEST_START_FAIL=agent_name_taken OPSX_TEST_PANE_READ_FAIL=1 opsx relaunch retry-backoff 2>&1)"; [ $? -ne 0 ] || fail "要非 0: $out"
 case "$out" in *agent_name_taken*'pane 沒有任何輸出'*) ;; *) fail "pane read 失敗要當成沒輸出: $out" ;; esac
 
+# --- 送 /exit 中途失敗（esc 那一步）：非 0，不再送 /exit、不重起，pane 不關 ---
+# 假 herdr 的 send-keys 不會自己失敗：hook 把假 herdr 本身 kill 掉，呼叫端就拿到非 0
+printf '[ "$4" = esc ] || exit 0\nkill -TERM "$PPID"\n' > "$FX/esc-fail.sh"
+: > "$OPSX_FAKE_LOG"
+out="$(OPSX_TEST_ON_SEND_KEYS="$FX/esc-fail.sh" opsx relaunch retry-backoff 2>&1)"; [ $? -ne 0 ] || fail "esc 送不出去要非 0: $out"
+case "$out" in *w1:pE*) ;; *) fail "訊息要含 pane id: $out" ;; esac
+assert_grep '^pane send-keys w1:pE esc$' "$OPSX_FAKE_LOG"
+assert_not_grep '^pane send-text' "$OPSX_FAKE_LOG"
+assert_not_grep '^agent start' "$OPSX_FAKE_LOG"
+assert_not_grep '^pane close' "$OPSX_FAKE_LOG"
+assert_not_grep '^tab close' "$OPSX_FAKE_LOG"
+python3 -I -c 'import json,sys;e=json.load(open(sys.argv[1]))["Acmecorp-CS/retry-backoff"];assert "relaunching_at" not in e,e' "$J" || fail "失敗也要清掉 relaunching_at"
+
+# --- drive log 是 symlink：pane 已接回但不起 drive，訊息寫原因與 pane ---
+put_entry Acmecorp-CS/retry-backoff "$CARD"
+DL="$OPSX_STATE_DIR/drive-Acmecorp-CS-retry-backoff.log"; rm -f "$DL"; ln -s "$FX/elsewhere" "$DL"; : > "$OPSX_FAKE_LOG"
+out="$(opsx relaunch retry-backoff 2>&1)"; [ $? -ne 0 ] || fail "drive log 是 symlink 要非 0: $out"
+case "$out" in *'refuse to write through symlink'*w1:pE*) ;; *) fail "要寫出 symlink 原因與 pane: $out" ;; esac
+assert_grep '^agent prompt retry-backoff ' "$OPSX_FAKE_LOG"
+rm -f "$DL"
+
 echo ok

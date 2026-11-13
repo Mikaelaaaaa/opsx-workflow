@@ -2,7 +2,8 @@
 # agent runtime：呼叫者只說「對哪個 agent 做哪個動作」，herdr 的 argv、agent 名與 pane 的查法只寫在這裡。
 # 對象是卡片身分 <repo>/<slug>（feature session 是 <repo>/@<feature>，也就是 dispatch.json 的 key），
 # 或 --agent <名>：不是卡的 agent（協調者），不讀 dispatch.json。由 common.sh 在檔尾 source。
-# 這裡只放 Orca 版也做得出來的動作；process-info、report-metadata、zoom、plugin、rename 等 herdr 專屬子指令由呼叫者直接下。
+# 這裡只放 Orca 版也做得出來的動作；process-info、report-metadata、zoom、plugin、rename 等 herdr 專屬子指令，
+# 以及在現有 pane 重起（relaunch）、派工失敗收剛開的 tab，由呼叫者直接下。
 
 # 解析對象：設 RT_WHO（訊息用）、RT_NAME、RT_PANE、RT_TAB，RT_ARGC 是吃掉的參數個數。
 # 名字的規則跟 route.sh 的 card_route 相同：條目的 herdr_name，沒有就是 key 的最後一段去掉 @。
