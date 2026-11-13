@@ -4,8 +4,14 @@ herdr-board D4 / 5.2，specs/board-plugin「最小 TUI」。
 from __future__ import annotations
 
 import curses
+import pathlib
+import sys
 import unicodedata
 from datetime import datetime
+
+HERE = pathlib.Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE.parent / "bin" / "lib"))
+import runtime  # noqa: E402
 
 SECTIONS = ("待處理", "進行中", "待指派", "收件匣", "已完成")
 MARK = {"待處理": "▲", "進行中": "●", "待指派": "○", "收件匣": "·", "已完成": "—"}
@@ -151,12 +157,12 @@ def enter(row: dict) -> list[str] | None:
             return None
         m = next(m for m in s["mains"] if m["slug"] == s["current"]["slug"])
         d = m["dispatch"] or {}
-        return ["herdr", "agent", "focus", d.get("herdr_name") or m["slug"]] if d.get("pane") else None
+        return runtime.focus(agent=d.get("herdr_name") or m["slug"]) if d.get("pane") else None
     if row.get("kind") != "card":
         return None
     c = row["card"]
     d = c.get("dispatch") or {}
-    return ["herdr", "agent", "focus", str(c.get("slug"))] if d.get("pane") else None
+    return runtime.focus(agent=str(c.get("slug"))) if d.get("pane") else None
 
 
 ZOOM_ARGV = ["herdr", "pane", "zoom", "--current", "--toggle"]

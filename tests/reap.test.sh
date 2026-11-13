@@ -112,4 +112,30 @@ assert_eq "$(closed w1:pG)" 1 "成員都收完，session pane 要關"
 python3 -I -c 'import json,sys;d=json.load(open(sys.argv[1]));assert d["o/@g"]["reaped_at"] and "reaped_at" not in d["o/m5"],d' "$OPSX_STATE_DIR/dispatch.json" || fail "reaped_at 記在 session 條目"
 assert_grep "o/@g w1:pG.*session-done" "$OPSX_STATE_DIR/reap.log"
 
+# collect 之後條目換了 pane（重派）或被刪：不關、不寫 reaped_at、reap.log 記「條目已換 pane」。
+# collect 與 close 之間的時間差用假的 opsx 入口模擬：collect 固定判 r/old 的 w1:p9 是孤兒
+mkdir -p "$FX/r"
+cat > "$FX/fake-opsx" <<EOF
+printf '{"orphans":[{"pane":"w1:p9","cwd":"/x","agent_status":"idle","repo":"r","slug":"old","reason":"archived"}],"cards":[],"errors":[],"repo_paths":{"r":"$FX/r"}}'
+EOF
+reap_direct() { python3 -I "$OPSX_ROOT/bin/lib/reap.py" "$OPSX_STATE_DIR" "$FX/fake-opsx" "$@"; }
+printf '{"r/old":{"pane":"w1:p10","mode":"autopilot"}}' > "$OPSX_STATE_DIR/dispatch.json"
+: > "$OPSX_FAKE_LOG"; rm -f "$OPSX_STATE_DIR/reap.log"
+out="$(reap_direct 2>&1)"; assert_eq "$?" 0 "條目已換 pane: $out"
+assert_eq "$(grep -c '^pane close' "$OPSX_FAKE_LOG" || true)" 0 "條目已換 pane 不能關：$(cat "$OPSX_FAKE_LOG")"
+python3 -I -c 'import json,sys;assert "reaped_at" not in json.load(open(sys.argv[1]))["r/old"]' "$OPSX_STATE_DIR/dispatch.json" || fail "條目已換 pane 不寫 reaped_at"
+assert_grep "r/old.*條目已換 pane" "$OPSX_STATE_DIR/reap.log"
+printf '{}' > "$OPSX_STATE_DIR/dispatch.json"
+: > "$OPSX_FAKE_LOG"; rm -f "$OPSX_STATE_DIR/reap.log"
+out="$(reap_direct 2>&1)"; assert_eq "$?" 0 "條目已刪: $out"
+assert_eq "$(grep -c '^pane close' "$OPSX_FAKE_LOG" || true)" 0 "條目已刪不能關：$(cat "$OPSX_FAKE_LOG")"
+assert_eq "$(cat "$OPSX_STATE_DIR/dispatch.json")" "{}" "條目已刪不補條目"
+assert_grep "r/old.*條目已換 pane" "$OPSX_STATE_DIR/reap.log"
+# 同一個 pane：照關，argv 跟遷移前相同
+printf '{"r/old":{"pane":"w1:p9","mode":"autopilot"}}' > "$OPSX_STATE_DIR/dispatch.json"
+: > "$OPSX_FAKE_LOG"
+out="$(reap_direct 2>&1)"; assert_eq "$?" 0 "條目還是同一個 pane: $out"
+assert_eq "$(grep '^pane close' "$OPSX_FAKE_LOG")" "pane close w1:p9"
+python3 -I -c 'import json,sys;assert json.load(open(sys.argv[1]))["r/old"]["reaped_at"]' "$OPSX_STATE_DIR/dispatch.json" || fail "同一個 pane 關了要寫 reaped_at"
+
 echo "ok reap"

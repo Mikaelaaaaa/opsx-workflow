@@ -1063,7 +1063,7 @@ AR="$FX/agent-read.txt"; export OPSX_TEST_AGENT_READ="$AR"
 ahead() { python3 -I -c 'import datetime,sys; print((datetime.datetime.now().astimezone()+datetime.timedelta(minutes=int(sys.argv[1]))).isoformat(timespec="seconds"))' "$1"; }
 LIMIT_MSG='Usage limit reached · continuing automatically at 7pm · esc to cancel'
 idle() { printf '{"slug":"%s","section":"進行中","dispatch":%s,"agent_status":"idle"}' "$1" "$D"; }
-rm -f "$MEMO"; printf '{}' > "$DISP"
+rm -f "$MEMO"; printf '{"demo/r1":%s,"demo/r2":%s}' "$D" "$D" > "$DISP"
 
 # 到上限：不派、不答、不重派，通知一次，第二輪不再通知
 printf '%s\n' "$LIMIT_MSG" > "$AR"
@@ -1335,10 +1335,13 @@ HUMAN='[{"slug":"a1","section":"待處理","dispatch":'"$D"',"agent_status":"idl
 cards "$HUMAN"
 round || fail "rc: $(cat "$FX/out")"
 n1="$(notes)"; grep '^notification show' "$OPSX_FAKE_LOG" > "$FX/note1"
+grep -E '^(agent prompt|notification show)' "$OPSX_FAKE_LOG" | cut -d' ' -f1-3 > "$FX/sends1"
 round || fail "rc: $(cat "$FX/out")"
 assert_eq "$((n1 + $(notes)))" 1 "兩輪只通知一次：$(cat "$FX/note1")"
 assert_grep '^notification show \[demo/a1\] ' "$FX/note1"
 assert_grep ' --body 看板.*這段怎麼驗 --sound request$' "$FX/note1"
+assert_eq "$(cat "$FX/sends1")" "agent prompt opsx-coordinator
+notification show [demo/a1]" "先送協調者，送不到才發桌面通知：$(cat "$FX/sends1")"
 assert_not_grep '第二行' "$FX/note1"
 [ -n "$(memo_get _notified demo/a1/gate/g1)" ] || fail "_notified 要有 demo/a1/gate/g1：$(cat "$MEMO")"
 assert_eq "$(count '^opsx answer')" 0 "要人的 gate 不代答"
@@ -1624,6 +1627,11 @@ wake_wp pending; wake_disp autopilot; cp "$DISP" "$FX/disp-before.json"
 round --dry || fail "rc: $(cat "$FX/out")"
 assert_eq "$(cat "$DISP")" "$(cat "$FX/disp-before.json")" "--dry 不改 dispatch.json"
 assert_not_grep '^agent prompt' "$OPSX_FAKE_LOG"
+# --dry 不標 workplan，所以預先標好 m3 merged 才走得到叫醒；m4 的條目沒寫，名字照樣是 session 的 g
+wake_wp merged; wake_disp autopilot
+round --dry || fail "rc: $(cat "$FX/out")"
+assert_not_grep '^agent prompt' "$OPSX_FAKE_LOG"
+assert_grep 'DRY herdr agent prompt g \[m4\] /opsx-workflow:apply m4$' "$FX/out"
 
 # session 不活時不叫醒
 wake_wp pending; wake_disp stopped
@@ -1989,7 +1997,8 @@ RA='{"slug":"ra","section":"進行中","dispatch":{"mode":"autopilot","agent":"c
 ra() { cards "[${RA/\"idle\"/\"$1\"}]"; }   # ra <agent_status>
 relaunches() { count '^opsx relaunch'; }
 ecount() { grep -cE -- "$1" "$OPSX_FAKE_LOG" || true; }   # count 是 BRE，(a|b) 要用這個
-printf '{}' > "$DISP"; rm -f "$MEMO"
+# 用量上限讀畫面的 pane 從 dispatch.json 來，ra 要有條目
+printf '{"demo/ra":{"mode":"autopilot","agent":"claude","pane":"w1:p1","drive_pid":null}}' > "$DISP"; rm -f "$MEMO"
 
 # 參數遺失的 idle 卡：讀 process-info，執行 opsx relaunch，log 寫原因
 ra idle

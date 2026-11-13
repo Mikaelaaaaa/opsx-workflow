@@ -180,6 +180,15 @@ class CursorTest(unittest.TestCase):
         self.assertEqual(rows[cur.index]["card"]["slug"], "ready1")
         self.assertIsNone(tm.enter(rows[cur.index]), "沒派出的卡 Enter 不做事")
 
+    def test_enter_on_card_keeps_slug_even_with_herdr_name(self):
+        c = dict(card("fb", "進行中", pane="p3"), dispatch={"pane": "p3", "agent": "claude", "herdr_name": "other"})
+        self.assertEqual(tm.enter({"kind": "card", "card": c}), ["herdr", "agent", "focus", "fb"])
+
+    def test_enter_on_session_uses_herdr_name_of_current_main(self):
+        main = dict(SESSION["mains"][0], dispatch={"pane": "p9", "agent": "claude", "herdr_name": "feat-x"})
+        self.assertEqual(tm.enter({"kind": "session", "session": dict(SESSION, mains=[main])}),
+                         ["herdr", "agent", "focus", "feat-x"])
+
     def test_empty_board(self):
         rows = tm.rows({"cards": [], "unmatched_agents": [], "errors": []}, done_open=False)
         cur = tm.Cursor(rows)
