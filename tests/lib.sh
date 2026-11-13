@@ -44,6 +44,18 @@ use_fakes() {
   local f; for f in "$@"; do printf '#!/usr/bin/env bash\nexec bash "%s/tests/fakes/%s" "$@"\n' "$OPSX_ROOT" "$f" > "$FX/fakebin/$f"; chmod +x "$FX/fakebin/$f"; done
   export PATH="$FX/fakebin:$PATH"
 }
+# 假 herdr 的 $OPSX_FAKE_LOG 把參數接成一行，分不出參數邊界。這支放在它前面，另外把每次呼叫的參數用 \x1f 分隔
+# 記進 $OPSX_FAKE_LOG.sep，再交給假 herdr。要比對「argv 逐字相同」的測試在 use_fakes herdr 之後呼叫。
+use_herdr_argv_log() {
+  mkdir -p "$FX/argvbin"
+  cat > "$FX/argvbin/herdr" <<'EOF'
+#!/usr/bin/env bash
+( IFS=$'\x1f'; printf '%s\n' "$*" ) >> "$OPSX_FAKE_LOG.sep"
+exec bash "$OPSX_ROOT/tests/fakes/herdr" "$@"
+EOF
+  chmod +x "$FX/argvbin/herdr"
+  export PATH="$FX/argvbin:$PATH"
+}
 
 # 建一個有 .git 的 fixture repo，可選 remote
 mk_repo() { # mk_repo <name> [remote-url]

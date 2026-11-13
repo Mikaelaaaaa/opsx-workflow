@@ -770,7 +770,7 @@ out="$(mg "echo 'gh pr create' | xargs -I{} echo {}")"; assert_eq "$out" "" "mr:
 
 # ---------- gate-timestamp ----------
 # 有 open 的 gate 時 hook 會叫 $CLAUDE_PLUGIN_ROOT/bin/opsx coordinate --kick：換成假的 plugin 根，bin/opsx 是 fake，記到 kick.log
-GP="$FX/gate-plugin"; mkdir -p "$GP/bin/lib"; cp "$OPSX_ROOT/bin/lib/common.sh" "$OPSX_ROOT/bin/lib/python.sh" "$OPSX_ROOT/bin/lib/safefile.py" "$GP/bin/lib/"
+GP="$FX/gate-plugin"; mkdir -p "$GP/bin/lib"; cp "$OPSX_ROOT/bin/lib/common.sh" "$OPSX_ROOT/bin/lib/runtime.sh" "$OPSX_ROOT/bin/lib/python.sh" "$OPSX_ROOT/bin/lib/safefile.py" "$GP/bin/lib/"
 printf '#!/usr/bin/env bash\nOPSX_FAKE_LOG="%s" exec bash "%s/tests/fakes/opsx" "$@"\n' "$FX/kick.log" "$OPSX_ROOT" > "$GP/bin/opsx"
 KL="$FX/kick.log"; : > "$KL"
 gt() { printf '{"cwd":"%s","tool_name":"%s","tool_input":{"file_path":"%s"},"hook_event_name":"PostToolUse"}' "$R" "${2:-Write}" "$1" | CLAUDE_PLUGIN_ROOT="$GP" OPSX_NOW=2026-11-06T14:05:00+08:00 bash "$H/gate-timestamp.sh" 2>/dev/null; echo "rc=$?"; }

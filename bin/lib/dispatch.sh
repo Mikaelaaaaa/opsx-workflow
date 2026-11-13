@@ -153,44 +153,20 @@ PY
   # codex 沒有 router hook：把同一批規則放進 worktree。worktree 已在也寫（重派可能換模式）
   if [ "$agent" = codex ]; then place_agents_md "$wt" "$mode" || die "dispatch: AGENTS.md 放不進 $wt"; fi
 
-  # workspace：workspaces.toml 記的是 label（人看的，例 acmecorp-ai），herdr 的 tab create 只吃 id（w1），
-  # 所以用 `herdr workspace list`（result.workspaces[].{label,workspace_id}，2026-11-06 實跑）換；沒掛就開一個以 repo 為 label 的
-  local ws ws_id; ws="$(workspace_for "$repo")"
+  # workspace：workspaces.toml 記的是 label（人看的，例 acmecorp-ai），開 agent 用 workspace list 換成 id；沒掛就開一個以 repo 為 label 的
+  local ws ws_arg; ws="$(workspace_for "$repo")"
   if [ -n "$ws" ]; then
-    ws_id="$(OPSX_WSJSON="$(herdr workspace list 2>/dev/null || true)" OPSX_WS="$ws" "$OPSX_PY" -I - <<'PY'
-import json, os, sys
-want = os.environ["OPSX_WS"]
-try:
-    wss = json.loads(os.environ["OPSX_WSJSON"] or "null")["result"]["workspaces"]   # heredoc 占了 stdin，JSON 走環境變數
-except (json.JSONDecodeError, KeyError, TypeError) as e:
-    sys.exit("dispatch: herdr workspace list 讀不懂（%s）；在 herdr pane 裡跑嗎？" % e)
-hit = [w for w in wss if w.get("workspace_id") == want or w.get("label") == want]
-if not hit:
-    sys.exit("dispatch: herdr 沒有 workspace「%s」（現有：%s）。改 workspaces.toml 成其中一個 label，或先在 herdr 建一個叫 %s 的 workspace"
-             % (want, "、".join(str(w.get("label")) for w in wss) or "無", want))
-print(hit[0]["workspace_id"])
-PY
-)" || exit 2
+    ws_arg=(--workspace-label "$ws")
   else
     ws="$repo"
-    ws_id="$(herdr workspace create --label "$repo" --cwd "$top" --no-focus 2>/dev/null | jq -r '.result.workspace.workspace_id // .result.workspace_id // .result.workspace // empty' 2>/dev/null || true)"
-    [ -n "$ws_id" ] || die "dispatch: herdr workspace create 沒回 workspace id"
-    grep -q '^\[repos\]' "$OPSX_STATE_DIR/workspaces.toml" 2>/dev/null || { printf '\n[repos]\n' | opsx_append "$OPSX_STATE_DIR/workspaces.toml" || die "dispatch: 寫不進 $OPSX_STATE_DIR/workspaces.toml"; }   # 第二台機器沒跑過 init 時檔案是空的
-    printf '"%s" = "%s"\n' "$repo" "$ws" | opsx_append "$OPSX_STATE_DIR/workspaces.toml" || die "dispatch: 寫不進 $OPSX_STATE_DIR/workspaces.toml"
-    say "dispatch: 新 workspace ${ws}（${ws_id}）記進 workspaces.toml"
+    ws_arg=(--workspace-create "$repo" "$top" --on-workspace-created dispatch_record_workspace)
   fi
-
-  # pane：在那個 workspace 開一個 tab。真格式：result.root_pane.pane_id（w1:pE）、result.tab.tab_id（w1:tB）
-  local tabjson pane tab
-  tabjson="$(herdr tab create --workspace "$ws_id" --cwd "$wt" --label "$slug" --no-focus)"
-  pane="$(printf '%s' "$tabjson" | jq -r '.result.root_pane.pane_id // empty' 2>/dev/null || true)"
-  tab="$(printf '%s' "$tabjson" | jq -r '.result.tab.tab_id // empty' 2>/dev/null || true)"
-  [ -n "$pane" ] || die "dispatch: herdr tab create 沒回 root_pane：$tabjson"
 
   launch_args "$agent" "$model" "$mode" "$repo" "$slug" "$top"
   # 名字被占用：dispatch.json 沒記著（手動開的、或 stop 時 pane 沒關成）但 herdr 還有同名 agent，指出它在哪
-  herdr_start_agent dispatch "$slug" "$agent" "$pane" "$tab" "${LAUNCH_ARGS[@]}" \
+  runtime_open "$me_key" --kind "$agent" "${ws_arg[@]}" --cwd "$wt" --label "$slug" -- "${LAUNCH_ARGS[@]}" \
     || die "dispatch: herdr agent start 失敗：herdr 已經有叫 ${slug} 的 agent，dispatch.json 沒記：${HERDR_TAKEN_AT}。關掉那個 pane 再派"
+  local pane="$RUNTIME_PANE" tab="$RUNTIME_TAB" ws_id="$RUNTIME_WORKSPACE_ID"
 
   # dispatch.json
   # 一般卡一筆。feature session 另有自己的條目 <repo>/@<feature>（pane 層的欄位），每個能開工的主 change 再各一筆：
@@ -304,4 +280,11 @@ try:
 except tomllib.TOMLDecodeError as e:
     sys.exit("dispatch: workspaces.toml 壞了：%s" % e)
 PY
+}
+# runtime_open 的 --on-workspace-created：新 workspace 一建好就記 label，在開 tab 之前。
+# 早於 create 記，create 失敗後每次派工都找不到這個 label；晚到 agent 起來才記，開 agent 失敗一次重派就多開一個同名 workspace
+dispatch_record_workspace() { # <label> <workspace id>
+  grep -q '^\[repos\]' "$OPSX_STATE_DIR/workspaces.toml" 2>/dev/null || printf '\n[repos]\n' | opsx_append "$OPSX_STATE_DIR/workspaces.toml" || die "dispatch: 寫不進 $OPSX_STATE_DIR/workspaces.toml"   # 第二台機器沒跑過 init 時檔案是空的
+  printf '"%s" = "%s"\n' "$1" "$1" | opsx_append "$OPSX_STATE_DIR/workspaces.toml" || die "dispatch: 寫不進 $OPSX_STATE_DIR/workspaces.toml"
+  say "dispatch: 新 workspace ${1}（${2}）記進 workspaces.toml"
 }
