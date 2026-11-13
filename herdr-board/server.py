@@ -48,7 +48,7 @@ HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent / "bin" / "lib"))
 import runtime  # noqa: E402
 
-OPSX =pathlib.Path(os.environ.get("OPSX_TEST_OPSX") or HERE.parent / "bin" / "opsx")   # 測試換成假的 opsx
+OPSX = pathlib.Path(os.environ.get("OPSX_TEST_OPSX") or HERE.parent / "bin" / "opsx")   # 測試換成假的 opsx
 INDEX = HERE / "web" / "index.html"
 SLUG_RE = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
 REPO_LABEL_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
