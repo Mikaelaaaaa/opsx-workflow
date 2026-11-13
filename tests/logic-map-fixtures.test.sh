@@ -15,10 +15,17 @@ for e in json.load(open(sys.argv[1]))["evals"]:
 assert_eq "$(awk '{print $1, $2}' "$FX/evals")" "1 fixtures/stop-gate-subagent
 2 fixtures/gate-title-slug
 3 fixtures/coordinate-usage-limit
-4 fixtures/question-reply"
-head -3 "$FX/evals" > "$FX/map-evals"
-assert_eq "$(grep -c 'HEAD^...HEAD' "$FX/map-evals")" 3 "產表題的範圍都是 HEAD^...HEAD"
-tail -1 "$FX/evals" > "$FX/question-eval"
+4 fixtures/question-reply
+5 fixtures/coordinate-usage-limit"
+grep -v '^4 ' "$FX/evals" > "$FX/map-evals"
+assert_eq "$(grep -c 'HEAD^...HEAD' "$FX/map-evals")" 4 "產表題的範圍都是 HEAD^...HEAD"
+grep '^4 ' "$FX/evals" > "$FX/question-eval"
+# 第 5 題只驗兩段業務說明：位置、句數、沒有識別字
+python3 -I -c '
+import json, sys
+e = [x for x in json.load(open(sys.argv[1]))["evals"] if x["id"] == 5][0]
+print("\n".join(e["assertions"]))' "$EV/evals.json" > "$FX/eval5" || fail "evals.json 第 5 題讀不了"
+for k in '## 這支 PR 在做什麼（業務說明）' '### 業務上在做什麼' '3 到 5 句' '2 到 4 句' '反引號'; do assert_grep "$k" "$FX/eval5"; done
 assert_not_grep 'HEAD^...HEAD' "$FX/question-eval"
 assert_not_grep '7b30eef\|24b2c40\|6312881\|8389924' "$FX/evals"
 assert_not_grep '絕對路徑' "$FX/evals"

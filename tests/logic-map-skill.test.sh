@@ -56,6 +56,53 @@ assert_file "$DIR/../technical-writing/SKILL.md"
 assert_fixed 'every existing decision on the path from the entry of the enclosing function' "$SK"
 assert_fixed 'including checks that return early' "$SK"
 
+# --- 兩段業務說明：範本位置 ---
+BIZ_TOP='## 這支 PR 在做什麼（業務說明）'; BIZ_FEAT='### 業務上在做什麼'
+for k in "$BIZ_TOP" "$BIZ_FEAT"; do assert_fixed "$k" "$TPL"; done
+grep -n -e '^範圍：' -e "^$BIZ_TOP" -e '^## 功能 1' -e '^### ' "$TPL" | sed 's/^[0-9]*://' | head -4 > "$FX/tpl-order"
+assert_eq "$(cat "$FX/tpl-order")" "範圍：\`<base>...<head>\` · 讀的檔：<n> 個 · 功能：<n> 個
+$BIZ_TOP
+## 功能 1：<一句話>
+$BIZ_FEAT" "範本順序：範圍行、頂端業務說明、功能 1、功能的第一小節是業務段"
+
+# --- 兩段業務說明：寫法規則 ---
+BIZ="$FX/business"
+section "The business summary" > "$BIZ"
+[ -s "$BIZ" ] || fail "section missing: The business summary"
+assert_eq "$(grep '^## ' "$SK" | grep -A1 -x '## The business summary' | tail -1)" '## The three parts of a feature'
+for k in '3 to 5 sentences' '2 to 4 sentences' 'a concrete example' '誰做什麼' '系統怎麼判斷' '對方看到什麼' \
+  'No function names, file paths, or FEEL' 'only from the code in the diff range' '使用者看不到差別'; do
+  assert_fixed "$k" "$BIZ"
+done
+assert_not_fixed '搬移' "$BIZ"
+
+# --- 兩段業務說明：三份範例都有，內文沒有識別字 ---
+python3 -I - "$EX" > "$FX/ex-biz" <<'PY' || fail "examples.md 的業務說明：$(cat "$FX/ex-biz")"
+import re, sys
+text = open(sys.argv[1], encoding="utf-8").read()
+maps = re.split(r"^# 邏輯表：", text, flags=re.M)[1:]
+bad = []
+if len(maps) != 3:
+    bad.append("範例數 %d" % len(maps))
+for i, m in enumerate(maps, 1):
+    head = re.split(r"^## 功能", m, maxsplit=1, flags=re.M)[0]
+    top = re.search(r"^## 這支 PR 在做什麼（業務說明）\n(.*?)(?=^## |\Z)", head, flags=re.M | re.S)
+    if not top:
+        bad.append("範例 %d 沒有頂端業務說明" % i)
+    bodies = [top.group(1)] if top else []
+    for f in re.split(r"^## 功能", m, flags=re.M)[1:]:
+        subs = re.findall(r"^### (.+)$", f, flags=re.M)
+        if not subs or subs[0] != "業務上在做什麼":
+            bad.append("範例 %d 的功能第一小節是 %r" % (i, subs[:1]))
+            continue
+        bodies.append(re.search(r"^### 業務上在做什麼\n(.*?)(?=^### |\Z)", f, flags=re.M | re.S).group(1))
+    for b in bodies:
+        if "`" in b or re.search(r"[\w./-]+:\d+", b):
+            bad.append("範例 %d 的業務段有識別字或路徑：%s" % (i, b.strip()[:60]))
+print("\n".join(bad))
+sys.exit(1 if bad else 0)
+PY
+
 # --- frontmatter name 對得上目錄 ---
 assert_eq "$(sed -n '2p' "$SK")" 'name: logic-map'
 
