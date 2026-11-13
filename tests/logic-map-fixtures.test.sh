@@ -14,8 +14,12 @@ for e in json.load(open(sys.argv[1]))["evals"]:
     print(e["id"], e["files"][0] if e["files"] else "-", e["prompt"].replace("\n", " "))' "$EV/evals.json" > "$FX/evals" || fail "evals.json 讀不了"
 assert_eq "$(awk '{print $1, $2}' "$FX/evals")" "1 fixtures/stop-gate-subagent
 2 fixtures/gate-title-slug
-3 fixtures/coordinate-usage-limit"
-assert_eq "$(grep -c 'HEAD^...HEAD' "$FX/evals")" 3 "每題的範圍都是 HEAD^...HEAD"
+3 fixtures/coordinate-usage-limit
+4 fixtures/question-reply"
+head -3 "$FX/evals" > "$FX/map-evals"
+assert_eq "$(grep -c 'HEAD^...HEAD' "$FX/map-evals")" 3 "產表題的範圍都是 HEAD^...HEAD"
+tail -1 "$FX/evals" > "$FX/question-eval"
+assert_not_grep 'HEAD^...HEAD' "$FX/question-eval"
 assert_not_grep '7b30eef\|24b2c40\|6312881\|8389924' "$FX/evals"
 assert_not_grep '絕對路徑' "$FX/evals"
 
@@ -58,6 +62,21 @@ base" "$name 只有 head、base 兩個 commit"
 check_fixture stop-gate-subagent 8389924
 check_fixture gate-title-slug 24b2c40
 check_fixture coordinate-usage-limit 6312881
+
+# --- 提問題的 fixture：不是 commit 快照，是一份邏輯表加它的 design 與討論紀錄 ---
+QR="$FX/fx-question-reply"
+assert_file "$FIXTURES/question-reply/setup.sh"
+bash "$FIXTURES/question-reply/setup.sh" "$QR" >/dev/null 2>&1 || fail "question-reply setup.sh 失敗"
+assert_eq "$(git -C "$QR" remote)" "" "question-reply 不該有 remote"
+assert_eq "$(git -C "$QR" status --short)" "" "question-reply 工作樹要乾淨"
+CH="$QR/openspec/changes/report-export"
+for f in logic-map.md design.md explore.md; do assert_file "$CH/$f"; done
+# 只有 design.md 寫了 fallback_role：回答要把它標成 agent 自己加的
+assert_grep 'fallback_role' "$CH/design.md"
+assert_grep 'fallback_role' "$CH/logic-map.md"
+assert_not_grep 'fallback_role' "$CH/explore.md"
+git -C "$QR" ls-files > "$FX/question-reply.files"
+! grep -Eiq 'eval|test|judge|experiment|rubric|score|compare|benchmark|candidate|arena' "$FX/question-reply.files" || fail "question-reply 留著含評測字眼的路徑"
 
 # --- eval 1 改成 #88：答案講 Stop 閘門與 stage.sh，不再是 commit 閘門 ---
 python3 -I -c '

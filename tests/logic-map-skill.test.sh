@@ -58,3 +58,25 @@ assert_fixed 'including checks that return early' "$SK"
 
 # --- frontmatter name 對得上目錄 ---
 assert_eq "$(sed -n '2p' "$SK")" 'name: logic-map'
+
+# --- 回答對既有邏輯表的提問：四部分、不代決、出處、跟產表模式分界 ---
+ANS="$FX/answer"
+section "Answering questions about a map" > "$ANS"
+[ -s "$ANS" ] || fail "section missing: Answering questions about a map"
+# 段落緊接在 Output template 前面（範本裡有 `## 功能 1`，所以不能看最後一個 `## `）
+assert_eq "$(grep '^## ' "$SK" | grep -B1 -x '## Output template' | head -1)" '## Answering questions about a map'
+# 第一個非標題的行寫分界：拿到三樣輸入時不用這一段
+sed -n '2,$p' "$ANS" | grep -m1 . > "$FX/answer-first"
+assert_fixed 'repo, a diff range, and an output path' "$FX/answer-first"
+assert_fixed 'Steps' "$FX/answer-first"
+for k in '| 程式名 | 誰設定 | 業務上是什麼 | 被擋時記成 |' '| 你是誰 | 結果 |' \
+  'every gate' 'product decision' '2 to 4 options' 'never decide' \
+  'Do not read the code' '沒寫' 'outside the table, on its own line' \
+  'explore.md' 'grill.md' 'design.md' 'path:line' '繁體中文'; do
+  assert_fixed "$k" "$ANS"
+done
+# 產表模式的禁讀句與理由句原文還在，Inputs 段首說它只管產表
+assert_fixed 'This section is for producing a map' "$INPUTS"
+# description 有回答模式的觸發
+sed -n '3p' "$SK" > "$FX/description"
+assert_fixed 'asks what a line' "$FX/description"

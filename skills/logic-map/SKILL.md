@@ -1,6 +1,6 @@
 ---
 name: logic-map
-description: Turn the code one PR changed into a logic map the user can judge the work by — a numbered feature list, a flowchart whose decision nodes are numbered D1…Dn, and a condition table that gives each node its exact condition in FEEL with the file:line it came from. Reads only the code in the PR's diff range, never the spec, the chat, or the commit messages, so the map shows what the code does rather than what anyone meant it to do. Use when a PR is finished and the user wants to check the development work, when the opsx pr stage asks for a logic map, or when someone says "logic map", "邏輯表", "程式邏輯", "畫這支 PR 的邏輯", "他用了哪些邏輯", or "讓我判斷他的開發工作".
+description: Turn the code one PR changed into a logic map the user can judge the work by — a numbered feature list, a flowchart whose decision nodes are numbered D1…Dn, and a condition table that gives each node its exact condition in FEEL with the file:line it came from. Reads only the code in the PR's diff range, never the spec, the chat, or the commit messages, so the map shows what the code does rather than what anyone meant it to do. Use when a PR is finished and the user wants to check the development work, when the opsx pr stage asks for a logic map, or when someone says "logic map", "邏輯表", "程式邏輯", "畫這支 PR 的邏輯", "他用了哪些邏輯", or "讓我判斷他的開發工作". Also use when the user quotes a line of an existing logic map (a D node, a condition-table row, or a ⚠ item) and asks what a line means, e.g. 「這是啥意思」「D3 是什麼」.
 ---
 
 # Logic map
@@ -11,7 +11,7 @@ Write in the user's language (Traditional Chinese unless the request is in anoth
 
 ## Inputs
 
-You get a repo path and a diff range (`<base>...<head>`), and an output path. Nothing else. If any of the three is missing, stop and say which one.
+This section is for producing a map. You get a repo path and a diff range (`<base>...<head>`), and an output path. Nothing else. If any of the three is missing, stop and say which one.
 
 Do not read `openspec/`, `report.md`, PR descriptions, or commit messages. They say what the author intended. The map exists to show what the code does, so the user can see where the two differ. Reading intent first makes you describe the intent.
 
@@ -79,6 +79,38 @@ After the table, list what a careful reviewer would question. Each item is one s
 - A missing case: an `if` with no `else` where the input can take the other value.
 
 Do not mark style. Do not invent a problem to fill the list. An empty list is a valid result; write `無`.
+
+## Answering questions about a map
+
+When the prompt gives you a repo, a diff range, and an output path, you are producing a map: skip this section and follow Steps. Use this section when the user quotes a D node, a condition-table row, or a ⚠ item of an existing map and asks what it means.
+
+Read the logic map, then the `design.md`, `explore.md`, and `grill.md` in the same change directory as the map. Do not read the code. The map is the version the user judges by, and conditions re-derived from code make a second account that can disagree with it. When none of these files says something, such as who sets a value, write 「沒寫」. Do not guess.
+
+Answer in 繁體中文, in four parts, in this order:
+
+1. A table `| 程式名 | 誰設定 | 業務上是什麼 | 被擋時記成 |`. Add one row per function or constant the question touches. 誰設定 says who controls the value. 業務上是什麼 says what it means for a person. 被擋時記成 is what the system records or shows when it blocks.
+2. One concrete setting, such as what an admin configured, and a table `| 你是誰 | 結果 |`. Give every gate on the path at least one row that reaches it.
+3. Every ⚠ item of the map, numbered. Mark each one as the user's product decision and give 2 to 4 options. You never decide for the user. Do not mark any option as settled.
+4. Sources as `path:line`. For each behavior, say whether the discussion record (`explore.md`, `grill.md`) decided it, or the agent added it on its own in `design.md`. Put each path outside the table, on its own line. A terminal does not make a path inside a table cell clickable.
+
+**Example.** The map has 下載檢查 D1 帳號鎖定?, D2 等級在 `PLAN_TIERS`?, D3 用量 < `MAX_JOBS`?. The code has `PLAN_TIERS = ["pro"]`, and an admin set `MAX_JOBS = 5`.
+
+| 程式名 | 誰設定 | 業務上是什麼 | 被擋時記成 |
+|---|---|---|---|
+| `PLAN_TIERS` | 寫死在程式 | 哪些方案能下載 | `blocked: tier` |
+| `MAX_JOBS` | 管理員 | 一個人同時能跑幾個工作 | `blocked: quota` |
+
+| 你是誰 | 結果 |
+|---|---|
+| 帳號被鎖的 pro 用戶 | D1 擋，記成 `blocked: locked` |
+| free 用戶 | D2 擋，記成 `blocked: tier` |
+| pro 用戶，已有 5 個工作在跑 | D3 擋，記成 `blocked: quota` |
+| pro 用戶，有 2 個工作在跑 | 可以下載 |
+
+⚠ 1：`PLAN_TIERS` 寫死。這是你的產品決定，選項：(a) 維持寫死；(b) 改成管理員可設定；(c) 改成每個組織各自設定。
+
+出處：`PLAN_TIERS` 只有 pro，是 explore.md 定的。
+openspec/changes/download-check/explore.md:7
 
 ## Output template
 
