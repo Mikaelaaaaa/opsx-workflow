@@ -513,14 +513,16 @@ echo "$out" | grep -q "relaunch" || fail "晚 30 秒的標記要算在 relaunch:
 assert_not_grep '^agent prompt' "$OPSX_FAKE_LOG"
 
 # 代管卡（via）與已交接的父卡（handed_to）沒有自己的 agent：herdr_name 指向 session 或子卡，drive 不能對它們送話
-rm -f "$FX/werr"; reset_apply
+rm -f "$FX/werr"; reset_apply; : > "$KL"
 printf '{"Acmecorp-CS/retry-backoff":{"mode":"autopilot","pane":"p42","grants":[],"herdr_name":"fs","feature":"fs","via":"@fs"}}' > "$OPSX_STATE_DIR/dispatch.json"
 out="$(PATH="$FX/sleepbin:$PATH" OPSX_DRIVE_POLL=0 OPSX_DRIVE_MAX=3 opsx drive retry-backoff 2>&1)"; assert_eq "$?" 0 "代管卡: $out"
 echo "$out" | grep -q "代管" || fail "代管卡要說明為什麼結束: $out"
 assert_not_grep '^agent prompt' "$OPSX_FAKE_LOG"; assert_not_grep '^agent wait' "$OPSX_FAKE_LOG"
-reset_apply
+assert_eq "$(grep -c '^opsx coordinate --kick$' "$KL")" 0 "代管卡不 kick coordinate: $(cat "$KL")"
+reset_apply; : > "$KL"
 printf '{"Acmecorp-CS/retry-backoff":{"mode":"autopilot","pane":"p42","grants":[],"herdr_name":"c","handed_to":["c"]}}' > "$OPSX_STATE_DIR/dispatch.json"
 out="$(PATH="$FX/sleepbin:$PATH" OPSX_DRIVE_POLL=0 OPSX_DRIVE_MAX=3 opsx drive retry-backoff 2>&1)"; assert_eq "$?" 0 "已交接: $out"
 echo "$out" | grep -q "交接" || fail "已交接要說明為什麼結束: $out"
 assert_not_grep '^agent prompt' "$OPSX_FAKE_LOG"; assert_not_grep '^agent wait' "$OPSX_FAKE_LOG"
+assert_eq "$(grep -c '^opsx coordinate --kick$' "$KL")" 0 "已交接不 kick coordinate: $(cat "$KL")"
 echo ok
