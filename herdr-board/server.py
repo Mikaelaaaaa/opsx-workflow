@@ -9,7 +9,8 @@ GET /api/collect 回上一次 `opsx collect` 的結果（成功或失敗），�
                  同一時間只跑一支 collect，沒有請求時不跑。只有 server 剛啟動還沒有結果時，GET 才等 collect 跑完。
                  動作 POST 呼叫過 opsx 後快取作廢並在背景開跑一輪，之後的 GET 等到動作之後才開始的那輪結果。
 GET /api/log[?since=<iso>] 回 `opsx timeline [--since …]` 的輸出（紀錄 tab、抽屜、banner 用，開才拉，不快取）。
-GET /api/output?pane=<id> 跑 `herdr agent read <id> --lines 10 --format text`，回 {ok, text} 或 {ok: false, error}（抽屜「最後輸出」）。
+GET /api/output?card=<repo>/<slug> 由 runtime.read 從 <state>/dispatch.json 查出這張卡的 pane，跑 `herdr agent read <pane> --lines 10 --format text`，
+                 回 {ok, text} 或 {ok: false, error}（抽屜「最後輸出」）。card 格式不對或沒給 card 回 400；查不到 pane 回 {ok: false, error}，都不叫 herdr。
 POST /api/seen {at} 把 at 寫進 <state>/last-seen（banner 按「關閉」時送）。
 POST /api/{answer,dispatch,merge,stop,new,file,drop,merge-card,split-out,sync,note} 轉呼叫對應的 `opsx` 子命令，POST /api/focus 跑 herdr agent focus <slug>；都回 {ok, stdout, stderr}。
 POST /api/priority {repo, slug, level, reason} 轉 `opsx priority <slug> --set <level> --reason <理由> --repo <repo>`；
@@ -44,9 +45,13 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs
 
 HERE = pathlib.Path(__file__).resolve().parent
-OPSX = pathlib.Path(os.environ.get("OPSX_TEST_OPSX") or HERE.parent / "bin" / "opsx")   # 測試換成假的 opsx
+sys.path.insert(0, str(HERE.parent / "bin" / "lib"))
+import runtime  # noqa: E402
+
+OPSX =pathlib.Path(os.environ.get("OPSX_TEST_OPSX") or HERE.parent / "bin" / "opsx")   # 測試換成假的 opsx
 INDEX = HERE / "web" / "index.html"
 SLUG_RE = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
+REPO_LABEL_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 TOKEN_RE = re.compile(r"^[A-Za-z0-9_-]{32,}$")
 COLLECT_TIMEOUT = 60
 TIMELINE_TIMEOUT = 60
@@ -288,6 +293,12 @@ def priority_args(body: dict) -> list[str]:
     return ["priority", slug, "--set", level, "--reason", reason, "--repo", repo]
 
 
+def valid_card(card: str) -> bool:
+    """卡片身分 <repo>/<slug>：repo 是 collect 的 repo 標籤，slug 照 SLUG_RE。"""
+    parts = card.split("/")
+    return len(parts) == 2 and bool(REPO_LABEL_RE.fullmatch(parts[0])) and bool(SLUG_RE.fullmatch(parts[1]))
+
+
 def run(argv: list[str], timeout: int, env: dict, cwd: pathlib.Path | None = None) -> dict:
     """跑一個子行程；逾時殺整個 process group（collect 底下掛著幾百支 stage_of / python，只殺 bash 會留孤兒）。"""
     try:
@@ -394,10 +405,17 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/output":
             if not self.authorised():
                 self.send_json(401, {"error": "token"}); return
-            pane = parse_qs(self.path.split("?", 1)[1] if "?" in self.path else "").get("pane", [""])[0]
-            if not PANE_RE.match(pane):
-                self.send_json(400, {"error": "pane 不合格：%r" % pane}); return
-            r = run(["herdr", "agent", "read", pane, "--lines", "10", "--format", "text"], OUTPUT_TIMEOUT, self.opsx_env())
+            query = parse_qs(self.path.split("?", 1)[1] if "?" in self.path else "")
+            if "card" not in query:
+                self.send_json(400, {"error": "要給 card=<repo>/<slug>（不再收 pane=）"}); return
+            card = query["card"][0]
+            if not valid_card(card):
+                self.send_json(400, {"error": "card 要是 <repo>/<slug>：%r" % card}); return
+            try:
+                argv = runtime.read(card=card, dispatch=self.cfg.state / "dispatch.json", lines=10)
+            except runtime.MissingHandle as e:
+                self.send_json(200, {"ok": False, "error": str(e)}); return
+            r = run(argv, OUTPUT_TIMEOUT, self.opsx_env())
             if not r["ok"]:
                 self.send_json(200, {"ok": False, "error": (r["stderr"] or r["stdout"]).strip() or "herdr agent read 失敗"}); return
             self.send_json(200, {"ok": True, "text": r["stdout"]}); return
@@ -454,7 +472,7 @@ class Handler(BaseHTTPRequestHandler):
                 agent = body.get("agent")
                 if not isinstance(agent, str) or not SLUG_RE.match(agent):
                     raise ValueError("agent 不合格：%r" % agent)
-                r = run(["herdr", "agent", "focus", agent], 10, self.opsx_env())
+                r = run(runtime.focus(agent=agent), 10, self.opsx_env())
                 if r["ok"]:
                     hint = raise_terminal(self.cfg.state, self.opsx_env())
                     if hint:

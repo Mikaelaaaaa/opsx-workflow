@@ -306,7 +306,7 @@ function token(){try{return sessionStorage.getItem('opsx-token')||'';}catch(e){r
 const api={
   async collect(){const r=await fetch('/api/collect',{headers:{'X-Opsx-Token':token()}});if(r.status===401)throw new Error('token 不對：從 herdr 的 open-board 重開一次');if(!r.ok)throw new Error('collect '+r.status+'：'+(await r.text()).slice(0,200));return r.json();},
   async log(since){const r=await fetch('/api/log'+(since?'?since='+encodeURIComponent(since):''),{headers:{'X-Opsx-Token':token()}});const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error('log '+r.status+'：'+(j.error||j.stderr||''));return j;},
-  async output(pane){const r=await fetch('/api/output?pane='+encodeURIComponent(pane),{headers:{'X-Opsx-Token':token()}});const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error('output '+r.status+'：'+(j.error||''));return j;},
+  async output(card){const r=await fetch('/api/output?card='+encodeURIComponent(card),{headers:{'X-Opsx-Token':token()}});const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error('output '+r.status+'：'+(j.error||''));return j;},
   async post(action,body){const r=await fetch('/api/'+action,{method:'POST',headers:{'X-Opsx-Token':token(),'Content-Type':'application/json'},body:JSON.stringify(body)});const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(action+' '+r.status+'：'+(j.error||j.stderr||''));if(!j.ok)throw new Error((j.stderr||j.stdout||'opsx '+action+' 失敗').trim());return j;}
 };
 let data={generated_at:null,scopes:[],cards:[],sessions:[],unmatched_agents:[],errors:[],legacy:{},worktrees_skipped:[]};let lastRaw='';
@@ -848,7 +848,7 @@ function renderDrawer(){
 }
 async function loadOutput(c){
   const k=key(c);
-  try{outputs[k]=await api.output(c.dispatch.pane);}catch(e){outputs[k]={ok:false,error:e.message};}
+  try{outputs[k]=await api.output(k);}catch(e){outputs[k]={ok:false,error:e.message};}
   if(ui.open===k)renderDrawer();
 }
 function openDrawer(k){ui.open=k;ui.sel=k;const c=byKey(k);if(c&&c.dispatch&&c.dispatch.pane){delete outputs[k];loadOutput(c);}render();if(!tl)loadLog();const x=$('#drawer .x');if(x)x.focus();}
