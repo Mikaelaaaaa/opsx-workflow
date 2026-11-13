@@ -25,7 +25,7 @@ opsx_stop() {
   local route name via; route="$(card_route "$repo" "$slug")" || die "stop: 讀不懂 dispatch.json"; name="${route%%$'\t'*}"; via="${route#*$'\t'}"
   if [ -n "$via" ]; then
     # 代管卡跟兄弟卡共用 pane，關 pane 會連兄弟一起停：只請 pane 停掉這張的 subagent（grill D4）
-    if herdr agent prompt "$name" "[$slug] stop" >/dev/null 2>&1; then say "stop: 已請 $name 的 pane 停掉 $slug 的 subagent，pane 不關"
+    if runtime_prompt "$repo/$slug" "[$slug] stop" nowait >/dev/null 2>&1; then say "stop: 已請 $name 的 pane 停掉 $slug 的 subagent，pane 不關"
     else say "stop: 送不到 ${name}，$slug 照樣標 stopped；它的 subagent 可能還在跑，到 pane $pane 看"; fi
   else
     if [ -n "$pid" ]; then
@@ -36,7 +36,7 @@ opsx_stop() {
       esac
     fi
     if [ -n "$pane" ]; then
-      if herdr pane close "$pane" >/dev/null 2>&1; then closed=1; say "stop: pane $pane 關了"; else say "stop: pane $pane 關不掉（可能已經不在）"; fi
+      if runtime_close "$repo/$slug" pane >/dev/null 2>&1; then closed=1; say "stop: pane $pane 關了"; else say "stop: pane $pane 關不掉（可能已經不在）"; fi
     fi
   fi
   # pane_closed_at：這個 pane id 已經被關掉了。之後 herdr 若把同一個 id 發給別的 pane，collect 靠它不把新的 pane 當成這張卡的孤兒

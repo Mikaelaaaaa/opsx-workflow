@@ -27,7 +27,7 @@ for q in "$qd/$repo"-*.tsv; do
   while IFS=$'\t' read -r op a b; do
     case "$op" in
       rename) out="$(herdr agent rename "$a" "$b" 2>&1)" || ok=0 ;;
-      prompt) out="$(herdr agent prompt "$a" "$b" 2>&1)" || ok=0 ;;
+      prompt) out="$(runtime_prompt --agent "$a" "$b" nowait 2>&1)" || ok=0 ;;
       drive)
         drivelog="$OPSX_STATE_DIR/drive-$repo-$a.log"
         if ! : | opsx_append "$drivelog" 2>/dev/null; then out="refuse to write through symlink: $drivelog"; ok=0; else

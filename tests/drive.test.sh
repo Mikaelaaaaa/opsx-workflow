@@ -229,6 +229,7 @@ export OPSX_TEST_ON_PROMPT="$FX/noop.sh" OPSX_TEST_PANE_TEXT="API Error: HTTP 42
 out="$(PATH="$FX/sleepbin:$PATH" OPSX_DRIVE_POLL=7 OPSX_DRIVE_MAX=2 opsx drive retry-backoff 2>&1)"; assert_eq "$?" 0 "drive 429: $out"
 assert_eq "$(grep -c '^agent prompt' "$OPSX_FAKE_LOG")" 1 "429 尾巴只送一次: $(cat "$OPSX_FAKE_LOG")"
 assert_eq "$(sed -n '/^agent prompt/,$p' "$OPSX_FAKE_LOG" | grep -c '^sleep 7$')" 1 "退避的 sleep 要在送出之後: $(cat "$OPSX_FAKE_LOG")"
+assert_grep '^pane read p42$' "$OPSX_FAKE_LOG"
 if [ -f "$C/gates.md" ]; then assert_not_grep '^## drive-' "$C/gates.md"; fi
 echo "$out" | grep -q "退避 7 秒" || fail "要說退避多久: $out"
 reset_apply
@@ -286,7 +287,7 @@ printf '# report\n\n## MR\nhttps://gitlab.example.com/acmecorp/Acmecorp-CS/-/mer
 printf '{"state":"opened","draft":false,"has_conflicts":false,"head_pipeline":{"status":"failed"},"unresolved_discussions_count":1}' > "$OPSX_TEST_GLAB_JSON"
 unset OPSX_TEST_PANE_TEXT
 out="$(PATH="$FX/sleepbin:$PATH" OPSX_DRIVE_POLL=7 OPSX_DRIVE_MAX=3 opsx drive retry-backoff 2>&1)"; assert_eq "$?" 0 "drive babysit 睡完: $out"
-assert_grep '^agent prompt retry-backoff /opsx-workflow:babysit retry-backoff' "$OPSX_FAKE_LOG"
+assert_grep '^agent prompt retry-backoff /opsx-workflow:babysit retry-backoff --wait$' "$OPSX_FAKE_LOG"
 assert_eq "$(sleep_without_wait)" 0 "babysit 的 sleep 之後要先 agent wait: $(cat "$OPSX_FAKE_LOG")"
 # herdr 回錯誤時 herdr_step 退避睡 poll 秒，睡完也要先重等；迴圈頂端的 wait 失敗不算 settled
 printf '{"Acmecorp-CS/retry-backoff":{"mode":"drive","pane":"p42","grants":[]}}' > "$OPSX_STATE_DIR/dispatch.json"

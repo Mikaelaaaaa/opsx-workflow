@@ -137,9 +137,9 @@ PY
   else log_row "$d" 你 已決定 "$answer" "$gate"; fi
 
   if [ "$result" = dispatched ]; then
-    local route name via; route="$(card_route "$repo" "$slug")" || die "讀不懂 dispatch.json，不知道話要送給誰"; name="${route%%$'\t'*}"; via="${route#*$'\t'}"
+    local route via; route="$(card_route "$repo" "$slug")" || die "讀不懂 dispatch.json，不知道話要送給誰"; via="${route#*$'\t'}"
     local prefix="${via:+[$slug] }"; [ -z "$sub" ] || prefix="[$slug/$sub] "
-    herdr agent prompt "$name" "$prefix$answer" >/dev/null || die "answer: gates.md 與 decisions 已寫，但 herdr agent prompt 失敗；agent 下次讀 gates.md 會看到答案"
+    runtime_prompt "$repo/$slug" "$prefix$answer" nowait >/dev/null || die "answer: gates.md 與 decisions 已寫，但 herdr agent prompt 失敗；agent 下次讀 gates.md 會看到答案"
     say "answer: $slug 的 $gate 已回「${answer}」${grant:+（grant: ${grant}）}，已送進 agent"
   else
     say "answer: $slug 的 $gate 已回「${answer}」${grant:+（grant: ${grant}）}；這張卡沒派出，沒有 agent 可以通知，派出時它會讀 gates.md"
