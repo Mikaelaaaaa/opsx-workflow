@@ -90,4 +90,24 @@ for i in 1 2 3 4 5; do
 done
 assert_eq "$(grep -c '^## 卡在接' "$C/gates.md")" 1 "卡在接 + approval：不寫第二個「卡在接」"
 assert_no_file "$STOP_STATE/Acmecorp-AI-eval-core"
+
+# 舊的「卡在接」答完了、再開一個等人的 gate：答完的不算，照樣放行
+printf '## 卡在接 /apply #1\ntype: decision\nstatus: answered\nanswer: 在等使用者\n\n' > "$C/gates.md"
+printf "$APPROVAL" >> "$C/gates.md"
+rm -rf "$STOP_STATE"
+for i in 1 2 3 4 5; do
+  out="$(sg)"; assert_eq "$(decision "$out")" allow "答完的卡在接 + approval：第 ${i} 次要放行: $out"
+done
+assert_eq "$(grep -c '^## 卡在接' "$C/gates.md")" 1 "答完的卡在接 + approval：不寫新的「卡在接」"
+assert_no_file "$STOP_STATE/Acmecorp-AI-eval-core"
+
+# 兩個「卡在接」開著、沒有等人的 gate：不是等人，照擋並計數
+printf '## 卡在接 /apply #1\ntype: decision\nstatus: open\n\n## 卡在接 /review #1\ntype: decision\nstatus: open\n' > "$C/gates.md"
+rm -rf "$STOP_STATE"
+out="$(sg)"; assert_eq "$(decision "$out")" block "兩個卡在接、沒有等人 gate：要擋: $out"
+assert_eq "$(cut -d' ' -f1,2 "$STOP_STATE/Acmecorp-AI-eval-core")" "apply 1" "兩個卡在接：照計數"
+# 再加一個等人的 gate：放行
+printf "\n$APPROVAL" >> "$C/gates.md"
+rm -rf "$STOP_STATE"
+out="$(sg)"; assert_eq "$(decision "$out")" allow "兩個卡在接 + approval：要放行: $out"
 echo "stop-gate-open-gate ok"
