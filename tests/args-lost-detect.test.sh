@@ -80,4 +80,33 @@ except ValueError as e:
 case "$sp" in ERR:*settings_path*"/a b/s.json"*) ;; *) fail "含空白的 settings_path 要 raise 並點名欄位與值：$sp" ;; esac
 printf '%s\n' "claude --settings /a b/s.json" | OPSX_LIB="$OPSX_ROOT/bin/lib" python3 -I "$OPSX_ROOT/bin/lib/argslost.py" "/a b/s.json" 2>"$FX/cli.err"
 assert_eq "$?" 2 "CLI：含空白的 settings_path 認不得"
+
+# CLI --process-info：stdin 是 herdr pane process-info 的 JSON，取前景唯一的 claude 判定；退出碼同上
+# 驗收：openspec/changes/agent-20261113-1355/specs/args-lost-guard/spec.md（判遺失前用 pane 的 claude 確認）
+SAMPLES="$OPSX_ROOT/tests/fakes/herdr-samples"
+PS_SETTINGS=/Users/dev/.local/state/opsx/settings/opsx-workflow-relaunch-auto-autopilot.json
+pi_cli() { # <settings_path> < process-info JSON
+  OPSX_LIB="$OPSX_ROOT/bin/lib" python3 -I "$OPSX_ROOT/bin/lib/argslost.py" --process-info "$1" 2>"$FX/cli.err"
+}
+pi_cli "$PS_SETTINGS" < "$SAMPLES/process-info-claude.json"; assert_eq "$?" 0 "process-info：pane 的 claude 帶了該卡的 settings"
+pi_cli "$S" < "$SAMPLES/process-info-claude.json"; assert_eq "$?" 1 "process-info：pane 的 claude 帶的是別張卡的 settings"
+pi_cli "$S" < "$SAMPLES/process-info-shell.json"; assert_eq "$?" 2 "process-info：前景沒有 claude"
+assert_grep "前景沒有 claude" "$FX/cli.err"
+jq -c '.result.process_info.foreground_processes += [.result.process_info.foreground_processes[1]]' "$SAMPLES/process-info-claude.json" > "$FX/pi-two.json"
+pi_cli "$PS_SETTINGS" < "$FX/pi-two.json"; assert_eq "$?" 2 "process-info：前景有兩個 claude"
+assert_grep "2 個 claude" "$FX/cli.err"
+printf '{"result":{}}' | pi_cli "$S"; assert_eq "$?" 2 "process-info：形狀不對"
+assert_grep "foreground_processes" "$FX/cli.err"
+printf 'not json' | pi_cli "$S"; assert_eq "$?" 2 "process-info：不是 JSON"
+assert_grep "JSON" "$FX/cli.err"
+
+# claude_argv 認不得時 raise ValueError，coordinate 照舊接得住
+cv="$(OPSX_LIB="$OPSX_ROOT/bin/lib" python3 -I -c '
+import os, sys
+sys.path.insert(0, os.environ["OPSX_LIB"]); import argslost
+try:
+    argslost.claude_argv({"result": {"process_info": {"foreground_processes": []}}})
+except ValueError as e:
+    print("ERR:" + str(e))')"
+case "$cv" in ERR:*前景沒有\ claude*) ;; *) fail "前景空的要 raise ValueError：$cv" ;; esac
 echo ok

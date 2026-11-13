@@ -12,7 +12,14 @@ printf 'schema: opsx\ncreated: 2026-11-05\nkind: bug-fix\n' > "$C/.openspec.yaml
 printf '## 1. x\n\n- [x] 1.1 a\n- [ ] 1.2 b\n' > "$C/tasks.md"
 S="$OPSX_STATE_DIR/settings/Acmecorp-AI-eval-core-autopilot.json"
 mkdir -p "$(dirname "$S")"; printf '{}' > "$S"
-mode() { printf '{"Acmecorp-AI/eval-core":{"mode":"%s"}}' "$1" > "$OPSX_STATE_DIR/dispatch.json"; }
+mode() { printf '{"Acmecorp-AI/eval-core":{"mode":"%s","pane":"w1:p1"}}' "$1" > "$OPSX_STATE_DIR/dispatch.json"; }
+# pane 的 process-info：前景 claude 帶了這張卡的 settings／沒帶
+SAMPLES="$OPSX_ROOT/tests/fakes/herdr-samples"
+PI_HAS="$FX/pi-has.json"; PI_LOST="$FX/pi-lost.json"; PI_TWO="$FX/pi-two.json"
+jq -c --arg s "$S" '(.result.process_info.foreground_processes[] | select(.argv0 == "claude") | .argv) |= ["claude", "--model", "m", "--settings", $s]' "$SAMPLES/process-info-claude.json" > "$PI_HAS"
+jq -c '(.result.process_info.foreground_processes[] | select(.argv0 == "claude") | .argv) |= ["claude", "--model", "m"]' "$SAMPLES/process-info-claude.json" > "$PI_LOST"
+jq -c '.result.process_info.foreground_processes += [.result.process_info.foreground_processes[1]]' "$PI_HAS" > "$PI_TWO"
+export OPSX_TEST_PROCESS_INFO="$PI_LOST"
 
 # 假 ps 與假 herdr（回報協調者的那行記在 $CL）
 mkdir -p "$FX/cbin"
@@ -43,6 +50,34 @@ done
 assert_no_file "$C/gates.md"
 assert_grep "參數遺失" "$CL"
 assert_file "$OPSX_STATE_DIR/args-lost/Acmecorp-AI-eval-core"   # drive 靠這個標記知道參數遺失
+
+# 父行程沒帶，但 pane 的 claude 有帶：不是遺失，照既有規則擋（還有沒勾的 task），不回報、不留標記
+# 驗收：openspec/changes/agent-20261113-1355/specs/args-lost-guard/spec.md（判遺失前用 pane 的 claude 確認）
+fresh; rm -rf "$OPSX_STATE_DIR/args-lost"
+out="$(OPSX_TEST_PROCESS_INFO="$PI_HAS" OPSX_FAKE_PS="claude --model m" stop)"
+blocked "$out" || fail "pane 的 claude 有帶要照舊擋：$out"
+printf '%s' "$out" | jq -r '.reason' | grep -q '/opsx-workflow:apply' || fail "要叫接 /apply：$out"
+case "$(cat "$CL")" in *"參數遺失"*) fail "pane 的 claude 有帶不回報參數遺失：$(cat "$CL")" ;; esac
+assert_no_file "$OPSX_STATE_DIR/args-lost/Acmecorp-AI-eval-core"
+assert_grep "^pane process-info --pane w1:p1$" "$CL"   # 問的是 dispatch.json 記的那個 pane
+
+# pane 讀不到：判不了，照擋並回報原因，不回報參數遺失、不留標記
+pane_unknown() { # <說明> → 呼叫前設好 env 或 dispatch.json
+  local out
+  out="$(OPSX_FAKE_PS="claude --model m" stop)"
+  blocked "$out" || fail "$1：要照舊擋：$out"
+  assert_grep "無法判斷啟動參數" "$CL"
+  case "$(cat "$CL")" in *"參數遺失"*) fail "$1：不回報參數遺失：$(cat "$CL")" ;; esac
+  assert_no_file "$OPSX_STATE_DIR/args-lost/Acmecorp-AI-eval-core"
+}
+fresh; OPSX_TEST_PROCESS_INFO_ERR=1 pane_unknown "herdr pane process-info 失敗"
+fresh; OPSX_TEST_PROCESS_INFO="$SAMPLES/process-info-shell.json" pane_unknown "pane 前景沒有 claude"
+assert_grep "前景沒有 claude" "$CL"
+fresh; OPSX_TEST_PROCESS_INFO="$PI_TWO" pane_unknown "pane 前景有兩個 claude"
+fresh; printf '{"Acmecorp-AI/eval-core":{"mode":"autopilot"}}' > "$OPSX_STATE_DIR/dispatch.json"
+pane_unknown "dispatch.json 的條目沒有 pane"
+assert_grep "pane" "$CL"
+mode autopilot
 
 # 重新啟動後有帶 settings：標記清掉
 fresh

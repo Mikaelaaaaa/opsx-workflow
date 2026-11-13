@@ -110,13 +110,21 @@ card_mode() { # <repo> <slug>：印 interactive、autopilot、drive、stopped，
 }
 # 這個 claude 有沒有帶 dispatch 給這張卡的 --settings（沒帶就寫不了主 repo 的 openspec/）。
 # 回 0：有帶，或不判定（mode 不是 autopilot / drive、沒 python、settings 檔不存在表示沒派過）；回 1：遺失；
-# 回 2：認不得（ps 失敗、不是 claude 的 cmdline），原因印在 stdout
+# 回 2：認不得（ps 失敗、不是 claude 的 cmdline、pane 讀不到），原因印在 stdout。
+# hook 的父行程不一定是 pane 裡那個 claude：父行程看起來遺失時，以 pane 前景的 claude 定案（協調者 check_args 也看它）
 args_lost_status() { # <repo> <slug> <mode>
-  local settings="$OPSX_STATE_DIR/settings/$1-$2-$3.json" line out rc=0
+  local settings="$OPSX_STATE_DIR/settings/$1-$2-$3.json" line out pane info rc=0
   case "$3" in autopilot|drive) ;; *) return 0 ;; esac
   [ -n "${OPSX_PY:-}" ] && [ -f "$settings" ] || return 0
   line="$(ps -o args= -p "$PPID" 2>&1)" || { printf 'ps 失敗：%s' "$line"; return 2; }
   out="$(printf '%s\n' "$line" | "$OPSX_PY" -I "$OPSX_ROOT/bin/lib/argslost.py" "$settings" 2>&1)" || rc=$?
+  if [ "$rc" -eq 1 ]; then
+    rc=0
+    pane="$(jq -r --arg k "$1/$2" '.[$k].pane // empty' "$OPSX_STATE_DIR/dispatch.json" 2>&1)" || { printf 'dispatch.json 讀不到 pane：%s' "$pane"; return 2; }
+    [ -n "$pane" ] || { printf 'dispatch.json 的 %s 沒有 pane，無法確認 pane 裡的 claude' "$1/$2"; return 2; }
+    info="$(herdr pane process-info --pane "$pane" 2>&1)" || { printf 'herdr pane process-info --pane %s 失敗：%s' "$pane" "$info"; return 2; }
+    out="$(printf '%s' "$info" | "$OPSX_PY" -I "$OPSX_ROOT/bin/lib/argslost.py" --process-info "$settings" 2>&1)" || rc=$?
+  fi
   [ "$rc" -le 1 ] || printf '%s' "$out"
   # 判出結果就留標記給 drive 看（drive 在 agent 外面，看不到 agent 的 argv）：遺失就建，有帶就刪，認不得不動
   local mark="$OPSX_STATE_DIR/args-lost/$1-$2"
