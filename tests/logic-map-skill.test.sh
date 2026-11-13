@@ -75,30 +75,70 @@ for k in '3 to 5 sentences' '2 to 4 sentences' 'a concrete example' '誰做什�
   assert_fixed "$k" "$BIZ"
 done
 assert_not_fixed '搬移' "$BIZ"
+# 業務段要等三部分寫完才寫：先寫的話寫出來的是預期，不是條件表上的條件
+assert_fixed 'For each feature, write the three parts below.' "$STEPS"
+assert_fixed 'write the business sections last' "$STEPS"
+assert_fixed 'The business sections never contradict a condition-table row, a note under the table, or a ⚠ item.' "$BIZ"
+assert_fixed 'When a ⚠ item changes what a person sees, say it in business words.' "$BIZ"
 
-# --- 兩段業務說明：三份範例都有，內文沒有識別字 ---
+# --- 範例的業務段跟自己的條件表一致（review 第 1 輪抓到的三處矛盾）---
+for k in '只要那個 repo 有用 opsx，閘門直接擋下' '如果 gate 裡出現「合併」，就算只是要把主線合進分支解衝突，協調者也不答' \
+  '單一偏好就超過預算時，一個偏好都不會用上' '信心分數有到門檻時助理會存下這個偏好'; do
+  assert_not_fixed "$k" "$EX"
+done
+for k in 'session 所在的 repo' '只看動作和問題' '之前沒記過' '優先度最高'; do assert_fixed "$k" "$EX"; done
+
+# --- 兩段業務說明：三份範例都有，句數對，內文沒有識別字 ---
 python3 -I - "$EX" > "$FX/ex-biz" <<'PY' || fail "examples.md 的業務說明：$(cat "$FX/ex-biz")"
 import re, sys
-text = open(sys.argv[1], encoding="utf-8").read()
-maps = re.split(r"^# 邏輯表：", text, flags=re.M)[1:]
-bad = []
-if len(maps) != 3:
-    bad.append("範例數 %d" % len(maps))
-for i, m in enumerate(maps, 1):
+
+IDENT = re.compile(r"[A-Za-z_]\w*\(|\b[a-z]+_[a-z_]+\b|\b\w+\.(?:py|sh|md|ts|js|json|yaml)\b|[\w./-]+\.\w+:\d+")
+
+
+def leaks(body, symbols):
+    """Identifiers in a business section: backticks, code-shaped words, or a symbol the same map backticks elsewhere."""
+    found = ["`"] if "`" in body else []
+    found += IDENT.findall(body)
+    found += [s for s in symbols if s in body]
+    return found
+
+
+def check_map(i, m):
+    bad = []
     head = re.split(r"^## 功能", m, maxsplit=1, flags=re.M)[0]
     top = re.search(r"^## 這支 PR 在做什麼（業務說明）\n(.*?)(?=^## |\Z)", head, flags=re.M | re.S)
     if not top:
         bad.append("範例 %d 沒有頂端業務說明" % i)
-    bodies = [top.group(1)] if top else []
+    bodies = [("頂端", top.group(1), 3, 5)] if top else []
     for f in re.split(r"^## 功能", m, flags=re.M)[1:]:
         subs = re.findall(r"^### (.+)$", f, flags=re.M)
         if not subs or subs[0] != "業務上在做什麼":
             bad.append("範例 %d 的功能第一小節是 %r" % (i, subs[:1]))
             continue
-        bodies.append(re.search(r"^### 業務上在做什麼\n(.*?)(?=^### |\Z)", f, flags=re.M | re.S).group(1))
-    for b in bodies:
-        if "`" in b or re.search(r"[\w./-]+:\d+", b):
-            bad.append("範例 %d 的業務段有識別字或路徑：%s" % (i, b.strip()[:60]))
+        bodies.append(("功能", re.search(r"^### 業務上在做什麼\n(.*?)(?=^### |\Z)", f, flags=re.M | re.S).group(1), 2, 4))
+    rest = re.sub(r"^### 業務上在做什麼\n.*?(?=^### |\Z)", "", m.split("\n## 功能", 1)[-1], flags=re.M | re.S)
+    symbols = {s.strip() for s in re.findall(r"`([^`]+)`", rest) if len(s.strip()) > 2}
+    for kind, b, lo, hi in bodies:
+        n = b.count("。")
+        if not lo <= n <= hi:
+            bad.append("範例 %d 的%s業務段 %d 句，要 %d 到 %d 句" % (i, kind, n, lo, hi))
+        hit = leaks(b, symbols)
+        if hit:
+            bad.append("範例 %d 的%s業務段有識別字：%s" % (i, kind, hit))
+    return bad
+
+
+# 檢查本身先過自驗：裸函式名、路徑、表裡的符號要擋，時間不能誤判
+assert leaks("系統呼叫 should_store(c, existing) 判斷。", set())
+assert leaks("讀 memory/policy.py 的設定。", set())
+assert leaks("分數到 c.confidence 就存。", {"c.confidence"})
+assert not leaks("當天 23:59 到期。", {"c.confidence"})
+
+text = open(sys.argv[1], encoding="utf-8").read()
+maps = re.split(r"^# 邏輯表：", text, flags=re.M)[1:]
+bad = [] if len(maps) == 3 else ["範例數 %d" % len(maps)]
+for i, m in enumerate(maps, 1):
+    bad += check_map(i, m)
 print("\n".join(bad))
 sys.exit(1 if bad else 0)
 PY

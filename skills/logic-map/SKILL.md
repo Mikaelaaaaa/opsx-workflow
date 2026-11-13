@@ -20,9 +20,9 @@ Do not read `openspec/`, `report.md`, PR descriptions, or commit messages. They 
 1. Run `cd <repo>` as its own Bash call; every git command below runs from there. List the changed files: `git diff --name-only <base>...<head>`. Skip tests, fixtures, docs, and lockfiles. Keep source, hooks, scripts, and skill files whose text is executed as instructions.
 2. For each kept file, read the diff, then read every changed function in full. A condition often sits outside the changed lines but decides whether they run.
 3. Group the changes into features. A feature is one behavior someone outside the code would notice ("the commit gate picks the repo from `git -C`"). One PR usually has one to three.
-4. For each feature, write its business section first (see The business summary), then the three parts below.
+4. For each feature, write the three parts below.
 5. Take the title from the branch name only. If `<head>` is a branch name, use it; otherwise run `git rev-parse --abbrev-ref HEAD`. Do not read the commit message or the PR description to name the map: a PR title is intent too.
-6. Once every feature is written, write the business summary at the top of the map, for the whole PR.
+6. Once every feature's three parts and ⚠ marks are written, write the business sections last: each feature's section, then the summary at the top. They still go first in the file. Written earlier, they describe what you expected the code to do, not the conditions you translated.
 7. Write `logic-map.md` to the output path. Print the path and the number of features, nodes, and ⚠ marks.
 
 ## The business summary
@@ -33,6 +33,7 @@ The map opens with `## 這支 PR 在做什麼（業務說明）`, and every feat
 - A feature's section is 2 to 4 sentences, in this order: 誰做什麼 → 系統怎麼判斷 → 對方看到什麼.
 - No function names, file paths, or FEEL: no backticks, no `path:line`. The three parts below carry the real names.
 - Write the example along a path the code really takes, with the condition the code really checks, not a softened version. A reader who stops here judges the PR by it.
+- The business sections never contradict a condition-table row, a note under the table, or a ⚠ item. When a ⚠ item changes what a person sees, say it in business words.
 - When the PR changes nothing a user can see, still write both sections: say 使用者看不到差別, then say in business words what internal behavior changed.
 
 ## The three parts of a feature
