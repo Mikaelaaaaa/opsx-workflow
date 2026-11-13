@@ -15,7 +15,7 @@ import subprocess
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from argslost import args_lost  # noqa: E402
+from argslost import args_lost, claude_argv  # noqa: E402
 import chain  # noqa: E402
 import gaterule  # noqa: E402
 import jsonfile  # noqa: E402
@@ -1125,25 +1125,6 @@ def status_line(lines, key, name):
                 return None
         return None
     return None
-
-
-def claude_argv(info):
-    """herdr pane process-info 的輸出裡，前景行程中唯一一筆 argv0 是 claude 的 argv。
-    不用 name 欄位：claude 那筆的 name 是版本號。認不得就 raise CoordinateError，點名欄位與值。"""
-    try:
-        procs = info["result"]["process_info"]["foreground_processes"]
-    except (KeyError, TypeError) as e:
-        raise CoordinateError("process-info 沒有 result.process_info.foreground_processes：%s" % json.dumps(info, ensure_ascii=False)[:200]) from e
-    if not isinstance(procs, list) or not all(isinstance(p, dict) for p in procs):
-        raise CoordinateError("foreground_processes 要是物件的 list：%s" % json.dumps(procs, ensure_ascii=False)[:200])
-    hits = [p for p in procs if p.get("argv0") == "claude"]
-    if not hits:
-        raise CoordinateError("前景沒有 claude（argv0 是 %s）" % "、".join(str(p.get("argv0")) for p in procs))
-    if len(hits) > 1:
-        raise CoordinateError("前景有 %d 個 claude，認不出是哪一個（pid %s）" % (len(hits), "、".join(str(p.get("pid")) for p in hits)))
-    if "argv" not in hits[0]:
-        raise CoordinateError("claude 那筆前景行程沒有 argv 欄位：%s" % json.dumps(hits[0], ensure_ascii=False)[:200])
-    return hits[0]["argv"]
 
 
 def parse_drive_pid(key, entry):

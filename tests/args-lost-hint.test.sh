@@ -21,10 +21,21 @@ start() { # <事件> → router 注入的文字。hook 是 bash -c 這個行程�
   local json; json="$(python3 -I -c 'import json,sys;print(json.dumps(dict(cwd=sys.argv[1],prompt="",hook_event_name=sys.argv[2])))' "$R" "$1")"
   PATH="$FX/psbin:$PATH" bash -c 'echo $$ > "$OPSX_FAKE_PS_PID"; printf "%s" "$0" | bash "$1"' "$json" "$H/openspec-router.sh" 2>/dev/null | jq -r '.hookSpecificOutput.additionalContext // ""'
 }
-mode() { mkdir -p "$OPSX_STATE_DIR"; printf '{"Acmecorp-AI/eval-core":{"mode":"%s"}}' "$1" > "$OPSX_STATE_DIR/dispatch.json"; }
+mode() { mkdir -p "$OPSX_STATE_DIR"; printf '{"Acmecorp-AI/eval-core":{"mode":"%s","pane":"w1:p1"}}' "$1" > "$OPSX_STATE_DIR/dispatch.json"; }
+# 父行程看起來遺失時 hook 問 pane：假 herdr 的 process-info 印 $OPSX_TEST_PROCESS_INFO
+printf '#!/usr/bin/env bash\nexec bash "%s/tests/fakes/herdr" "$@"\n' "$OPSX_ROOT" > "$FX/psbin/herdr"; chmod +x "$FX/psbin/herdr"
+PI_HAS="$FX/pi-has.json"; PI_LOST="$FX/pi-lost.json"
+jq -c --arg s "$S" '(.result.process_info.foreground_processes[] | select(.argv0 == "claude") | .argv) |= ["claude", "--model", "m", "--settings", $s]' "$OPSX_ROOT/tests/fakes/herdr-samples/process-info-claude.json" > "$PI_HAS"
+jq -c '(.result.process_info.foreground_processes[] | select(.argv0 == "claude") | .argv) |= ["claude", "--model", "m"]' "$OPSX_ROOT/tests/fakes/herdr-samples/process-info-claude.json" > "$PI_LOST"
+export OPSX_TEST_PROCESS_INFO="$PI_LOST" OPSX_FAKE_LOG="$FX/herdr.log"
 
 mode autopilot
 mkdir -p "$(dirname "$S")"; printf '{}' > "$S"
+
+# 父行程沒帶、pane 的 claude 有帶：不印參數遺失
+# 驗收：openspec/changes/agent-20261113-1355/specs/args-lost-guard/spec.md（SessionStart 提示同樣先看 pane）
+out="$(OPSX_TEST_PROCESS_INFO="$PI_HAS" OPSX_FAKE_PS="claude --model m" start SessionStart)"
+case "$out" in *"參數遺失"*|*"無法判斷"*) fail "pane 的 claude 有帶不該印參數遺失或無法判斷：$out" ;; esac
 
 out="$(OPSX_FAKE_PS="claude --model m --settings $S" start SessionStart)"
 case "$out" in *"參數遺失"*) fail "有帶 settings 不該印參數遺失：$out" ;; esac

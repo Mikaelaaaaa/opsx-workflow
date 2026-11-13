@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Stop：branch 對到的卡，agent 要停時依 stage_name 看下一站。要擋就 block 並說原因：
-#   有 tasks.md 且沒有會擋的 open gate 時主殼或子殼 spec 不合 Gherkin 寫法；apply 站 tasks.md 仍有 - [ ]（有會擋的 open gate 時這一項放行）、status.json tests 不是 green、有 commit 但 review 沒跑
+#   有等人答的 open gate（會擋的 gate 扣掉「卡在接」）時每一站都放行。其餘：
+#   有 tasks.md 且沒有會擋的 open gate 時主殼或子殼 spec 不合 Gherkin 寫法；apply 站 tasks.md 仍有 - [ ]、status.json tests 不是 green、有 commit 但 review 沒跑
 #   （report.md 有「確認: <sha>」且 HEAD 等於該 sha 時不算）、report.md 的「待修（範圍內）」還有項目；
 #   explore 站（explore.md 已存在、卡建立日期晚於 2026-11-10）## 步驟 不齊；
 #   grill / propose / pr / babysit 站該 invoke 下一站而沒有會擋的 open gate；
@@ -50,6 +51,8 @@ $missing
       return 0
     fi
   fi
+  # 等人答的 gate 開著就是合法停點，哪一站都一樣。hook 自己開的「卡在接」不算：它走下面原本的計數，答完那一輪照擋不計次要靠它
+  [ "$(st_open_gates_blocking "$d")" -gt "$(stuck_gates_open "$d")" ] && return 0
   if [ "$stage" = explore ]; then
     [ -f "$d/explore.md" ] || return 0
     missing="$(check_explore "$d")"
@@ -148,6 +151,12 @@ $missing
 titled_gate_open() { # <dir> <站>
   [ -f "$1/gates.md" ] || return 1
   awk -v t="## 卡在接 /$2" '/^## /{cur = ($0 == t || index($0, t " #") == 1)} cur && /^status:[ \t]*open[ \t]*$/{found = 1} END{exit !found}' "$1/gates.md"
+}
+
+# open 的「卡在接」gate 數（只寫在主殼的 gates.md）
+stuck_gates_open() { # <dir>
+  [ -f "$1/gates.md" ] || { printf 0; return; }
+  awk '/^## /{cur = ($0 ~ /^## 卡在接 \//)} cur && /^status:[ \t]*open[ \t]*$/{n++} END{print n + 0}' "$1/gates.md"
 }
 
 # 任何一站的「卡在接」gate 有沒有 open
