@@ -58,3 +58,51 @@ assert_fixed 'including checks that return early' "$SK"
 
 # --- frontmatter name 對得上目錄 ---
 assert_eq "$(sed -n '2p' "$SK")" 'name: logic-map'
+
+# --- 回答對既有邏輯表的提問：四部分、不代決、出處、跟產表模式分界 ---
+ANS="$FX/answer"
+section "Answering questions about a map" > "$ANS"
+[ -s "$ANS" ] || fail "section missing: Answering questions about a map"
+# 段落緊接在 Output template 前面（範本裡有 `## 功能 1`，所以不能看最後一個 `## `）
+assert_eq "$(grep '^## ' "$SK" | grep -B1 -x '## Output template' | head -1)" '## Answering questions about a map'
+# 第一個非標題的行寫分界，整句比對：只查關鍵字的話，把規則反寫也會過
+sed -n '2,$p' "$ANS" | grep -m1 . > "$FX/answer-first"
+assert_fixed 'When the prompt gives you a repo, a diff range, and an output path, you are producing a map: skip this section and follow Steps.' "$FX/answer-first"
+# 四條規則各自那一行要帶自己的表頭與整句：表頭也出現在範例裡，只查全段會讓刪掉的規則照樣過
+grep -m1 '^1\. ' "$ANS" > "$FX/rule1"; grep -m1 '^2\. ' "$ANS" > "$FX/rule2"
+grep -m1 '^3\. ' "$ANS" > "$FX/rule3"; grep -m1 '^4\. ' "$ANS" > "$FX/rule4"
+assert_fixed '| 程式名 | 誰設定 | 業務上是什麼 | 被擋時記成 |' "$FX/rule1"
+assert_fixed '| 你是誰 | 結果 |' "$FX/rule2"
+assert_fixed 'every gate' "$FX/rule2"
+assert_fixed 'product decision' "$FX/rule3"
+assert_fixed '2 to 4 options' "$FX/rule3"
+assert_fixed 'You never decide for the user. Do not mark any option as settled.' "$FX/rule3"
+assert_fixed 'path:line' "$FX/rule4"
+assert_fixed 'outside the table, on its own line' "$FX/rule4"
+assert_fixed '文件都沒寫，只有程式這樣做' "$FX/rule4"
+assert_fixed 'design.md mentions it, explore.md and grill.md do not' "$FX/rule4"
+# 規則句整句比對：這些字在規則 4 與範例裡也有，只查關鍵字的話刪掉規則句照樣過
+for k in 'Read the logic map, then the `design.md`, `explore.md`, and `grill.md` in the same change directory as the map. Do not read the code.' \
+  'When a file is missing, or none of them says something, such as who sets a value, write 「沒寫」 in the table cell. Do not guess.' \
+  'In this mode, answer in the reply. Do not write or change any file.' \
+  'In a dispatch worktree that is the main checkout, not the current directory' \
+  'does not find exactly one map, ask which card before reading any map.' \
+  'If the map the question is about no longer exists, say so, quote the `## 邏輯表` line of that card'"'"'s `report.md`, and stop' \
+  '繁體中文'; do
+  assert_fixed "$k" "$ANS"
+done
+assert_not_fixed 'before reading anything' "$ANS"
+assert_not_fixed 'A missing file says nothing' "$ANS"
+# 範例的出處有前提可循：說 explore.md 定的，前提就寫 explore.md 說了什麼
+assert_fixed 'explore.md says only pro can download' "$ANS"
+# 範例照自己的規則：不說讀了程式碼
+assert_not_fixed 'The code has' "$ANS"
+# 產表模式的禁讀句與理由句原文還在，Inputs 段首與開頭都說只管產表
+assert_fixed 'This section is for producing a map' "$INPUTS"
+assert_fixed 'When producing a map, you produce one document' "$SK"
+# description：產表才只讀程式碼；回答的觸發綁在邏輯表上，不跟 grill/design 的 D 編號撞
+sed -n '3p' "$SK" > "$FX/description"
+assert_fixed 'asks what a line' "$FX/description"
+assert_fixed 'When producing a map, it reads only the code' "$FX/description"
+assert_fixed '「邏輯表的 D3 是什麼」' "$FX/description"
+assert_not_fixed '「D3 是什麼」' "$FX/description"

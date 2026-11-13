@@ -14,8 +14,12 @@ for e in json.load(open(sys.argv[1]))["evals"]:
     print(e["id"], e["files"][0] if e["files"] else "-", e["prompt"].replace("\n", " "))' "$EV/evals.json" > "$FX/evals" || fail "evals.json 讀不了"
 assert_eq "$(awk '{print $1, $2}' "$FX/evals")" "1 fixtures/stop-gate-subagent
 2 fixtures/gate-title-slug
-3 fixtures/coordinate-usage-limit"
-assert_eq "$(grep -c 'HEAD^...HEAD' "$FX/evals")" 3 "每題的範圍都是 HEAD^...HEAD"
+3 fixtures/coordinate-usage-limit
+4 fixtures/question-reply"
+head -3 "$FX/evals" > "$FX/map-evals"
+assert_eq "$(grep -c 'HEAD^...HEAD' "$FX/map-evals")" 3 "產表題的範圍都是 HEAD^...HEAD"
+tail -1 "$FX/evals" > "$FX/question-eval"
+assert_not_grep 'HEAD^...HEAD' "$FX/question-eval"
 assert_not_grep '7b30eef\|24b2c40\|6312881\|8389924' "$FX/evals"
 assert_not_grep '絕對路徑' "$FX/evals"
 
@@ -58,6 +62,41 @@ base" "$name 只有 head、base 兩個 commit"
 check_fixture stop-gate-subagent 8389924
 check_fixture gate-title-slug 24b2c40
 check_fixture coordinate-usage-limit 6312881
+
+# --- 提問題的 fixture：不是 commit 快照，是一份邏輯表加它的 design 與討論紀錄 ---
+QR="$FX/fx-question-reply"
+assert_file "$FIXTURES/question-reply/setup.sh"
+bash "$FIXTURES/question-reply/setup.sh" "$QR" >/dev/null 2>&1 || fail "question-reply setup.sh 失敗"
+assert_eq "$(git -C "$QR" remote)" "" "question-reply 不該有 remote"
+assert_eq "$(git -C "$QR" status --short)" "" "question-reply 工作樹要乾淨"
+CH="$QR/openspec/changes/report-export"
+for f in logic-map.md design.md explore.md; do assert_file "$CH/$f"; done
+# 只有 design.md 寫了 fallback_role：回答要把它標成 agent 自己加的
+assert_grep 'fallback_role' "$CH/design.md"
+assert_grep 'fallback_role' "$CH/logic-map.md"
+assert_not_grep 'fallback_role' "$CH/explore.md"
+# design.md 不自報出處：要分出哪條是 agent 自己加的，只能拿 explore.md 來比
+assert_not_grep 'explore.md' "$CH/design.md"
+# 沒給 dest 就停，不在目前目錄建 repo
+assert_rc 1 bash "$FIXTURES/question-reply/setup.sh"
+# eval 4 的斷言真的帶著 spec 的 Scenario：只看 assertions（expected_output 不逐條評分），逐條對，
+# 刪掉或改弱任一條要被抓到；出處要能分出「有比對」與「全標 design.md」
+python3 -I -c '
+import json, sys
+e = next(x for x in json.load(open(sys.argv[1]))["evals"] if x["id"] == 4)
+print("\n".join(e["assertions"]))' "$EV/evals.json" > "$FX/eval4"
+assert_grep 'D1、D2、D3' "$FX/eval4"
+assert_grep '至少 2 個選項' "$FX/eval4"
+grep 'fallback_role' "$FX/eval4" > "$FX/eval4-design" || fail "eval 4 沒有 fallback_role 的斷言"
+assert_grep 'design.md' "$FX/eval4-design"
+assert_grep 'path:line' "$FX/eval4-design"
+grep 'admin' "$FX/eval4" | grep 'analyst' > "$FX/eval4-explore" || fail "eval 4 沒有 admin 與 analyst 名單的斷言"
+assert_grep 'explore.md' "$FX/eval4-explore"
+assert_grep 'path:line' "$FX/eval4-explore"
+assert_grep '表格' "$FX/eval4"
+assert_not_grep '讀了 explore.md' "$FX/eval4"
+git -C "$QR" ls-files > "$FX/question-reply.files"
+! grep -Eiq 'eval|test|judge|experiment|rubric|score|compare|benchmark|candidate|arena' "$FX/question-reply.files" || fail "question-reply 留著含評測字眼的路徑"
 
 # --- eval 1 改成 #88：答案講 Stop 閘門與 stage.sh，不再是 commit 閘門 ---
 python3 -I -c '
