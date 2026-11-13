@@ -4,7 +4,7 @@
 # 不是 opsx commit 的快照，所以不用 _lib.sh。fallback_role 只寫在 design.md 與邏輯表，explore.md 沒提。
 set -euo pipefail
 
-dest="$1"
+dest="${1:?dest}"
 mkdir -p "$dest"
 git -C "$dest" init -q -b feat/report-export/dev
 ch="$dest/openspec/changes/report-export"
@@ -48,7 +48,7 @@ EOF
 cat > "$ch/design.md" <<'EOF'
 ## Context
 
-報表頁要加「匯出 CSV」。explore.md 定了誰能匯出：只有 admin 與 analyst，停用的帳號不行，不能匯出別的部門的報表。
+報表頁要加「匯出 CSV」。只有 admin 與 analyst 能匯出。停用的帳號不能匯出。不能匯出別的部門的報表。
 
 ## Goals / Non-Goals
 
@@ -60,9 +60,9 @@ cat > "$ch/design.md" <<'EOF'
 
 ## Decisions
 
-三道檢查照 explore.md 的順序：先看 `user.disabled`，再看角色是否在 `EXPORT_ROLES = ["admin", "analyst"]`，最後比 `report.dept == user.dept`。擋下時記 `export_denied: <原因>`，原因是 `disabled`、`role`、`dept` 三者之一。
+三道檢查的順序：先看 `user.disabled`，再看角色是否在 `EXPORT_ROLES = ["admin", "analyst"]`，最後比 `report.dept == user.dept`。擋下時記 `export_denied: <原因>`，原因是 `disabled`、`role`、`dept` 三者之一。
 
-舊帳號有些角色欄位是空的。為了讓角色檢查不碰到空值，實作時在取角色的地方加 `fallback_role = "viewer"`：角色欄位空就當成 viewer。viewer 不在 `EXPORT_ROLES`，所以這些帳號會在角色檢查被擋下。這是實作選擇，explore.md 沒討論過。
+舊帳號有些角色欄位是空的。為了讓角色檢查不碰到空值，實作時在取角色的地方加 `fallback_role = "viewer"`：角色欄位空就當成 viewer。viewer 不在 `EXPORT_ROLES`，所以這些帳號會在角色檢查被擋下。
 
 `EXPORT_ROLES` 先寫成常數放在 `src/permissions.py`，不做成設定。
 

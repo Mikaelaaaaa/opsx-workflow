@@ -75,6 +75,18 @@ for f in logic-map.md design.md explore.md; do assert_file "$CH/$f"; done
 assert_grep 'fallback_role' "$CH/design.md"
 assert_grep 'fallback_role' "$CH/logic-map.md"
 assert_not_grep 'fallback_role' "$CH/explore.md"
+# design.md 不自報出處：要分出哪條是 agent 自己加的，只能拿 explore.md 來比
+assert_not_grep 'explore.md' "$CH/design.md"
+# 沒給 dest 就停，不在目前目錄建 repo
+assert_rc 1 bash "$FIXTURES/question-reply/setup.sh"
+# eval 4 的斷言真的帶著 spec 的三個 Scenario：刪掉或改弱斷言要被抓到
+python3 -I -c '
+import json, sys
+e = next(x for x in json.load(open(sys.argv[1]))["evals"] if x["id"] == 4)
+print("\n".join(e["assertions"])); print(e["expected_output"])' "$EV/evals.json" > "$FX/eval4"
+for k in 'D1、D2、D3' '至少 2 個選項' 'design.md' 'path:line' '表格' '讀了 explore.md'; do
+  assert_grep "$k" "$FX/eval4"
+done
 git -C "$QR" ls-files > "$FX/question-reply.files"
 ! grep -Eiq 'eval|test|judge|experiment|rubric|score|compare|benchmark|candidate|arena' "$FX/question-reply.files" || fail "question-reply 留著含評測字眼的路徑"
 

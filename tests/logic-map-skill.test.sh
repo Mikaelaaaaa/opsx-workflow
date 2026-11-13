@@ -65,18 +65,34 @@ section "Answering questions about a map" > "$ANS"
 [ -s "$ANS" ] || fail "section missing: Answering questions about a map"
 # 段落緊接在 Output template 前面（範本裡有 `## 功能 1`，所以不能看最後一個 `## `）
 assert_eq "$(grep '^## ' "$SK" | grep -B1 -x '## Output template' | head -1)" '## Answering questions about a map'
-# 第一個非標題的行寫分界：拿到三樣輸入時不用這一段
+# 第一個非標題的行寫分界，整句比對：只查關鍵字的話，把規則反寫也會過
 sed -n '2,$p' "$ANS" | grep -m1 . > "$FX/answer-first"
-assert_fixed 'repo, a diff range, and an output path' "$FX/answer-first"
-assert_fixed 'Steps' "$FX/answer-first"
-for k in '| 程式名 | 誰設定 | 業務上是什麼 | 被擋時記成 |' '| 你是誰 | 結果 |' \
-  'every gate' 'product decision' '2 to 4 options' 'never decide' \
-  'Do not read the code' '沒寫' 'outside the table, on its own line' \
-  'explore.md' 'grill.md' 'design.md' 'path:line' '繁體中文'; do
+assert_fixed 'When the prompt gives you a repo, a diff range, and an output path, you are producing a map: skip this section and follow Steps.' "$FX/answer-first"
+# 四條規則各自那一行要帶自己的表頭與整句：表頭也出現在範例裡，只查全段會讓刪掉的規則照樣過
+grep -m1 '^1\. ' "$ANS" > "$FX/rule1"; grep -m1 '^2\. ' "$ANS" > "$FX/rule2"
+grep -m1 '^3\. ' "$ANS" > "$FX/rule3"; grep -m1 '^4\. ' "$ANS" > "$FX/rule4"
+assert_fixed '| 程式名 | 誰設定 | 業務上是什麼 | 被擋時記成 |' "$FX/rule1"
+assert_fixed '| 你是誰 | 結果 |' "$FX/rule2"
+assert_fixed 'every gate' "$FX/rule2"
+assert_fixed 'product decision' "$FX/rule3"
+assert_fixed '2 to 4 options' "$FX/rule3"
+assert_fixed 'You never decide for the user. Do not mark any option as settled.' "$FX/rule3"
+assert_fixed 'path:line' "$FX/rule4"
+assert_fixed 'outside the table, on its own line' "$FX/rule4"
+assert_fixed '文件都沒寫，只有程式這樣做' "$FX/rule4"
+for k in 'Do not read the code' '沒寫' 'explore.md' 'grill.md' 'design.md' '繁體中文' \
+  'Answer in the reply. Do not write or change any file.' \
+  'A missing file says nothing' 'ask which card'; do
   assert_fixed "$k" "$ANS"
 done
-# 產表模式的禁讀句與理由句原文還在，Inputs 段首說它只管產表
+# 範例照自己的規則：不說讀了程式碼
+assert_not_fixed 'The code has' "$ANS"
+# 產表模式的禁讀句與理由句原文還在，Inputs 段首與開頭都說只管產表
 assert_fixed 'This section is for producing a map' "$INPUTS"
-# description 有回答模式的觸發
+assert_fixed 'When producing a map, you produce one document' "$SK"
+# description：產表才只讀程式碼；回答的觸發綁在邏輯表上，不跟 grill/design 的 D 編號撞
 sed -n '3p' "$SK" > "$FX/description"
 assert_fixed 'asks what a line' "$FX/description"
+assert_fixed 'When producing a map, it reads only the code' "$FX/description"
+assert_fixed '「邏輯表的 D3 是什麼」' "$FX/description"
+assert_not_fixed '「D3 是什麼」' "$FX/description"
