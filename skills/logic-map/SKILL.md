@@ -84,20 +84,20 @@ Do not mark style. Do not invent a problem to fill the list. An empty list is a 
 
 When the prompt gives you a repo, a diff range, and an output path, you are producing a map: skip this section and follow Steps. Use this section when the user quotes a D node, a condition-table row, or a ⚠ item of an existing map and asks what it means.
 
-Answer in the reply. Do not write or change any file. The map is the version the user judges, and `openspec/` is not in git, so an overwritten map is lost.
+In this mode, answer in the reply. Do not write or change any file. The map is the version the user judges, and `openspec/` is not in git, so an overwritten map is lost.
 
-If the question names no map path or card and more than one card has a `logic-map.md`, ask which card before reading anything.
+Find maps at `openspec/changes/*/logic-map.md` in the checkout that holds `openspec/`. In a dispatch worktree that is the main checkout, not the current directory; `git worktree list` prints it first. If the question names no map path or card and the search does not find exactly one map, ask which card before reading any map. If the map the question is about no longer exists, say so, quote the `## 邏輯表` line of that card's `report.md`, and stop. Do not answer from `design.md` or the code.
 
-Read the logic map, then the `design.md`, `explore.md`, and `grill.md` in the same change directory as the map. A missing file says nothing: write 「沒寫」 for anything only it could answer. Do not read the code. The map is the version the user judges by, and conditions re-derived from code make a second account that can disagree with it. When none of these files says something, such as who sets a value, write 「沒寫」. Do not guess.
+Read the logic map, then the `design.md`, `explore.md`, and `grill.md` in the same change directory as the map. Do not read the code. The map is the version the user judges by, and conditions re-derived from code make a second account that can disagree with it. When a file is missing, or none of them says something, such as who sets a value, write 「沒寫」 in the table cell. Do not guess.
 
 Answer in 繁體中文, in four parts, in this order:
 
 1. A table `| 程式名 | 誰設定 | 業務上是什麼 | 被擋時記成 |`. Add one row per function or constant the question touches. 誰設定 says who controls the value. 業務上是什麼 says what it means for a person. 被擋時記成 is what the system records or shows when it blocks.
 2. One concrete setting, such as what an admin configured, and a table `| 你是誰 | 結果 |`. Give every gate on the path at least one row that reaches it.
 3. Every ⚠ item of the map, numbered. Mark each one as the user's product decision and give 2 to 4 options. You never decide for the user. Do not mark any option as settled.
-4. Sources as `path:line`. For each behavior, give one of three sources: the discussion record (`explore.md`, `grill.md`) decided it; the agent added it on its own in `design.md`; or, when only the map shows it and neither explore.md, grill.md nor design.md mentions it, write 「文件都沒寫，只有程式這樣做」 and cite the map's 位置 cell. Put each path outside the table, on its own line. A terminal does not make a path inside a table cell clickable.
+4. Sources as `path:line`. For each behavior, give one of three sources: the discussion record (`explore.md`, `grill.md`) decided it; the agent added it on its own in `design.md` (design.md mentions it, explore.md and grill.md do not); or, when only the map shows it and neither explore.md, grill.md nor design.md mentions it, write 「文件都沒寫，只有程式這樣做」 and cite the map's 位置 cell. Put each path outside the table, on its own line. A terminal does not make a path inside a table cell clickable.
 
-**Example.** The map shows 下載檢查 with D1 帳號鎖定?, D2 等級在 `PLAN_TIERS`?, D3 用量 < `MAX_JOBS`?. Its 條件表 has `PLAN_TIERS = ["pro"]`, and design.md says an admin sets `MAX_JOBS`. The concrete setting: the admin set `MAX_JOBS` to 5.
+**Example.** The map shows 下載檢查 with D1 帳號鎖定?, D2 等級在 `PLAN_TIERS`?, D3 用量 < `MAX_JOBS`?. Its 條件表 has `PLAN_TIERS = ["pro"]`, explore.md says only pro can download, and design.md says an admin sets `MAX_JOBS`. The concrete setting: the admin set `MAX_JOBS` to 5.
 
 | 程式名 | 誰設定 | 業務上是什麼 | 被擋時記成 |
 |---|---|---|---|

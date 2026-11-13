@@ -80,11 +80,21 @@ assert_fixed 'You never decide for the user. Do not mark any option as settled.'
 assert_fixed 'path:line' "$FX/rule4"
 assert_fixed 'outside the table, on its own line' "$FX/rule4"
 assert_fixed '文件都沒寫，只有程式這樣做' "$FX/rule4"
-for k in 'Do not read the code' '沒寫' 'explore.md' 'grill.md' 'design.md' '繁體中文' \
-  'Answer in the reply. Do not write or change any file.' \
-  'A missing file says nothing' 'ask which card'; do
+assert_fixed 'design.md mentions it, explore.md and grill.md do not' "$FX/rule4"
+# 規則句整句比對：這些字在規則 4 與範例裡也有，只查關鍵字的話刪掉規則句照樣過
+for k in 'Read the logic map, then the `design.md`, `explore.md`, and `grill.md` in the same change directory as the map. Do not read the code.' \
+  'When a file is missing, or none of them says something, such as who sets a value, write 「沒寫」 in the table cell. Do not guess.' \
+  'In this mode, answer in the reply. Do not write or change any file.' \
+  'In a dispatch worktree that is the main checkout, not the current directory' \
+  'does not find exactly one map, ask which card before reading any map.' \
+  'If the map the question is about no longer exists, say so, quote the `## 邏輯表` line of that card'"'"'s `report.md`, and stop' \
+  '繁體中文'; do
   assert_fixed "$k" "$ANS"
 done
+assert_not_fixed 'before reading anything' "$ANS"
+assert_not_fixed 'A missing file says nothing' "$ANS"
+# 範例的出處有前提可循：說 explore.md 定的，前提就寫 explore.md 說了什麼
+assert_fixed 'explore.md says only pro can download' "$ANS"
 # 範例照自己的規則：不說讀了程式碼
 assert_not_fixed 'The code has' "$ANS"
 # 產表模式的禁讀句與理由句原文還在，Inputs 段首與開頭都說只管產表
