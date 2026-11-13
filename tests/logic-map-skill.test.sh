@@ -76,23 +76,48 @@ for k in '3 to 5 sentences' '2 to 4 sentences' 'a concrete example' '誰做什�
 done
 assert_not_fixed '搬移' "$BIZ"
 # 業務段要等三部分寫完才寫：先寫的話寫出來的是預期，不是條件表上的條件
-assert_fixed 'For each feature, write the three parts below.' "$STEPS"
-assert_fixed 'write the business sections last' "$STEPS"
+STEP4='4. For each feature, write the three parts below.'
+STEP6="6. Once every feature's three parts and ⚠ marks are written, write the business sections last: each feature's section, then the summary at the top."
+grep -nF -- "$STEP4" "$STEPS" | cut -d: -f1 > "$FX/step4"; grep -nF -- "$STEP6" "$STEPS" | cut -d: -f1 > "$FX/step6"
+[ -s "$FX/step4" ] || fail "Steps 沒有整句：$STEP4"
+[ -s "$FX/step6" ] || fail "Steps 沒有整句：$STEP6"
+[ "$(cat "$FX/step6")" -gt "$(cat "$FX/step4")" ] || fail "寫業務段的步驟要排在寫三部分之後"
 assert_fixed 'The business sections never contradict a condition-table row, a note under the table, or a ⚠ item.' "$BIZ"
-assert_fixed 'When a ⚠ item changes what a person sees, say it in business words.' "$BIZ"
+# 句數上限照派工指示；「每條 ⚠ 都寫成業務話」會撐破上限，不收
+assert_not_fixed 'say it in business words' "$BIZ"
 
-# --- 範例的業務段跟自己的條件表一致（review 第 1 輪抓到的三處矛盾）---
+# --- 範例的業務段跟自己的條件表一致：舊的矛盾句不在 ---
 for k in '只要那個 repo 有用 opsx，閘門直接擋下' '如果 gate 裡出現「合併」，就算只是要把主線合進分支解衝突，協調者也不答' \
-  '單一偏好就超過預算時，一個偏好都不會用上' '信心分數有到門檻時助理會存下這個偏好'; do
+  '單一偏好就超過預算時，一個偏好都不會用上' '信心分數有到門檻時助理會存下這個偏好' '實際寫進'; do
   assert_not_fixed "$k" "$EX"
 done
-for k in 'session 所在的 repo' '只看動作和問題' '之前沒記過' '優先度最高'; do assert_fixed "$k" "$EX"; done
 
-# --- 兩段業務說明：三份範例都有，句數對，內文沒有識別字 ---
+# --- 兩段業務說明：三份範例都有，句數對，關鍵條件釘在各自那段，內文沒有識別字 ---
 python3 -I - "$EX" > "$FX/ex-biz" <<'PY' || fail "examples.md 的業務說明：$(cat "$FX/ex-biz")"
 import re, sys
 
-IDENT = re.compile(r"[A-Za-z_]\w*\(|\b[a-z]+_[a-z_]+\b|\b\w+\.(?:py|sh|md|ts|js|json|yaml)\b|[\w./-]+\.\w+:\d+")
+IDENT = re.compile(r"[A-Za-z_]\w*\(|(?<![A-Za-z0-9_])[a-z]+_[a-z_]+(?![A-Za-z0-9_])|\b\w+\.(?:py|sh|md|ts|js|json|yaml)\b|[\w./-]+\.\w+:\d+")
+FENCE = re.compile(r"```.*?```", re.S)
+# 每段業務說明要寫到的條件，對應同一份範例的表：段落以 (範例, "頂端") 或 (範例, 功能編號) 標
+PINS = {
+    (1, "頂端"): ["session 所在的 repo", "沒用 opsx 就放行"],
+    (1, 1): ["沒用 opsx", "不需要卡的標記", "session 所在的 repo"],
+    (2, "頂端"): ["只看動作和問題", "沒有在等別張卡"],
+    (2, 1): ["只看動作和問題", "其他 gate 看全文"],
+    (3, "頂端"): ["之前沒記過", "今天"],
+    (3, 1): ["其他情況先問使用者"],
+    (3, 2): ["優先度最高", "排到最後才被拿掉"],
+}
+# 每份範例的條件表裡一定抽得到的符號：抽不到代表反引號配對又壞了
+KNOWN = {1: "card_dir(branch(目標repo)) != null", 2: 'gate.needs = "run"', 3: "c.confidence >= 0.7"}
+
+
+def table_symbols(text):
+    """Backticked code-shaped spans, paired per line with fenced blocks removed."""
+    out = set()
+    for line in FENCE.sub("", text).splitlines():
+        out |= {s.strip() for s in re.findall(r"`([^`]+)`", line) if len(s.strip()) > 2 and re.search(r"[A-Za-z_]", s)}
+    return out
 
 
 def leaks(body, symbols):
@@ -110,29 +135,36 @@ def check_map(i, m):
     if not top:
         bad.append("範例 %d 沒有頂端業務說明" % i)
     bodies = [("頂端", top.group(1), 3, 5)] if top else []
-    for f in re.split(r"^## 功能", m, flags=re.M)[1:]:
+    for n_feat, f in enumerate(re.split(r"^## 功能", m, flags=re.M)[1:], 1):
         subs = re.findall(r"^### (.+)$", f, flags=re.M)
         if not subs or subs[0] != "業務上在做什麼":
             bad.append("範例 %d 的功能第一小節是 %r" % (i, subs[:1]))
             continue
-        bodies.append(("功能", re.search(r"^### 業務上在做什麼\n(.*?)(?=^### |\Z)", f, flags=re.M | re.S).group(1), 2, 4))
+        bodies.append((n_feat, re.search(r"^### 業務上在做什麼\n(.*?)(?=^### |\Z)", f, flags=re.M | re.S).group(1), 2, 4))
     rest = re.sub(r"^### 業務上在做什麼\n.*?(?=^### |\Z)", "", m.split("\n## 功能", 1)[-1], flags=re.M | re.S)
-    symbols = {s.strip() for s in re.findall(r"`([^`]+)`", rest) if len(s.strip()) > 2}
-    for kind, b, lo, hi in bodies:
+    symbols = table_symbols(rest)
+    if KNOWN[i] not in symbols:
+        bad.append("範例 %d 抽不到條件表符號 %r" % (i, KNOWN[i]))
+    for key, b, lo, hi in bodies:
         n = b.count("。")
         if not lo <= n <= hi:
-            bad.append("範例 %d 的%s業務段 %d 句，要 %d 到 %d 句" % (i, kind, n, lo, hi))
+            bad.append("範例 %d 的%s業務段 %d 句，要 %d 到 %d 句" % (i, key, n, lo, hi))
         hit = leaks(b, symbols)
         if hit:
-            bad.append("範例 %d 的%s業務段有識別字：%s" % (i, kind, hit))
+            bad.append("範例 %d 的%s業務段有識別字：%s" % (i, key, hit))
+        missing = [p for p in PINS[(i, key)] if p not in b]
+        if missing:
+            bad.append("範例 %d 的%s業務段少了條件：%s" % (i, key, missing))
     return bad
 
 
-# 檢查本身先過自驗：裸函式名、路徑、表裡的符號要擋，時間不能誤判
+# 檢查本身先過自驗：裸函式名（含緊接中文）、路徑、表裡的符號要擋，時間不能誤判，fence 不打亂配對
 assert leaks("系統呼叫 should_store(c, existing) 判斷。", set())
+assert leaks("系統呼叫should_store判斷。", set())
 assert leaks("讀 memory/policy.py 的設定。", set())
 assert leaks("分數到 c.confidence 就存。", {"c.confidence"})
 assert not leaks("當天 23:59 到期。", {"c.confidence"})
+assert table_symbols("```\na ─→ b\n```\n| D1 | `x.y >= 1` |") == {"x.y >= 1"}
 
 text = open(sys.argv[1], encoding="utf-8").read()
 maps = re.split(r"^# 邏輯表：", text, flags=re.M)[1:]

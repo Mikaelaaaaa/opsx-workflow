@@ -11,12 +11,12 @@ Three complete maps. The first two are real opsx code at `main` 6312881. The thi
 範圍：`58f3045...7b30eef` · 讀的檔：1 個 · 功能：1 個
 
 ## 這支 PR 在做什麼（業務說明）
-這支 PR 影響在 opsx 裡做卡、要 commit 的使用者或 agent。以前 commit 閘門拿 session 所在的 repo 找卡，現在改拿 commit 實際寫進的 repo。例：session 開在主目錄，指令先切到卡的 worktree 再 commit，閘門就用那個 worktree 的分支找卡，看卡上有沒有勾掉的 task。目錄寫成變數或家目錄符號這類讀不出的寫法時，閘門算不出目標，改看 session 所在的 repo：那個 repo 有用 opsx 就擋下，請對方改寫成實際路徑；沒用 opsx 就放行。
+這支 PR 影響在 opsx 裡做卡、要 commit 的使用者或 agent。以前 commit 閘門拿 session 所在的 repo 找卡，現在改從指令裡切換的目錄算出 commit 寫進的 repo。例：session 開在主目錄，指令先切到卡的 worktree 再 commit，閘門就用那個 worktree 的分支找卡，看卡上有沒有勾掉的 task。目錄寫成變數或家目錄符號這類讀不出的寫法時，閘門算不出目標，改看 session 所在的 repo：那個 repo 有用 opsx 就擋下，請對方改寫成實際路徑；沒用 opsx 就放行。
 
 ## 功能 1：commit 閘門用 commit 實際作用的 repo 來對卡
 
 ### 業務上在做什麼
-agent 在卡的 worktree 下 commit 指令。閘門先從指令算出 commit 實際寫進哪個 repo，再用那個 repo 的分支找卡，找不到卡或卡上沒有勾掉的 task 就擋。agent 看到被擋的原因與該怎麼改；目錄讀不出時，閘門改看 session 所在的 repo，有用 opsx 才擋，並請對方改用實際路徑。
+agent 在卡的 worktree 下 commit 指令。閘門先從指令算出 commit 寫進哪個 repo；那個 repo 沒用 opsx，或 commit 訊息帶了不需要卡的標記，就放行，否則用它的分支找卡，找不到卡或卡上沒有勾掉的 task 就擋。agent 看到被擋的原因與該怎麼改；目錄讀不出時，閘門改看 session 所在的 repo，有用 opsx 才擋，並請對方改用實際路徑。
 
 ### 做了什麼
 1. 從 Bash 指令取出骨架，不是 `git commit` 就放行（`hooks/openspec-commit-gate.sh`）。
@@ -73,7 +73,7 @@ D2 只取「`git commit` 前面最後一個 `cd`」：`cd a && cd b && git commi
 ## 功能 1：協調者決定代答、轉人，還是停 pane
 
 ### 業務上在做什麼
-agent 開了 gate 等回覆。協調者由上往下比對九條規則，第一條成立就照它做，後面不看；等待授權的 gate 只看動作和問題有沒有「合併」或 merge，其他 gate 看全文。agent 收到代答就繼續，或被停住等別張卡；協調者不答時，使用者收到桌面通知，要去看板回答。
+agent 開了 gate 等回覆。協調者由上往下比對規則，第一條成立就照它做，後面不看；等待授權的 gate 只看動作和問題有沒有「合併」或 merge，其他 gate 看全文。agent 收到代答就繼續，或被停住等別張卡；協調者不答時，使用者收到桌面通知，要去看板回答。
 
 ### 做了什麼
 1. 讀這張卡第一個 open gate（`bin/lib/coordinate.py` `handle_gate`）。

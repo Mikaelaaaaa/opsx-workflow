@@ -33,7 +33,7 @@ The map opens with `## 這支 PR 在做什麼（業務說明）`, and every feat
 - A feature's section is 2 to 4 sentences, in this order: 誰做什麼 → 系統怎麼判斷 → 對方看到什麼.
 - No function names, file paths, or FEEL: no backticks, no `path:line`. The three parts below carry the real names.
 - Write the example along a path the code really takes, with the condition the code really checks, not a softened version. A reader who stops here judges the PR by it.
-- The business sections never contradict a condition-table row, a note under the table, or a ⚠ item. When a ⚠ item changes what a person sees, say it in business words.
+- The business sections never contradict a condition-table row, a note under the table, or a ⚠ item.
 - When the PR changes nothing a user can see, still write both sections: say 使用者看不到差別, then say in business words what internal behavior changed.
 
 ## The three parts of a feature
