@@ -51,7 +51,8 @@ table() { # <表格檔>
 
 # --- 動詞對應的 herdr argv（runtime-sh spec 兩張 Examples 表，不含送 /exit） ---
 cat > "$FX/verbs" <<'EOF'
-agent prompt card-a hi|runtime_prompt r/card-a hi|rt.prompt("hi", card="r/card-a", dispatch=D)
+agent prompt card-a hi|runtime_prompt r/card-a hi nowait|rt.prompt("hi", "nowait", card="r/card-a", dispatch=D)
+agent prompt card-a hi --wait|runtime_prompt r/card-a hi wait|rt.prompt("hi", "wait", card="r/card-a", dispatch=D)
 pane read w1:p1|runtime_read r/card-a|rt.read(card="r/card-a", dispatch=D)
 agent read w1:p1 --lines 10 --format text|runtime_read r/card-a --lines 10|rt.read(card="r/card-a", dispatch=D, lines=10)
 agent get card-a|runtime_get r/card-a|rt.get(card="r/card-a", dispatch=D)
@@ -69,33 +70,34 @@ table "$FX/verbs"
 
 # --- 查表規則跟 runtime_target 相同：herdr_name、@feature、沒有條目、--agent 不讀 dispatch.json ---
 cat > "$FX/lookup" <<'EOF'
-agent prompt card-b hi|runtime_prompt r/card-b hi|rt.prompt("hi", card="r/card-b", dispatch=D)
+agent prompt card-b hi|runtime_prompt r/card-b hi nowait|rt.prompt("hi", "nowait", card="r/card-b", dispatch=D)
 pane read w1:p2|runtime_read r/card-b|rt.read(card="r/card-b", dispatch=D)
-agent prompt feat-x hi|runtime_prompt r/child hi|rt.prompt("hi", card="r/child", dispatch=D)
+agent prompt feat-x hi|runtime_prompt r/child hi nowait|rt.prompt("hi", "nowait", card="r/child", dispatch=D)
 pane read w1:p3|runtime_read r/child|rt.read(card="r/child", dispatch=D)
-agent prompt feat-x hi|runtime_prompt r/@feat-x hi|rt.prompt("hi", card="r/@feat-x", dispatch=D)
+agent prompt feat-x hi|runtime_prompt r/@feat-x hi nowait|rt.prompt("hi", "nowait", card="r/@feat-x", dispatch=D)
 pane read w1:p3|runtime_read r/@feat-x|rt.read(card="r/@feat-x", dispatch=D)
-agent prompt other hi|runtime_prompt r/renamed hi|rt.prompt("hi", card="r/renamed", dispatch=D)
+agent prompt other hi|runtime_prompt r/renamed hi nowait|rt.prompt("hi", "nowait", card="r/renamed", dispatch=D)
 pane read w1:p4|runtime_read r/renamed|rt.read(card="r/renamed", dispatch=D)
-agent prompt fresh hi|runtime_prompt r/fresh hi|rt.prompt("hi", card="r/fresh", dispatch=D)
-agent prompt opsx-coordinator hi|runtime_prompt --agent opsx-coordinator hi|rt.prompt("hi", agent="opsx-coordinator")
+agent prompt fresh hi|runtime_prompt r/fresh hi nowait|rt.prompt("hi", "nowait", card="r/fresh", dispatch=D)
+agent prompt fresh hi --wait|runtime_prompt r/fresh hi wait|rt.prompt("hi", "wait", card="r/fresh", dispatch=D)
+agent prompt opsx-coordinator hi|runtime_prompt --agent opsx-coordinator hi nowait|rt.prompt("hi", "nowait", agent="opsx-coordinator")
 agent get opsx-coordinator|runtime_get --agent opsx-coordinator|rt.get(agent="opsx-coordinator")
 EOF
 table "$FX/lookup"
-reset; runtime_prompt --agent opsx-coordinator "[x] 停住" >/dev/null || fail "含空白的一行 bash rc"
+reset; runtime_prompt --agent opsx-coordinator "[x] 停住" nowait >/dev/null || fail "含空白的一行 bash rc"
 assert_eq "$(argv_calls)" $'agent\x1fprompt\x1fopsx-coordinator\x1f[x] 停住' "bash：含空白的一行原樣是一個參數"
-reset; assert_eq "$(py 'rt.prompt("[x] 停住", agent="opsx-coordinator")')" $'agent\x1fprompt\x1fopsx-coordinator\x1f[x] 停住' "python：含空白的一行原樣是一個參數"
+reset; assert_eq "$(py 'rt.prompt("[x] 停住", "nowait", agent="opsx-coordinator")')" $'agent\x1fprompt\x1fopsx-coordinator\x1f[x] 停住' "python：含空白的一行原樣是一個參數"
 reset; assert_eq "$(py 'rt.notify("[r/x] 併入", "a b 併進 x")')" $'notification\x1fshow\x1f[r/x] 併入\x1f--body\x1fa b 併進 x' "python：通知的標題與內文各是一個參數"
 
 # --agent 不讀 dispatch.json：檔案是壞的 JSON 也照樣產生 argv
 cp "$J" "$J.good"; printf '{"opsx-coordinator": {"herdr_name": "zzz"}' > "$J"
-reset; assert_eq "$(py 'rt.prompt("hi", agent="opsx-coordinator", dispatch=D)')" $'agent\x1fprompt\x1fopsx-coordinator\x1fhi' "python：--agent 在壞的 dispatch.json 下照樣產生 argv"
+reset; assert_eq "$(py 'rt.prompt("hi", "nowait", agent="opsx-coordinator", dispatch=D)')" $'agent\x1fprompt\x1fopsx-coordinator\x1fhi' "python：--agent 在壞的 dispatch.json 下照樣產生 argv"
 mv "$J.good" "$J"
 
 # dispatch.json 不存在：名字照樣推得出來，要 pane 或 tab 的動詞 raise
 mv "$J" "$J.bak"
 cat > "$FX/nofile" <<'EOF'
-agent prompt feat-y hi|runtime_prompt r/@feat-y hi|rt.prompt("hi", card="r/@feat-y", dispatch=D)
+agent prompt feat-y hi|runtime_prompt r/@feat-y hi nowait|rt.prompt("hi", "nowait", card="r/@feat-y", dispatch=D)
 EOF
 table "$FX/nofile"
 reset; err="$(py 'rt.close("tab", card="r/card-a", dispatch=D)' 2>&1 >/dev/null)" && fail "沒有 dispatch.json 時關 tab 要 raise"
@@ -112,11 +114,17 @@ reset
 raises 'MissingHandle: runtime: r/fresh' 'rt.read(card="r/fresh", dispatch=D)'
 raises 'MissingHandle: runtime: r/card-b' 'rt.close("tab", card="r/card-b", dispatch=D)'
 raises 'MissingHandle: runtime: opsx-coordinator' 'rt.read(agent="opsx-coordinator")'
-raises 'ValueError' 'rt.prompt("hi", card="card-a", dispatch=D)'
-raises 'ValueError' 'rt.prompt("hi", card="r/card-a", agent="x", dispatch=D)'
-raises 'ValueError' 'rt.prompt("hi")'
-raises 'ValueError' 'rt.prompt("hi", agent="")'
-raises 'ValueError' 'rt.prompt("hi", card="r/card-a")'
+raises 'ValueError' 'rt.prompt("hi", "nowait", card="card-a", dispatch=D)'
+raises 'ValueError' 'rt.prompt("hi", "nowait", card="r/card-a", agent="x", dispatch=D)'
+raises 'ValueError' 'rt.prompt("hi", "nowait")'
+raises 'ValueError' 'rt.prompt("hi", "nowait", agent="")'
+raises 'ValueError' 'rt.prompt("hi", "nowait", card="r/card-a")'
+# 模式不對就不送
+raises 'TypeError' 'rt.prompt("hi", card="r/card-a", dispatch=D)'
+raises "ValueError: runtime: r/card-a 的模式只有 wait、nowait，收到：'yes'" 'rt.prompt("hi", "yes", card="r/card-a", dispatch=D)'
+raises "收到：'--wait'" 'rt.prompt("hi", "--wait", card="r/card-a", dispatch=D)'
+raises "收到：'Wait'" 'rt.prompt("hi", "Wait", card="r/card-a", dispatch=D)'
+raises "ValueError: runtime: r/card-a 的模式只有 wait、nowait，收到：''" 'rt.prompt("hi", "", card="r/card-a", dispatch=D)'
 raises 'ValueError: runtime: r/card-a' 'rt.close("exit", card="r/card-a", dispatch=D)'
 assert_eq "$(calls)" "" "raise 的動詞不叫 herdr"
 echo ok

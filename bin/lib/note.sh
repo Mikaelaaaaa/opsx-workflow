@@ -68,9 +68,9 @@ opsx_note() {
   note_append "$d" "$note" || die "note: 寫不進 $d/inbox.md"
 
   if note_dispatched "$repo" "$slug"; then
-    local route name via; route="$(card_route "$repo" "$slug")" || die "讀不懂 dispatch.json，不知道話要送給誰"; name="${route%%$'\t'*}"; via="${route#*$'\t'}"
+    local route via; route="$(card_route "$repo" "$slug")" || die "讀不懂 dispatch.json，不知道話要送給誰"; via="${route#*$'\t'}"
     # 不帶原文：router 會在 prompt 裡比對 tdd、audit、/pause 這類關鍵詞，指示原文會把這一句導到別的流程
-    herdr agent prompt "$name" "${via:+[$slug] }有新的派工指示，Read inbox.md 的 ## 派工指示" >/dev/null \
+    runtime_prompt "$repo/$slug" "${via:+[$slug] }有新的派工指示，Read inbox.md 的 ## 派工指示" nowait >/dev/null \
       || die "note: inbox.md 已寫，但 herdr agent prompt 失敗；agent 下一句 prompt 會從 router 看到有指示"
     say "note: $slug 的派工指示已寫進 inbox.md，已送進 agent"
   else

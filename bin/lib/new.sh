@@ -60,7 +60,7 @@ merge_into() { # <top> <目標> <基本 id> <source> <kind> <evidence> <type> <�
   own="$(st_card_dir "$top" "${source#agent:}")"
   [ ! -d "$own" ] || log_row "$own" 系統 已決定 "併進 ${tgt}（id ${id}）" "$source"
   if [ -n "${HERDR_ENV:-}" ]; then
-    err="$(herdr notification show "[${top##*/}/${tgt}] 併入" --body "${text} 併進 ${tgt}" 2>&1 >/dev/null)" || warn "new: 已併進 ${tgt}，但 herdr 通知送不出去：$err"
+    err="$(runtime_notify "[${top##*/}/${tgt}] 併入" "${text} 併進 ${tgt}" 2>&1 >/dev/null)" || warn "new: 已併進 ${tgt}，但 herdr 通知送不出去：$err"
   fi
   printf '併進 %s（id %s）\n' "$tgt" "$id" >&2
   printf '%s\n' "$tgt"

@@ -85,7 +85,7 @@ opsx_collect() {
 
   # herdr：一律問（它靠 socket，不需要在 pane 裡）；失敗記 errors，不中斷
   local herdr_err=""
-  herdr agent list > "$work/agents.json" 2>"$work/agents.err" || herdr_err="herdr agent list 失敗：$(head -c 200 "$work/agents.err")"
+  runtime_list > "$work/agents.json" 2>"$work/agents.err" || herdr_err="herdr agent list 失敗：$(head -c 200 "$work/agents.err")"
 
   # 讀卡的檔與全域狀態，組 JSON
   OPSX_C_WORK="$work" OPSX_C_STATE="$state" OPSX_C_HERDR_ERR="$herdr_err" OPSX_C_NOW="$now" OPSX_C_LIB="$OPSX_ROOT/bin/lib" "$OPSX_PY" -I - <<'PY'

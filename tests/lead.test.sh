@@ -53,6 +53,7 @@ assert_rc 2 opsx lead "$FX/nope"
 out="$(OPSX_TEST_COORDINATOR_UP=1 opsx lead 2>&1)"; assert_eq "$?" 0 "已在跑要退出 0：$out"
 case "$out" in *w3:p7*) ;; *) fail "要印出它的 pane：$out" ;; esac
 case "$out" in *w3:t2*) ;; *) fail "要印出它的 tab：$out" ;; esac
+assert_grep '^agent get opsx-coordinator$' "$OPSX_FAKE_LOG"
 assert_not_grep '^tab create' "$OPSX_FAKE_LOG"
 assert_not_grep '^agent start' "$OPSX_FAKE_LOG"
 

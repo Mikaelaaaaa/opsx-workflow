@@ -13,7 +13,7 @@ opsx_lead() {
 
   # agent get 的真輸出與錯誤碼沒有樣本，所以它只用來提早說「已在跑」：查不到、或讀不出位置就照常開，
   # 第二個協調者由 herdr 的名字唯一性擋（agent start 回 agent_name_taken）
-  if got="$(herdr agent get "$COORDINATOR_AGENT" 2>/dev/null)" \
+  if got="$(runtime_get --agent "$COORDINATOR_AGENT" 2>/dev/null)" \
     && where="$(printf '%s' "$got" | jq -er 'first(.. | objects | select(has("pane_id") and has("tab_id") and has("workspace_id"))) | "workspace \(.workspace_id) · tab \(.tab_id) · pane \(.pane_id)"' 2>/dev/null)"; then
     say "lead: 協調者已在跑（${where}），不開第二個。herdr agent focus $COORDINATOR_AGENT 切過去"
     return 0
@@ -25,7 +25,7 @@ opsx_lead() {
     return 0
   fi
   pane="$RUNTIME_PANE"; tab="$RUNTIME_TAB"
-  herdr agent prompt "$COORDINATOR_AGENT" "/opsx-workflow:lead" >/dev/null || die "lead: 協調者起來了但第一句送不進去。到 pane ${pane} 自己打 /opsx-workflow:lead（重跑 opsx lead 會說已在跑，不會補送）"
-  herdr agent focus "$COORDINATOR_AGENT" >/dev/null || warn "焦點切不過去，協調者在 tab ${tab}（pane ${pane}）"
+  runtime_prompt --agent "$COORDINATOR_AGENT" "/opsx-workflow:lead" nowait >/dev/null || die "lead: 協調者起來了但第一句送不進去。到 pane ${pane} 自己打 /opsx-workflow:lead（重跑 opsx lead 會說已在跑，不會補送）"
+  runtime_focus --agent "$COORDINATOR_AGENT" >/dev/null || warn "焦點切不過去，協調者在 tab ${tab}（pane ${pane}）"
   say "lead: 協調者開在 tab ${tab}（pane ${pane}），cwd ${top}"
 }

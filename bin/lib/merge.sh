@@ -55,7 +55,7 @@ def put(d):
 authz.update(sd, put)
 PY
   log_row "$d" 你 已允許 "核准合併 ${sha}" "${sha} · $(st_mr_url "$d")"
-  local route name via; route="$(card_route "$repo" "$slug")" || die "讀不懂 dispatch.json，不知道話要送給誰"; name="${route%%$'\t'*}"; via="${route#*$'\t'}"
-  herdr agent prompt "$name" "/opsx-workflow:babysit merge ${sha}${via:+ $slug}" >/dev/null || die "merge: 核准已寫進 dispatch.json，但 herdr agent prompt 失敗；在 pane 裡對 agent 說 /opsx-workflow:babysit merge ${sha}"
+  local route via; route="$(card_route "$repo" "$slug")" || die "讀不懂 dispatch.json，不知道話要送給誰"; via="${route#*$'\t'}"
+  runtime_prompt "$repo/$slug" "/opsx-workflow:babysit merge ${sha}${via:+ $slug}" nowait >/dev/null || die "merge: 核准已寫進 dispatch.json，但 herdr agent prompt 失敗；在 pane 裡對 agent 說 /opsx-workflow:babysit merge ${sha}"
   say "merge: $slug 核准合併 ${sha}，已叫 agent /opsx-workflow:babysit merge；它跑 glab mr merge 時閘門會放行（只放這個 sha、這條 MR）"
 }

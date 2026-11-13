@@ -2,7 +2,8 @@
 # agent runtime：呼叫者只說「對哪個 agent 做哪個動作」，herdr 的 argv、agent 名與 pane 的查法只寫在這裡。
 # 對象是卡片身分 <repo>/<slug>（feature session 是 <repo>/@<feature>，也就是 dispatch.json 的 key），
 # 或 --agent <名>：不是卡的 agent（協調者），不讀 dispatch.json。由 common.sh 在檔尾 source。
-# 這裡只放 Orca 版也做得出來的動作；process-info、report-metadata、zoom、plugin、rename 等 herdr 專屬子指令由呼叫者直接下。
+# 這裡只放 Orca 版也做得出來的動作；process-info、pane current、report-metadata、zoom、plugin、action、rename 這些 herdr 專屬子指令，
+# 以及在現有 pane 重起（relaunch）、派工失敗收剛開的 tab，由呼叫者直接下。
 
 # 解析對象：設 RT_WHO（訊息用）、RT_NAME、RT_PANE、RT_TAB，RT_ARGC 是吃掉的參數個數。
 # 名字的規則跟 route.sh 的 card_route 相同：條目的 herdr_name，沒有就是 key 的最後一段去掉 @。
@@ -37,9 +38,14 @@ runtime_need() { # <pane|tab> <值>
   return 2
 }
 
-runtime_prompt() { # <對象> <一行>
+# 模式必填：漏寫時看不出呼叫者要不要等 agent 做完
+runtime_prompt() { # <對象> <一行> <wait|nowait>
   runtime_target "$@" || return; shift "$RT_ARGC"
-  herdr agent prompt "$RT_NAME" "$1"
+  case "$#:${2:-}" in
+    2:wait) herdr agent prompt "$RT_NAME" "$1" --wait ;;
+    2:nowait) herdr agent prompt "$RT_NAME" "$1" ;;
+    *) warn "runtime_prompt: ${RT_WHO} 的模式只有 wait、nowait，收到：${2-（漏寫）}"; return 2 ;;
+  esac
 }
 
 # 不給 --lines 讀 pane 原文（bash 呼叫者自己 tail）；給了讀 agent 的文字畫面（python 呼叫者的形式）
@@ -202,7 +208,7 @@ $(herdr pane read "$pane" 2>/dev/null | tail -20)"
 # 回報一行給協調者 session。送不出去（它不在、herdr 掛了）記 coordinator.log 並回 1；成功回 0。
 coordinator_say() { # <一行>
   local err
-  err="$(runtime_prompt --agent "$COORDINATOR_AGENT" "$1" 2>&1 >/dev/null)" && return 0
+  err="$(runtime_prompt --agent "$COORDINATOR_AGENT" "$1" nowait 2>&1 >/dev/null)" && return 0
   printf '%s ?? 回報 %s 送不出去：%s\n' "$(now_iso)" "$COORDINATOR_AGENT" "$(printf '%s' "$err" | head -c 200 | tr '\n' ' ')" | opsx_append "$OPSX_STATE_DIR/coordinator.log" || true
   return 1
 }

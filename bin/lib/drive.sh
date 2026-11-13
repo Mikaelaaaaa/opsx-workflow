@@ -29,10 +29,11 @@ opsx_drive() {
   while [ "$i" -lt "$max" ]; do
     i=$((i+1))
     dispatched "$repo" "$slug" || { say "drive: $repo/$slug 不在 dispatch.json（停了或被清掉），結束"; return 0; }
+    drive_not_own_agent "$repo" "$slug" && return 0
     # dispatch 送完第一句不等就起 drive；herdr 不分辨是哪一輪，agent 還在跑時送同一句會排在後面，之後每句都差一輪
     # wait 沒成功不算 settled：herdr_step 退避過了，下一輪重等。卡目錄不在時照常往下，讓下面的目錄檢查結束 drive
     if [ "$settled" = 0 ]; then
-      herdr_step "$slug" agent wait "$slug" || return 0
+      herdr_step "$slug" runtime_wait "$DRIVE_REPO/$slug" || return 0
       if [ "$HERDR_STEP_OK" = 1 ]; then settled=1; elif [ -d "$d" ]; then continue; fi
     fi
     # 啟動時目錄在，所以現在不在只會是歸檔或被刪；stage_of 分不出這兩種和「還沒建殼」，不能靠它。放在 settle 之後：agent 跑 /archive 的那一輪也要看得到
@@ -48,9 +49,9 @@ opsx_drive() {
       fi
       # 回 gate 時 opsx answer 自己會 prompt agent，所以等它開工再等它做完，才輪到 drive 送下一句。
       # 有 timeout：answer 寫完 gates.md 但 prompt 沒送成時 agent 不會開工，要回頭重讀 gates.md
-      herdr_step "$slug" agent wait "$slug" --until working --timeout $((poll * 1000)) || return 0
+      herdr_step "$slug" runtime_wait "$DRIVE_REPO/$slug" --until working --timeout $((poll * 1000)) || return 0
       [ "$HERDR_STEP_OK" = 1 ] || continue
-      herdr_step "$slug" agent wait "$slug" || return 0
+      herdr_step "$slug" runtime_wait "$DRIVE_REPO/$slug" || return 0
       continue
     fi
     if [ -n "$watch" ]; then
@@ -83,7 +84,7 @@ opsx_drive() {
         case "$mr" in
           ready) say "drive: $slug MR 五條件全綠，可以合併，停在這裡等人"; opsx_status_quiet "$top" "$slug" pr 5/5 "可以合併"; coordinate_kick "$slug"; return 0 ;;
           none)  say "drive: $slug report.md 有 MR 但 glab 讀不到，等 $poll 秒再看"; sleep "$poll"; settled=0 ;;
-          *)     say "drive: $slug MR 卡在 $mr → /opsx-workflow:babysit"; herdr_step "$slug" agent prompt "$slug" "/opsx-workflow:babysit $slug" --wait || return 0; sleep "$poll"; settled=0 ;;
+          *)     say "drive: $slug MR 卡在 $mr → /opsx-workflow:babysit"; herdr_step "$slug" runtime_prompt "$DRIVE_REPO/$slug" "/opsx-workflow:babysit $slug" wait || return 0; sleep "$poll"; settled=0 ;;
         esac ;;
       explore|grill|propose|apply|review|pr)
         # 上一輪送出後 pane 有背景工作：不重送。指紋動了就照常往下；還在跑就再等；不跑了指紋仍沒動才算卡住
@@ -106,7 +107,7 @@ opsx_drive() {
         fi
         say "drive: $slug → /opsx-workflow:$stage"
         local before sent_at; before="$(stage_fingerprint "$top" "$slug")"; sent_at="$(date +%s)"
-        herdr_step "$slug" agent prompt "$slug" "/opsx-workflow:$stage $slug" --wait || return 0
+        herdr_step "$slug" runtime_prompt "$DRIVE_REPO/$slug" "/opsx-workflow:$stage $slug" wait || return 0
         # prompt 已送、只是沒在時限內 settle：算一次送出（下一輪受間隔下限），但沒 settle 不驗
         if [ "$HERDR_STEP_OK" = 1 ] || [ "$HERDR_STEP_TIMEOUT" = 1 ]; then last_stage="$stage"; last_at="$sent_at"; fi
         [ "$HERDR_STEP_OK" = 1 ] || continue   # 沒送進去的不驗、不算一次送出（herdr_step 已經退避過）
@@ -134,13 +135,13 @@ opsx_drive() {
   say "drive: 跑滿 $max 輪，結束"
 }
 
-# 跑一個 herdr 呼叫。回 1 表示 pane 沒了、drive 該結束；其他情況回 0，HERDR_STEP_OK 說這次呼叫本身成不成功。
+# 跑一個 runtime 呼叫（stderr 就是 herdr 的）。回 1 表示 pane 沒了、drive 該結束；其他情況回 0，HERDR_STEP_OK 說這次呼叫本身成不成功。
 # 錯誤一律先等過再回，迴圈才不會在同一個錯誤上空轉。
 # 睡過就把呼叫者 opsx_drive 的 local settled 設回 0（bash 動態作用域，跟讀 $poll 一樣）：睡的時候 agent 可能起了新 turn，回迴圈頂端要重等。
-herdr_step() { # <slug> <herdr args…>
+herdr_step() { # <slug> <runtime 函式> <參數…>
   local slug="$1" err code; shift
   HERDR_STEP_OK=0; HERDR_STEP_TIMEOUT=0
-  if err="$(herdr "$@" 2>&1 >/dev/null)"; then HERDR_STEP_OK=1; return 0; fi
+  if err="$("$@" 2>&1 >/dev/null)"; then HERDR_STEP_OK=1; return 0; fi
   code="$(printf '%s' "$err" | jq -r '.error.code // empty' 2>/dev/null || true)"
   case "$code" in
     timeout)
@@ -153,14 +154,14 @@ herdr_step() { # <slug> <herdr args…>
     agent_blocked)
       say "drive: $slug 在終端機等待輸入，等人在 pane 處理完"
       coordinate_kick "$slug"
-      herdr agent wait "$slug" --until working >/dev/null 2>&1 && herdr agent wait "$slug" >/dev/null 2>&1 || { sleep "$poll"; settled=0; }
+      runtime_wait "$DRIVE_REPO/$slug" --until working >/dev/null 2>&1 && runtime_wait "$DRIVE_REPO/$slug" >/dev/null 2>&1 || { sleep "$poll"; settled=0; }
       return 0 ;;
     *)
       # relaunch 讓 claude /exit 的空窗：結束，relaunch 結束時會起新的 drive，不睡完再送階段指令
       if [ "$code" = agent_not_running ] && drive_relaunching "$DRIVE_REPO" "$slug"; then
         say "drive: $slug 的 claude 在 relaunch 空窗（agent_not_running，relaunching_at 未過期），結束，relaunch 會起新的 drive"; return 1
       fi
-      say "drive: herdr $1 $2 回 ${code:-$err}，等 $poll 秒"; sleep "$poll"; settled=0; return 0 ;;
+      say "drive: $1 回 ${code:-$err}，等 $poll 秒"; sleep "$poll"; settled=0; return 0 ;;
   esac
 }
 
@@ -190,7 +191,7 @@ drive_args_lost() { # <repo> <slug>
 }
 
 pane_tail() { # <repo> <slug>：pane 最後 20 行壓成一行；pane 讀不到印空
-  herdr pane read "$(dispatch_pane "$1" "$2")" 2>/dev/null | tail -20 | tr '\n' ' ' || true
+  runtime_read "$1/$2" 2>/dev/null | tail -20 | tr '\n' ' ' || true
 }
 pane_state() { # <repo> <slug>：pane 尾巴是 API 錯誤（error）、有背景工作或 subagent 在跑（busy），或都不是（idle）
   # shortcut: [已評估] busy 只認 inbox 證據裡見過的兩種畫面，沒在真 pane 上校正過，漏掉的樣式會退回開 gate，有需要再補
@@ -260,14 +261,27 @@ def put(d):
 jsonfile.update(sys.argv[1], put)
 PY
 }
-dispatch_pane() { # <repo> <slug>：dispatch.json 記的 pane id
-  jq -r --arg k "$1/$2" '.[$k].pane // empty' "$OPSX_STATE_DIR/dispatch.json" 2>/dev/null || true
-}
 dispatched() { # <repo> <slug>
   [ -f "$OPSX_STATE_DIR/dispatch.json" ] || return 1
   OPSX_KEY="$1/$2" "$OPSX_PY" -I - "$OPSX_STATE_DIR/dispatch.json" <<'PY'
 import json,os,sys
 d=json.load(open(sys.argv[1])); c=d.get(os.environ["OPSX_KEY"]); sys.exit(0 if c is not None and c.get("mode") != "stopped" else 1)
+PY
+}
+
+# 代管卡（via）與已交接的父卡（handed_to）的 herdr_name 是 session 或子卡的 agent，drive 對它送話會打到別人的 pane。
+# 是這兩種就印一行說明並回 0，呼叫者結束 drive；不 kick coordinate，因為沒有東西壞掉
+drive_not_own_agent() { # <repo> <slug>
+  OPSX_KEY="$1/$2" "$OPSX_PY" -I - "$OPSX_STATE_DIR/dispatch.json" <<'PY'
+import json, os, sys
+key = os.environ["OPSX_KEY"]
+e = json.load(open(sys.argv[1]))[key]
+if e.get("via"):
+    print("drive: %s 由 %s 代管，沒有自己的 agent，結束" % (key, e["via"]))
+elif e.get("handed_to"):
+    print("drive: %s 已交接給 %s，結束" % (key, "、".join(e["handed_to"])))
+else:
+    sys.exit(1)
 PY
 }
 
