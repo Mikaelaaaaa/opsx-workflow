@@ -588,23 +588,57 @@ class ServerTest(unittest.TestCase):
         self.assertEqual(status, 401)
         self.assertEqual((self.state / "last-seen").read_text().strip(), "2026-11-06T09:00:00+08:00")
 
-    def test_output_reads_agent_terminal(self):
-        self.herdr_log.write_text("")
-        status, _, body = self.req("/api/output?pane=w5%3ApH", token=self.token)
+    def write_dispatch(self, entries):
+        (self.state / "dispatch.json").write_text(json.dumps(entries))
+
+    def test_output_reads_the_cards_pane_from_dispatch(self):
+        self.write_dispatch({"r/card-a": {"pane": "w5:pH"}, "r/other": {"pane": "w1:p1"}})
+        status, _, body = self.req("/api/output?card=r%2Fcard-a", token=self.token)
         self.assertEqual(status, 200, body)
         out = json.loads(body)
         self.assertEqual((out["ok"], out["text"]), (True, "line 1\nline 2\n"), out)
         self.assertEqual(self.herdr_log.read_text().strip(), "agent read w5:pH --lines 10 --format text")
 
-    def test_output_rejects_bad_pane_and_reports_herdr_failure(self):
-        self.herdr_log.write_text("")
-        for bad in ("w1;rm", "", "w1:p2%20--lines%201000", "--help", "-x"):
-            status, _, body = self.req("/api/output?pane=" + bad, token=self.token)
-            self.assertEqual(status, 400, "%r: %s" % (bad, body))
-        status, _, _ = self.req("/api/output")
+    def test_output_rejects_bad_card_without_calling_herdr(self):
+        self.write_dispatch({"r/card-a": {"pane": "w5:pH"}})
+        for query in ("card=r/x;rm", "card=r/--help", "card=card-a", "pane=w1:p2", "", "card=",
+                      "card=-r/card-a", "card=r/Card-a", "card=r/card-a/x", "card=/card-a", "card=r/", "card=r%20/card-a"):
+            status, _, body = self.req("/api/output?" + query, token=self.token)
+            self.assertEqual(status, 400, "%r: %s" % (query, body))
+        status, _, body = self.req("/api/output?pane=w1:p2", token=self.token)
+        self.assertIn("card", json.loads(body)["error"], "舊的 ?pane= 要寫出改用 card")
+        status, _, _ = self.req("/api/output?card=r/card-a")
         self.assertEqual(status, 401)
         self.assertEqual(self.herdr_log.read_text(), "", "壞參數不能叫到 herdr")
-        status, _, body = self.req("/api/output?pane=w9%3Ap9", token=self.token)
+
+    def test_output_accepts_repo_label_punctuation(self):
+        self.write_dispatch({"my.repo_2-x/card-a": {"pane": "w5:pH"}})
+        status, _, body = self.req("/api/output?card=my.repo_2-x/card-a", token=self.token)
+        self.assertEqual(status, 200, body)
+        self.assertTrue(json.loads(body)["ok"], body)
+
+    def test_output_card_without_pane_is_not_ok_and_skips_herdr(self):
+        self.write_dispatch({"r/idle": {"pane": None}})
+        for card in ("r/fresh", "r/idle"):
+            status, _, body = self.req("/api/output?card=" + card, token=self.token)
+            self.assertEqual(status, 200, body)
+            out = json.loads(body)
+            self.assertFalse(out["ok"], out)
+            self.assertIn(card, out["error"])
+        (self.state / "dispatch.json").unlink()
+        status, _, body = self.req("/api/output?card=r/fresh", token=self.token)
+        self.assertEqual((status, json.loads(body)["ok"]), (200, False), body)
+        self.assertEqual(self.herdr_log.read_text(), "", "查不到 pane 不能叫到 herdr")
+
+    def test_index_drawer_sends_card_identity(self):
+        _, _, html = self.req("/")
+        self.assertIn("/api/output?card=", html)
+        self.assertIn("const k=key(c);\n  try{outputs[k]=await api.output(k);}", html)
+        self.assertNotIn("output?pane=", html)
+
+    def test_output_reports_herdr_failure(self):
+        self.write_dispatch({"r/card-a": {"pane": "w9:p9"}})
+        status, _, body = self.req("/api/output?card=r/card-a", token=self.token)
         self.assertEqual(status, 200, body)
         out = json.loads(body)
         self.assertFalse(out["ok"])
@@ -729,6 +763,7 @@ class NoHerdrTest(unittest.TestCase):
         fixture.write_text(json.dumps({"generated_at": "t", "scopes": [], "cards": [], "unmatched_agents": [], "errors": []}))
         env = {k: v for k, v in os.environ.items() if k != "HERDR_ENV"}
         env.update(OPSX_STATE_DIR=str(state), PATH=f"{shim_dir}:{os.environ['PATH']}")
+        (state / "dispatch.json").write_text(json.dumps({"r/card-a": {"pane": "w5:pH"}}))
         cls.proc, _, port = start_server(env, fixture)
         cls.base = "http://127.0.0.1:%d" % port
         cls.token = (state / "board-token").read_text().strip()
@@ -739,7 +774,7 @@ class NoHerdrTest(unittest.TestCase):
         cls.proc.wait()
 
     def test_output_outside_herdr(self):
-        r = urllib.request.Request(self.base + "/api/output?pane=w5%3ApH")
+        r = urllib.request.Request(self.base + "/api/output?card=r/card-a")
         r.add_header("X-Opsx-Token", self.token)
         with urllib.request.urlopen(r, timeout=5) as resp:
             self.assertEqual(resp.status, 200)
