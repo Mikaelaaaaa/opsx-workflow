@@ -7,7 +7,7 @@ description: Turn the code one PR changed into a logic map the user can judge th
 
 When producing a map, you produce one document: `logic-map.md`. The user reads it to decide whether the code in one PR does what they wanted. They will not read the code. Every condition you write is the thing they judge, so a wrong or softened condition is the worst mistake you can make here.
 
-Write in the user's language (Traditional Chinese unless the request is in another language). Follow `../technical-writing/SKILL.md`: short sentences, the real symbol names, one name per thing, no metaphors.
+Write in the user's language (Traditional Chinese unless the request is in another language). Follow `../technical-writing/SKILL.md`: short sentences, the real symbol names, one name per thing, no metaphors. The two business sections are the exception to real symbol names (see The business summary).
 
 ## Inputs
 
@@ -22,7 +22,19 @@ Do not read `openspec/`, `report.md`, PR descriptions, or commit messages. They 
 3. Group the changes into features. A feature is one behavior someone outside the code would notice ("the commit gate picks the repo from `git -C`"). One PR usually has one to three.
 4. For each feature, write the three parts below.
 5. Take the title from the branch name only. If `<head>` is a branch name, use it; otherwise run `git rev-parse --abbrev-ref HEAD`. Do not read the commit message or the PR description to name the map: a PR title is intent too.
-6. Write `logic-map.md` to the output path. Print the path and the number of features, nodes, and ⚠ marks.
+6. Once every feature's three parts and ⚠ marks are written, write the business sections last: each feature's section, then the summary at the top. They still go first in the file. Written earlier, they describe what you expected the code to do, not the conditions you translated.
+7. Write `logic-map.md` to the output path. Print the path and the number of features, nodes, and ⚠ marks.
+
+## The business summary
+
+The map opens with `## 這支 PR 在做什麼（業務說明）`, and every feature opens with `### 業務上在做什麼`. They are for a reader who does not know the code. Write them only from the code in the diff range, like the rest of the map.
+
+- The top summary is 3 to 5 sentences: who is affected, what changed for them, and a concrete example (one person, one input, what happens).
+- A feature's section is 2 to 4 sentences, in this order: 誰做什麼 → 系統怎麼判斷 → 對方看到什麼.
+- No function names, file paths, or FEEL: no backticks, no `path:line`. The three parts below carry the real names.
+- Write the example along a path the code really takes, with the condition the code really checks, not a softened version. A reader who stops here judges the PR by it.
+- The business sections never contradict a condition-table row, a note under the table, or a ⚠ item.
+- When the PR changes nothing a user can see, still write both sections: say 使用者看不到差別, then say in business words what internal behavior changed.
 
 ## The three parts of a feature
 
@@ -130,7 +142,13 @@ src/download.py:9
 
 範圍：`<base>...<head>` · 讀的檔：<n> 個 · 功能：<n> 個
 
+## 這支 PR 在做什麼（業務說明）
+…
+
 ## 功能 1：<一句話>
+
+### 業務上在做什麼
+…
 
 ### 做了什麼
 1. …
