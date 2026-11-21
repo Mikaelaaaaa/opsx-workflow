@@ -311,7 +311,16 @@ mkmerged y $'## 一句話\n\n沒有併入\n'
 mkmerged w $'## 一句話\n\n欄位不齊\n\n## 併入：2026-11-11T10:40:00+08:00 agent:foo\n\n- id: agent-20261111-1040\n- kind_of_work: planned\n\n沒有 type 也沒有 area\n'
 mkmerged z $'## 一句話\n\n手動搬入\n\n## 併入：me-20261110-1614（全文）\n\n隨手貼的一段\n'
 mkmerged archive/2026-11-01-old $'## 一句話\n\n歸檔的\n\n## 併入：me-20261101-0900（全文）\n\n隨手貼的一段\n'
+# opsx merge-card 寫的縮排形狀（照抄磁碟上實際的段）；u 的段裡有一行沒縮排
+mkmerged v $'## 一句話\n\n收了縮排段\n\n## 證據\n\n## 併入：2026-11-20T17:35:20+08:00 agent:personal-skill\n\n- id: agent-20261118-1910\n- kind_of_work: planned\n- type: bug\n\n  ## 一句話\n\n  沒有 hnsw 索引\n\n  ## 證據\n'
+mkmerged t $'## 一句話\n\n多行一句話\n\n## 證據\n\n## 併入：2026-11-20T17:35:22+08:00 me\n\n- id: me-20261120-1425\n- kind_of_work: planned\n- type: bug\n\n  ## 一句話\n\n  第一行\n   第二行\n\n  ## 證據\n\n  ## 派工指示\n\n  - 2026-11-20T10:00:00+08:00 做到可合併\n'
+mkmerged u $'## 一句話\n\n縮排段壞了\n\n## 證據\n\n## 併入：2026-11-20T17:35:21+08:00 agent:personal-skill\n\n- id: agent-20261118-1913\n- kind_of_work: planned\n- type: bug\n\n  ## 一句話\n\n  一句\n沒縮排的行\n'
 J="$(opsx collect --root "$RM")"; assert_eq "$?" 0 "merged collect rc: $J"
+assert_eq "$(q "$(card "$J" rm v)" merged)" '[{"id": "agent-20261118-1910", "kind_of_work": "planned", "source": "agent:personal-skill", "text": "沒有 hnsw 索引", "type": "bug", "when": "2026-11-20T17:35:20+08:00"}]' "縮排段列得出，欄位跟一行形狀一樣"
+assert_eq "$(q "$(card "$J" rm t)" merged)" '[{"id": "me-20261120-1425", "kind_of_work": "planned", "source": "me", "text": "第一行", "type": "bug", "when": "2026-11-20T17:35:22+08:00"}]' "多行一句話只取第一個非空行（跟一般卡一樣），派工指示不進 text"
+assert_eq "$(q "$(card "$J" rm u)" merged)" '[]' "格式錯的縮排段不列"
+case "$(q "$J" errors)" in *"u 的併入段格式不對：## 併入：2026-11-20T17:35:21+08:00 agent:personal-skill"*) ;; *) fail "格式錯的縮排段要進 errors：$(q "$J" errors)" ;; esac
+case "$(q "$J" errors)" in */v/inbox.md*) fail "好的縮排段不該進 errors：$(q "$J" errors)" ;; esac
 assert_eq "$(q "$(card "$J" rm x)" merged)" '[{"area": "hooks", "id": "agent-20261111-1040", "kind_of_work": "planned", "source": "agent:foo", "text": "hook 漏擋", "when": "2026-11-11T10:40:00+08:00"}, {"area": "hooks", "evidence": "tests/x.sh", "id": "me-20261111-1100", "kind_of_work": "unplanned", "source": "me", "text": "第二項", "when": "2026-11-11T11:00:00+08:00"}, {"id": "agent-20261111-1110", "kind_of_work": "planned", "source": "agent:bar", "text": "新格式", "type": "bug", "when": "2026-11-11T11:10:00+08:00"}]'
 assert_eq "$(q "$(card "$J" rm y)" merged)" '[]'
 assert_eq "$(q "$(card "$J" rm w)" merged)" '[]' "type 與 area 都沒有的段不列"
