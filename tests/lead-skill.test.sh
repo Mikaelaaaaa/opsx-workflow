@@ -116,6 +116,35 @@ done
 duty 2 | grep -qF 'never answer them' || fail "職責 2 要保留 never answer them"
 case "$DUTIES" in *自動採用*) fail "Duties 不能有「自動採用」" ;; esac
 
+# 流量控管（specs/opsx-lead「每輪依序看四欄」「coordinate 放棄的卡列進 ①」「有 open gate 時，跳窗不擋住同一輪的其他欄」
+# 「載入後開 10 分鐘一輪」「這個 session 已有流量控管的 loop 時不開第二個」「跳窗開著時不搶著跑」
+# 「context 壓縮後不把舊的 ?? 行列進 ①」「同一個 gate 的 ?? 行在兩輪都出現時不輸出」「用量上限暫停時，等待中的卡不列進 ①」
+# 「沒事不輸出」「① 少了一項時輸出目前的 ①」「有處理掉的事就回報」「這一輪不列 forge 上的 open MR」）：只切職責 19 那一條
+D19="$(duty 19)"
+[ -n "$D19" ] || fail "找不到職責 19（流量控管）"
+for s in 'Flow control' '`opsx collect`' '待處理, then 等待中, then 待指派, then 收件匣' \
+  'list the scheduled tasks of this session with CronList; when none has the prompt `職責 19 流量控管：跑一輪`, start `/loop 10m 職責 19 流量控管：跑一輪`' \
+  'pop-up is open' 'waits until the pop-up returns' 'never open a second pop-up' \
+  'open the pop-up only after the 等待中, 待指派 and 收件匣 columns are done' \
+  'never push a pane yourself' 'lost its --settings' 'redispatches a dead one' \
+  'read only the latest coordinate run in `$OPSX_STATE_DIR/coordinator.log`, from the last `== coordinator 開始` line to its `== 結束` line' \
+  'list each `??` line from it in block ①' 'unless its gate is already there from 待處理' \
+  'Compare block ① by card and reason, never by the timestamps' \
+  'outputs nothing' 'not even a line saying so' \
+  'handled nothing and block ① is the same as in your last output' 'what coordinate already pushed does not count as handled' \
+  'When block ① differs from your last output, by an item added or gone, output the current block ①' \
+  'fully handled that the user does not need to know about gets no reply' 'report it in block ④ together with the current block ①' \
+  'duty 14 does not run in it' \
+  '待處理 by duties 2 and 8' '待指派 by duty 9' '收件匣 by duty 10'; do
+  case "$D19" in *"$s"*) ;; *) fail "職責 19 缺：$s — $D19" ;; esac
+done
+# 三欄照職責 2、9、10：職責 19 不另訂派工上限、不代答；推 pane 是 coordinate 的事；等協調者是 collect 給任何閒著 pane 的預設標籤，不是 coordinate 放棄
+for s in 'opsx merge' 'glab mr merge' 'gh pr merge' 'CronCreate' 'max-working' 'P2' 'Recommended' 'opsx answer' 'opsx dispatch' \
+  'herdr pane send-keys' 'herdr pane read' 'herdr agent prompt' 'send-text' 'opsx relaunch' '「繼續」' \
+  'since your last round' '等協調者' 'confirmation screen' 'with this duty as its prompt' 'pop-up first' 'heartbeat'; do
+  case "$D19" in *"$s"*) fail "職責 19 不能有：$s — $D19" ;; esac
+done
+
 # frontmatter 的 name 是 lead（/opsx-workflow:lead）
 assert_eq "$(sed -n 2p "$F")" "name: lead" "frontmatter name"
 echo ok
