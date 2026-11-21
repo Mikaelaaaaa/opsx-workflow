@@ -946,6 +946,12 @@ EOF
 pc10 n solo >/dev/null
 # nc：有 milestones 沒有 current_milestone，兩張活卡，一張不在 workplan
 mkdir -p "$R10/nc/.git"; pc10 nc nc-a >/dev/null; pc10 nc nc-loose >/dev/null
+# opsx-workflow：協調者照建議答的決定題在答掉之前仍開著，派沒派出都算等你、分區仍是待處理（gate-rule 的 answer 處置）
+mkdir -p "$R10/opsx-workflow/.git"
+D=$(pc10 opsx-workflow ow-auto); printf '## 1\n\n- [ ] 1.1 a\n' > "$D/tasks.md"
+printf '## g1\ntype: decision\nstatus: open\n問題: 哪個？\n建議: 用 A\n' > "$D/gates.md"
+D=$(pc10 opsx-workflow ow-free); printf '## 1\n\n- [ ] 1.1 a\n' > "$D/tasks.md"
+printf '## g1\ntype: decision\nstatus: open\n問題: 哪個？\n建議: 用 A\n' > "$D/gates.md"
 cat > "$R10/nc/openspec/workplan.yaml" <<'EOF'
 milestones:
   - name: "1.0"
@@ -957,7 +963,7 @@ features:
       - name: nc-a
         status: pending
 EOF
-printf '{"r/m-merge":{"pane":"q1","mode":"autopilot"},"r/m-gate":{"pane":"q2","mode":"autopilot"},"r/m-review":{"pane":"q3","mode":"autopilot"},"r/m-apply":{"pane":"q4","mode":"autopilot"},"r/m-auto":{"pane":"q5","mode":"autopilot"},"r/m-park":{"pane":"q6","mode":"stopped"},"r/m-wake":{"pane":"q10","mode":"autopilot"},"r/m-park-merged":{"pane":"q11","mode":"stopped"},"r/m-ready-gate":{"pane":"q7","mode":"autopilot"},"r/m-pr-run":{"pane":"q8","mode":"autopilot"},"r/m-block":{"pane":"p9","mode":"autopilot"},"r/m-ready-working":{"pane":"p4","mode":"autopilot"},"r/m-ready-stale":{"pane":"q12","mode":"autopilot"}}' > "$S10/dispatch.json"
+printf '{"r/m-merge":{"pane":"q1","mode":"autopilot"},"r/m-gate":{"pane":"q2","mode":"autopilot"},"r/m-review":{"pane":"q3","mode":"autopilot"},"r/m-apply":{"pane":"q4","mode":"autopilot"},"r/m-auto":{"pane":"q5","mode":"autopilot"},"r/m-park":{"pane":"q6","mode":"stopped"},"r/m-wake":{"pane":"q10","mode":"autopilot"},"r/m-park-merged":{"pane":"q11","mode":"stopped"},"r/m-ready-gate":{"pane":"q7","mode":"autopilot"},"r/m-pr-run":{"pane":"q8","mode":"autopilot"},"r/m-block":{"pane":"p9","mode":"autopilot"},"r/m-ready-working":{"pane":"p4","mode":"autopilot"},"r/m-ready-stale":{"pane":"q12","mode":"autopilot"},"opsx-workflow/ow-auto":{"pane":"q13","mode":"autopilot"}}' > "$S10/dispatch.json"
 J="$(opsx collect --root "$R10" --state "$S10")"; assert_eq "$?" 0 "progress collect rc: $J"
 pclass() { q "$(card "$J" r "$1")" progress_class; }
 # 五類各一張
@@ -982,4 +988,7 @@ assert_eq "$(q "$J" progress.nc.milestone) $(q "$J" progress.nc.goal) $(q "$J" p
 assert_eq "$(q "$P" at)" "$(q "$J" generated_at)"
 # 沒有 workplan 的 repo：milestone null、數全部活卡
 assert_eq "$(q "$J" progress.n.milestone) $(q "$J" progress.n.remaining) $(q "$J" progress.n.not_dispatched_planned) $(q "$(card "$J" n solo)" progress_class)" "null 1 [] not_dispatched"
+# opsx-workflow 的決定題（協調者會照建議答）：答掉之前派沒派出都算等你，分區仍是待處理
+assert_eq "$(q "$(card "$J" opsx-workflow ow-auto)" progress_class) $(q "$(card "$J" opsx-workflow ow-free)" progress_class)" "waiting_on_you waiting_on_you"
+assert_eq "$(q "$(card "$J" opsx-workflow ow-auto)" section) $(q "$(card "$J" opsx-workflow ow-free)" section)" "待處理 待處理"
 echo ok

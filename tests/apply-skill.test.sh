@@ -83,4 +83,9 @@ has 'When the repo has `tests/run.sh` (only the file name counts, not its conten
 ! grep -qF 'In this repo the command is `bash tests/run.sh' "$SK" || fail "apply SKILL.md 不能無條件寫 bash tests/run.sh"
 ! grep -qF '(`bash tests/run.sh <name>` filters by file name)' "$SK" || fail "apply SKILL.md 的檔名過濾說明要限於有 tests/run.sh 的 repo"
 ! grep -qF 'and read its output file: `tests/run.sh` prints' "$SK" || fail "apply SKILL.md 的 START 進度說明要限於有 tests/run.sh 的 repo"
+# 開 gate 那一步寫明 opsx-workflow 的 decision 由協調者照建議答（specs/opsx-autonomy「agent 規則寫明誰答 gate」）
+grep -E '^\| 5 \|' "$SK" | grep -qF 'opsx-workflow repo' || fail "apply 第 5 步要寫 opsx-workflow 的 decision 由協調者照建議答"
+grep -E '^\| 5 \|' "$SK" | grep -qF 'not one that needs your hands, a merge, has no recommendation, is a stuck gate or carries `needs: run`' || fail "apply 第 5 步要寫哪些 opsx decision 仍留給人（D2）"
+grep -E '^\| 5 \|' "$SK" | grep -qF 'in other repos, a 要不要另開卡／併進這張 gate' || fail "apply 第 5 步要寫另開卡題的範圍判斷只在其他 repo（D13）"
+! grep -qF 'The coordinator never answers any gate' "$SK" || fail "apply SKILL.md 不該再寫協調者不答任何 gate"
 echo ok

@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# opsx answer <slug> [--sub <子>] --gate <id> [--grant this|card|repo] [--repo <top>] <text…>：回一個 gate。
+# opsx answer <slug> [--sub <子>] --gate <id> [--grant this|card|repo] [--by coordinator] [--repo <top>] <text…>：回一個 gate。
+# --by coordinator：協調者照建議代答，decisions.tsv 記成「協調者 已決定 自動採用：<答案>」。
 # 先驗 gate，再把授權落檔（repo 寫 grants.toml；card 與 this 寫受保護位置 bin/lib/authz.py 的 grants / once，閘門用掉 once 就刪），
 # 把 gates.md 那段改成 answered，在 decisions.tsv 記一行（log_row），最後 herdr agent prompt 送給 agent。卡沒派出就不送，agent 派出時會讀 gates.md。
 # --sub：gates.md 與 decisions.tsv 換成 changes/<slug>/subs/<子>/ 的；子 change 跑在主 change 的 session、不在 dispatch.json，
@@ -10,10 +11,11 @@
 source "$OPSX_ROOT/bin/lib/route.sh"
 
 opsx_answer() {
-  local slug="" sub="" gate="" grant="" top="" text=()
+  local slug="" sub="" gate="" grant="" top="" by="" text=()
   while [ $# -gt 0 ]; do
     case "$1" in
       --sub) sub="$2"; shift 2 ;;
+      --by) by="$2"; shift 2 ;;
       --gate) gate="$2"; shift 2 ;;
       --grant) grant="$2"; shift 2 ;;
       --repo) top="$2"; shift 2 ;;
@@ -24,6 +26,7 @@ opsx_answer() {
   done
   [ -n "$slug" ] && [ -n "$gate" ] && [ ${#text[@]} -gt 0 ] || die "answer: 用法 opsx answer <slug> [--sub <子>] --gate <id> [--grant this|card|repo] <text…>"
   case "$grant" in ""|this|card|repo) ;; *) die "answer: --grant 要是 this|card|repo，收到 $grant" ;; esac
+  case "$by" in ""|coordinator) ;; *) die "answer: --by 只收 coordinator，收到 $by" ;; esac
   [ -n "$top" ] || top="$(git_toplevel)"
   [ -n "$top" ] || die "answer: 不在 git repo 裡，或給 --repo"
   top="$(cd "$top" && pwd -P)"
@@ -134,6 +137,7 @@ print("dispatched" if dispatched else "undispatched")
 PY
 )" || exit 2
   if [ -n "$grant" ]; then log_row "$d" 你 已允許 "$answer" "$gate · $grant"
+  elif [ -n "$by" ]; then log_row "$d" 協調者 已決定 "自動採用：$answer" "$gate"
   else log_row "$d" 你 已決定 "$answer" "$gate"; fi
 
   if [ "$result" = dispatched ]; then

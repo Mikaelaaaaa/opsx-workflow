@@ -70,4 +70,8 @@ for k in '- 1 讀卡：done' '- 8 待決：待決' '- 9 unslop：done'; do
   has "$k" "$ENDING"
   has "$k" "$TPL"
 done
+# split gate 在 opsx-workflow 由協調者照建議答（specs/opsx-autonomy「agent 規則寫明誰答 gate」）
+has 'opsx-workflow repo' "$SPLIT"
+has 'not one that needs your hands, a merge, has no recommendation, is a stuck gate or carries `needs: run`' "$SPLIT"
+! grep -qF 'the coordinator never answers any gate' "$SK" || fail "explore SKILL.md 不該再寫協調者不答任何 gate"
 echo ok

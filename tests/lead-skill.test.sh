@@ -130,9 +130,21 @@ for s in 'skill-creator' '--note' '依 skill-creator 撰寫' 'design.md' 'decisi
   case "$D11" in *"$s"*) ;; *) fail "職責 11 缺：$s — $D11" ;; esac
 done
 # 授權指令由使用者自己答：職責 2 的不代答不變，Duties 裡沒有自動採用
-duty 2 | grep -qF 'never answer them' || fail "職責 2 要保留 never answer them"
+duty 2 | grep -qF 'answer none yourself' || fail "職責 2 要保留 answer none yourself"
 case "$DUTIES" in *自動採用*) fail "Duties 不能有「自動採用」" ;; esac
 
 # frontmatter 的 name 是 lead（/opsx-workflow:lead）
 assert_eq "$(sed -n 2p "$F")" "name: lead" "frontmatter name"
+# 職責 2：opsx-workflow 的 decision 由 opsx coordinate 照建議答並列在 ④，其餘 gate 轉給使用者（specs/opsx-lead「opsx repo 的決定題由 coordinate 照建議答」「其他 gate 仍不代答」）
+D2="$(grep -E '^2\. ' "$F")"; [ -n "$D2" ] || fail "缺職責 2"
+for k in 'opsx-workflow' 'decision' '照建議' 'ponytail' '④' 'Every other gate is the user'"'"'s' \
+  'not one that needs your hands, a merge, has no recommendation, is a stuck gate or carries `needs: run`' '①'; do
+  case "$D2" in *"$k"*) ;; *) fail "職責 2 缺 [$k]" ;; esac
+done
+case "$D2" in *"Every gate is the user's"*) fail "職責 2 不該再寫每個 gate 都是使用者的" ;; esac
+# ④ 的資料來源是 decisions.tsv（D14）；另開卡題的範圍判斷只在其他 repo（D13）
+for k in 'decisions.tsv' 'whose who column is 協調者' 'sends you no event' 'In other repos, a gate that asks whether to open another card'; do
+  case "$D2" in *"$k"*) ;; *) fail "職責 2 缺 [$k]" ;; esac
+done
+case "$D2" in *"lists what it answered in block ④"*) fail "職責 2 不能寫成 opsx coordinate 自己列 ④" ;; esac
 echo ok

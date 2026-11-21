@@ -110,6 +110,6 @@ assert_grep 'agent wait retry-backoff --until working' "$OPSX_FAKE_LOG"
 got="$(python3 -I -c 'import sys; sys.path.insert(0, sys.argv[1]); import gaterule
 w = {"gate_id": "dialog-1", "needs": "run", "type": "等待決定"}
 s = {"gate_id": "drive-apply-1", "needs": None, "type": "等待決定"}
-print(gaterule.decide(w), gaterule.decide(s))' "$OPSX_ROOT/bin/lib")"
+print(gaterule.decide(w, "opsx-workflow"), gaterule.decide(s, "opsx-workflow"))' "$OPSX_ROOT/bin/lib")"
 assert_eq "$got" "('human', 'run') ('human', 'stuck')" "gaterule 判斷"
 echo "drive-dialog ok"

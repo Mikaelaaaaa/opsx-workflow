@@ -49,6 +49,12 @@ assert_grep '^status: answered' "$FX/g2.txt"; assert_grep '^answer: 選 檔案' 
 awk '/^## g1/{f=1} /^## g2/{f=0} f' "$C/gates.md" | grep -q '^status: open' || fail "g1 不該被動到"
 assert_eq "$(tail -1 "$C/decisions.tsv" | cut -f2-5)" $'你\t已決定\t選 檔案\tg2'
 assert_grep '^agent prompt x 選 檔案$' "$OPSX_FAKE_LOG"
+# 協調者代答：decisions.tsv 記協調者、自動採用；--by 只收 coordinator
+gates
+out="$(opsx answer x --gate g2 --by someone "選 檔案" 2>&1)"; rc=$?; [ $rc -ne 0 ] || fail "--by someone 要退出非零"
+awk '/^## g2/{f=1} /^## g3/{f=0} f' "$C/gates.md" | grep -q '^status: open' || fail "--by 不合法時 g2 不該被動到"
+out="$(opsx answer x --gate g2 --by coordinator "選 檔案" 2>&1)"; assert_eq "$?" 0 "answer --by coordinator: $out"
+assert_eq "$(tail -1 "$C/decisions.tsv" | cut -f2-5)" $'協調者\t已決定\t自動採用：選 檔案\tg2'
 
 # --- 不存在的 gate：退出非零，什麼都不動 ---
 cp "$C/gates.md" "$FX/before.md"; cp "$C/decisions.tsv" "$FX/before.tsv"; : > "$OPSX_FAKE_LOG"

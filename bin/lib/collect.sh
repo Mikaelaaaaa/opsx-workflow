@@ -358,11 +358,12 @@ def needs_human(card, gates, agent_status, top, prs, dispatched):
     open_gates = [g for g in gates if g.get("status", "").strip() == "open"]
     if not open_gates: return True
     for g in open_gates:
-        verdict = gaterule.decide(waiting_of(card, [g], agent_status))
+        verdict = gaterule.decide(waiting_of(card, [g], agent_status), card["repo"])
         if verdict[0] == "coordinator":
             if dispatched: continue
             return True
-        if verdict[0] == "human" or chain.merged_into_main(top, prs, verdict[1]): return True
+        # 協調者照建議答的題在答掉之前仍開著，跟留給人的一樣算要人
+        if verdict[0] != "park" or chain.merged_into_main(top, prs, verdict[1]): return True
     return False
 
 PRE_APPLY = ("explore", "grill", "propose")
