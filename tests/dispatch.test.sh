@@ -244,12 +244,72 @@ assert_grep '^agent prompt rdap-timeout /opsx-workflow:explore rdap-timeout$' "$
 R3="$(mk_repo Acmecorp-AI)"; mkdir -p "$R3/openspec/changes/eval-core"; printf 'schema: opsx\nkind: dev\n' > "$R3/openspec/changes/eval-core/.openspec.yaml"
 printf 'features:\n  - name: eval\n    prs:\n      - name: eval-core\n        branch: feat/eval-core-v2/mikaela\n        status: pending\n' > "$R3/openspec/workplan.yaml"
 printf '"Acmecorp-AI" = "w1"\n' >> "$OPSX_STATE_DIR/workspaces.toml"
+cp "$R3/openspec/workplan.yaml" "$FX/wp3.before"
 cd "$R3"; opsx dispatch eval-core --agent claude --mode drive >/dev/null 2>&1 || fail "dispatch with workplan"
 wait_drive Acmecorp-AI eval-core   # --mode drive 是 autopilot 的別名：照樣起 drive，dispatch.json 寫 autopilot
 python3 -I -c 'import json,sys;d=json.load(open(sys.argv[1]))["Acmecorp-AI/eval-core"];assert d["mode"]=="autopilot",d' "$OPSX_STATE_DIR/dispatch.json" || fail "--mode drive 要寫成 autopilot"
 assert_eq "$(git -C "$R3/.claude/worktrees/eval-core" rev-parse --abbrev-ref HEAD)" "feat/eval-core-v2/mikaela" "workplan branch"
+cmp -s "$FX/wp3.before" "$R3/openspec/workplan.yaml" || fail "已在 workplan 的卡派工不動 workplan：$(diff "$FX/wp3.before" "$R3/openspec/workplan.yaml")"
+
+# --- 不在 workplan 的卡派工前先掛進去，branch 用 workplan 上那個 PR 的（specs/workplan-attach「派工時補掛」）---
+mkdir -p "$R3/openspec/changes/x"; printf 'schema: opsx\nkind: bug-fix\n' > "$R3/openspec/changes/x/.openspec.yaml"
+printf -- '---\ntype: bug\nsource: me\nkind_of_work: planned\n---\n\n## 一句話\n\nx\n' > "$R3/openspec/changes/x/inbox.md"
+out="$(OPSX_USER=mika opsx dispatch x --agent claude --mode autopilot 2>&1)" || fail "dispatch 不在 workplan 的卡: $out"
+python3 -I - "$OPSX_ROOT/bin/lib" "$R3/openspec/workplan.yaml" <<'PY' || fail "x 要自成 feature、PR branch 是 fix/x/mika：$(cat "$R3/openspec/workplan.yaml")"
+import sys
+sys.path.insert(0, sys.argv[1]); import chain
+f = [x for x in chain.load_workplan(sys.argv[2])["features"] if x["name"] == "x"][0]
+assert [(p["name"], p["branch"]) for p in f["prs"]] == [("x", "fix/x/mika")], f
+PY
+assert_eq "$(git -C "$R3/.claude/worktrees/x" rev-parse --abbrev-ref HEAD)" "fix/x/mika" "worktree 用 workplan 上的 branch"
+assert_grep '^priority: P2$' "$R3/openspec/changes/x/inbox.md"
+opsx stop x >/dev/null 2>&1
+# 前綴照 kind（workplan-attach D8）：type 是 bug、kind 是 chore 的卡，workplan 與 worktree 都是 chore/
+mkdir -p "$R3/openspec/changes/xc"; printf 'schema: opsx\nkind: dev\n' > "$R3/openspec/changes/xc/.openspec.yaml"
+printf -- '---\ntype: bug\nsource: me\nkind_of_work: planned\n---\n' > "$R3/openspec/changes/xc/inbox.md"
+out="$(OPSX_USER=mika opsx dispatch xc --kind chore --agent claude --mode autopilot 2>&1)" || fail "dispatch kind chore: $out"
+assert_eq "$(git -C "$R3/.claude/worktrees/xc" rev-parse --abbrev-ref HEAD)" "chore/xc/mika" "kind chore 的前綴是 chore"
+grep -q 'branch: "chore/xc/mika"' "$R3/openspec/workplan.yaml" || fail "workplan 的 branch 要是 chore/xc/mika：$(cat "$R3/openspec/workplan.yaml")"
+opsx stop xc >/dev/null 2>&1
+# 建卡時已掛進 workplan（還沒有 kind，照 type 寫 feat/）：派工的 kind 是 refactoring、branch 還沒建，就改成 refactor/（workplan-attach D14）
+mkdir -p "$R3/openspec/changes/xr"; printf 'schema: opsx\n' > "$R3/openspec/changes/xr/.openspec.yaml"
+printf -- '---\ntype: 功能\nsource: me\nkind_of_work: planned\n---\n' > "$R3/openspec/changes/xr/inbox.md"
+python3 -I "$OPSX_ROOT/bin/lib/workplanwrite.py" attach "$R3" xr "" mika "" || fail "建卡時的掛入"
+grep -q 'branch: "feat/xr/mika"' "$R3/openspec/workplan.yaml" || fail "建卡時照 type 是 feat/xr/mika：$(cat "$R3/openspec/workplan.yaml")"
+out="$(OPSX_USER=mika opsx dispatch xr --kind refactoring --agent claude --mode autopilot 2>&1)" || fail "dispatch kind refactoring: $out"
+assert_eq "$(git -C "$R3/.claude/worktrees/xr" rev-parse --abbrev-ref HEAD)" "refactor/xr/mika" "已掛的卡照 kind 改前綴"
+grep -q 'branch: "refactor/xr/mika"' "$R3/openspec/workplan.yaml" || fail "workplan 的 branch 要改成 refactor/xr/mika：$(cat "$R3/openspec/workplan.yaml")"
+opsx stop xr >/dev/null 2>&1
+# branch 已經建出來就不改
+mkdir -p "$R3/openspec/changes/xe"; printf 'schema: opsx\n' > "$R3/openspec/changes/xe/.openspec.yaml"
+printf -- '---\ntype: bug\nsource: me\nkind_of_work: planned\n---\n' > "$R3/openspec/changes/xe/inbox.md"
+python3 -I "$OPSX_ROOT/bin/lib/workplanwrite.py" attach "$R3" xe "" mika "" || fail "建卡時的掛入 xe"
+git -C "$R3" branch fix/xe/mika || fail "先建 branch"
+cp "$R3/openspec/workplan.yaml" "$FX/wp3.xe"
+out="$(OPSX_USER=mika opsx dispatch xe --kind chore --agent claude --mode autopilot 2>&1)" || fail "dispatch xe: $out"
+assert_eq "$(git -C "$R3/.claude/worktrees/xe" rev-parse --abbrev-ref HEAD)" "fix/xe/mika" "branch 已建出來就沿用"
+cmp -s "$FX/wp3.xe" "$R3/openspec/workplan.yaml" || fail "branch 已建出來時 workplan 不動：$(diff "$FX/wp3.xe" "$R3/openspec/workplan.yaml")"
+opsx stop xe >/dev/null 2>&1
+
+# --- 補掛失敗只警告、照 kind 預設 branch 派（workplan-attach D11）：沒有 inbox frontmatter、milestone 欄位壞掉 ---
+mkdir -p "$R3/openspec/changes/nofm"; printf 'schema: opsx\nkind: refactoring\n' > "$R3/openspec/changes/nofm/.openspec.yaml"
+out="$(OPSX_USER=mika opsx dispatch nofm --agent claude --mode autopilot 2>&1)" || fail "沒有 frontmatter 的卡要派得出去: $out"
+case "$out" in *沒掛進\ workplan*) ;; *) fail "要警告沒掛進 workplan：$out" ;; esac
+assert_eq "$(git -C "$R3/.claude/worktrees/nofm" rev-parse --abbrev-ref HEAD)" "refactor/nofm/mika" "掛不進去時用 kind 的預設前綴"
+opsx stop nofm >/dev/null 2>&1
+cp "$R3/openspec/workplan.yaml" "$FX/wp3.keep"
+printf 'current_milestone: "9"\n' >> "$R3/openspec/workplan.yaml"
+mkdir -p "$R3/openspec/changes/badms"; printf 'schema: opsx\nkind: dev\n' > "$R3/openspec/changes/badms/.openspec.yaml"
+printf -- '---\ntype: 功能\nsource: me\nkind_of_work: planned\n---\n' > "$R3/openspec/changes/badms/inbox.md"
+out="$(OPSX_USER=mika opsx dispatch badms --agent claude --mode autopilot 2>&1)" || fail "milestone 欄位壞掉時要派得出去: $out"
+case "$out" in *沒掛進\ workplan*) ;; *) fail "要警告沒掛進 workplan：$out" ;; esac
+assert_eq "$(git -C "$R3/.claude/worktrees/badms" rev-parse --abbrev-ref HEAD)" "feat/badms/mika"
+opsx stop badms >/dev/null 2>&1
+cp "$FX/wp3.keep" "$R3/openspec/workplan.yaml"
 
 # --- 分支尾巴：OPSX_USER 沒設就用 git user.name；是 git 的占位字「Your Name」或空的就拒絕，不開 worktree 不碰 herdr ---
+# 這段測沒有 workplan 時 dispatch 自己取的 branch：先把 R3 的 workplan 移開，段尾放回
+mv "$R3/openspec/workplan.yaml" "$FX/wp3.aside"
 mkdir -p "$R3/openspec/changes/noname-card"; printf 'schema: opsx\nkind: dev\n' > "$R3/openspec/changes/noname-card/.openspec.yaml"
 : > "$OPSX_FAKE_LOG"
 out="$(OPSX_USER= opsx dispatch noname-card --agent claude --mode autopilot 2>&1)" || fail "git user.name t should name the branch: $out"
@@ -260,6 +320,12 @@ out="$(OPSX_USER= opsx dispatch noname-card --agent claude --mode autopilot 2>&1
 echo "$out" | grep -q 'OPSX_USER' && echo "$out" | grep -q 'Your Name' || fail "要說怎麼設名字: $out"
 [ ! -d "$R3/.claude/worktrees/noname-card" ] || fail "refused dispatch must not open a worktree"
 assert_eq "$(cat "$OPSX_FAKE_LOG")" "" "refused dispatch must not touch herdr"
+# 有 workplan 時，名字是占位字的卡掛不進 workplan，一樣拒絕
+mv "$FX/wp3.aside" "$R3/openspec/workplan.yaml"
+printf -- '---\ntype: 功能\nsource: me\n---\n' > "$R3/openspec/changes/noname-card/inbox.md"
+out="$(OPSX_USER= opsx dispatch noname-card --agent claude --mode autopilot 2>&1)"; [ $? -eq 2 ] || fail "placeholder name must be refused with a workplan: $out"
+echo "$out" | grep -q 'OPSX_USER' && echo "$out" | grep -q 'Your Name' || fail "要說怎麼設名字: $out"
+[ ! -d "$R3/.claude/worktrees/noname-card" ] || fail "refused dispatch must not open a worktree"
 git -C "$R3" config user.name t
 
 # --- 新分支從 fetch 後的 origin/main 開，不從主 checkout 當下的 HEAD（主 checkout 在 feat/x、origin/main 比本機新） ---
@@ -337,9 +403,18 @@ features:
         changes:
           - name: m3
             status: pending
+      - name: m4
+        branch: feat/m4/mikaela
+        status: pending
+        depends-on: []
+        changes:
+          - name: m4
+            status: pending
 EOF
 mkdir -p "$RF/openspec"; mv "$RF/openspec-wp.yaml" "$RF/openspec/workplan.yaml"
-for s in m1 m2 m3; do mkdir -p "$RF/openspec/changes/$s"; printf 'schema: opsx\nkind: dev\n' > "$RF/openspec/changes/$s/.openspec.yaml"; printf -- '- [ ] 1.1 x\n' > "$RF/openspec/changes/$s/tasks.md"; done
+for s in m1 m2 m3 m4; do mkdir -p "$RF/openspec/changes/$s"; printf 'schema: opsx\nkind: dev\n' > "$RF/openspec/changes/$s/.openspec.yaml"; printf -- '- [ ] 1.1 x\n' > "$RF/openspec/changes/$s/tasks.md"; done
+# m4 是 P2：沒依賴、有 tasks.md，但 session 不接它（session-dispatch「P2 的主 change 不寫」）
+printf -- '---\ntype: 功能\nsource: me\npriority: P2\npriority_reason: 自動掛進 workplan，維持 P2\n---\n' > "$RF/openspec/changes/m4/inbox.md"
 cd "$RF"; printf '{}' > "$OPSX_STATE_DIR/dispatch.json"; : > "$OPSX_FAKE_LOG"
 
 # 沒有這個 feature：拒絕，不開 pane
@@ -364,6 +439,7 @@ assert_eq "$(jq -r '."Feat-Repo/m1" | [.herdr_name, .via, .feature, .pane, .bran
 assert_eq "$(jq -r '."Feat-Repo/m2" | [.herdr_name, .via, .feature, .pane, .branch] | join(" ")' "$J")" "fs @fs fs w1:pE feat/m2/mikaela" "m2 跟 m1 共用 pane"
 assert_eq "$(jq -r 'keys | map(select(startswith("Feat-Repo/"))) | join(" ")' "$J")" "Feat-Repo/@fs Feat-Repo/m1 Feat-Repo/m2" "session 加兩個成員共三筆"
 assert_eq "$(jq -r '."Feat-Repo/m3" // "none"' "$J")" none "依賴沒滿足的主 change 不寫"
+assert_eq "$(jq -r '."Feat-Repo/m4" // "none"' "$J")" none "P2 的主 change 不寫"
 assert_eq "$(git -C "$RF/.claude/worktrees/fs" rev-parse --abbrev-ref HEAD)" "feat/m1/mikaela" "worktree 叫 feature 名，從第一個主 change 的 branch 開"
 assert_grep '已指派' "$RF/openspec/changes/m2/decisions.tsv"
 

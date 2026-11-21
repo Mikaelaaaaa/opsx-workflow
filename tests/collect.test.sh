@@ -433,6 +433,12 @@ pcard q q1
 printf 'milestones:\n  - name: "1.0"\n    goal: "先上線"\nfeatures:\n  - name: f\n    milestone: "1.0"\n' > "$R8/q/openspec/workplan.yaml"
 pcard w w1 'kind_of_work: incident' 'impact: security' 'evidence: x'
 printf 'milestones:\n  - name: "1.0"\n    goal: "先上線"\ncurrent_milestone: "9.9"\n' > "$R8/w/openspec/workplan.yaml"
+# 自動掛進目前 milestone 的 P2 卡不算進進度；人改過等級（priority_auto 拿掉）的才算（workplan-attach D17）
+mkdir -p "$R8/a/.git"
+pcard a auto 'priority: P2' 'priority_reason: 自動掛進 workplan，維持 P2' 'priority_auto: true'
+pcard a lifted 'priority: P1' 'priority_reason: 人排的'
+printf 'milestones:\n  - name: "1.0"\n    goal: "g"\ncurrent_milestone: "1.0"\nfeatures:\n' > "$R8/a/openspec/workplan.yaml"
+printf '  - name: %s\n    milestone: "1.0"\n    prs:\n      - name: %s\n        branch: feat/%s/m\n        status: pending\n        changes:\n          - name: %s\n            status: pending\n' auto auto auto auto lifted lifted lifted lifted >> "$R8/a/openspec/workplan.yaml"
 J="$(opsx collect --root "$R8")"; assert_eq "$?" 0 "priority collect rc: $J"
 # 卡帶等級與理由
 C="$(card "$J" p hot)"; assert_eq "$(q "$C" priority.level)" P0; assert_eq "$(q "$C" priority.overridden)" false
@@ -457,6 +463,9 @@ assert_eq "$(q "$J" progress.p.milestone) $(q "$J" progress.p.goal) $(q "$J" pro
 assert_eq "$(q "$(card "$J" p plain)" progress_class)" null "不在 workplan 的卡在有 milestone 時沒有分類"
 assert_eq "$(q "$J" progress.q.milestone) $(q "$J" progress.q.remaining) $(q "$(card "$J" q q1)" progress_class)" "null 1 not_dispatched"
 assert_eq "$(q "$J" progress.w.milestone) $(q "$J" progress.w.remaining) $(q "$J" progress.w.not_dispatched_planned)" "null 1 []"
+assert_eq "$(q "$(card "$J" a auto)" progress_class)" null "自動 P2 的卡不算進進度"
+assert_eq "$(q "$J" progress.a.remaining)" 1 "a 的剩下只有人改過等級的 lifted"
+[ "$(q "$(card "$J" a lifted)" progress_class)" != null ] || fail "lifted 要有進度分類"
 
 # ---------- 孤兒 pane：cwd 在 opsx worktree 底下，且卡已歸檔 / split / stopped / 目錄不在（specs/opsx-reap「孤兒 pane 的判定」、board-collect「orphans 清單」） ----------
 RP6="$FX/code-reap6"; mkdir -p "$RP6/o/.git" "$RP6/o/openspec/changes/archive"

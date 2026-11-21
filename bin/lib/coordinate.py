@@ -27,6 +27,7 @@ import priority  # noqa: E402
 import runtime  # noqa: E402
 import safefile  # noqa: E402
 import submit  # noqa: E402
+import workplanwrite  # noqa: E402
 
 # 討論卡：派工指示有一條含這句。開卡端寫的是「做到 propose 完成就停（留在待指派），不要 apply」，檔裡只放前半句，括號裡改了也認得
 with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "propose-stop-note.txt"), encoding="utf-8") as _f:
@@ -170,13 +171,18 @@ class Round:
             self.plans[top] = read_prs(os.path.join(top, "openspec", "workplan.yaml"))
         return self.plans[top]
 
-    def level(self, top, slug):
-        """卡的 {level, reason, overridden}，算不出來是 {error}。workplan 的 milestone 欄位不合格時那個 repo 每張卡都是 error。"""
+    def repo_levels(self, top):
+        """priority.levels(top)，每輪每個 repo 算一次。workplan 的 milestone 欄位不合格時是空 dict，每張卡都當成算不出來。"""
         if top not in self.levels and top not in self.level_errors:
             try:
                 self.levels[top] = priority.levels(top)
             except priority.PriorityError as e:
                 self.level_errors[top] = str(e)
+        return self.levels.get(top, {})
+
+    def level(self, top, slug):
+        """卡的 {level, reason, overridden}，算不出來是 {error}。workplan 的 milestone 欄位不合格時那個 repo 每張卡都是 error。"""
+        self.repo_levels(top)
         if top in self.level_errors:
             return {"error": self.level_errors[top]}
         if slug not in self.levels[top]:
@@ -273,7 +279,7 @@ class Round:
         shared = self.session_siblings(key, top)
         # 單卡派的卡屬於 session 代管的 feature、session 還活著：依賴它的下一個主 change 要叫醒。
         # chain.children 從磁碟讀這張的條目，opsx stop 標 stopped 之前叫醒，不然它會當成人停的而不接
-        owner = self.session_feature_of(top, c["slug"])
+        owner = self.session_feature_of(top, c["repo"], c["slug"])
         session = self.dispatch_file.get("%s/@%s" % (c["repo"], owner)) if owner and not shared else None
         wake_session = bool(session) and chain.session_alive(session)
         stop = entry and entry.get("mode") != "stopped" and not shared
@@ -449,15 +455,16 @@ class Round:
         if self.dry:
             self.log("DRY workplan %s 標 %s" % (path, "、".join("%s %s" % (n, v) for _, n, v in marks)))
             return True
-        with open(path, encoding="utf-8") as f:
-            lines = f.read().split("\n")
-        for key, name, value in marks:
-            i = status_line(lines, key, name)
-            if i is None:
-                self.log("?? %s 找不到 %s 的 status 行，不收尾" % (path, name))
-                return False
-            lines[i] = re.sub(r"status:.*$", "status: " + value, lines[i])
-        safefile.write_atomic(path, "\n".join(lines))
+        with workplanwrite.WorkplanLock(top):
+            with open(path, encoding="utf-8") as f:
+                lines = f.read().split("\n")
+            for key, name, value in marks:
+                i = status_line(lines, key, name)
+                if i is None:
+                    self.log("?? %s 找不到 %s 的 status 行，不收尾" % (path, name))
+                    return False
+                lines[i] = re.sub(r"status:.*$", "status: " + value, lines[i])
+            safefile.write_atomic(path, "\n".join(lines))
         self.plans.pop(top, None)
         if archived:
             self.log("ok   workplan 的 change %s 已歸檔、沒更新，跟著標 done" % "、".join(archived))
@@ -1023,7 +1030,7 @@ class Round:
             if not (discuss or os.path.isfile(os.path.join(c["path"], "tasks.md"))) or c["mr"]:
                 continue
             # parked 的卡是這裡自己停下的，重派是接回原本那個 pane 的工作；交給 session 的話，它的 worktree 會擋住 session
-            owner = None if parked else self.session_feature_of(top, c["slug"])
+            owner = None if parked else self.session_feature_of(top, c["repo"], c["slug"])
             if owner:
                 self.log("-- %s 屬於 feature %s，由那個 session 做，不單獨派" % (key, owner))
                 continue
@@ -1097,9 +1104,9 @@ class Round:
                 return k, v
         return None
 
-    def session_feature_of(self, top, slug):
+    def session_feature_of(self, top, repo, slug):
         pr = pr_of(self.workplan(top), slug)
-        for f in session_features(read_features(os.path.join(top, "openspec", "workplan.yaml"))):
+        for f in session_features(top, repo, read_features(os.path.join(top, "openspec", "workplan.yaml")), self.repo_levels(top), self.dispatch_file):
             if pr is not None and any(p.get("name") == pr.get("name") for p in f.get("prs") or []):
                 return f.get("name")
         return None
@@ -1112,10 +1119,11 @@ class Round:
             prs = self.workplan(top)
             status = {p.get("name"): p.get("status") for p in prs}
             features = read_features(os.path.join(top, "openspec", "workplan.yaml"))
+            levels = self.repo_levels(top)
             for f in features:
-                if not chain.session_managed(f) and (len(f.get("prs") or []) >= 2 or f.get("depends-on")):
+                if not AGENT_NAME.match(f.get("name") or "") and (chain.counted_prs(top, f, levels) >= 2 or f.get("depends-on")):
                     self.log("?? %s 的 feature %s 不是合法的 agent 名，開不了 session，它的卡照單卡派" % (repo, f.get("name")))
-            for f in session_features(features):
+            for f in session_features(top, repo, features, levels, self.dispatch_file):
                 name = f.get("name")
                 if all(p.get("status") == "merged" for p in f.get("prs") or []):
                     continue
@@ -1373,9 +1381,9 @@ def pr_of(prs, slug):
     return chain.find_pr(prs, slug)
 
 
-def session_features(features):
+def session_features(top, repo, features, levels, dispatch):
     """由 session 代管的 feature（chain.session_managed）：依賴合了才由 coordinate 開 session，它的卡不單獨派。"""
-    return [f for f in features if chain.session_managed(f)]
+    return [f for f in features if chain.session_managed(top, f, levels, chain.session_live(dispatch, repo, f.get("name")))]
 
 
 def deps_unmerged(slug, prs, features):
@@ -1405,7 +1413,7 @@ def status_line(lines, key, name):
         if m:
             item_indent = len(m.group(1)) + 2
             continue
-        if item_indent is None or not re.match(r"^ {%d}- name:\s*%s\s*(#.*)?$" % (item_indent, re.escape(name)), line):
+        if item_indent is None or not re.match(r"""^ {%d}- name:\s*(["']?)%s\1\s*(#.*)?$""" % (item_indent, re.escape(name)), line):
             continue
         for j in range(i + 1, len(lines)):
             if re.match(r"^ {%d}status:" % (item_indent + 2), lines[j]):

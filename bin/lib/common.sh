@@ -78,12 +78,21 @@ opsx_repo_top() { # <path>
   ( cd "$1" && pwd -P )
 }
 
+# 分支尾巴的名字：OPSX_USER，沒設就是 git user.name（空白換 -、轉小寫）。沒有名字、或是 git 的占位字「Your Name」時印空行。
+branch_user() { # <top>
+  local u="${OPSX_USER:-$(git -C "$1" config user.name 2>/dev/null | tr ' ' '-' | tr '[:upper:]' '[:lower:]')}"
+  [ "$u" != your-name ] || u=""
+  printf '%s\n' "$u"
+}
+
 # 在 <top> 用 openspec 建殼，inbox.md 寫成 <內容檔>；slug 已存在就依序加 -2、-3。印實際的 slug。
+# 建好就掛進 workplan（workplanwrite.py attach），<父卡> 沒給時從卡的 source: agent:<卡> 取。
+# 掛不進去只警告、照樣印 slug：卡已經建好，退出非零會讓呼叫端或 agent 再建一張。
 # 總長超過 32 時截中段、保留最後一段（issue 編號）：gh-<repo>-1 撞名要變 gh-<re>-1-2，不能變成 issue #2 的 gh-<repo>-2。
 # 沒有 - 或最後一段太長（留不下開頭至少一個字）時，改成截尾再加 -N。
 # 並行呼叫挑同一個 slug：先 mkdir <top>/openspec/.reserve-<slug>（原子）拿到保留，才建殼；建完或失敗都放掉。
 # 不能預先 mkdir changes/<slug>：openspec new change 看到已存在會拒絕。
-new_shell() { # <top> <slug> <inbox 內容檔>
+new_shell() { # <top> <slug> <inbox 內容檔> [<父卡>]
   local top="$1" slug="$2" n=1 head tail keep res err
   while :; do
     res="$top/openspec/.reserve-$slug"
@@ -107,6 +116,8 @@ new_shell() { # <top> <slug> <inbox 內容檔>
   ( cd "$top" && openspec new change "$slug" --schema opsx >/dev/null ) || { rmdir "$res"; die "openspec new change $slug 失敗（${top}）"; }
   cp "$3" "$top/openspec/changes/$slug/inbox.md" || { rmdir "$res"; die "寫不進 $top/openspec/changes/$slug/inbox.md"; }
   rmdir "$res"
+  "$OPSX_PY" -I "$(dirname "${BASH_SOURCE[0]}")/workplanwrite.py" attach "$top" "$slug" "${4:-}" "$(branch_user "$top")" "" \
+    || warn "已建 ${slug}，但沒掛進 workplan（上面是原因）"
   printf '%s\n' "$slug"
 }
 

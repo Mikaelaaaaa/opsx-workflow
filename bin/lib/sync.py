@@ -285,19 +285,22 @@ def inbox_text(item: dict, today: str) -> str:
         item["type"], item["source"], today, fm, item["title"], body, item["evidence"])
 
 
-def create_shell(opsx_root: pathlib.Path, item: dict, today: str) -> str:
-    """用 common.sh 的 new_shell 建殼（slug 撞名加 -2 的規則只有一份）。"""
+def create_shell(opsx_root: pathlib.Path, item: dict, today: str) -> tuple:
+    """用 common.sh 的 new_shell 建殼（slug 撞名加 -2 的規則只有一份）。回 (slug, 掛不進 workplan 的警告，沒有是空字串)：
+    new_shell 掛不進去仍退出 0，警告只在 stderr。"""
     with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".md", delete=False) as f:
         f.write(inbox_text(item, today))
     try:
         p = subprocess.run(["bash", "-c", 'source "$1"; new_shell "$2" "$3" "$4"', "opsx-sync",
                             str(opsx_root / "bin" / "lib" / "common.sh"), str(item["path"]), item["slug"], f.name],
-                           capture_output=True, text=True)
+                           capture_output=True, text=True, env=dict(os.environ, OPSX_PY=sys.executable))
     finally:
         os.unlink(f.name)
     if p.returncode != 0:
         raise RuntimeError(p.stderr.strip() or "new_shell 退出 %d" % p.returncode)
-    return p.stdout.strip()
+    if "沒掛進 workplan" not in p.stderr:
+        return p.stdout.strip(), ""
+    return p.stdout.strip(), " ".join(l.strip() for l in p.stderr.splitlines() if l.startswith("workplan:") or "沒掛進 workplan" in l)
 
 
 def file_unfiled(state: pathlib.Path, item: dict, today: str) -> pathlib.Path:
@@ -429,9 +432,11 @@ def main() -> int:
             continue
         if entry is None:
             try:
-                slug = create_shell(a.opsx_root, item, today)
+                slug, unattached = create_shell(a.opsx_root, item, today)
             except RuntimeError as e:
                 tally.error(src, str(e)); continue
+            if unattached:
+                tally.error(src, unattached)
             index[src] = {"path": item["path"] / "openspec" / "changes" / slug / "inbox.md", "frozen": False}
             tally.created += 1
             continue

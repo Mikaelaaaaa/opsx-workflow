@@ -215,4 +215,20 @@ PATH="$FX/failopenspec:$PATH" split x "$ID"; rc=$?
 cmp -s "$C/x/inbox.md" "$FX/keep.md" || fail "建殼失敗不能刪段：$(diff "$FX/keep.md" "$C/x/inbox.md")"
 assert_eq "$(dirs)" "x " "沒有新殼"
 assert_eq "$(find "$E/openspec" -maxdepth 1 -name '.reserve-*' | wc -l | tr -d ' ')" 0 "不留保留目錄"
+
+# --- 拆出的卡掛進被拆那張所屬的 feature（specs/workplan-attach「opsx split-out pa <id>」）---
+# 新殼的 source 是原回報者 agent:foo，foo 不在 workplan；父卡要是被拆的 x
+reset; card x
+printf 'milestones:\n  - name: "1.0"\n    goal: "g"\n\nfeatures:\n  - name: fx\n    milestone: "1.0"\n    status: active\n    prs:\n      - name: x\n        branch: feat/x/t\n        status: pending\n        changes:\n          - name: x\n            status: pending\n' > "$E/openspec/workplan.yaml"
+merge --kind-of-work planned -- 拆出後掛進 fx
+OPSX_USER=mika split x "$ID"; assert_eq "$?" 0 "$(cat "$ERR")"
+assert_not_grep '沒掛進' "$ERR"
+python3 -I - "$OPSX_ROOT/bin/lib" "$E/openspec/workplan.yaml" "$ID" <<'PY' || fail "拆出的卡要是 fx 底下的 PR：$(cat "$E/openspec/workplan.yaml")"
+import sys
+sys.path.insert(0, sys.argv[1]); import chain
+f = [x for x in chain.load_workplan(sys.argv[2])["features"] if x["name"] == "fx"][0]
+want = (sys.argv[3], "fix/%s/mika" % sys.argv[3], [sys.argv[3]])
+assert [(p["name"], p["branch"], [c["name"] for c in p["changes"]]) for p in f["prs"]][1:] == [want], f
+PY
+rm "$E/openspec/workplan.yaml"
 echo ok

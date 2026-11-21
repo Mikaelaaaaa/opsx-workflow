@@ -72,4 +72,19 @@ before="$(ls "$A/openspec/changes")"
 assert_rc 2 opsx file me-20261106-1600 --repo "$A"
 assert_eq "$(ls "$A/openspec/changes")" "$before" "不能建殼"
 assert_file "$OPSX_STATE_DIR/unfiled/me-20261106-1600.md"; assert_file "$OPSX_STATE_DIR/unfiled/me-20261106-1600/attachments/shot.png"
+
+# --- 分類進有 workplan 的 repo：source me 的卡自成 feature，milestone 是 current_milestone（specs/workplan-attach「opsx file」）---
+F="$(mk_opsx_repo f)"
+printf 'milestones:\n  - name: "2.0"\n    goal: "g"\ncurrent_milestone: "2.0"\n\nfeatures:\n  - name: fa\n    status: active\n    prs:\n      - name: pa\n        branch: feat/pa/t\n        status: pending\n        changes:\n          - name: pa\n            status: pending\n' > "$F/openspec/workplan.yaml"
+export OPSX_TEST_NOW="2026-11-06 18:00"
+assert_eq "$(opsx new --type 功能 -- 分類後掛進 workplan)" me-20261106-1800
+out="$(OPSX_USER=mika opsx file me-20261106-1800 --repo "$F" 2> "$FX/f.err")"; assert_eq "$?" 0 "$(cat "$FX/f.err")"
+assert_not_grep '沒掛進' "$FX/f.err"
+python3 -I - "$OPSX_ROOT/bin/lib" "$F/openspec/workplan.yaml" "$out" <<'PY' || fail "分類的卡要自成 feature：$(cat "$F/openspec/workplan.yaml")"
+import sys
+sys.path.insert(0, sys.argv[1]); import chain
+f = chain.load_workplan(sys.argv[2])["features"][-1]
+assert (f["name"], f.get("milestone"), f["prs"][0]["name"], f["prs"][0]["branch"]) == (sys.argv[3], "2.0", sys.argv[3], "feat/%s/mika" % sys.argv[3]), f
+PY
+assert_grep '^priority: P2$' "$F/openspec/changes/$out/inbox.md"
 echo ok

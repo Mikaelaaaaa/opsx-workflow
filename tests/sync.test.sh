@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # opsx sync：來源撈進收件匣。驗收：specs/board-sync（board-inbox 7.1 debt、8.1 gitlab、9.1 github）
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+OPSX_PY="$(cat "$OPSX_STATE_DIR/python")"   # 下面直接 source common.sh 呼叫 new_shell，它用 OPSX_PY 掛 workplan
 use_fakes glab gh
 export OPSX_FAKE_LOG="$FX/fake.log"; : > "$OPSX_FAKE_LOG"
 mkdir -p "$OPSX_STATE_DIR"
@@ -644,5 +645,22 @@ printf '[]' > "$OPSX_TEST_ISSUES/Acmecorp-CS.json"; rm -f "$OPSX_TEST_ISSUES/wt.
 out="$(opsx sync --root "$ROOT" --source gitlab 2>&1)"; assert_eq "$?" 0 "U+2028 的 issue 不該讓 sync 崩潰：$out"
 [ -f "$CH/gl-a-777/inbox.md" ] || fail "U+2028 的 issue 要建殼：${out}"
 assert_eq "$(awk -F'\t' '$2=="sync"' "$LOG" | tail -1 | cut -f1 | wc -l | tr -d ' ')" 1 "sync.log 要有這次的列"
+
+# --- sync 建的卡掛進 workplan；掛不進去時卡照建、記進這次 sync 的錯誤數（workplan-attach D12）---
+# 前面的段落留下 github:z 的錯誤，每次 --source github 都會有：先取基準，再比多出來的
+opsx sync --root "$ROOT" --source github >/dev/null 2>&1
+base_err="$(logcols | cut -f4)"
+WOK="$(mk_opsx_repo wok)"; mv "$WOK" "$ROOT/wok"; WOK="$(cd "$ROOT/wok" && pwd -P)"
+WBAD="$(mk_opsx_repo wbad)"; mv "$WBAD" "$ROOT/wbad"; WBAD="$(cd "$ROOT/wbad" && pwd -P)"
+printf 'features:\n  - name: f0\n    status: active\n    prs:\n      - name: p0\n        branch: feat/p0/t\n        status: pending\n        changes:\n          - name: p0\n            status: pending\n' > "$WOK/openspec/workplan.yaml"
+printf 'created: 2026-11-19\n' > "$WBAD/openspec/workplan.yaml"
+printf '\n[[source]]\nkind = "github"\nrepo = "wok"\nproject = "me/wok"\npath = "%s"\n\n[[source]]\nkind = "github"\nrepo = "wbad"\nproject = "me/wbad"\npath = "%s"\n' "$WOK" "$WBAD" >> "$OPSX_STATE_DIR/sources.toml"
+ghi() { printf '[{"number":%s,"title":"%s","body":"b","state":"OPEN","updatedAt":"2026-11-07T10:00:00Z","url":"https://github.com/me/x/issues/%s","labels":[]}]' "$1" "$2" "$1"; }
+ghi 1 掛得進去 > "$OPSX_TEST_ISSUES/gh-wok.json"; ghi 2 掛不進去 > "$OPSX_TEST_ISSUES/gh-wbad.json"
+out="$(opsx sync --root "$ROOT" --source github 2>&1)"; assert_eq "$?" 0 "sync github: $out"
+grep -q 'name: "gh-wok-1"' "$WOK/openspec/workplan.yaml" || fail "sync 建的卡要掛進 workplan：$(cat "$WOK/openspec/workplan.yaml")"
+assert_file "$WBAD/openspec/changes/gh-wbad-2/inbox.md"
+assert_eq "$(logcols | cut -f4)" "$((base_err + 1))" "掛不進去要多記一個錯誤：$(lastsync)"
+assert_not_grep 'gh-wbad-2' "$WBAD/openspec/workplan.yaml"
 
 echo ok

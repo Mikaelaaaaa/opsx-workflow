@@ -126,12 +126,35 @@ def card_of(top: str, pr: dict, todo: list) -> str:
     return todo[0]   # 一個 PR 一條 branch；同 PR 的其他 change 由接手的 agent 依序做
 
 
-def session_managed(feature: dict) -> bool:
-    """feature 由 session 代管：名稱能當 herdr agent 名，且有 depends-on 或 prs 有 2 個以上。已合的 PR 也算，代管方式才不會做到一半切換。
-    名稱不合法的 feature 開不了 session，照單卡派（feature 的 depends-on 由 feature_waits 擋）。"""
+def counted_prs(top: str, feature: dict, levels: dict) -> int:
+    """feature 底下算數的 PR：已合併的，加上卡的等級是 P0／P1 的未合併 PR。P2 與等級算不出來的不算，
+    掛進父 feature 的 P2 卡才不會把它變成 session 代管（workplan-attach D5）。levels 是 priority.levels(top) 的結果。
+    卡照 card_of 找；change 都 done 了還沒合的 PR，用它全部的 change 找。"""
+    n = 0
+    for pr in feature.get("prs") or []:
+        if pr.get("status") == "merged":
+            n += 1
+            continue
+        names = [c.get("name") for c in pr.get("changes") or []]
+        todo = [c.get("name") for c in pr.get("changes") or [] if c.get("status") != "done"]
+        got = levels.get(card_of(top, pr, todo or names or [pr.get("name")]), {})
+        n += got.get("level") in ("P0", "P1")
+    return n
+
+
+def session_managed(top: str, feature: dict, levels: dict, live: bool) -> bool:
+    """feature 由 session 代管：名稱能當 herdr agent 名，且有 depends-on、算數的 PR 有 2 個以上（counted_prs），
+    或它的 session 還活著（live，session_live 的結果）。已合的 PR 也算；卡的等級變了，session 還活著時也維持代管，
+    session 結束後才照等級重算（workplan-attach D13）。名稱不合法的 feature 開不了 session，照單卡派（feature 的 depends-on 由 feature_waits 擋）。"""
     if not AGENT_NAME.match(feature.get("name") or ""):
         return False
-    return bool(feature.get("depends-on")) or len(feature.get("prs") or []) >= 2
+    return live or bool(feature.get("depends-on")) or counted_prs(top, feature, levels) >= 2
+
+
+def session_live(dispatch: dict, repo: str, feature: str) -> bool:
+    """dispatch.json 有這個 feature 的 session 條目 <repo>/@<feature>，而且它還活著。"""
+    entry = dispatch.get("%s/@%s" % (repo, feature))
+    return bool(entry) and session_alive(entry)
 
 
 def children(top: str, repo: str, parent: str, dispatch_path: str, feature: str = None) -> list:
@@ -161,7 +184,11 @@ def children(top: str, repo: str, parent: str, dispatch_path: str, feature: str 
             return split_next(top, repo, prs, split, dispatch, feature_waits(features, prs))
         return [("skip", "workplan 裡沒有 %s" % parent)]
     session = me.get("feature") or feature
-    gated = {f.get("name") for f in features if session_managed(f)}
+    try:
+        lv = priority.levels(top)
+    except priority.PriorityError as e:
+        return [("skip", "等級算不出來，不自動續接：%s" % e)]
+    gated = {f.get("name") for f in features if session_managed(top, f, lv, session_live(dispatch, repo, f.get("name")))}
     waits = feature_waits(features, prs)
     status = {pr.get("name"): pr.get("status") for pr in prs}
     out = []
@@ -289,12 +316,17 @@ def _by_level(top: str, rows: list) -> list:
 
 def feature_plan(top: str, feature: str) -> list:
     """opsx dispatch --feature：feature 底下現在能開工的主 change，(卡名, branch, kind) 依 workplan 順序。
-    能開工 = PR 沒合、depends-on 都合了、還有沒 done 的 change、卡有 tasks.md。沒有這個 feature 或一個都不能開工就 exit。"""
+    能開工 = PR 沒合、depends-on 都合了、還有沒 done 的 change、卡有 tasks.md、卡的等級是 P0／P1（workplan-attach D5）。
+    沒有這個 feature 或一個都不能開工就 exit。"""
     wp_path = os.path.join(top, "openspec", "workplan.yaml")
     features = load_workplan(wp_path).get("features") if os.path.exists(wp_path) else []
     hit = [f for f in features or [] if f.get("name") == feature]
     if not hit:
         sys.exit("dispatch: workplan 沒有 feature「%s」" % feature)
+    try:
+        lv = priority.levels(top)
+    except priority.PriorityError as e:
+        sys.exit("dispatch: 等級算不出來，feature「%s」不開工：%s" % (feature, e))
     status = {pr.get("name"): pr.get("status") for f in features for pr in f.get("prs") or []}
     out = []
     for pr in hit[0].get("prs") or []:
@@ -307,11 +339,13 @@ def feature_plan(top: str, feature: str) -> list:
         card = os.path.join(top, "openspec", "changes", slug)
         if not os.path.exists(os.path.join(card, "tasks.md")):
             continue
+        if lv.get(slug, {}).get("level") not in ("P0", "P1"):
+            continue
         if not pr.get("branch"):
             sys.exit("dispatch: workplan 的 PR「%s」沒有 branch" % pr.get("name"))
         out.append((slug, pr["branch"], _kind(card)))
     if not out:
-        sys.exit("dispatch: feature「%s」現在沒有能開工的主 change（都合了、依賴沒合，或還沒 propose）" % feature)
+        sys.exit("dispatch: feature「%s」現在沒有能開工的主 change（都合了、依賴沒合、還沒 propose，或都是 P2）" % feature)
     return out
 
 

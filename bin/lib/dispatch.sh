@@ -132,13 +132,18 @@ PY
   # model：沒給就照 kind
   [ -n "$model" ] || model="$(default_model "$agent" "$kind")"
 
-  # branch：workplan 有就用，沒有就 {type}/{slug}/{user}
+  # 不在 workplan 的卡先掛進去（workplan-attach「派工時補掛」）；feature session 的卡本來就在 workplan。
+  # 掛不進去只警告，下面照 kind 的預設 branch 派，跟建卡時一樣（workplan-attach D11）
+  if [ -z "$feature" ]; then
+    "$OPSX_PY" -I "$OPSX_ROOT/bin/lib/workplanwrite.py" attach "$top" "$card" "" "$(branch_user "$top")" "$kind" \
+      || warn "dispatch: ${card} 沒掛進 workplan（上面是原因），照 kind 的預設 branch 派"
+  fi
+  # branch：workplan 有就用，沒有（repo 沒有 workplan）就 {type}/{slug}/{user}
   local branch; branch="$(workplan_branch "$top" "$card")"
   if [ -z "$branch" ]; then
     local t=feat; case "$kind" in bug-fix) t=fix ;; refactoring) t=refactor ;; ops|chore) t=chore ;; esac
-    local user="${OPSX_USER:-$(git -C "$top" config user.name 2>/dev/null | tr ' ' '-' | tr '[:upper:]' '[:lower:]')}"
-    # git 沒設身分時 user.name 是占位字「Your Name」，會變成 feat/<slug>/your-name
-    case "$user" in ""|your-name) die "dispatch: 分支尾巴沒有名字：OPSX_USER 沒設，git config user.name 是「$(git -C "$top" config user.name 2>/dev/null)」。設 OPSX_USER，或在這個 repo git config user.name" ;; esac
+    local user; user="$(branch_user "$top")"
+    [ -n "$user" ] || die "dispatch: 分支尾巴沒有名字：OPSX_USER 沒設，git config user.name 是「$(git -C "$top" config user.name 2>/dev/null)」。設 OPSX_USER，或在這個 repo git config user.name"
     branch="$t/$slug/$user"
   fi
 

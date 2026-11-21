@@ -50,6 +50,8 @@ card() { # card <repo-dir> <slug>
   mkdir -p "$1/openspec/changes/$2"
   printf 'schema: opsx\ncreated: 2026-11-17\n' > "$1/openspec/changes/$2/.openspec.yaml"
   printf '## 已知\n- x\n\n## 待決\n\n## 不做\n' > "$1/openspec/changes/$2/explore.md"
+  # 不在 workplan 的卡派工前會掛進去、寫 priority 覆寫，要有 opsx new 建的 frontmatter
+  printf -- '---\ntype: 功能\nsource: me\nkind_of_work: planned\n---\n' > "$1/openspec/changes/$2/inbox.md"
 }
 key() { jq -r --arg k "$1" 'has($k)' "$OPSX_STATE_DIR/dispatch.json" 2>/dev/null || echo false; }
 dispatch_ok() { # dispatch_ok <cwd> <slug> [args…]：rc 0，回傳 stdout

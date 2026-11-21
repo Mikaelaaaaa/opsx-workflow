@@ -533,6 +533,10 @@ def has_shell(top, name):
     archive = os.path.join(changes, "archive")
     return any((m := ARCHIVED_NAME.match(n)) and m[1] == name for n in (os.listdir(archive) if os.path.isdir(archive) else []))
 
+def auto_p2(c):
+    """自動掛進 workplan 的卡（priority_auto）沒人排過，人改等級前不算進 milestone 進度（workplan-attach D17）。"""
+    return priority.frontmatter(priority.read_text(os.path.join(c["path"], "inbox.md")))[0].get("priority_auto") == "true"
+
 # 進度以 main change 為單位：有殼的卡，加上 workplan 排了還沒建殼的 PR；子 change 與拆過的母卡不算
 progress = {}
 for repo in repos:
@@ -543,7 +547,7 @@ for repo in repos:
     counts = dict.fromkeys(PROGRESS_CLASSES, 0)
     for c in cards:
         if c["repo"] != repo: continue
-        live = c["section"] != "已完成"
+        live = c["section"] != "已完成" and not auto_p2(c)
         c["progress_class"] = progress_class(c) if live and (owned is None or c["slug"] in owned) else None
         if c["progress_class"]: counts[c["progress_class"]] += 1
     planned = [pr["name"] for f in scoped for pr in f.get("prs") or []

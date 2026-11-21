@@ -278,4 +278,11 @@ assert_eq "$(cat "$FX/p1.out" "$FX/p2.out" | tr '\n' ' ')" "x x " "兩個都併�
 assert_eq "$(grep -c '^## 併入：' "$C/x/inbox.md")" 2 "兩段都在"
 assert_eq "$(grep '^- id:' "$C/x/inbox.md" | sort -u | wc -l | tr -d ' ')" 2 "兩段 id 不同"
 assert_eq "$(dirs)" "x "
+
+# --- 併入既有卡不寫 workplan（specs/workplan-attach「併入不寫 workplan」）---
+reset; card x '`bin/x.sh` 的檢查'
+printf 'features:\n  - name: fx\n    status: active\n    prs:\n      - name: x\n        branch: feat/x/t\n        status: pending\n        changes:\n          - name: x\n            status: pending\n' > "$E/openspec/workplan.yaml"
+cp "$E/openspec/workplan.yaml" "$FX/wp.before"
+agent_new --kind-of-work planned --repo "$E" -- "bin/x.sh:30 又一個"; merged_into x 1
+cmp -s "$FX/wp.before" "$E/openspec/workplan.yaml" || fail "併入時 workplan 要逐字不變"
 echo ok

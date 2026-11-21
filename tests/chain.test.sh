@@ -633,6 +633,20 @@ for s in r2 s1; do mkdir -p "$R7/openspec/changes/$s"; printf -- '- [ ] 1.1 x\n'
 printf '{"root/m1":{"mode":"autopilot","pane":"w5:pQ","agent":"claude","grants":[]}}' > "$FX/disp7.json"
 got="$(python3 -I -B "$OPSX_ROOT/bin/lib/chain.py" children "$R7" root m1 "$FX/disp7.json")"
 assert_eq "$got" "$(printf 'child\ts1\tfeat/s1/u\tdev')" "多 PR 根 feature 的 r2 留給 coordinate 開 session，單 PR 根 feature 的 s1 照接"
+# r1 改成 P2：算數的 PR 剩 1，沒有 session 時 r 不代管，r2 照單卡接
+mkdir -p "$R7/openspec/changes/r1"; printf -- '---\npriority: P2\npriority_reason: 不急\n---\n' > "$R7/openspec/changes/r1/inbox.md"
+got="$(python3 -I -B "$OPSX_ROOT/bin/lib/chain.py" children "$R7" root m1 "$FX/disp7.json")"
+assert_eq "$got" "$(printf 'child\tr2\tfeat/r2/u\tdev\nchild\ts1\tfeat/s1/u\tdev')" "r 只剩一個算數的 PR、session 沒在跑：r2 單卡接"
+# r 的 session 還活著：維持代管，r2 不單卡接（workplan-attach D13）
+printf '{"root/m1":{"mode":"autopilot","pane":"w5:pQ","agent":"claude","grants":[]},"root/@r":{"mode":"autopilot","pane":"w5:pS"}}' > "$FX/disp7.json"
+got="$(python3 -I -B "$OPSX_ROOT/bin/lib/chain.py" children "$R7" root m1 "$FX/disp7.json")"
+assert_eq "$got" "$(printf 'child\ts1\tfeat/s1/u\tdev')" "r 的 session 還活著：r2 留給 session"
+# current_milestone 寫壞：等級算不出來，不續接（workplan-attach D5）
+cp "$R7/openspec/workplan.yaml" "$FX/wp7.keep"; printf 'current_milestone: "9"\n' >> "$R7/openspec/workplan.yaml"
+got="$(python3 -I -B "$OPSX_ROOT/bin/lib/chain.py" children "$R7" root m1 "$FX/disp7.json")"
+case "$got" in "skip	等級算不出來，不自動續接："*) ;; *) fail "等級算不出來要 skip：$got" ;; esac
+cp "$FX/wp7.keep" "$R7/openspec/workplan.yaml"; rm -r "$R7/openspec/changes/r1"
+printf '{"root/m1":{"mode":"autopilot","pane":"w5:pQ","agent":"claude","grants":[]}}' > "$FX/disp7.json"
 echo ok
 
 # 單卡 r1 收尾由 coordinate 叫醒 session：帶 feature 參數時，同 feature 的 r2 回 session row；不帶時照舊留給 coordinate

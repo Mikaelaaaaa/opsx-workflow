@@ -322,4 +322,128 @@ assert_rc 2 opsx new --type 改善 -- x
 assert_rc 2 opsx new --area hooks --repo "$A" -- x
 assert_rc 2 opsx new --dup-of x --repo "$A" -- y
 assert_eq "$(snap)" "$before"; assert_eq "$(find "$OPSX_STATE_DIR/unfiled" | sort)" "$ub" "被拒時不能寫任何檔"
+
+# --- 掛進 workplan：specs/workplan-attach「新卡掛進 workplan」「新 PR 帶 branch」「掛進去不改等級」「沒有 workplan 的 repo 不建檔」---
+export OPSX_USER=mika OPSX_TEST_NOW="2026-11-12 09:00"
+wp_fixture() { # wp_fixture <repo> <current_milestone 那一行，空字串是沒設>
+  cat > "$1/openspec/workplan.yaml" <<EOF
+created: 2026-11-05
+
+milestones:
+  - name: "1.0"
+    goal: "g1"
+  - name: "2.0"
+    goal: "g2"
+$2
+
+features:
+  - name: fa
+    milestone: "1.0"
+    status: active
+    prs:
+      - name: pa
+        branch: feat/pa/t
+        status: pending
+        depends-on: []
+        changes:
+          - name: pa
+            status: pending
+  - name: fc
+    milestone: "1.0"
+    status: complete
+    prs:
+      - name: pc
+        branch: feat/pc/t
+        status: merged
+        depends-on: []
+        changes:
+          - name: pc
+            status: done
+  - name: fp
+    milestone: "1.0"
+    status: pending
+    prs:
+      - name: pp
+        branch: feat/pp/t
+        status: pending
+        changes:
+          - name: pp
+            status: pending
+  - name: fn
+    prs:
+      - name: pn
+        branch: feat/pn/t
+        status: pending
+        changes:
+          - name: pn
+            status: pending
+EOF
+}
+where() { # where <repo> <slug>：印「<feature>\t<milestone，沒有是 ->\t<branch>」；workplan 沒有以 slug 命名、底下一個同名 change 的 PR 印 none
+  python3 -I - "$OPSX_ROOT/bin/lib" "$1/openspec/workplan.yaml" "$2" <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1]); import chain
+for f in chain.load_workplan(sys.argv[2]).get("features") or []:
+    for pr in f.get("prs") or []:
+        if pr.get("name") == sys.argv[3] and [(c.get("name"), c.get("status")) for c in pr.get("changes") or []] == [(sys.argv[3], "pending")]:
+            print("%s\t%s\t%s" % (f["name"], f.get("milestone") or "-", pr.get("branch")))
+            sys.exit(0)
+print("none")
+PY
+}
+WP="$(mk_opsx_repo wp)"; wp_fixture "$WP" 'current_milestone: "2.0"'
+wnew() { opsx new --repo "$WP" "$@" 2> "$FX/wp.err"; }
+s="$(wnew --type 功能 -- 使用者的卡)"; assert_eq "$?" 0 "$(cat "$FX/wp.err")"
+assert_eq "$(where "$WP" "$s")" "$s	2.0	feat/$s/mika" "source me 自成 feature，milestone 是 current_milestone"
+assert_not_grep '沒掛進' "$FX/wp.err"
+assert_grep '^priority: P2$' "$WP/openspec/changes/$s/inbox.md"
+assert_grep '^priority_reason: 自動掛進 workplan，維持 P2$' "$WP/openspec/changes/$s/inbox.md"
+assert_grep '^priority_auto: true$' "$WP/openspec/changes/$s/inbox.md"
+assert_eq "$(opsx priority "$s" --repo "$WP" | cut -f1)" P2 "掛進目前 milestone 仍是 P2"
+opsx priority "$s" --repo "$WP" | cut -f2 | grep -q '系統：自動掛進 workplan' || fail "理由要顯示系統：$(opsx priority "$s" --repo "$WP")"
+python3 -I - "$OPSX_ROOT/bin/lib" "$WP/openspec/workplan.yaml" "$s" <<'PY' || fail "新 feature 要是 active、depends-on 空、PR pending"
+import sys
+sys.path.insert(0, sys.argv[1]); import chain
+f = [x for x in chain.load_workplan(sys.argv[2])["features"] if x["name"] == sys.argv[3]][0]
+assert (f["status"], f["depends-on"], f["prs"][0]["status"], f["prs"][0]["depends-on"]) == ("active", [], "pending", []), f
+PY
+s="$(wnew --type bug -- 使用者的 bug)"; assert_eq "$(where "$WP" "$s" | cut -f3)" "fix/$s/mika" "type bug 的 branch 前綴是 fix"
+assert_eq "$(where "$WP" "$s" | cut -f1)" "$s" "沒有併入目標的 bug 卡建殼並自成 feature"
+s="$(wnew --type 功能 --source agent:pa --kind-of-work planned -- 父 feature active)"
+assert_eq "$(where "$WP" "$s")" "fa	1.0	feat/$s/mika" "父卡 feature active 時加 PR"
+s="$(wnew --type 功能 --source agent:pc --kind-of-work planned -- 父 feature complete)"
+assert_eq "$(where "$WP" "$s")" "$s	1.0	feat/$s/mika" "父 feature complete 時自成 feature、沿用它的 milestone"
+s="$(wnew --type 功能 --source agent:pp --kind-of-work planned -- 父 feature pending)"
+assert_eq "$(where "$WP" "$s" | cut -f1)" fp "只有 complete 才自成 feature，pending 掛進父 feature"
+s="$(wnew --type 功能 --source agent:pn --kind-of-work planned -- 父 feature 沒寫 status)"
+assert_eq "$(where "$WP" "$s" | cut -f1)" fn "沒寫 status 的父 feature 也掛進去"
+s="$(wnew --type 功能 --source agent:pa--sub1 --kind-of-work planned -- 子殼開的)"
+assert_eq "$(where "$WP" "$s" | cut -f1)" fa "子殼 agent 取主殼"
+s="$(wnew --type 功能 --source agent:zz --kind-of-work planned -- 父卡不在 workplan)"
+assert_eq "$(where "$WP" "$s")" "$s	2.0	feat/$s/mika" "父卡沒掛等於沒有父卡"
+s="$(wnew --kind-of-work incident --impact security --evidence 'bin/x.sh:1 洩漏' --type bug -- 安全事件)"
+assert_eq "$(where "$WP" "$s" | cut -f1)" "$s"
+assert_not_grep '^priority:' "$WP/openspec/changes/$s/inbox.md"
+assert_eq "$(opsx priority "$s" --repo "$WP" | cut -f1)" P0 "incident P0 卡不寫覆寫"
+# 掛入前是 P0／P1 的卡不掛進父 feature，自成 feature、沿用父 feature 的 milestone（workplan-attach D16）
+fa_prs="$(grep -c '^      - name:' "$WP/openspec/workplan.yaml")"
+s="$(wnew --kind-of-work incident --impact security --evidence 'bin/x.sh:2 洩漏' --type bug --source agent:pa -- 有父卡的安全事件)"
+assert_eq "$(where "$WP" "$s")" "$s	1.0	fix/$s/mika" "有父卡的 incident 卡自成 feature、milestone 沿用 fa"
+assert_eq "$(grep -c '^      - name:' "$WP/openspec/workplan.yaml")" "$((fa_prs + 1))" "只多了新 feature 自己的 PR，fa 的 prs 不變"
+# 父卡名是 feature 名（feature session 的 agent 開的卡）：找不到 PR 就當 feature 名找（workplan-attach D18）
+s="$(wnew --type 功能 --source agent:fa --kind-of-work planned -- session agent 開的)"
+assert_eq "$(where "$WP" "$s")" "fa	1.0	feat/$s/mika" "source 是 feature 名時掛進那個 feature"
+s="$(wnew --type 功能 --source agent:fc --kind-of-work planned -- complete feature 的 session)"
+assert_eq "$(where "$WP" "$s")" "$s	1.0	feat/$s/mika" "feature 名指到 complete 的 feature 時自成 feature、沿用它的 milestone"
+WN="$(mk_opsx_repo wn)"; wp_fixture "$WN" ""
+s="$(opsx new --type 功能 --repo "$WN" -- 沒設目前階段)"
+assert_eq "$(where "$WN" "$s")" "$s	-	feat/$s/mika" "沒有 current_milestone 就不寫 milestone"
+s="$(opsx new --type 功能 --repo "$A" -- 沒有 workplan 的 repo)"; assert_file "$A/openspec/changes/$s/inbox.md"
+assert_no_file "$A/openspec/workplan.yaml"; assert_no_file "$A/openspec/workplan.lock"
+# 掛不進去（workplan 沒有 features:）：卡照建、退出 0，stderr 說卡已建、沒掛進 workplan，workplan 不動
+WB="$(mk_opsx_repo wb)"; printf 'created: 2026-11-05\n' > "$WB/openspec/workplan.yaml"
+s="$(opsx new --type 功能 --repo "$WB" -- 壞的 workplan 2> "$FX/wb.err")"; assert_eq "$?" 0 "$(cat "$FX/wb.err")"
+assert_file "$WB/openspec/changes/$s/inbox.md"
+assert_grep "已建 ${s}，但沒掛進 workplan" "$FX/wb.err"; assert_grep 'features' "$FX/wb.err"
+assert_eq "$(cat "$WB/openspec/workplan.yaml")" "created: 2026-11-05"
 echo ok

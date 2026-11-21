@@ -232,6 +232,15 @@ assert_eq "$(level_of carry-dst8)" P2
 assert_rc 0 opsx merge-card carry-src8 --into carry-dst8 --repo "$A"
 assert_eq "$(level_of carry-dst8)" P0 "來源的 priority 覆寫要帶過去"
 
+# --- 人定的 priority 併進自動 P2 的目標：拿掉 priority_auto，理由不顯示系統（workplan-attach D7）---
+mk_card carry-src14 planned "" ""; mk_card carry-dst14 planned "" ""
+printf -- '---\ntype: bug\nsource: agent:t\nfound: 2026-11-10\nrelated:\nkind_of_work: planned\npriority: P1\npriority_reason: 人判定\n---\n\n## 一句話\n\ncarry-src14\n\n## 證據\n\n- 原有\n' > "$CH/carry-src14/inbox.md"
+printf -- '---\ntype: bug\nsource: agent:t\nfound: 2026-11-10\nrelated:\nkind_of_work: planned\npriority: P2\npriority_reason: 自動掛進 workplan，維持 P2\npriority_auto: true\n---\n\n## 一句話\n\ncarry-dst14\n\n## 證據\n\n- 原有\n' > "$CH/carry-dst14/inbox.md"
+assert_rc 0 opsx merge-card carry-src14 --into carry-dst14 --repo "$A"
+assert_eq "$(fm_value carry-dst14 priority_auto)" "" "人定的等級帶過去後不能留 priority_auto"
+assert_eq "$(level_of carry-dst14)" P1
+case "$(opsx priority carry-dst14 --repo "$A" | cut -f2)" in *使用者：併自\ carry-src14*) ;; *) fail "理由要是使用者：併自 carry-src14：$(opsx priority carry-dst14 --repo "$A")" ;; esac
+
 # --- 兩張卡有同一條證據併進同一個目標：證據不重複 ---
 mk_card carry-s9a incident data "same"; mk_card carry-s9b incident data "same"; mk_card carry-dst9 planned "" ""
 assert_rc 0 opsx merge-card carry-s9a --into carry-dst9 --repo "$A"

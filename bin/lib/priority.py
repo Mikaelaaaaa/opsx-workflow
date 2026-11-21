@@ -101,7 +101,11 @@ def facts_of(slug: str, text: str) -> dict:
         raise PriorityError("%s：priority 要是 P0、P1、P2，收到「%s」" % (slug, override))
     if override and not fm.get("priority_reason"):
         raise PriorityError("%s：priority 是 %s 但 priority_reason 是空的；改等級要寫理由（opsx priority --set … --reason …）" % (slug, override))
-    return {"kind": kind, "impact": impact, "priority": override, "priority_reason": fm.get("priority_reason") or ""}
+    auto = fm.get("priority_auto") or ""
+    if auto not in ("", "true"):
+        raise PriorityError("%s：priority_auto 只能是 true 或不寫，收到「%s」" % (slug, auto))
+    return {"kind": kind, "impact": impact, "priority": override, "priority_reason": fm.get("priority_reason") or "",
+            "auto": auto == "true"}
 
 
 def card_dirs(top: str) -> dict:
@@ -212,6 +216,13 @@ def fact_level(kind: str, impact_csv: str) -> tuple:
 
 
 def base_level(slug: str, facts: dict, plan: dict, owner) -> tuple:
+    """自動掛進 workplan 寫的覆寫（priority_auto）是下限：incident 的事實等級較高時用事實等級，
+    而且不算使用者覆寫，依賴繼承照常往上升（workplan-attach D7）。"""
+    if facts["priority"] and facts["auto"]:
+        lv, why = rule_level(facts["kind"], facts["impact"], None, None)
+        if LEVELS.index(lv) < LEVELS.index(facts["priority"]):
+            return lv, why, False
+        return facts["priority"], "%s：系統：%s" % (facts["priority"], facts["priority_reason"]), False
     if facts["priority"]:
         return facts["priority"], "%s：使用者：%s" % (facts["priority"], facts["priority_reason"]), True
     lv, why = rule_level(facts["kind"], facts["impact"], plan, owner)
@@ -265,8 +276,9 @@ def levels(top: str) -> dict:
     return out
 
 
-def set_override(inbox: str, level: str, reason: str) -> None:
-    """frontmatter 的 priority / priority_reason 改成新值（已有就取代，沒有就加在結尾 `---` 前）。"""
+def set_override(inbox: str, level: str, reason: str, auto: bool) -> None:
+    """frontmatter 的 priority / priority_reason 改成新值（已有就取代，沒有就加在結尾 `---` 前）。
+    auto 是自動掛進 workplan 寫的覆寫，加 priority_auto: true；人改等級時 auto 是 False，舊的 priority_auto 一併拿掉。"""
     if level not in LEVELS:
         raise PriorityError("等級要是 P0、P1、P2，收到「%s」" % level)
     reason = " ".join(reason.split())
@@ -279,8 +291,8 @@ def set_override(inbox: str, level: str, reason: str) -> None:
         end = next((i for i in range(1, len(lines)) if lines[i].strip() == "---"), None)
         if end is None:
             raise PriorityError("%s 的 frontmatter 沒有結尾的 ---" % inbox)
-        body = [l for l in lines[1:end] if not re.match(r"^priority(_reason)?:", l)]
-        new = [lines[0]] + body + ["priority: " + level, "priority_reason: " + reason] + lines[end:]
+        body = [l for l in lines[1:end] if not re.match(r"^priority(_reason|_auto)?:", l)]
+        new = [lines[0]] + body + ["priority: " + level, "priority_reason: " + reason] + (["priority_auto: true"] if auto else []) + lines[end:]
         safefile.write_atomic(inbox, "\n".join(new))
 
 
@@ -295,7 +307,7 @@ def main() -> None:
                 raise PriorityError(got["error"])
             print("%s\t%s" % (got["level"], got["reason"]))
         elif len(args) == 4 and args[0] == "set":
-            set_override(args[1], args[2], args[3])
+            set_override(args[1], args[2], args[3], False)
         elif len(args) == 3 and args[0] == "level":
             print("%s\t%s" % fact_level(args[1], args[2]))
         else:

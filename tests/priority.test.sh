@@ -312,4 +312,49 @@ REF="$OPSX_ROOT/references/priority.md"
 grep '^| `type` |' "$REF" > "$FX/type-row" || fail "references/priority.md 事實欄位表缺 type 列"
 for k in bug 功能 想法 技術債 待定; do assert_grep "$k" "$FX/type-row"; done
 ! grep -q '^| `area` |' "$REF" || fail "references/priority.md 事實欄位表不該再有 area 列"
+
+# --- 自動掛入的覆寫（priority_auto）是下限：incident 事實與依賴繼承升得上去，--set 拿掉它（workplan-attach D7）---
+wp <<'EOF'
+current_milestone: "2.0"
+milestones:
+  - name: "2.0"
+    goal: "g"
+features:
+  - name: fa
+    milestone: "2.0"
+    status: active
+    prs:
+      - name: auto-a
+        branch: feat/auto-a/m
+        status: pending
+        depends-on: []
+        changes:
+          - name: auto-a
+            status: pending
+      - name: waiter
+        branch: feat/waiter/m
+        status: pending
+        depends-on: [auto-b]
+        changes:
+          - name: waiter
+            status: pending
+      - name: auto-b
+        branch: feat/auto-b/m
+        status: pending
+        depends-on: []
+        changes:
+          - name: auto-b
+            status: pending
+EOF
+AUTO=('priority: P2' 'priority_reason: 自動掛進 workplan，維持 P2' 'priority_auto: true')
+card auto-a 'kind_of_work: planned' "${AUTO[@]}"
+expect auto-a P2 '系統：自動掛進 workplan'
+card auto-a 'kind_of_work: incident' 'impact: security' 'evidence: bin/x.sh:1' "${AUTO[@]}"
+expect auto-a P0 security
+card waiter 'kind_of_work: incident' 'impact: data' 'evidence: x'
+card auto-b 'kind_of_work: planned' "${AUTO[@]}"
+expect auto-b P0 'waiter 在等它'
+pr auto-a --set P1 --reason 人升的 > /dev/null || fail "--set 失敗"
+assert_not_grep '^priority_auto:' "$R/openspec/changes/auto-a/inbox.md"
+expect auto-a P1 '使用者：人升的'
 echo ok

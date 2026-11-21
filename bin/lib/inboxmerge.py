@@ -241,7 +241,8 @@ def split_out(card_dir: str, mid: str, top: str) -> None:
         with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".md") as body:
             body.write(_card_unlocked(card_dir, mid))
             body.flush()
-            p = subprocess.run(["bash", "-c", 'source "$1"; new_shell "$2" "$3" "$4"', "opsx-split-out", common, top, mid, body.name],
+            p = subprocess.run(["bash", "-c", 'source "$1"; new_shell "$2" "$3" "$4" "$5"', "opsx-split-out", common, top, mid, body.name,
+                                os.path.basename(card_dir)], env=dict(os.environ, OPSX_PY=sys.executable),
                                stdout=subprocess.PIPE, text=True)
         if p.returncode != 0:
             raise ValueError("建殼失敗：new_shell 退出 %d（上面是原因）" % p.returncode)
@@ -273,6 +274,7 @@ def evidence(card_dir: str, line: str) -> None:
 
 def rewrite_frontmatter(text: str, updates: dict, where: str) -> str:
     """frontmatter 裡 updates 的 key 改成同一行的 key: value（原本巢狀的縮排續行一併拿掉）；原本沒有的接在結尾 --- 前。
+    值是 None 的 key 整個拿掉，原本沒有就不加。
     where 是檔案路徑，沒有 frontmatter（第一行不是 ---，或沒有結尾 ---）時訊息指名它。"""
     lines = text.split("\n")
     end = next((i for i, x in enumerate(lines[1:], 1) if x.strip() == "---"), None)
@@ -287,11 +289,12 @@ def rewrite_frontmatter(text: str, updates: dict, where: str) -> str:
         key = x.partition(":")[0].strip()
         skipping = key in updates
         if skipping:
-            out.append("%s: %s" % (key, updates[key]))
+            if updates[key] is not None:
+                out.append("%s: %s" % (key, updates[key]))
             seen.add(key)
         else:
             out.append(x)
-    out += ["%s: %s" % (k, v) for k, v in updates.items() if k not in seen]
+    out += ["%s: %s" % (k, v) for k, v in updates.items() if k not in seen and v is not None]
     return "\n".join(out + lines[end:])
 
 
@@ -334,7 +337,8 @@ def carry(target_dir: str, source_inbox: str, source_slug: str, write: bool = Tr
             updates["evidence"] = evidence
         effective = t["priority"] or priority.rule_level("incident" if "kind_of_work" in updates else t["kind"], impact, None, None)[0]
         if s["priority"] and priority.LEVELS.index(s["priority"]) < priority.LEVELS.index(effective):
-            updates.update({"priority": s["priority"], "priority_reason": "併自 %s：%s" % (source_slug, s["reason"])})
+            updates.update({"priority": s["priority"], "priority_reason": "併自 %s：%s" % (source_slug, s["reason"]),
+                            "priority_auto": None})
         new = rewrite_frontmatter(text, updates, inbox)
         if write and new != text:
             safefile.write_atomic(inbox, new)
